@@ -7149,6 +7149,35 @@
           <button class="btn primary" type="button" id="run-mass-import">Importar archivo</button>
         </div>
       </div>` : ""}
+      ${currentUser.role === "manager" ? `
+      <div class="panel" style="margin-top:14px">
+        <h2 class="page-title" style="font-size:18px">Actualizaciones</h2>
+        <p class="muted">Exporte la base de datos actual de cada tabla. Al adjuntar el archivo de vuelta, los datos se reemplazan por el contenido del archivo.</p>
+        <div class="page-actions" style="margin-top:10px">
+          <button class="btn blue" type="button" data-update-export="compras">Exportar Compras</button>
+          <button class="btn blue" type="button" data-update-export="ventas">Exportar Ventas</button>
+          <button class="btn blue" type="button" data-update-export="precios">Exportar Precios</button>
+          <button class="btn blue" type="button" data-update-export="productos">Exportar Productos</button>
+          <button class="btn blue" type="button" data-update-export="pedidos">Exportar Pedidos</button>
+          <button class="btn blue" type="button" data-update-export="pagos">Exportar Pagos</button>
+          <button class="btn blue" type="button" data-update-export="clientes">Exportar Clientes</button>
+        </div>
+        <div class="form-grid" style="margin-top:14px">
+          <div class="field span-2"><label>Tabla a actualizar</label><select id="update-import-type">
+            <option value="compras">Compras</option>
+            <option value="ventas">Ventas</option>
+            <option value="precios">Precios</option>
+            <option value="productos">Productos</option>
+            <option value="pedidos">Pedidos</option>
+            <option value="pagos">Pagos</option>
+            <option value="clientes">Clientes</option>
+          </select></div>
+          <div class="field span-2"><label>Archivo exportado (.json)</label><input type="file" id="update-import-file" accept="application/json" /></div>
+        </div>
+        <div class="page-actions" style="margin-top:12px">
+          <button class="btn warn" type="button" id="run-update-import">Actualizar base de datos</button>
+        </div>
+      </div>` : ""}
       ${renderRolePermissionsPanel()}
       ${renderPrintTemplatesPanel()}
       `,
@@ -7223,10 +7252,13 @@
         <p class="muted">Personalice el titulo, la leyenda y el tamano de letra de cada documento imprimible.</p>
         <div class="form-grid" style="margin-top:10px">
           <div class="field"><label>Plantilla</label><select id="tpl-key">${PRINT_TEMPLATE_KEYS.map((t) => `<option value="${t.id}" ${key === t.id ? "selected" : ""}>${escapeHtml(t.label)}</option>`).join("")}</select></div>
+          <div class="field"><label>&nbsp;</label><button class="btn blue" type="button" id="tpl-download">Descargar</button></div>
           <div class="field"><label>Titulo</label><input id="tpl-titulo" value="${escapeAttr(tplGet(key, "titulo", ""))}" placeholder="(por defecto)" /></div>
           ${def.hasLeyenda ? `<div class="field span-2"><label>Leyenda al pie</label><input id="tpl-leyenda" value="${escapeAttr(tplGet(key, "leyenda", ""))}" placeholder="Ej: Gracias por su compra" /></div>` : ""}
           <div class="field"><label>Tamano de letra (0.8 a 1.3)</label><input id="tpl-escala" inputmode="decimal" value="${escapeAttr(String(tplGet(key, "escala", 1)))}" /></div>
           <div class="field"><label>&nbsp;</label><button class="btn primary" type="button" id="tpl-save">Guardar plantilla</button></div>
+          <div class="field span-2"><label>Adjuntar plantilla (.json)</label><input type="file" id="tpl-file" accept="application/json" /></div>
+          <div class="field"><label>&nbsp;</label><button class="btn warn" type="button" id="tpl-upload">Cargar plantilla</button></div>
         </div>
       </div>
     `;
@@ -7294,6 +7326,54 @@
       saveState();
       alert("Plantilla guardada.");
       render();
+    });
+    const downloadButton = document.getElementById("tpl-download");
+    if (downloadButton) downloadButton.addEventListener("click", () => {
+      const key = ui.tplKey || "remito";
+      const def = PRINT_TEMPLATE_KEYS.find((t) => t.id === key) || PRINT_TEMPLATE_KEYS[0];
+      const tpl = {
+        titulo: tplGet(key, "titulo", ""),
+        escala: tplGet(key, "escala", 1)
+      };
+      if (def.hasLeyenda) tpl.leyenda = tplGet(key, "leyenda", "");
+      const payload = { type: "printTemplate", key, label: def.label, exportedAt: new Date().toISOString(), appVersion: APP_VERSION, template: tpl };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileDate(todayISO()) + " Plantilla " + def.label + ".json";
+      document.body.appendChild(link);
+      link.click();
+      setTimeout(() => {
+        URL.revokeObjectURL(url);
+        link.remove();
+      }, 1000);
+    });
+    const uploadButton = document.getElementById("tpl-upload");
+    if (uploadButton) uploadButton.addEventListener("click", async () => {
+      const key = ui.tplKey || "remito";
+      const def = PRINT_TEMPLATE_KEYS.find((t) => t.id === key) || PRINT_TEMPLATE_KEYS[0];
+      const fileInput = document.getElementById("tpl-file");
+      const file = fileInput && fileInput.files ? fileInput.files[0] : null;
+      if (!file) return alert("Seleccione un archivo JSON de plantilla.");
+      try {
+        const parsed = JSON.parse(await file.text());
+        if (!parsed || parsed.type !== "printTemplate" || !parsed.template) throw new Error("Formato invalido.");
+        state.appSettings.printTemplates = state.appSettings.printTemplates || {};
+        const tpl = state.appSettings.printTemplates[key] || {};
+        if (parsed.template.titulo !== undefined) tpl.titulo = String(parsed.template.titulo || "").trim();
+        if (def.hasLeyenda && parsed.template.leyenda !== undefined) tpl.leyenda = String(parsed.template.leyenda || "").trim();
+        if (parsed.template.escala !== undefined) {
+          const escala = Number(parsed.template.escala);
+          tpl.escala = Number.isFinite(escala) && escala >= 0.7 && escala <= 1.4 ? escala : 1;
+        }
+        state.appSettings.printTemplates[key] = tpl;
+        saveState();
+        alert("Plantilla de " + def.label + " cargada correctamente.");
+        render();
+      } catch (error) {
+        alert("No se pudo cargar la plantilla: " + error.message);
+      }
     });
   }
 
@@ -7378,6 +7458,9 @@
       alert("Importacion completa: " + count + " registros.");
       render();
     });
+    document.querySelectorAll("[data-update-export]").forEach((button) => button.addEventListener("click", () => exportUpdateTable(button.dataset.updateExport)));
+    const runUpdateImport = document.getElementById("run-update-import");
+    if (runUpdateImport) runUpdateImport.addEventListener("click", importUpdateTable);
   }
 
   function downloadMassImportTemplate(type) {
@@ -7877,6 +7960,62 @@
       alert(registro.label + " importado correctamente. Los saldos y datos derivados fueron recalculados.");
     } catch (error) {
       alert("No se pudo importar: " + error.message);
+    }
+  }
+
+  const UPDATE_TABLES = {
+    compras: { label: "Compras", keys: ["purchases", "vendorLedger", "providerLedger", "providerPayments"] },
+    ventas: { label: "Ventas", keys: ["orders", "remitos"] },
+    precios: { label: "Precios", keys: ["prices", "costRelations"] },
+    productos: { label: "Productos", keys: ["products", "productRelations"] },
+    pedidos: { label: "Pedidos", keys: ["orders", "remitos"] },
+    pagos: { label: "Pagos", keys: ["payments", "saldos", "caja", "clientTransfers"] },
+    clientes: { label: "Clientes", keys: ["clients"] }
+  };
+
+  function exportUpdateTable(key) {
+    const table = UPDATE_TABLES[key];
+    if (!table) return;
+    const data = {};
+    table.keys.forEach((stateKey) => {
+      data[stateKey] = state[stateKey];
+    });
+    const payload = { type: key, label: table.label, exportedAt: new Date().toISOString(), appVersion: APP_VERSION, data };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileDate(todayISO()) + " " + table.label + ".json";
+    document.body.appendChild(link);
+    link.click();
+    setTimeout(() => {
+      URL.revokeObjectURL(url);
+      link.remove();
+    }, 1000);
+  }
+
+  async function importUpdateTable() {
+    const typeSelect = document.getElementById("update-import-type");
+    const fileInput = document.getElementById("update-import-file");
+    const table = UPDATE_TABLES[typeSelect.value];
+    if (!table) return;
+    const file = fileInput.files && fileInput.files[0];
+    if (!file) return alert("Seleccione el archivo JSON exportado.");
+    try {
+      const parsed = JSON.parse(await file.text());
+      if (!parsed || parsed.type !== typeSelect.value || !parsed.data) {
+        return alert("El archivo no corresponde a la tabla seleccionada (" + table.label + "). Fue exportado como: " + (parsed && parsed.label ? parsed.label : "desconocido") + ".");
+      }
+      if (!confirm("Esto REEMPLAZA todos los datos de " + table.label + " con el contenido del archivo. Continuar?")) return;
+      table.keys.forEach((stateKey) => {
+        if (parsed.data[stateKey] !== undefined) state[stateKey] = parsed.data[stateKey];
+      });
+      state = normalizeLoadedState({ ...seedState(), ...state }, seedState());
+      saveState();
+      render();
+      alert(table.label + " actualizado correctamente.");
+    } catch (error) {
+      alert("No se pudo actualizar: " + error.message);
     }
   }
 
