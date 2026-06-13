@@ -1,0 +1,6 @@
+.env
+.env.save
+*.backup-*
+node_modules/
+uploads/
+project.tar.gz

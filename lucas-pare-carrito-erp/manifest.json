@@ -1,0 +1,13 @@
+{
+  "name": "Pare Carrito SAS",
+  "short_name": "Pare Carrito",
+  "description": "Insumos frescos para gastronomicos",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#eef6ec",
+  "theme_color": "#176b49",
+  "icons": [
+    { "src": "./assets/logo.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "./assets/logo.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}

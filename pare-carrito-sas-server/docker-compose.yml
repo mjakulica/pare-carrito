@@ -1,0 +1,68 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: parecarrito
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: parecarrito
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U parecarrito -d parecarrito"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  api:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://parecarrito:${POSTGRES_PASSWORD}@db:5432/parecarrito
+      JWT_SECRET: ${JWT_SECRET}
+      ALLOWED_ORIGIN: ${ALLOWED_ORIGIN}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-gerente}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-gerente123}
+      UPLOAD_DIR: /data/uploads
+      PUBLIC_URL: ${PUBLIC_URL:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      MAIL_FROM: ${MAIL_FROM:-}
+      EXTERNAL_API_KEY: ${EXTERNAL_API_KEY:-}
+      TUSFACTURAS_APIKEY: ${TUSFACTURAS_APIKEY:-}
+      TUSFACTURAS_APITOKEN: ${TUSFACTURAS_APITOKEN:-}
+      TUSFACTURAS_USERTOKEN: ${TUSFACTURAS_USERTOKEN:-}
+      TUSFACTURAS_PUNTO_VENTA: ${TUSFACTURAS_PUNTO_VENTA:-1}
+      TUSFACTURAS_PROVINCIA: ${TUSFACTURAS_PROVINCIA:-17}
+      TUSFACTURAS_RUBRO: ${TUSFACTURAS_RUBRO:-Frutas y verduras}
+      TUSFACTURAS_CONDICION_PAGO: ${TUSFACTURAS_CONDICION_PAGO:-211}
+    volumes:
+      - uploads:/data/uploads
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      SITE_DOMAIN: ${SITE_DOMAIN}
+      API_DOMAIN: ${API_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../lucas-pare-carrito-erp:/srv/frontend:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
+  uploads:
+  caddy_data:
+  caddy_config:

@@ -1,0 +1,11403 @@
+(function () {
+  "use strict";
+
+  const STORAGE_KEY = "lpc_erp_state_v1";
+  const USER_KEY = "lpc_current_user_v1";
+  const OPERATIONAL_RESET_VERSION = "20260610-operational-clean-1";
+  const BUSINESS_NAME = "Pare Carrito SAS";
+  const APP_VERSION = "v12";
+  const WHATSAPP_LINK = "https://wa.me/5493874566725";
+  const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
+  const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
+  const UNIT_TYPES = ["kg", "docena", "jaula", "cajon", "bolsa", "unidad", "maple", "ristra", "cabeza", "bandeja"];
+  const CATEGORIES = ["FRUTAS", "VERDURAS", "HUEVOS", "OTROS"];
+  const PAYMENT_METHODS = {
+    efectivo: "Efectivo",
+    transferencia: "Transferencia",
+    cheque: "Cheque"
+  };
+  const IVA_OPTIONS = [
+    { value: "no_gravado", label: "No gravado", rate: 0 },
+    { value: "exento", label: "Exento", rate: 0 },
+    { value: "0", label: "0%", rate: 0 },
+    { value: "2.5", label: "2,5%", rate: 2.5 },
+    { value: "5", label: "5%", rate: 5 },
+    { value: "10.5", label: "10,5%", rate: 10.5 },
+    { value: "21", label: "21%", rate: 21 },
+    { value: "27", label: "27%", rate: 27 }
+  ];
+  const DEFAULT_QUANTITY_ALIASES = [
+    { alias: "1/2", quantity: 0.5 },
+    { alias: "½", quantity: 0.5 },
+    { alias: "media", quantity: 0.5 },
+    { alias: "medio", quantity: 0.5 },
+    { alias: "0,5", quantity: 0.5 },
+    { alias: "0.5", quantity: 0.5 },
+    { alias: "1/4", quantity: 0.25 },
+    { alias: "¼", quantity: 0.25 },
+    { alias: "3/4", quantity: 0.75 },
+    { alias: "¾", quantity: 0.75 }
+  ];
+
+  const ui = {
+    modal: null,
+    selectedClientId: "",
+    selectedDate: todayISO(),
+    vehicleDate: todayISO(),
+    search: "",
+    tab: "activos",
+    purchaseTab: "registro",
+    purchaseProductView: "grid",
+    purchaseAssigneeFilter: "all",
+    orderView: "grid",
+    orderProductFilter: "",
+    balanceFrom: todayISO(),
+    balanceTo: todayISO(),
+    balanceAccounts: null,
+    divideAssignee: "all",
+    customerDashboardClient: "all",
+    customerDashboardClients: null,
+    loginView: "login",
+    resetToken: "",
+    customerReportFrom: todayISO(),
+    customerReportTo: todayISO(),
+    customerReportClient: "all",
+    historyFrom: todayISO(),
+    historyTo: todayISO(),
+    providerSelectedId: "",
+    providerFrom: todayISO(),
+    providerTo: todayISO(),
+    unitsDate: todayISO(),
+    remitosFrom: todayISO(),
+    remitosTo: todayISO(),
+    performanceDate: todayISO(),
+    performanceFrom: todayISO(),
+    performanceTo: todayISO(),
+    cajaSelectedId: "all",
+    dashCashBox: "all",
+    ordersTab: "activos",
+    pendingHandwritten: "",
+    permRole: "employee",
+    tplKey: "remito",
+    dashFrom: addDaysISO(todayISO(), -29),
+    dashTo: todayISO(),
+    priceListClient: "",
+    remitosClientId: "all",
+    remitosLinkedClientId: "all",
+    transferClientId: "all",
+    providerProductId: "",
+    importType: "purchases"
+  };
+
+  let afterRender = [];
+  let state = loadState();
+  let currentUser = loadCurrentUser();
+
+  const menu = [
+    { id: "dashboard", label: "Inicio", icon: "IN", roles: ["manager", "admin", "employee", "customer", "example"] },
+    { id: "nuevo-pedido", label: "Nuevo Pedido", icon: "NP", roles: ["manager", "admin", "employee", "customer", "example"] },
+    { id: "pedidos", label: "Pedidos", icon: "PE", roles: ["manager", "admin", "employee", "customer", "example"] },
+    { id: "clientes", label: "Clientes", icon: "CL", roles: ["manager", "admin"] },
+    { id: "productos", label: "Productos", icon: "PR", roles: ["manager", "admin"] },
+    { id: "precios", label: "Precios", icon: "$", roles: ["manager", "admin"] },
+    { id: "historiales", label: "Historiales", icon: "HI", roles: ["manager", "admin"] },
+    { id: "rendimiento", label: "Rendimiento", icon: "RE", roles: ["manager"] },
+    { id: "compras", label: "Compras/Gastos", icon: "CO", roles: ["manager", "admin", "employee"] },
+    { id: "dividir", label: "Dividir Compras", icon: "DV", roles: ["manager", "admin", "employee"] },
+    { id: "vehiculos", label: "Vehiculos", icon: "VH", roles: ["manager", "admin", "employee"] },
+    { id: "remitos", label: "Remitos", icon: "RM", roles: ["manager", "admin", "employee"] },
+    { id: "unidades", label: "Unidades", icon: "UN", roles: ["manager", "admin", "employee"] },
+    { id: "pagos", label: "Pagos", icon: "PG", roles: ["manager", "admin", "employee", "contador"] },
+    { id: "saldos", label: "Saldos", icon: "SA", roles: ["manager", "admin", "employee", "customer", "contador", "example"] },
+    { id: "caja", label: "Caja", icon: "CJ", roles: ["manager", "admin", "contador"] },
+    { id: "empleados", label: "Empleados", icon: "EM", roles: ["manager", "admin", "contador"] },
+    { id: "horarios", label: "Horarios", icon: "HR", roles: ["employee"] },
+    { id: "registrar-transferencia", label: "Registrar Transferencia", icon: "RT", roles: ["customer", "example"] },
+    { id: "comprobar-transferencias", label: "Comprobar Transferencias", icon: "CT", roles: ["manager", "admin", "contador"] },
+    { id: "facturacion", label: "Facturacion", icon: "FA", roles: ["manager", "admin", "contador"] },
+    { id: "mis-pedidos", label: "Mis Pedidos", icon: "MP", roles: ["customer", "example"] },
+    { id: "lista-precios", label: "Lista de Precios", icon: "LP", roles: ["customer", "example"] },
+    { id: "proveedores", label: "Proveedores", icon: "PV", roles: ["manager", "admin", "employee", "contador"] },
+    { id: "usuarios", label: "Usuarios", icon: "US", roles: ["manager"] },
+    { id: "configuracion", label: "Configuracion", icon: "CF", roles: ["manager", "admin", "employee", "customer", "contador", "example"] },
+    { id: "backup", label: "Backup", icon: "BK", roles: ["manager", "admin"] }
+  ];
+
+  const toolbarRoutes = new Set([
+    "clientes",
+    "nuevo-pedido",
+    "productos",
+    "precios",
+    "historiales",
+    "rendimiento",
+    "compras",
+    "dividir",
+    "vehiculos",
+    "remitos",
+    "unidades",
+    "pagos",
+    "saldos",
+    "proveedores",
+    "registrar-transferencia",
+    "comprobar-transferencias",
+    "facturacion",
+    "empleados",
+    "horarios",
+    "mis-pedidos",
+    "lista-precios",
+    "usuarios",
+    "configuracion"
+  ]);
+
+  window.addEventListener("hashchange", render);
+  window.addEventListener("DOMContentLoaded", () => {
+    render();
+    const cloudConfig = getCloudSyncConfig();
+    if (cloudSyncReady(cloudConfig) && cloudConfig.auto !== false) cloudPull(false);
+    startCloudAutoSync();
+  });
+  window.addEventListener("online", () => {
+    const banner = document.getElementById("offline-banner");
+    if (banner) banner.style.display = "none";
+    const cloudConfig = getCloudSyncConfig();
+    if (cloudSyncReady(cloudConfig) && cloudConfig.auto !== false) cloudPull(false);
+  });
+  window.addEventListener("offline", () => {
+    const banner = document.getElementById("offline-banner");
+    if (banner) banner.style.display = "block";
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") return;
+    const cloudConfig = getCloudSyncConfig();
+    if (cloudSyncReady(cloudConfig) && cloudConfig.auto !== false) cloudPull(false);
+  });
+  window.addEventListener("beforeunload", () => {
+    flushCloudPush();
+  });
+
+  function seedState() {
+    const vehicleSeeds = [
+      ["Kangoo1", "Kangoo 1", "Chico", "Lucas"],
+      ["Trafic1", "Trafic 1", "Mediano", "Lucas"],
+      ["M1", "M1", "Mediano", ""],
+      ["M2", "M2", "Mediano", ""],
+      ["M3", "M3", "Mediano", ""],
+      ["M4", "M4", "Mediano", ""],
+      ["M5", "M5", "Mediano", ""],
+      ["M6", "M6", "Mediano", ""],
+      ["M7", "M7", "Mediano", ""],
+      ["C1", "C1", "Chico", ""],
+      ["C2", "C2", "Chico", ""],
+      ["C3", "C3", "Chico", ""],
+      ["C4", "C4", "Chico", ""],
+      ["C5", "C5", "Chico", ""],
+      ["C6", "C6", "Chico", ""],
+      ["C7", "C7", "Chico", ""],
+      ["C8", "C8", "Chico", ""],
+      ["C9", "C9", "Chico", ""]
+    ];
+
+    const clientSeeds = [
+      ["001", "Belgrano panaderia", "16", "Kangoo1"],
+      ["002", "Estacion Buenos Aires", "182", "Trafic1"],
+      ["003", "Tuchito", "73", "Trafic1"],
+      ["004", "Estacion Buenos Aires 2", "13", "Trafic1"],
+      ["005", "Barrett", "165", "Trafic1"],
+      ["006", "Del Milagro 352", "6", "Trafic1"],
+      ["007", "Factury", "189", "M3"],
+      ["008", "Bovino", "50", "M3"],
+      ["010", "Parada Sanguchera", "77", "M1"],
+      ["011", "Pistacchio", "66", "M2"],
+      ["012", "Estacion Belgrano 2", "148", "C4"],
+      ["013", "Del Milagro 352 (2)", "3", "Trafic1"],
+      ["014", "Bonito Bistro", "98", "Trafic1"],
+      ["015", "H Villa Vicuna", "65", "Trafic1"],
+      ["016", "House", "110", "Trafic1"],
+      ["017", "Casa de Espinas", "7", "Trafic1"],
+      ["018", "Estacion Terminal", "173", "C7"],
+      ["019", "The Salad Bar", "188", "M2"],
+      ["020", "Alvarez Eventos", "18", "M3"],
+      ["021", "Estacion Belgrano", "191", "M1"],
+      ["022", "Belgrano Panaderia", "41", "M3"],
+      ["023", "Los Diaz Confiteria", "80", "Trafic1"],
+      ["024", "Los Diaz Heladeria", "66", "Trafic1"],
+      ["025", "Spot", "93", "C3"],
+      ["030", "De Boca en Boca", "69", "C6"],
+      ["031", "Charrua", "185", "C7"],
+      ["032", "Brew", "17", "Trafic1"],
+      ["033", "Tucan Club", "17", "Trafic1"],
+      ["035", "Mapogo", "193", "M5"],
+      ["037", "El Paso Cafe Bistro", "15", "Trafic1"],
+      ["038", "La Fiamma Paseo Guemes", "149", "Trafic1"],
+      ["039", "Paula Juramento 1421 8C", "3", "Trafic1"],
+      ["040", "Gertrudis Cafe", "140", "Trafic1"],
+      ["041", "Charrua GyT", "33", "Trafic1"],
+      ["042", "Sandwicheria David", "19", "Trafic1"],
+      ["043", "La Fiamma Caseros", "140", "Trafic1"],
+      ["044", "Charrua GyT (2)", "5", "Trafic1"],
+      ["045", "Hotel Guemes", "9", "Trafic1"],
+      ["046", "Hirpace Comedor", "27", "M6"],
+      ["047", "Hirpace Institucion", "22", "C8"],
+      ["048", "Blanes", "3", "Trafic1"],
+      ["049", "Dietetica Magnolia", "20", "Trafic1"],
+      ["050", "Moira Parrilla", "43", "Trafic1"],
+      ["051", "Vaca Club", "123", "M7"],
+      ["052", "El Wey", "47", "C9"],
+      ["054", "Baum", "3", "Trafic1"],
+      ["056", "El Wey 2", "4", "Trafic1"],
+      ["058", "Jarrito Cafe", "6", "Trafic1"],
+      ["060", "Hirpace Condimentos", "5", "Trafic1"],
+      ["061", "Paula Juramento 1421", "1", "Trafic1"]
+    ];
+
+    const productSeeds = [
+      ["Bananas Docena", "FRUTAS", "docena", 1400, 2200],
+      ["Bananas Kg", "FRUTAS", "kg", 1200, 1850],
+      ["Banana Cajon", "FRUTAS", "cajon", 24000, 33500],
+      ["Manzana Roja Kg", "FRUTAS", "kg", 1700, 2600],
+      ["Manzana Verde Kg", "FRUTAS", "kg", 1850, 2850],
+      ["Pera Kg", "FRUTAS", "kg", 1500, 2300],
+      ["Naranja Docena", "FRUTAS", "docena", 1150, 1900],
+      ["Naranja Jaula", "FRUTAS", "jaula", 21000, 30000],
+      ["Mandarina Docena", "FRUTAS", "docena", 1300, 2100],
+      ["Limon Docena", "FRUTAS", "docena", 1100, 1850],
+      ["Limon Jaula", "FRUTAS", "jaula", 20000, 29000],
+      ["Pomelo Docena", "FRUTAS", "docena", 1350, 2150],
+      ["Kiwi Kg", "FRUTAS", "kg", 4200, 6000],
+      ["Uva Kg", "FRUTAS", "kg", 3000, 4500],
+      ["Frutilla Kg", "FRUTAS", "kg", 3500, 5200],
+      ["Palta Madura Kg", "FRUTAS", "kg", 4200, 6400],
+      ["Sandia", "FRUTAS", "unidad", 6000, 8500],
+      ["Tomate Perita Kg", "VERDURAS", "kg", 1250, 2100],
+      ["Tomate Redondo Kg", "VERDURAS", "kg", 1350, 2200],
+      ["Tomate Cherry Kg", "VERDURAS", "kg", 3800, 5600],
+      ["Papa Kg", "VERDURAS", "kg", 650, 1100],
+      ["Papa Bolsa", "VERDURAS", "bolsa", 15500, 23000],
+      ["Cebolla Kg", "VERDURAS", "kg", 700, 1250],
+      ["Cebolla Bolsa", "VERDURAS", "bolsa", 14500, 21500],
+      ["Cebolla Morada Kg", "VERDURAS", "kg", 1200, 2100],
+      ["Morron Verde Kg", "VERDURAS", "kg", 2200, 3400],
+      ["Morron Rojo Kg", "VERDURAS", "kg", 2500, 3900],
+      ["Ajo Cabeza", "VERDURAS", "cabeza", 450, 800],
+      ["Berenjena Kg", "VERDURAS", "kg", 1150, 1900],
+      ["Zapallito Verde Kg", "VERDURAS", "kg", 900, 1600],
+      ["Calabaza Kg", "VERDURAS", "kg", 700, 1250],
+      ["Lechuga Crespa Unidad", "VERDURAS", "unidad", 850, 1450],
+      ["Lechuga Morada Unidad", "VERDURAS", "unidad", 900, 1500],
+      ["Rucula Unidad", "VERDURAS", "unidad", 850, 1450],
+      ["Espinaca", "VERDURAS", "unidad", 950, 1600],
+      ["Acelga", "VERDURAS", "unidad", 850, 1450],
+      ["Perejil", "VERDURAS", "unidad", 350, 650],
+      ["Albahaca Unidad", "VERDURAS", "unidad", 700, 1200],
+      ["Zanahoria Kg", "VERDURAS", "kg", 800, 1400],
+      ["Remolacha", "VERDURAS", "kg", 750, 1300],
+      ["Batata Kg", "VERDURAS", "kg", 900, 1500],
+      ["Pepino Kg", "VERDURAS", "kg", 1050, 1750],
+      ["Choclo", "VERDURAS", "unidad", 500, 900],
+      ["Repollo Blanco", "VERDURAS", "unidad", 1600, 2400],
+      ["Champinon", "VERDURAS", "kg", 5200, 7600],
+      ["Huevos Maple", "HUEVOS", "maple", 3600, 5200],
+      ["Huevos Maple Jaula", "HUEVOS", "jaula", 42000, 58000],
+      ["Huevos Kg", "HUEVOS", "kg", 2800, 4100],
+      ["Miel de Abeja", "OTROS", "unidad", 4500, 6500],
+      ["Mani con Cascara Bolsa", "OTROS", "bolsa", 6000, 8500],
+      ["Tomate Deshidratado", "OTROS", "kg", 9000, 13000]
+    ];
+
+    const products = productSeeds.map((item, index) => ({
+      id: "PROD-" + String(index + 1).padStart(3, "0"),
+      name: item[0],
+      category: item[1],
+      unitType: item[2],
+      baseCost: item[3],
+      salePrice: item[4],
+      isActive: true,
+      sortOrder: index,
+      notes: ""
+    }));
+    products.forEach((product) => {
+      product.ivaType = "10.5";
+      product.imageSeed = product.category + "-" + product.name.slice(0, 2).toUpperCase();
+    });
+
+    const prices = {};
+    products.forEach((product) => {
+      prices[product.id] = {
+        productId: product.id,
+        date: todayISO(),
+        cost: product.baseCost,
+        price: product.salePrice,
+        marketPrice: 0,
+        marginPct: calcMargin(product.baseCost, product.salePrice)
+      };
+    });
+
+    return {
+      version: 1,
+      users: [
+        { id: "USR-000", name: "Gerente", username: "gerente", password: "gerente123", role: "manager", email: "gerencia@parecarrito.com", phone: "", isActive: true },
+        { id: "USR-001", name: "Admin", username: "admin", password: "admin123", role: "admin", email: "admin@parecarrito.com", phone: "", isActive: true },
+        { id: "USR-002", name: "Empleado", username: "empleado", password: "empleado123", role: "employee", email: "empleado@parecarrito.com", phone: "", hourlyRate: 2500, overtimeRate: 3500, overtimeStart: "14:00", shiftStart: "05:45", shiftEnd: "13:45", isActive: true },
+        { id: "USR-003", name: "Cliente Estacion Belgrano", username: "cliente", password: "cliente123", role: "customer", clientId: "021", linkedClientIds: ["021"], email: "cliente@parecarrito.com", phone: "", isActive: true },
+        { id: "USR-004", name: "Usuario Ejemplo", username: "ejemplo", password: "ejemplo123", role: "example", clientId: "DEMO", linkedClientIds: ["DEMO"], email: "ejemplo@parecarrito.com", phone: "", isActive: true }
+      ],
+      clients: clientSeeds.map((item) => ({
+        id: item[0],
+        name: item[1],
+        address: item[2],
+        phone: "",
+        email: "",
+        contactName: "",
+        paymentType: Number(item[0]) % 5 === 0 ? "contado" : "cuenta_corriente",
+        priceTier: Number(item[0]) % 3 === 0 ? "preferencial" : "general",
+        priceAdjustmentPct: Number(item[0]) % 3 === 0 ? -5 : 0,
+        needsInvoice: false,
+        cuit: "",
+        legalName: "",
+        invoiceType: "Factura B",
+        invoiceFrequency: "mensual",
+        vehicleId: item[3],
+        isActive: true,
+        notes: ""
+      })),
+      products,
+      vehicles: vehicleSeeds.map((item) => ({
+        id: item[0],
+        name: item[1],
+        type: item[2],
+        driverName: item[3],
+        capacity: item[2] === "Chico" ? 8 : 24,
+        isActive: true
+      })),
+      providers: [
+        { id: "PROV-001", name: "Chicho", contactName: "", phone: "", email: "", address: "Mercado San Miguel", paymentTerms: "contado", defaultMargin: 30, productsSupplied: ["PROD-001", "PROD-002", "PROD-004", "PROD-018", "PROD-021", "PROD-023", "PROD-027", "PROD-030"], isActive: true, notes: "Proveedor principal" },
+        { id: "PROV-002", name: "Caro Verdes", contactName: "", phone: "", email: "", address: "", paymentTerms: "semanal", defaultMargin: 28, productsSupplied: ["PROD-032", "PROD-033", "PROD-034", "PROD-035", "PROD-036", "PROD-037", "PROD-038"], isActive: true, notes: "Verdes y hierbas" },
+        { id: "PROV-003", name: "Chicho Limones", contactName: "", phone: "", email: "", address: "", paymentTerms: "contado", defaultMargin: 25, productsSupplied: ["PROD-007", "PROD-008", "PROD-009", "PROD-010", "PROD-011", "PROD-012"], isActive: true, notes: "Citricos" },
+        { id: "PROV-004", name: "Russo", contactName: "", phone: "", email: "", address: "", paymentTerms: "semanal", defaultMargin: 25, productsSupplied: ["PROD-021", "PROD-022", "PROD-046", "PROD-047", "PROD-048"], isActive: true, notes: "Proveedor secundario" },
+        { id: "PROV-005", name: "Mercado Central", contactName: "", phone: "", email: "", address: "", paymentTerms: "contado", defaultMargin: 22, productsSupplied: ["PROD-020", "PROD-024", "PROD-025", "PROD-041", "PROD-042", "PROD-045", "PROD-050"], isActive: true, notes: "Compras varias" }
+      ],
+      prices,
+      orders: [],
+      exampleOrders: defaultExampleOrders(products),
+      remitos: [],
+      saldos: [],
+      purchases: [],
+      costRelations: [],
+      productRelations: [],
+      vendorLedger: [],
+      productAliases: [],
+      clientProductAliases: [],
+      quantityAliases: DEFAULT_QUANTITY_ALIASES.map((alias) => ({ ...alias })),
+      clientQuantityAliases: [],
+      providerLedger: [],
+      providerPayments: [],
+      clientTransfers: [],
+      billingLog: [],
+      attendance: [],
+      employeePayments: [],
+      employeeReimbursements: [],
+      performanceAdjustments: [],
+      appSettings: defaultAppSettings(),
+      cashBoxes: defaultCashBoxes(),
+      caja: [],
+      payments: [],
+      preferences: [],
+      createdAt: new Date().toISOString()
+    };
+  }
+
+  function loadState() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return seedState();
+      const parsed = JSON.parse(raw);
+      const seeded = seedState();
+      const shouldPurgeOperationalRecords = !parsed.appSettings || parsed.appSettings.operationalResetVersion !== OPERATIONAL_RESET_VERSION;
+      const loaded = {
+        ...seeded,
+        ...parsed,
+        users: parsed.users || seeded.users,
+        clients: parsed.clients || seeded.clients,
+        products: parsed.products || seeded.products,
+        vehicles: parsed.vehicles || seeded.vehicles,
+        providers: parsed.providers || seeded.providers,
+        prices: parsed.prices || seeded.prices,
+        orders: parsed.orders || [],
+        exampleOrders: parsed.exampleOrders || seeded.exampleOrders || [],
+        remitos: parsed.remitos || [],
+        saldos: parsed.saldos || [],
+        purchases: parsed.purchases || [],
+        providerLedger: parsed.providerLedger || [],
+        providerPayments: parsed.providerPayments || [],
+        clientTransfers: parsed.clientTransfers || [],
+        billingLog: parsed.billingLog || [],
+        costRelations: parsed.costRelations || [],
+        productRelations: parsed.productRelations || [],
+        vendorLedger: parsed.vendorLedger || [],
+        productAliases: parsed.productAliases || [],
+        clientProductAliases: parsed.clientProductAliases || [],
+        quantityAliases: mergeQuantityAliases(parsed.quantityAliases || []),
+        clientQuantityAliases: parsed.clientQuantityAliases || [],
+        attendance: parsed.attendance || [],
+        employeePayments: parsed.employeePayments || [],
+        employeeReimbursements: parsed.employeeReimbursements || [],
+        performanceAdjustments: parsed.performanceAdjustments || [],
+        appSettings: { ...defaultAppSettings(), ...(parsed.appSettings || {}) },
+        cashBoxes: mergeCashBoxes(parsed.cashBoxes || []),
+        caja: parsed.caja || [],
+        payments: parsed.payments || [],
+        preferences: parsed.preferences || []
+      };
+      const normalized = normalizeLoadedState(loaded, seeded);
+      if (shouldPurgeOperationalRecords) {
+        purgeOperationalRecords(normalized);
+        normalized.appSettings.operationalResetVersion = OPERATIONAL_RESET_VERSION;
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
+      }
+      return normalized;
+    } catch (error) {
+      console.warn("No se pudo cargar localStorage, usando datos iniciales.", error);
+      return seedState();
+    }
+  }
+
+  function normalizeLoadedState(loaded, seeded) {
+    const users = Array.isArray(loaded.users) ? loaded.users.slice() : [];
+    seeded.users.forEach((defaultUser) => {
+      const existing = users.find((user) => user.username === defaultUser.username || user.id === defaultUser.id);
+      if (existing) {
+        Object.assign(existing, {
+          password: existing.password || defaultUser.password,
+          role: existing.role || defaultUser.role,
+          clientId: existing.clientId || defaultUser.clientId,
+          isActive: existing.isActive !== false
+        });
+      } else {
+        users.push({ ...defaultUser });
+      }
+    });
+    users.forEach((user) => {
+      if (user.role === "manager" && !user.password) user.password = "gerente123";
+      if (user.role === "admin" && !user.password) user.password = "admin123";
+      if (user.role === "employee" && !user.password) user.password = "empleado123";
+      if (user.role === "customer" && !user.password) user.password = "cliente123";
+      if (user.role === "example" && !user.password) user.password = "ejemplo123";
+      user.email = user.email || "";
+      user.phone = user.phone || "";
+      if (user.role === "employee" && !user.hourlyRate) user.hourlyRate = 2500;
+      if (user.role === "employee" && !user.overtimeRate) user.overtimeRate = Math.round(Number(user.hourlyRate || 2500) * 1.5);
+      if (user.role === "employee" && !user.overtimeStart) user.overtimeStart = "14:00";
+      if (user.role === "employee" && !user.shiftStart) user.shiftStart = "05:45";
+      if (user.role === "employee" && !user.shiftEnd) user.shiftEnd = "13:45";
+      if (isClientLikeRole(user.role) && !Array.isArray(user.linkedClientIds)) user.linkedClientIds = [user.clientId].filter(Boolean);
+    });
+    const defaultExample = seeded.users.find((user) => user.username === "ejemplo");
+    let exampleUser = users.find((user) => user.id === (defaultExample && defaultExample.id) || user.username === "ejemplo" || (user.role === "example" && user.clientId === "DEMO"));
+    if (defaultExample && exampleUser) {
+      Object.assign(exampleUser, {
+        id: exampleUser.id || defaultExample.id,
+        name: exampleUser.name || defaultExample.name,
+        username: "ejemplo",
+        password: "ejemplo123",
+        role: "example",
+        clientId: "DEMO",
+        linkedClientIds: ["DEMO"],
+        email: exampleUser.email || defaultExample.email,
+        phone: exampleUser.phone || "",
+        isActive: true
+      });
+    } else if (defaultExample) {
+      users.push({ ...defaultExample });
+    }
+    const clients = (Array.isArray(loaded.clients) ? loaded.clients : []).map((client) => ({
+      email: "",
+      billingEmail: "",
+      needsInvoice: false,
+      cuit: "",
+      legalName: "",
+      invoiceType: "Factura B",
+      invoiceFrequency: "mensual",
+      priceAdjustmentPct: client.priceTier === "preferencial" ? -5 : 0,
+      zone: "",
+      openingTime: "",
+      maxDeliveryTime: "",
+      ...client
+    }));
+    clients.forEach((client) => {
+      if (client.paymentType === "fiado") client.paymentType = "cuenta_corriente";
+      if (!client.invoiceType || (!client.needsInvoice && client.priceTier !== "con_factura")) client.invoiceType = "Sin Factura";
+    });
+    const products = (Array.isArray(loaded.products) ? loaded.products : []).map((product) => ({
+      ivaType: "10.5",
+      imageSeed: product.category + "-" + String(product.name || "").slice(0, 2).toUpperCase(),
+      imageUrl: "",
+      imageData: "",
+      allowUnitWeight: false,
+      showInVehicleTotals: true,
+      ...product
+    }));
+    Object.keys(loaded.prices || {}).forEach((productId) => {
+      const product = products.find((item) => item.id === productId);
+      const rec = loaded.prices[productId];
+      if (!rec) return;
+      rec.marketPrice = Number(rec.marketPrice || 0);
+      rec.marginPct = Number.isFinite(Number(rec.marginPct)) ? Number(rec.marginPct) : calcMargin(rec.cost || (product && product.baseCost), rec.price || (product && product.salePrice));
+    });
+    loaded.appSettings.productCategories = normalizeProductCategories([
+      ...(loaded.appSettings.productCategories || []),
+      ...products.map((product) => product.category || "OTROS")
+    ]);
+    const providers = Array.isArray(loaded.providers) ? loaded.providers.slice() : [];
+    seeded.providers.forEach((defaultProvider) => {
+      const existing = providers.find((provider) => provider.id === defaultProvider.id || provider.name === defaultProvider.name);
+      if (existing && (!Array.isArray(existing.productsSupplied) || existing.productsSupplied.length === 0)) {
+        existing.productsSupplied = defaultProvider.productsSupplied.slice();
+      }
+    });
+    const saldos = reconcileOrderSaldos({ ...loaded, clients, products });
+    const cashBoxes = mergeCashBoxes(loaded.cashBoxes || []);
+    const caja = (Array.isArray(loaded.caja) ? loaded.caja : []).map((entry) => ({
+      ...entry,
+      cashBoxId: entry.cashBoxId || inferCashBoxId(entry)
+    }));
+    const exampleOrders = Array.isArray(loaded.exampleOrders) && loaded.exampleOrders.length ? loaded.exampleOrders : defaultExampleOrders(products);
+    const employeeReimbursements = Array.isArray(loaded.employeeReimbursements) ? loaded.employeeReimbursements : [];
+    const clientTransfers = Array.isArray(loaded.clientTransfers) ? loaded.clientTransfers : [];
+    return { ...loaded, users, clients, products, providers, saldos, caja, cashBoxes, exampleOrders, employeeReimbursements, clientTransfers, appSettings: { ...defaultAppSettings(), ...(loaded.appSettings || {}) } };
+  }
+
+  function defaultAppSettings() {
+    return {
+      remitoTotalStyle: "box",
+      sidebarOrder: [],
+      productCategories: CATEGORIES.slice(),
+      operationalResetVersion: OPERATIONAL_RESET_VERSION
+    };
+  }
+
+  function purgeOperationalRecords(targetState) {
+    Object.assign(targetState, {
+      orders: [],
+      remitos: [],
+      saldos: [],
+      purchases: [],
+      costRelations: [],
+      vendorLedger: [],
+      providerLedger: [],
+      providerPayments: [],
+      clientTransfers: [],
+      billingLog: [],
+      attendance: [],
+      employeePayments: [],
+      employeeReimbursements: [],
+      performanceAdjustments: [],
+      caja: [],
+      payments: [],
+      preferences: []
+    });
+    targetState.exampleOrders = defaultExampleOrders(targetState.products || []);
+  }
+
+  function defaultCashBoxes() {
+    return [
+      { id: "cash-general", name: "General", isActive: true, visibleToAdmin: true, notes: "Caja general" },
+      { id: "cash-banco", name: "Banco", isActive: true, visibleToAdmin: true, notes: "Transferencias y cheques" }
+    ];
+  }
+
+  function demoClient() {
+    return {
+      id: "DEMO",
+      name: "Cliente Ejemplo",
+      address: "Direccion de ejemplo 123",
+      phone: "0000-0000",
+      email: "ejemplo@parecarrito.com",
+      billingEmail: "facturacion.ejemplo@parecarrito.com",
+      contactName: "Contacto Ejemplo",
+      paymentType: "cuenta_corriente",
+      priceTier: "general",
+      priceAdjustmentPct: 0,
+      needsInvoice: false,
+      cuit: "30-00000000-0",
+      legalName: "Cliente Ejemplo SAS",
+      invoiceType: "Sin Factura",
+      invoiceFrequency: "mensual",
+      vehicleId: "Kangoo1",
+      isActive: true,
+      notes: "Datos ficticios para demostracion."
+    };
+  }
+
+  function defaultExampleOrders(products) {
+    const sampleProducts = (products || []).slice(0, 4);
+    const dates = [todayISO(), addDaysISO(todayISO(), -1)];
+    return dates.map((date, orderIndex) => {
+      const items = sampleProducts.slice(orderIndex, orderIndex + 3).map((product, index) => {
+        const quantity = index + 1;
+        const unitPrice = Number((product && product.salePrice) || getProductPrice(product && product.id) || 0);
+        return {
+          id: nextItemId(),
+          productId: product.id,
+          productName: product.name,
+          unitType: product.unitType,
+          quantity,
+          unitPrice,
+          subtotal: quantity * unitPrice,
+          ivaAmount: 0,
+          totalWithIva: quantity * unitPrice,
+          note: index === 0 ? "Nota de ejemplo" : ""
+        };
+      });
+      const subtotalAmount = items.reduce((sum, item) => sum + item.subtotal, 0);
+      return {
+        id: "EJ-" + String(orderIndex + 1).padStart(3, "0"),
+        userId: "USR-004",
+        exampleOnly: true,
+        date,
+        clientId: "DEMO",
+        deliveryVehicleId: "Kangoo1",
+        status: orderIndex === 0 ? "pendiente" : "entregado",
+        items,
+        subtotalAmount,
+        ivaAmount: 0,
+        totalAmount: subtotalAmount,
+        paymentReceived: 0,
+        paymentStatus: "pending",
+        remitoPrinted: false,
+        notes: "Pedido ficticio de ejemplo.",
+        createdAt: date + "T08:00:00.000Z"
+      };
+    });
+  }
+
+  function mergeCashBoxes(existing) {
+    const boxes = (Array.isArray(existing) ? existing.slice() : []).filter((box) => !isDeprecatedCashBox(box));
+    defaultCashBoxes().forEach((box) => {
+      const current = boxes.find((item) => item.id === box.id);
+      if (current) Object.assign(current, { ...box, ...current });
+      else boxes.push({ ...box });
+    });
+    return boxes.map((box) => ({
+      id: box.id,
+      name: box.name || box.id,
+      isActive: box.isActive !== false,
+      visibleToAdmin: box.visibleToAdmin !== false,
+      notes: box.notes || ""
+    }));
+  }
+
+  function isDeprecatedCashBox(box) {
+    const id = normalizeText(box && box.id);
+    const name = normalizeText(box && box.name);
+    return id === "cash-proveedores" || id === "cash-efectivo" || id === "cash-empleados" || name === "proveedores" || name === "efectivo";
+  }
+
+  function mergeQuantityAliases(existing) {
+    const aliases = Array.isArray(existing) ? existing.slice() : [];
+    DEFAULT_QUANTITY_ALIASES.forEach((defaultAlias) => {
+      const key = normalizeAliasKey(defaultAlias.alias);
+      if (!aliases.some((alias) => normalizeAliasKey(alias.alias) === key)) {
+        aliases.push({ ...defaultAlias });
+      }
+    });
+    return aliases.map((alias) => ({ alias: alias.alias, quantity: Number(alias.quantity || 0) })).filter((alias) => alias.alias && alias.quantity > 0);
+  }
+
+  function saveState() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    scheduleCloudPush();
+  }
+
+  const SYNC_KEY = "lpc_cloud_sync_v1";
+  let cloudPushTimer = null;
+
+  function getCloudSyncConfig() {
+    try {
+      return JSON.parse(localStorage.getItem(SYNC_KEY) || "{}") || {};
+    } catch {
+      return {};
+    }
+  }
+
+  function saveCloudSyncConfig(config) {
+    localStorage.setItem(SYNC_KEY, JSON.stringify(config || {}));
+  }
+
+  function cloudSyncReady(config) {
+    return !!(config && config.url && (config.token || (config.username && config.password)));
+  }
+
+  function cloudBaseUrl(config) {
+    return String(config.url || "").trim().replace(/\/+$/, "");
+  }
+
+  async function cloudLogin(config) {
+    const response = await fetch(cloudBaseUrl(config) + "/auth/login", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ username: config.username, password: config.password })
+    });
+    if (!response.ok) {
+      let detail = "";
+      try {
+        detail = (await response.json()).error || "";
+      } catch {}
+      throw new Error(detail || "no se pudo iniciar sesion en el servidor (HTTP " + response.status + ")");
+    }
+    const payload = await response.json();
+    config.jwt = payload.token;
+    saveCloudSyncConfig(config);
+    return payload;
+  }
+
+  async function cloudRequest(config, path, options, retried) {
+    const useJwt = !!config.username;
+    if (useJwt && !config.jwt) await cloudLogin(config);
+    const response = await fetch(cloudBaseUrl(config) + path, {
+      ...(options || {}),
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer " + (useJwt ? config.jwt : config.token),
+        ...((options && options.headers) || {})
+      }
+    });
+    if (response.status === 401 && useJwt && !retried) {
+      await cloudLogin(config);
+      return cloudRequest(config, path, options, true);
+    }
+    return response;
+  }
+
+  function scheduleCloudPush() {
+    const config = getCloudSyncConfig();
+    if (!cloudSyncReady(config) || config.auto === false) return;
+    clearTimeout(cloudPushTimer);
+    cloudPushTimer = setTimeout(() => {
+      cloudPushTimer = null;
+      cloudPush(false);
+    }, 500);
+  }
+
+  function flushCloudPush() {
+    if (!cloudPushTimer) return;
+    clearTimeout(cloudPushTimer);
+    cloudPushTimer = null;
+    const config = getCloudSyncConfig();
+    if (!cloudSyncReady(config) || config.auto === false) return;
+    try {
+      const xhr = new XMLHttpRequest();
+      xhr.open("PUT", cloudBaseUrl(config) + "/state", false);
+      xhr.setRequestHeader("content-type", "application/json");
+      xhr.setRequestHeader("authorization", "Bearer " + (config.username ? config.jwt : config.token));
+      xhr.send(JSON.stringify({ data: state, baseUpdatedAt: config.lastSync || null }));
+    } catch (error) {
+      console.warn("No se pudo enviar el push sincronico al cerrar:", error);
+    }
+  }
+
+  let cloudPollTimer = null;
+
+  function startCloudAutoSync() {
+    clearInterval(cloudPollTimer);
+    const config = getCloudSyncConfig();
+    if (!cloudSyncReady(config) || config.auto === false) return;
+    cloudPollTimer = setInterval(() => {
+      cloudPull(false);
+    }, 25000);
+  }
+
+  async function readCloudErrorDetail(response) {
+    try {
+      const payload = await response.json();
+      return payload && payload.error ? " - " + payload.error : "";
+    } catch {
+      return "";
+    }
+  }
+
+  async function cloudPush(manual, isRetry) {
+    const config = getCloudSyncConfig();
+    if (!cloudSyncReady(config)) {
+      if (manual) alert("Configure la URL y el token del backend en este panel.");
+      return;
+    }
+    try {
+      const response = await cloudRequest(config, "/state", {
+        method: "PUT",
+        body: JSON.stringify({ data: state, baseUpdatedAt: config.lastSync || null })
+      });
+      if (response.status === 409 && !isRetry) {
+        // Otro dispositivo subio datos mas nuevos: descargar, combinar y reintentar.
+        const remoteResponse = await cloudRequest(config, "/state", { method: "GET" });
+        if (remoteResponse.ok) {
+          const remote = await remoteResponse.json();
+          const merged = mergeCloudStates(remote.data, state);
+          state = normalizeLoadedState({ ...seedState(), ...merged }, seedState());
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+          config.lastSync = String(remote.updatedAt || "");
+          saveCloudSyncConfig(config);
+          currentUser = loadCurrentUser();
+          render();
+          return cloudPush(manual, true);
+        }
+      }
+      if (!response.ok) throw new Error("HTTP " + response.status + (await readCloudErrorDetail(response)));
+      const payload = await response.json();
+      config.lastSync = payload.updatedAt || new Date().toISOString();
+      config.lastError = "";
+      saveCloudSyncConfig(config);
+      if (manual) {
+        alert("Datos subidos a la nube correctamente.");
+        render();
+      }
+    } catch (error) {
+      config.lastError = "Subida fallida " + formatTimestampShort(new Date().toISOString()) + ": " + error.message;
+      saveCloudSyncConfig(config);
+      console.warn("Sincronizacion: " + error.message);
+      if (manual) alert("No se pudo subir a la nube: " + error.message);
+    }
+  }
+
+  function mergeCloudStates(remoteData, localData) {
+    const remote = remoteData || {};
+    const local = localData || {};
+    const merged = { ...remote };
+    const unionByKey = (a, b, keyFn) => {
+      const map = new Map();
+      (Array.isArray(a) ? a : []).forEach((item) => {
+        if (item) map.set(keyFn(item), item);
+      });
+      (Array.isArray(b) ? b : []).forEach((item) => {
+        if (item) map.set(keyFn(item), item);
+      });
+      return Array.from(map.values());
+    };
+    const byId = (item) => String(item.id);
+    [
+      "orders", "exampleOrders", "remitos", "saldos", "purchases", "payments", "caja",
+      "providerLedger", "providerPayments", "clientTransfers", "vendorLedger",
+      "attendance", "employeePayments", "employeeReimbursements", "performanceAdjustments",
+      "clients", "products", "providers", "vehicles", "users", "cashBoxes"
+    ].forEach((key) => {
+      merged[key] = unionByKey(remote[key], local[key], byId);
+    });
+    merged.prices = { ...(remote.prices || {}), ...(local.prices || {}) };
+    merged.appSettings = { ...(remote.appSettings || {}), ...(local.appSettings || {}) };
+    merged.preferences = unionByKey(remote.preferences, local.preferences, (item) => item.clientId + "|" + item.productId);
+    merged.productAliases = unionByKey(remote.productAliases, local.productAliases, (item) => item.productId + "|" + String(item.alias));
+    merged.clientProductAliases = unionByKey(remote.clientProductAliases, local.clientProductAliases, (item) => item.clientId + "|" + item.productId + "|" + String(item.alias));
+    merged.quantityAliases = unionByKey(remote.quantityAliases, local.quantityAliases, (item) => String(item.alias));
+    merged.clientQuantityAliases = unionByKey(remote.clientQuantityAliases, local.clientQuantityAliases, (item) => item.clientId + "|" + String(item.alias));
+    merged.costRelations = unionByKey(remote.costRelations, local.costRelations, (item) => JSON.stringify([item.sourceProductId, item.targetProductId, item.productId]));
+    merged.productRelations = unionByKey(remote.productRelations, local.productRelations, (item) => item.retailProductId + "|" + item.wholesaleProductId);
+    merged.billingLog = unionByKey(remote.billingLog, local.billingLog, (item) => String(item.id));
+    return merged;
+  }
+
+  function stateHasOperationalData(data) {
+    return [
+      "orders", "purchases", "saldos", "caja", "payments", "remitos",
+      "providerLedger", "providerPayments", "clientTransfers", "attendance",
+      "employeePayments", "employeeReimbursements", "billingLog", "vendorLedger"
+    ].some((key) => Array.isArray(data[key]) && data[key].length);
+  }
+
+  function looksLikeSeedState(data) {
+    return !stateHasOperationalData(data);
+  }
+
+  function localStateIsRicherThanRemote(localData, remoteData) {
+    const count = (arr) => (Array.isArray(arr) ? arr.length : 0);
+    return (
+      stateHasOperationalData(localData) ||
+      count(localData.clients) > count(remoteData.clients) ||
+      count(localData.products) > count(remoteData.products) ||
+      count(localData.users) > count(remoteData.users) ||
+      count(localData.providers) > count(remoteData.providers)
+    );
+  }
+
+  async function cloudPull(manual, isLogin) {
+    const config = getCloudSyncConfig();
+    if (!cloudSyncReady(config)) {
+      if (manual) alert("Configure la URL y el token del backend en este panel.");
+      return;
+    }
+    try {
+      const response = await cloudRequest(config, "/state", { method: "GET" });
+      if (response.status === 404) {
+        if (manual) alert("Todavia no hay datos en la nube. Use Subir datos ahora desde el dispositivo principal.");
+        return;
+      }
+      if (!response.ok) throw new Error("HTTP " + response.status + (await readCloudErrorDetail(response)));
+      const payload = await response.json();
+      if (!payload || typeof payload.data !== "object") throw new Error("respuesta invalida");
+      const remoteUpdated = String(payload.updatedAt || "");
+      if (!manual && !isLogin) {
+        if (config.lastSync && remoteUpdated && remoteUpdated <= config.lastSync) return;
+        if (!config.lastSync) return;
+      }
+      if (!manual) {
+        const active = document.activeElement;
+        const typing = active && ["INPUT", "TEXTAREA", "SELECT"].includes(active.tagName);
+        if (typing || ui.modal || cloudPushTimer) return;
+      }
+      if (!manual && looksLikeSeedState(payload.data) && localStateIsRicherThanRemote(state, payload.data)) {
+        console.warn("Sincronizacion: el servidor tiene datos de ejemplo/vacio; se conservan los datos locales.");
+        return;
+      }
+      if (manual && !confirm("Reemplazar los datos locales con los datos guardados en la nube?")) return;
+      state = normalizeLoadedState({ ...seedState(), ...payload.data }, seedState());
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      config.lastSync = remoteUpdated || new Date().toISOString();
+      saveCloudSyncConfig(config);
+      currentUser = loadCurrentUser();
+      render();
+      if (manual) alert("Datos descargados de la nube correctamente.");
+    } catch (error) {
+      const errorConfig = getCloudSyncConfig();
+      errorConfig.lastError = "Descarga fallida " + formatTimestampShort(new Date().toISOString()) + ": " + error.message;
+      saveCloudSyncConfig(errorConfig);
+      console.warn("Sincronizacion: " + error.message);
+      if (manual) alert("No se pudo descargar de la nube: " + error.message);
+    }
+  }
+
+  async function cloudTest() {
+    const config = getCloudSyncConfig();
+    if (!cloudSyncReady(config)) return alert("Complete la URL y el token, y presione Guardar configuracion.");
+    try {
+      const health = await fetch(cloudBaseUrl(config) + "/health");
+      if (!health.ok) throw new Error("el backend no responde (HTTP " + health.status + ")");
+      if (config.username) await cloudLogin(config);
+      const stateResponse = await cloudRequest(config, "/state", { method: "GET" });
+      if (stateResponse.status === 401) throw new Error(config.username ? "usuario o contrasena incorrectos" : "token incorrecto (revise que el secreto API_TOKEN del Worker sea igual al token pegado aca)");
+      if (stateResponse.status === 403) throw new Error("ese usuario no tiene permisos de sincronizacion (use gerente, admin o empleado)");
+      if (!stateResponse.ok && stateResponse.status !== 404) throw new Error("el backend respondio HTTP " + stateResponse.status + (await readCloudErrorDetail(stateResponse)));
+      alert("Conexion correcta. " + (stateResponse.status === 404 ? "La nube todavia no tiene datos: use Subir datos ahora." : "Hay datos guardados en la nube."));
+    } catch (error) {
+      alert("Fallo la prueba de conexion: " + error.message);
+    }
+  }
+
+  function loadCurrentUser() {
+    try {
+      const id = localStorage.getItem(USER_KEY);
+      if (!id) return null;
+      return state.users.find((user) => user.id === id) || null;
+    } catch {
+      return null;
+    }
+  }
+
+  function setCurrentUser(user) {
+    currentUser = user;
+    if (user) localStorage.setItem(USER_KEY, user.id);
+    else localStorage.removeItem(USER_KEY);
+  }
+
+  function render() {
+    afterRender = [];
+    const app = document.getElementById("app");
+    if (!currentUser) {
+      app.innerHTML = renderLogin();
+      bindLogin();
+      return;
+    }
+
+    const route = getRoute();
+    if (!canAccess(route.base)) {
+      navigate(roleHome(), true);
+      return;
+    }
+
+    const page = renderRoute(route);
+    app.innerHTML = `
+      <div id="offline-banner" class="offline-banner" style="display:${typeof navigator !== "undefined" && navigator.onLine === false ? "block" : "none"}">Sin conexion a internet: los cambios se guardan en este dispositivo y se sincronizaran al volver la conexion.</div>
+      <div class="app-shell">
+        ${renderSidebar(route.base)}
+        <div class="sidebar-overlay" aria-hidden="true"></div>
+        <main class="main">
+          ${renderTopbar()}
+          ${page}
+        </main>
+      </div>
+      ${renderModal()}
+    `;
+    bindCommon();
+    afterRender.forEach((fn) => fn());
+    maybeForcePasswordChange();
+  }
+
+  const DEFAULT_PASSWORDS = ["gerente123", "admin123", "empleado123", "cliente123"];
+
+  function maybeForcePasswordChange() {
+    if (!currentUser || ui.modal) return;
+    if (!["manager", "admin", "employee", "contador"].includes(currentUser.role)) return;
+    const stateUser = state.users.find((item) => item.id === currentUser.id);
+    if (!stateUser || !DEFAULT_PASSWORDS.includes(String(stateUser.password || ""))) return;
+    if (window.__pcForcePwdOpen) return;
+    window.__pcForcePwdOpen = true;
+    showModal(
+      "Cambie su contrasena",
+      `
+      <div class="alert" style="margin-bottom:12px">Su cuenta todavia usa la contrasena por defecto. Por seguridad debe crear una nueva antes de continuar.</div>
+      <form id="force-pwd-form" class="grid">
+        <div class="field"><label>Nueva contrasena (minimo 8 caracteres)</label><input id="force-pwd-1" type="password" autocomplete="new-password" /></div>
+        <div class="field"><label>Repetir contrasena</label><input id="force-pwd-2" type="password" autocomplete="new-password" /></div>
+      </form>
+      `,
+      () => {
+        const saveButton = document.getElementById("modal-save");
+        if (saveButton) saveButton.addEventListener("click", () => {
+          const p1 = document.getElementById("force-pwd-1").value;
+          const p2 = document.getElementById("force-pwd-2").value;
+          if (p1.length < 8) return alert("La contrasena debe tener al menos 8 caracteres.");
+          if (DEFAULT_PASSWORDS.includes(p1)) return alert("Elija una contrasena distinta a las contrasenas por defecto.");
+          if (p1 !== p2) return alert("Las contrasenas no coinciden.");
+          const stateUser = state.users.find((item) => item.id === currentUser.id);
+          if (stateUser) stateUser.password = p1;
+          const config = getCloudSyncConfig();
+          if (config.username && config.username === currentUser.username) {
+            config.password = p1;
+            config.jwt = "";
+            saveCloudSyncConfig(config);
+          }
+          saveState();
+          window.__pcForcePwdOpen = false;
+          closeModal();
+          alert("Contrasena actualizada correctamente.");
+        });
+      },
+      { saveLabel: "Guardar contrasena", cancelLabel: "Mas tarde" }
+    );
+  }
+
+  function renderLogin() {
+    const hash = String(location.hash || "");
+    if (hash.startsWith("#/restablecer/")) {
+      ui.loginView = "reset";
+      ui.resetToken = decodeURIComponent(hash.replace("#/restablecer/", ""));
+    }
+    const view = ui.loginView || "login";
+    let body = "";
+    if (view === "register") {
+      body = `
+        <h2 style="margin:0 0 8px;font-size:18px">Registro de cliente</h2>
+        <div class="alert" style="margin-bottom:12px">Con Factura se cobrara el IVA</div>
+        <form id="register-form" class="form-grid register-grid">
+          <div class="field span-2"><label>Nombre de usuario *</label><input id="reg-username" autocomplete="off" /></div>
+          <div class="field span-2"><label>Contrasena * (minimo 6)</label><input id="reg-password" type="password" autocomplete="new-password" /></div>
+          <div class="field span-2"><label>Nombre del local *</label><input id="reg-local" /></div>
+          <div class="field span-2"><label>Direccion *</label><input id="reg-address" /></div>
+          <div class="field span-2"><label>CUIT *</label><input id="reg-cuit" placeholder="30-12345678-9" /></div>
+          <div class="field span-2"><label>Correo electronico *</label><input id="reg-email" type="email" /></div>
+          <div class="field"><label>Apertura del local *</label><input id="reg-opening" type="time" /></div>
+          <div class="field"><label>Horario maximo de entrega *</label><input id="reg-delivery" type="time" /></div>
+          <div class="field"><label>Telefono *</label><input id="reg-phone" inputmode="tel" /></div>
+          <div class="field"><label>Zona *</label><input id="reg-zone" /></div>
+          <div class="field span-2"><label>Facturacion *</label><select id="reg-invoice"><option value="Sin Factura">Sin factura</option><option value="Factura A">Factura A</option><option value="Factura B">Factura B</option></select></div>
+          <div class="field span-2"><label>Correo de facturacion (opcional)</label><input id="reg-billing-email" type="email" /></div>
+          <div class="field span-4"><label>Nota (opcional)</label><textarea id="reg-notes"></textarea></div>
+          <div class="field span-4"><button class="btn primary full" type="submit">Registrarme</button></div>
+        </form>
+        <button class="btn ghost full" type="button" id="back-to-login" style="margin-top:10px">Volver al ingreso</button>
+      `;
+    } else if (view === "registered") {
+      body = `
+        <div class="alert" style="margin-bottom:14px">Su cuenta queda pendiente de aprobacion, por favor comunicarse con administracion para empezar a trabajar con nosotros.</div>
+        <a class="btn full whatsapp-btn" href="${WHATSAPP_REGISTER_LINK}" target="_blank" rel="noopener">${WHATSAPP_SVG}&nbsp;Escribirnos por WhatsApp</a>
+        <button class="btn ghost full" type="button" id="back-to-login" style="margin-top:10px">Volver al ingreso</button>
+      `;
+    } else if (view === "recover") {
+      body = `
+        <h2 style="margin:0 0 8px;font-size:18px">Recuperar contrasena</h2>
+        <p class="muted" style="margin:0 0 12px">Le enviaremos un correo con un enlace para crear una contrasena nueva.</p>
+        <form id="recover-form" class="grid">
+          <div class="field"><label>Usuario o correo electronico</label><input id="recover-identifier" autocomplete="username" /></div>
+          <button class="btn primary full" type="submit">Enviar correo de recuperacion</button>
+        </form>
+        <button class="btn ghost full" type="button" id="back-to-login" style="margin-top:10px">Volver al ingreso</button>
+      `;
+    } else if (view === "reset") {
+      body = `
+        <h2 style="margin:0 0 8px;font-size:18px">Crear nueva contrasena</h2>
+        <form id="reset-form" class="grid">
+          <div class="field"><label>Nueva contrasena (minimo 6)</label><input id="reset-password" type="password" autocomplete="new-password" /></div>
+          <div class="field"><label>Repetir contrasena</label><input id="reset-password2" type="password" autocomplete="new-password" /></div>
+          <button class="btn primary full" type="submit">Guardar contrasena</button>
+        </form>
+        <button class="btn ghost full" type="button" id="back-to-login" style="margin-top:10px">Volver al ingreso</button>
+      `;
+    } else {
+      body = `
+        <form id="login-form" class="grid">
+          <div class="field">
+            <label>Usuario</label>
+            <input id="login-username" autocomplete="username" placeholder="usuario o correo electronico" />
+          </div>
+          <div class="field">
+            <label>Contrasena</label>
+            <input id="login-password" type="password" autocomplete="current-password" placeholder="Ingrese su contrasena" />
+          </div>
+          <button class="btn primary full" type="submit">Ingresar</button>
+        </form>
+        <div class="login-actions">
+          <button class="btn ghost full" type="button" id="open-register">Registrarme como cliente</button>
+          <button class="btn ghost full" type="button" id="open-recover">Me olvide la contrasena</button>
+        </div>
+      `;
+    }
+    return `
+      <section class="login-screen">
+        <div class="login-panel ${view === "register" ? "login-panel-wide" : ""}">
+          <h1 class="login-title">${BUSINESS_NAME}</h1>
+          <p class="login-subtitle">Insumos Frescos para Gastronomicos</p>
+          ${body}
+          <img class="login-logo" src="./assets/logo.png" alt="Pare Carrito SAS" />
+        </div>
+      </section>
+    `;
+  }
+
+  async function findServerBase() {
+    const config = getCloudSyncConfig();
+    const candidates = [];
+    if (config.url) candidates.push(cloudBaseUrl(config));
+    candidates.push("/api");
+    for (const base of candidates) {
+      try {
+        const health = await fetch(base + "/health");
+        if (!health.ok) continue;
+        const body = await health.json().catch(() => null);
+        if (body && body.ok === true) return base;
+      } catch {}
+    }
+    return null;
+  }
+
+  function bindLoginExtras() {
+    const openRegister = document.getElementById("open-register");
+    if (openRegister) openRegister.addEventListener("click", () => {
+      ui.loginView = "register";
+      render();
+    });
+    const openRecover = document.getElementById("open-recover");
+    if (openRecover) openRecover.addEventListener("click", () => {
+      ui.loginView = "recover";
+      render();
+    });
+    const backButton = document.getElementById("back-to-login");
+    if (backButton) backButton.addEventListener("click", () => {
+      ui.loginView = "login";
+      ui.resetToken = "";
+      if (String(location.hash || "").startsWith("#/restablecer/")) location.hash = "";
+      render();
+    });
+    const registerForm = document.getElementById("register-form");
+    if (registerForm) registerForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const get = (id) => document.getElementById(id).value.trim();
+      const payload = {
+        username: get("reg-username").toLowerCase(),
+        password: document.getElementById("reg-password").value,
+        localName: get("reg-local"),
+        address: get("reg-address"),
+        cuit: get("reg-cuit"),
+        email: get("reg-email"),
+        openingTime: get("reg-opening"),
+        maxDeliveryTime: get("reg-delivery"),
+        phone: get("reg-phone"),
+        zone: get("reg-zone"),
+        invoiceType: document.getElementById("reg-invoice").value,
+        billingEmail: get("reg-billing-email"),
+        notes: get("reg-notes")
+      };
+      const requiredOk = payload.username && payload.password && payload.localName && payload.address && payload.cuit && payload.email && payload.openingTime && payload.maxDeliveryTime && payload.phone && payload.zone;
+      if (!requiredOk) return alert("Complete todos los campos obligatorios (*).");
+      if (payload.password.length < 6) return alert("La contrasena debe tener al menos 6 caracteres.");
+      const base = await findServerBase();
+      if (!base) return alert("El registro en linea esta disponible solo con el servidor del negocio. Comuniquese con administracion.");
+      try {
+        const response = await fetch(base + "/auth/register", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) return alert(result.error || "No se pudo completar el registro (HTTP " + response.status + ").");
+        ui.loginView = "registered";
+        render();
+      } catch (error) {
+        alert("No se pudo completar el registro: " + error.message);
+      }
+    });
+    const recoverForm = document.getElementById("recover-form");
+    if (recoverForm) recoverForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const identifier = document.getElementById("recover-identifier").value.trim();
+      if (!identifier) return alert("Indique su usuario o correo electronico.");
+      const base = await findServerBase();
+      if (!base) return alert("La recuperacion en linea esta disponible solo con el servidor del negocio. Comuniquese con administracion.");
+      try {
+        const response = await fetch(base + "/auth/recover", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ usernameOrEmail: identifier })
+        });
+        const result = await response.json().catch(() => ({}));
+        alert(result.message || "Si el usuario existe y tiene correo registrado, le enviamos las instrucciones.");
+        ui.loginView = "login";
+        render();
+      } catch (error) {
+        alert("No se pudo enviar el correo: " + error.message);
+      }
+    });
+    const resetForm = document.getElementById("reset-form");
+    if (resetForm) resetForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const password = document.getElementById("reset-password").value;
+      const password2 = document.getElementById("reset-password2").value;
+      if (password.length < 6) return alert("La contrasena debe tener al menos 6 caracteres.");
+      if (password !== password2) return alert("Las contrasenas no coinciden.");
+      const base = await findServerBase();
+      if (!base) return alert("No se pudo contactar al servidor del negocio.");
+      try {
+        const response = await fetch(base + "/auth/reset", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ token: ui.resetToken, password })
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) return alert(result.error || "No se pudo cambiar la contrasena.");
+        alert("Contrasena actualizada. Ya puede ingresar con la nueva contrasena.");
+        ui.loginView = "login";
+        ui.resetToken = "";
+        location.hash = "";
+        render();
+      } catch (error) {
+        alert("No se pudo cambiar la contrasena: " + error.message);
+      }
+    });
+  }
+
+  function bindLogin() {
+    bindLoginExtras();
+    const loginForm = document.getElementById("login-form");
+    if (!loginForm) return;
+    loginForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const username = document.getElementById("login-username").value.trim().toLowerCase();
+      const password = document.getElementById("login-password").value;
+      const submitButton = event.target.querySelector("button[type=submit]");
+      if (submitButton) submitButton.disabled = true;
+      try {
+        // 1) Si hay un servidor propio disponible (mismo dominio /api o el
+        //    configurado en Backup), autenticar ahi: cero configuracion por dispositivo.
+        const serverResult = await tryServerLogin(username, password);
+        if (serverResult && serverResult.payload) {
+          const config = getCloudSyncConfig();
+          config.url = serverResult.base;
+          config.username = username;
+          config.password = password;
+          config.jwt = serverResult.payload.token;
+          if (config.auto !== false) config.auto = true;
+          saveCloudSyncConfig(config);
+          if (["manager", "admin", "employee", "contador"].includes(serverResult.payload.role)) {
+            await cloudPull(false, true);
+          }
+          startCloudAutoSync();
+          let user = state.users.find((item) => item.isActive !== false && (item.username.toLowerCase() === username || String(item.email || "").toLowerCase() === username));
+          if (!user) {
+            user = { id: "USR-REMOTE-" + Date.now(), username, name: serverResult.payload.name || username, role: serverResult.payload.role, password, isActive: true };
+            state.users.push(user);
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+          }
+          setCurrentUser(user);
+          navigate(roleHome(), true);
+          render();
+          return;
+        }
+        if (serverResult && serverResult.failed && serverResult.status === 401) {
+          alert("Usuario o contrasena incorrectos.");
+          return;
+        }
+        // 2) Sin servidor: ingreso local como siempre.
+        const user = state.users.find((item) => item.isActive !== false && (item.username.toLowerCase() === username || String(item.email || "").toLowerCase() === username) && item.password === password);
+        if (!user) {
+          alert("Usuario o contrasena incorrectos.");
+          return;
+        }
+        setCurrentUser(user);
+        navigate(roleHome(), true);
+        render();
+      } finally {
+        if (submitButton) submitButton.disabled = false;
+      }
+    });
+  }
+
+  async function tryServerLogin(username, password) {
+    const config = getCloudSyncConfig();
+    const candidates = [];
+    if (config.url && config.username) candidates.push(cloudBaseUrl(config));
+    candidates.push("/api");
+    for (const base of candidates) {
+      try {
+        const health = await fetch(base + "/health");
+        if (!health.ok) continue;
+        const healthBody = await health.json().catch(() => null);
+        if (!healthBody || healthBody.ok !== true) continue;
+        const response = await fetch(base + "/auth/login", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ username, password })
+        });
+        if (response.status === 401) return { failed: true, status: 401 };
+        if (!response.ok) continue;
+        const payload = await response.json();
+        if (!payload || !payload.token) continue;
+        return { payload, base };
+      } catch {
+        continue;
+      }
+    }
+    return null;
+  }
+
+  function renderSidebar(activeRoute) {
+    const items = getOrderedMenuItems().filter((item) => pageVisibleForRole(item, currentUser.role));
+    return `
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-title">${BUSINESS_NAME}</div>
+        </div>
+        <div class="user-box">
+          <strong>${escapeHtml(currentUser.name)}</strong>
+          <span class="role-badge">${roleLabel(currentUser.role)}</span>
+        </div>
+        <nav class="nav" aria-label="Navegacion principal">
+          ${items.map((item) => {
+            const label = menuLabel(item);
+            return `
+            <button class="${activeRoute === item.id ? "active" : ""}" data-route="${item.id}" title="${escapeHtml(label)}">
+              <span class="nav-icon">${menuIcon(item.id) || escapeHtml(item.icon)}</span>
+              <span>${escapeHtml(label)}</span>
+            </button>
+          `;
+          }).join("")}
+        </nav>
+        <div class="sidebar-footer">
+          <button class="btn ghost full" data-logout>Salir de la cuenta</button>
+        </div>
+      </aside>
+    `;
+  }
+
+  function menuIcon(id) {
+    const icons = {
+      "dashboard": '<path d="M3 11l9-8 9 8"/><path d="M5 9.5V21h14V9.5"/>',
+      "nuevo-pedido": '<circle cx="9" cy="20" r="1.5"/><circle cx="17" cy="20" r="1.5"/><path d="M3 4h2l2.5 11h10L20 8.5H7.5"/><path d="M13.5 3.5h5M16 1v5"/>',
+      "pedidos": '<path d="M8 6h13M8 12h13M8 18h13"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/>',
+      "clientes": '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.5 3-6 6.5-6s6.5 2.5 6.5 6"/><circle cx="17.5" cy="9" r="2.5"/><path d="M16.5 14.5c2.8.3 5 2.4 5 5.5"/>',
+      "productos": '<path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/>',
+      "precios": '<circle cx="12" cy="12" r="9"/><path d="M12 6.5v11M14.8 8.8c0-1-1.2-1.8-2.8-1.8s-2.8.7-2.8 1.8 1 1.8 2.8 1.8 2.8.7 2.8 1.8-1.2 1.8-2.8 1.8-2.8-.8-2.8-1.8"/>',
+      "historiales": '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2.5"/>',
+      "rendimiento": '<path d="M4 20V10M10 20V4M16 20v-7M21 20H3"/>',
+      "compras": '<circle cx="9" cy="20" r="1.5"/><circle cx="17" cy="20" r="1.5"/><path d="M3 4h2l2.5 11h10L20 8.5H7.5"/>',
+      "dividir": '<path d="M4 4l7 7v9M20 4l-7 7"/><path d="M8.5 4H4v4.5M15.5 4H20v4.5"/>',
+      "vehiculos": '<path d="M1.5 6.5h12v9.5h-12z"/><path d="M13.5 10h4.5l3 3v3h-7.5"/><circle cx="6" cy="18.5" r="1.8"/><circle cx="17.5" cy="18.5" r="1.8"/>',
+      "remitos": '<path d="M6 2.5h8l4 4v15H6z"/><path d="M14 2.5v4h4M9 12.5h6M9 16.5h6"/>',
+      "unidades": '<path d="M12 3.5v17M5 7h14M8.5 20.5h7"/><path d="M5 7l-2.6 5.5a2.9 2.9 0 005.2 0L5 7zM19 7l-2.6 5.5a2.9 2.9 0 005.2 0L19 7z"/>',
+      "pagos": '<rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M5.5 9.5h.01M18.5 14.5h.01"/>',
+      "saldos": '<path d="M3 7a2 2 0 012-2h13v2.5"/><rect x="3" y="7" width="18" height="12" rx="2"/><circle cx="16.5" cy="13" r="1.1"/>',
+      "caja": '<rect x="3" y="9" width="18" height="11" rx="2"/><path d="M7 9V4.5h10V9M9 13.5h6"/>',
+      "empleados": '<rect x="4" y="3" width="16" height="18" rx="2"/><circle cx="12" cy="9.5" r="2.5"/><path d="M7.5 17.5c.7-2 2.4-3 4.5-3s3.8 1 4.5 3"/>',
+      "horarios": '<circle cx="12" cy="13" r="8"/><path d="M12 9.5v3.5l2.5 2.5M9.5 2.5h5"/>',
+      "registrar-transferencia": '<path d="M3 9.5L12 3.5l9 6"/><path d="M5 9.5V19M9.5 9.5V19M14.5 9.5V19M19 9.5V19M3 20.5h18"/>',
+      "comprobar-transferencias": '<path d="M6 2.5h8l4 4v15H6z"/><path d="M14 2.5v4h4M9 14l2.3 2.3 4-4.5"/>',
+      "facturacion": '<path d="M6 2.5h8l4 4v15H6z"/><path d="M14 2.5v4h4"/><path d="M9 11.5h6M9 15h6M9 18h3"/>',
+      "mis-pedidos": '<circle cx="12" cy="12" r="9"/><path d="M12 3v9h9"/>',
+      "lista-precios": '<path d="M3 11.5V3.5h8L20.5 13l-8 8z"/><circle cx="7.5" cy="8" r="1.4"/>',
+      "proveedores": '<path d="M4 9l1.5-5h13L20 9"/><path d="M4 9h16v11.5H4z"/><path d="M9 20.5V14h6v6.5"/>',
+      "usuarios": '<circle cx="10" cy="8" r="3.5"/><path d="M3.5 20c0-3.5 3-6 6.5-6 1.4 0 2.7.4 3.8 1"/><circle cx="17.5" cy="17.5" r="2.6"/><path d="M17.5 13.5v-1.2M17.5 22.5v-1.2M21.5 17.5h1.2M12.3 17.5h1.2" transform="translate(0 0)"/>',
+      "configuracion": '<circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.2 5.2l2.1 2.1M16.7 16.7l2.1 2.1M18.8 5.2l-2.1 2.1M7.3 16.7l-2.1 2.1"/>',
+      "backup": '<path d="M7 18.5a4.5 4.5 0 01-.6-9A6 6 0 0118 11.5a3.8 3.8 0 01-1 7"/><path d="M12 12.5V20M9.5 15l2.5-2.5L14.5 15"/>'
+    };
+    const path = icons[id];
+    if (!path) return "";
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + path + "</svg>";
+  }
+
+  function getOrderedMenuItems() {
+    const byRole = state.appSettings && state.appSettings.sidebarOrderByRole && currentUser ? state.appSettings.sidebarOrderByRole[currentUser.role] : null;
+    const order = Array.isArray(byRole) && byRole.length
+      ? byRole
+      : (state.appSettings && Array.isArray(state.appSettings.sidebarOrder) ? state.appSettings.sidebarOrder : []);
+    if (!order.length) return menu.slice();
+    const index = new Map(order.map((id, position) => [id, position]));
+    return menu.slice().sort((a, b) => {
+      const ai = index.has(a.id) ? index.get(a.id) : 999 + menu.findIndex((item) => item.id === a.id);
+      const bi = index.has(b.id) ? index.get(b.id) : 999 + menu.findIndex((item) => item.id === b.id);
+      return ai - bi;
+    });
+  }
+
+  function menuLabel(item) {
+    if (currentUser && isClientLikeRole(currentUser.role)) {
+      if (item.id === "pedidos") return "Mis Pedidos";
+      if (item.id === "mis-pedidos") return "Analisis de Compras";
+    }
+    return item.label;
+  }
+
+  function renderTopbar() {
+    return `
+      <header class="topbar">
+        <div class="topbar-start">
+          <button class="mobile-menu-toggle" type="button" aria-label="Abrir menu" aria-expanded="false" data-mobile-menu-toggle>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+          </button>
+          <div>
+            <strong>${formatDate(todayISO())}</strong>
+            <div class="muted">Operacion diaria</div>
+          </div>
+        </div>
+        <div class="page-actions">
+          ${isClientLikeRole(currentUser.role)
+            ? `<img class="topbar-logo-inline" src="./assets/logo.png" alt="Pare Carrito SAS" /><a class="btn small whatsapp-btn" href="${WHATSAPP_LINK}" target="_blank" rel="noopener" title="Escribinos por WhatsApp" aria-label="WhatsApp">${WHATSAPP_SVG}</a>`
+            : `<img class="topbar-logo" src="./assets/logo.png" alt="Pare Carrito SAS" />`}
+          <button class="btn ghost small" data-route="${roleHome()}">Inicio</button>
+          <button class="btn small" data-logout>Salir</button>
+        </div>
+      </header>
+    `;
+  }
+
+  function renderRoute(route) {
+    if (route.base === "vehiculos-print") return renderVehiclePrint(route.id);
+    if (route.base === "remito-print") return renderRemitoPrint(route.id);
+    if (route.base === "remitos-today-print") return renderTodayRemitosPrint();
+    if (route.base === "dividir-print") return renderDividePrint(route.id);
+    const pages = {
+      dashboard: renderDashboard,
+      "nuevo-pedido": renderNewOrder,
+      pedidos: renderOrders,
+      clientes: renderClients,
+      productos: renderProducts,
+      precios: renderPrices,
+      historiales: renderHistories,
+      rendimiento: renderPerformance,
+      compras: renderPurchases,
+      dividir: renderDividePurchases,
+      vehiculos: renderVehicles,
+      remitos: renderRemitos,
+      unidades: renderUnits,
+      pagos: renderPayments,
+      saldos: renderBalances,
+      caja: renderCaja,
+      empleados: renderEmployees,
+      horarios: renderAttendance,
+      "registrar-transferencia": renderCustomerTransferRegistration,
+      "comprobar-transferencias": renderTransferApprovals,
+      facturacion: renderFacturacion,
+      "mis-pedidos": renderCustomerReports,
+      "lista-precios": renderCustomerPriceList,
+      proveedores: renderProviders,
+      usuarios: renderUsers,
+      configuracion: renderSettings,
+      backup: renderBackup
+    };
+    return (pages[route.base] || renderDashboard)();
+  }
+
+  function pageShell(title, subtitle, actions, body, routeName) {
+    const toolbar = toolbarRoutes.has(routeName) ? renderToolbar() : "";
+    return `
+      <section class="page">
+        ${toolbar}
+        <div class="page-header">
+          <div>
+            <h1 class="page-title">${escapeHtml(title)}</h1>
+            <p class="page-subtitle">${escapeHtml(subtitle || "")}</p>
+          </div>
+          <div class="page-actions">${actions || ""}</div>
+        </div>
+        ${body}
+      </section>
+    `;
+  }
+
+  function renderToolbar() {
+    return `
+      <div class="toolbar no-print">
+        <button class="btn ghost" data-back>&lt; Volver</button>
+        <button class="btn ghost" data-route="${roleHome()}">Inicio</button>
+      </div>
+    `;
+  }
+
+  function renderDashboard() {
+    if (isClientLikeRole(currentUser.role)) return renderCustomerDashboard();
+    if (currentUser.role === "employee") return renderEmployeeDashboard();
+    const todaysOrders = ordersByDate(todayISO());
+    const cajaBalance = getCajaBalance();
+    const employeeCash = getEmployeeCashTotals();
+    const employeeCashTotal = employeeCash.reduce((sum, item) => sum + item.total, 0);
+    const bankCash = getBankCajaTotal();
+    const balances = getClientBalances();
+    const totalReceivable = balances.reduce((sum, item) => sum + Math.max(0, item.balance), 0);
+    const providerDebtTotal = getProviderBalances().reduce((sum, item) => sum + Math.max(0, item.balance), 0);
+    const pendingTransfers = state.payments.filter((payment) => payment.method === "transferencia" && !payment.transferProofFile).length;
+    const vehicleRows = activeVehicles().map((vehicle) => {
+      const totals = getVehicleTotals(vehicle.id, todayISO());
+      return `
+        <tr>
+          <td>${escapeHtml(vehicle.name)}</td>
+          <td class="num">${totals.orders.length}</td>
+          <td class="num">${totals.itemCount}</td>
+          <td class="num">${formatMoney(totals.totalValue)}</td>
+        </tr>
+      `;
+    }).join("");
+
+    return pageShell(
+      "Inicio",
+      "Resumen operativo para pedidos, reparto, caja y saldos.",
+      `<button class="btn primary" data-route="nuevo-pedido">Nuevo pedido</button>
+       <button class="btn blue" data-route="pagos">Registrar pago</button>`,
+      `
+      <div class="grid four">
+        ${metricCard("Pedidos de hoy", todaysOrders.length, "Pedidos activos cargados")}
+        ${metricCard("Caja", formatMoney(cajaBalance), "Ingresos menos egresos")}
+        ${metricCard("Caja empleados", formatMoney(employeeCashTotal), "Efectivo recibido por empleados")}
+        ${metricCard("Caja banco", formatMoney(bankCash), "Transferencias y cheques")}
+        ${metricCard("Saldos clientes", formatMoney(totalReceivable), "Total pendiente de cobro")}
+        ${metricCard("Deuda proveedores", formatMoney(providerDebtTotal), "Cuenta corriente proveedores")}
+      </div>
+      <div class="grid two" style="margin-top:14px">
+        <div class="panel">
+          <h2 class="page-title" style="font-size:18px">Caja de empleados</h2>
+          <div class="table-wrap employee-cash-table" style="margin-top:10px">
+            <table>
+              <thead><tr><th>Empleado</th><th class="cobros-col">Cobros</th><th>Caja</th></tr></thead>
+              <tbody>${employeeCash.map((item) => `<tr><td>${escapeHtml(item.name)}</td><td class="num">${item.count}</td><td class="num">${formatMoney(item.total)}</td></tr>`).join("") || emptyRow(3, "Sin cobros de empleados.")}</tbody>
+            </table>
+          </div>
+        </div>
+        <div class="panel">
+          <h2 class="page-title" style="font-size:18px">Caja banco</h2>
+          <div class="grid two" style="margin-top:10px">
+            ${metricCard("Banco", formatMoney(bankCash), "Transferencia + cheque")}
+            ${metricCard("Pendientes", pendingTransfers, "Transferencias sin comprobante")}
+          </div>
+          <div class="grid two" style="margin-top:10px">
+            ${metricCard("Saldos clientes", formatMoney(totalReceivable), "Total pendiente")}
+            ${metricCard("Proveedores", formatMoney(providerDebtTotal), "Total adeudado")}
+          </div>
+        </div>
+      </div>
+      <div class="grid two" style="margin-top:14px">
+        <div class="panel">
+          <h2 class="page-title" style="font-size:18px">Vehiculos de hoy</h2>
+          <div class="table-wrap" style="margin-top:10px">
+            <table>
+              <thead><tr><th>Vehiculo</th><th>Pedidos</th><th>Items</th><th>Total</th></tr></thead>
+              <tbody>${vehicleRows || emptyRow(4, "No hay pedidos para repartir.")}</tbody>
+            </table>
+          </div>
+        </div>
+        <div class="panel">
+          <h2 class="page-title" style="font-size:18px">Proximas acciones</h2>
+          <div class="grid" style="margin-top:10px">
+            <button class="btn ghost full" data-route="dividir">Dividir compras por proveedor</button>
+            <button class="btn ghost full" data-route="vehiculos">Revisar carga de vehiculos</button>
+            <button class="btn ghost full" data-route="unidades">Revisar Unidades</button>
+            <button class="btn ghost full" data-route="remitos">Generar remitos</button>
+            <button class="btn ghost full" data-route="backup">Exportar backup</button>
+          </div>
+          <div class="alert" style="margin-top:14px">Caja registra cada pedido como compromiso y cada pago como ingreso real para evitar doble conteo.</div>
+        </div>
+      </div>
+      ${renderDashboardCharts()}
+      `,
+      "dashboard"
+    );
+  }
+
+  function getKgFactor(product) {
+    if (!product) return 1;
+    const unit = String(product.unitType || "").toLowerCase();
+    const name = normalizeText(product.name);
+    if (unit === "jaula" || unit === "bolsa") return 20;
+    if (unit === "cajon") return name.includes("banana") ? 20 : 16;
+    if (unit === "ristra") return 3.5;
+    if (unit === "cabeza") return 0.07;
+    if (unit === "bandeja") return 4;
+    return 1;
+  }
+
+  function buildDashboardSeries(from, to) {
+    const dates = buildDateRange(from, to);
+    const index = new Map(dates.map((date, position) => [date, position]));
+    const orders = dates.map(() => 0);
+    const sales = dates.map(() => 0);
+    const kgs = dates.map(() => 0);
+    const expenses = dates.map(() => 0);
+    state.orders.forEach((order) => {
+      if (["cancelado", "anulado"].includes(order.status) || !index.has(order.date)) return;
+      const position = index.get(order.date);
+      orders[position] += 1;
+      sales[position] += Number(order.totalAmount || 0);
+      (order.items || []).forEach((item) => {
+        kgs[position] += Number(item.quantity || 0) * getKgFactor(getProduct(item.productId));
+      });
+    });
+    state.purchases.forEach((purchase) => {
+      if (!index.has(purchase.date)) return;
+      if (["market_price", "prepared", "cash_movement"].includes(purchase.expenseType)) return;
+      expenses[index.get(purchase.date)] += Number(purchase.totalCost || 0);
+    });
+    return { dates, orders, sales, kgs, expenses, result: sales.map((value, position) => value - expenses[position]) };
+  }
+
+  function cumulativeSeries(dates, entries, getDate, getDelta) {
+    const index = new Map(dates.map((date, position) => [date, position]));
+    const deltas = dates.map(() => 0);
+    let before = 0;
+    for (const entry of entries) {
+      const date = String(getDate(entry) || "").slice(0, 10);
+      if (!date) continue;
+      const delta = Number(getDelta(entry) || 0);
+      if (date < dates[0]) before += delta;
+      else if (index.has(date)) deltas[index.get(date)] += delta;
+    }
+    const out = [];
+    let acc = before;
+    for (const delta of deltas) {
+      acc += delta;
+      out.push(Math.round(acc * 100) / 100);
+    }
+    return out;
+  }
+
+  function buildDashboardExtraSeries(dates, cashBoxId) {
+    const allowed = new Set(activeCashBoxesForRole(currentUser ? currentUser.role : "admin").map((box) => box.id));
+    const cajaEntries = state.caja
+      .map((entry) => ({ ...entry, cashBoxId: resolveCajaEntryCashBoxId(entry) }))
+      .filter((entry) => cashBoxId && cashBoxId !== "all" ? entry.cashBoxId === cashBoxId : allowed.has(entry.cashBoxId));
+    return {
+      cash: cumulativeSeries(dates, cajaEntries, (e) => e.date, (e) => Number(e.amountIngreso || 0) - Number(e.amountEgreso || 0)),
+      clientBalances: cumulativeSeries(dates, state.saldos, (e) => e.date, (e) => e.amount),
+      providerBalances: cumulativeSeries(dates, state.providerLedger, (e) => e.date, (e) => e.amount)
+    };
+  }
+
+  function compactAxisValue(value) {
+    const abs = Math.abs(value);
+    if (abs >= 1000000) return (value / 1000000).toFixed(1).replace(".", ",") + "M";
+    if (abs >= 1000) return (value / 1000).toFixed(1).replace(".", ",") + "k";
+    return formatNumber(value);
+  }
+
+  function renderLineChartSvg(dates, values, color, formatValue) {
+    const width = 580;
+    const height = 170;
+    const padLeft = 46;
+    const padRight = 12;
+    const padTop = 18;
+    const padBottom = 16;
+    const max = Math.max(...values, 0);
+    const min = Math.min(...values, 0);
+    const span = max - min || 1;
+    const stepX = values.length > 1 ? (width - padLeft - padRight) / (values.length - 1) : 0;
+    const pointX = (position) => padLeft + position * stepX;
+    const pointY = (value) => height - padBottom - ((value - min) / span) * (height - padTop - padBottom);
+    const points = values.map((value, position) => `${pointX(position).toFixed(1)},${pointY(value).toFixed(1)}`).join(" ");
+    const tickCount = 4;
+    const gridLines = Array.from({ length: tickCount + 1 }).map((_, index) => {
+      const value = min + (span * index) / tickCount;
+      const y = pointY(value).toFixed(1);
+      return `
+        <line class="chart-grid-line" x1="${padLeft}" y1="${y}" x2="${width - padRight}" y2="${y}" />
+        <text class="chart-grid-label" x="${padLeft - 5}" y="${Number(y) + 3}" text-anchor="end">${escapeHtml(compactAxisValue(value))}</text>
+      `;
+    }).join("");
+    const zeroY = min < 0 ? pointY(0) : null;
+    const lastValue = values.length ? values[values.length - 1] : 0;
+    const pointMarks = values.map((value, position) => {
+      const x = pointX(position);
+      const y = pointY(value);
+      const labelX = Math.min(Math.max(x, padLeft + 26), width - padRight - 26);
+      const labelY = y - 9 < padTop ? y + 16 : y - 9;
+      return `
+        <g class="chart-point">
+          <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="8" fill="transparent" />
+          <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" fill="${color}" />
+          <text x="${labelX.toFixed(1)}" y="${labelY.toFixed(1)}" text-anchor="middle">${escapeHtml(formatValue(value))}</text>
+          <title>${escapeHtml(formatDateShort(dates[position] || ""))}: ${escapeHtml(formatValue(value))}</title>
+        </g>
+      `;
+    }).join("");
+    return `
+      <svg viewBox="0 0 ${width} ${height}" class="line-chart-svg" role="img">
+        ${gridLines}
+        ${zeroY !== null ? `<line x1="${padLeft}" y1="${zeroY.toFixed(1)}" x2="${width - padRight}" y2="${zeroY.toFixed(1)}" stroke="#f0b1ad" stroke-dasharray="4 4" stroke-width="1" />` : ""}
+        ${values.length > 1 ? `<polyline fill="none" stroke="${color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" points="${points}" />` : ""}
+        ${pointMarks}
+        <text class="chart-grid-label" x="${padLeft}" y="${height - 2}">${escapeHtml(formatDateShort(dates[0] || ""))}</text>
+        <text class="chart-grid-label" x="${width - padRight}" y="${height - 2}" text-anchor="end">${escapeHtml(formatDateShort(dates[dates.length - 1] || ""))}</text>
+      </svg>
+      <div class="line-chart-meta"><span>Max: ${escapeHtml(formatValue(max))}</span><span>Ultimo: ${escapeHtml(formatValue(lastValue))}</span></div>
+    `;
+  }
+
+  function renderDashboardCharts() {
+    const from = ui.dashFrom || addDaysISO(todayISO(), -29);
+    const to = ui.dashTo || todayISO();
+    const series = buildDashboardSeries(from, to);
+    const isManager = currentUser.role === "manager";
+    const formatCount = (value) => formatNumber(value);
+    const formatKg = (value) => formatNumber(value) + " kg";
+    const charts = [
+      { title: "Cantidad de pedidos por dia", values: series.orders, color: "#2457a6", format: formatCount },
+      { title: "Gastos totales por dia", values: series.expenses, color: "#b42318", format: formatMoney },
+      { title: "Kgs vendidos por dia", values: series.kgs, color: "#0f7a5d", format: formatKg }
+    ];
+    if (isManager) {
+      charts.push({ title: "Ventas totales por dia", values: series.sales, color: "#7a3bd0", format: formatMoney });
+      charts.push({ title: "Resultado (ventas - gastos) por dia", values: series.result, color: "#a36300", format: formatMoney });
+    }
+    const extra = buildDashboardExtraSeries(series.dates, ui.dashCashBox || "all");
+    charts.push({ title: "Caja (" + (ui.dashCashBox === "all" || !ui.dashCashBox ? "todas las cajas" : getCashBoxName(ui.dashCashBox)) + ")", values: extra.cash, color: "#087a83", format: formatMoney, cashSelector: true });
+    charts.push({ title: "Saldos de clientes (a cobrar)", values: extra.clientBalances, color: "#2156a8", format: formatMoney });
+    charts.push({ title: "Saldos de proveedores (a pagar)", values: extra.providerBalances, color: "#b42318", format: formatMoney });
+    afterRender.push(() => {
+      const fromInput = document.getElementById("dash-from");
+      const toInput = document.getElementById("dash-to");
+      if (fromInput) fromInput.addEventListener("change", () => {
+        ui.dashFrom = fromInput.value || addDaysISO(todayISO(), -29);
+        if (ui.dashTo < ui.dashFrom) ui.dashTo = ui.dashFrom;
+        render();
+      });
+      if (toInput) toInput.addEventListener("change", () => {
+        ui.dashTo = toInput.value || todayISO();
+        if (ui.dashTo < ui.dashFrom) ui.dashFrom = ui.dashTo;
+        render();
+      });
+      document.querySelectorAll("[data-dash-range]").forEach((button) => button.addEventListener("click", () => {
+        const days = Number(button.dataset.dashRange);
+        ui.dashTo = todayISO();
+        ui.dashFrom = addDaysISO(todayISO(), -(days - 1));
+        render();
+      }));
+      document.querySelectorAll("[data-dash-cashbox]").forEach((button) => button.addEventListener("click", () => {
+        ui.dashCashBox = button.dataset.dashCashbox;
+        render();
+      }));
+    });
+    return `
+      <div class="panel" style="margin-top:14px">
+        <h2 class="page-title" style="font-size:18px">Tendencias</h2>
+        <div class="form-grid" style="margin-top:10px">
+          <div class="field"><label>Desde</label><input type="date" id="dash-from" value="${escapeAttr(from)}" /></div>
+          <div class="field"><label>Hasta</label><input type="date" id="dash-to" value="${escapeAttr(to)}" /></div>
+          <div class="field"><label>&nbsp;</label><button class="btn ghost" type="button" data-dash-range="7">7 dias</button></div>
+          <div class="field"><label>&nbsp;</label><button class="btn ghost" type="button" data-dash-range="30">30 dias</button></div>
+        </div>
+        <div class="grid two dash-charts" style="margin-top:14px">
+          ${charts.map((chart) => `
+            <div class="card line-chart-card">
+              <strong>${escapeHtml(chart.title)}</strong>
+              <span class="muted" style="font-size:12px">${formatDate(from)} - ${formatDate(to)}</span>
+              ${chart.cashSelector ? `<div class="page-actions" style="margin:4px 0">
+                <button class="btn small ${!ui.dashCashBox || ui.dashCashBox === "all" ? "blue" : "ghost"}" type="button" data-dash-cashbox="all">Todas</button>
+                ${activeCashBoxesForRole(currentUser.role).map((box) => `<button class="btn small ${ui.dashCashBox === box.id ? "blue" : "ghost"}" type="button" data-dash-cashbox="${escapeAttr(box.id)}">${escapeHtml(box.name)}</button>`).join("")}
+              </div>` : ""}
+              ${renderLineChartSvg(series.dates, chart.values, chart.color, chart.format)}
+            </div>
+          `).join("")}
+        </div>
+      </div>
+    `;
+  }
+
+  function renderEmployeeDashboard() {
+    const todaysOrders = visibleOrders();
+    const assignedItems = getTodaysAssignableItems().length;
+    const employeeCaja = getEmployeeCajaTotal(currentUser.id);
+    const weeklyPay = getWeeklyPayDue(currentUser.id);
+    const vehicleRows = activeVehicles().map((vehicle) => {
+      const totals = getVehicleTotals(vehicle.id, todayISO());
+      return `
+        <tr>
+          <td>${escapeHtml(vehicle.name)}</td>
+          <td class="num">${totals.orders.length}</td>
+          <td class="num">${totals.itemCount}</td>
+          <td class="num">${formatMoney(totals.totalValue)}</td>
+        </tr>
+      `;
+    }).join("");
+    return pageShell(
+      "Inicio",
+      "Vista de empleado para pedidos de hoy, reparto, division de productos, gastos y cobros.",
+      `<button class="btn blue" data-route="pagos">Registrar pago</button>
+       <button class="btn ghost" data-route="compras">Registrar gasto</button>`,
+      `
+      <div class="grid three">
+        ${metricCard("Pedidos de hoy", todaysOrders.length, "Solo la operacion del dia")}
+        ${metricCard("Mi caja", formatMoney(employeeCaja), "Cobros registrados a mi nombre")}
+        ${metricCard("Cobro semanal", formatMoney(weeklyPay), "Horas presentes de esta semana")}
+      </div>
+      <div class="grid two" style="margin-top:14px">
+        <div class="panel">
+          <h2 class="page-title" style="font-size:18px">Vehiculos de hoy</h2>
+          <div class="table-wrap" style="margin-top:10px">
+            <table>
+              <thead><tr><th>Vehiculo</th><th>Pedidos</th><th>Items</th><th>Total</th></tr></thead>
+              <tbody>${vehicleRows || emptyRow(4, "No hay pedidos para repartir.")}</tbody>
+            </table>
+          </div>
+        </div>
+        <div class="panel">
+          <h2 class="page-title" style="font-size:18px">Acciones permitidas</h2>
+          <div class="grid" style="margin-top:10px">
+            <button class="btn ghost full" data-route="pedidos">Ver pedidos del dia</button>
+            <button class="btn ghost full" data-route="vehiculos">Cambiar distribucion de vehiculos</button>
+            <button class="btn ghost full" data-route="dividir">Cambiar distribucion de productos</button>
+            <button class="btn ghost full" data-route="saldos">Ver cuenta de clientes</button>
+            <button class="btn ghost full" data-route="horarios">Registrar fin de dia</button>
+          </div>
+        </div>
+      </div>
+      `,
+      "dashboard"
+    );
+  }
+
+  function renderCustomerDashboard() {
+    const clientIds = getCustomerVisibleClientIds();
+    if (!Array.isArray(ui.customerDashboardClients)) ui.customerDashboardClients = clientIds.slice();
+    ui.customerDashboardClients = ui.customerDashboardClients.filter((id) => clientIds.includes(id));
+    const ids = ui.customerDashboardClients;
+    const client = ids.length === 1 ? getClient(ids[0]) : getClient(currentUser.clientId);
+    const customerOrders = getCustomerOrdersForIds(ids);
+    const todayOrders = customerOrders.filter((order) => order.date === todayISO());
+    const todayOrder = todayOrders[0];
+    const lastOrder = customerOrders.slice().sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.createdAt || "").localeCompare(String(a.createdAt || "")))[0];
+    const featuredOrder = todayOrder || lastOrder;
+    const featuredDate = todayOrders.length ? todayISO() : featuredOrder ? featuredOrder.date : "";
+    const featuredAmount = todayOrders.length
+      ? todayOrders.reduce((sum, order) => sum + Number(order.totalAmount || 0), 0)
+      : featuredDate
+        ? customerOrders.filter((order) => order.date === featuredDate).reduce((sum, order) => sum + Number(order.totalAmount || 0), 0)
+        : 0;
+    const totalBalance = ids.reduce((sum, id) => sum + getClientBalance(id), 0);
+    afterRender.push(() => {
+      document.querySelectorAll("[data-dashboard-client]").forEach((button) => button.addEventListener("click", () => {
+        const value = button.dataset.dashboardClient;
+        if (value === "all") {
+          ui.customerDashboardClients = ui.customerDashboardClients.length === clientIds.length ? [] : clientIds.slice();
+        } else if (ui.customerDashboardClients.includes(value)) {
+          ui.customerDashboardClients = ui.customerDashboardClients.filter((id) => id !== value);
+        } else {
+          ui.customerDashboardClients = [...ui.customerDashboardClients, value];
+        }
+        render();
+      }));
+    });
+    return pageShell(
+      "Mi cuenta",
+      client ? "Portal de cliente para " + client.name : "Portal de cliente",
+      `<button class="btn primary" data-route="nuevo-pedido">Nuevo pedido</button>
+       <button class="btn ghost" data-route="mis-pedidos">Ver rango de pedidos</button>`,
+      `
+      <div class="customer-hero">
+        <img src="./assets/logo.png" alt="Pare Carrito SAS" />
+        <div class="customer-hero-text">Insumos Frescos para Gastronomicos</div>
+      </div>
+      <div class="tabs">
+        <button class="tab ${ids.length === clientIds.length && clientIds.length ? "active" : ""}" data-dashboard-client="all">Todos</button>
+        ${clientIds.map((id) => {
+          const item = getClient(id);
+          return `<button class="tab ${ids.includes(id) ? "active" : ""}" data-dashboard-client="${id}">${escapeHtml(item ? item.name : id)}</button>`;
+        }).join("")}
+      </div>
+      <div class="grid four">
+        ${metricCard("Saldo", currentUser.role === "example" ? formatMoney(0) : formatMoney(totalBalance), currentUser.role === "example" ? "Dato ficticio" : "Cuenta corriente")}
+        ${metricCard(todayOrder ? "Pedido de hoy" : "Ultimo pedido", featuredOrder ? formatMoney(featuredAmount) : "$0", featuredOrder ? formatDate(featuredDate) : "Sin pedidos")}
+        ${metricCard("Pedidos", customerOrders.length, "Pedidos registrados")}
+        ${metricCard("Vehiculo", client ? getVehicleName(client.vehicleId) : "-", "Ruta asignada")}
+      </div>
+      <div class="panel" style="margin-top:14px">
+        <h2 class="page-title" style="font-size:18px">Ultimos pedidos</h2>
+        <div class="table-wrap" style="margin-top:10px">
+          <table>
+            <thead><tr><th>Pedido</th><th>Fecha</th><th>Estado</th><th>Total</th></tr></thead>
+            <tbody>
+              ${customerOrders.slice(0, 12).map((order) => `<tr><td>${escapeHtml(order.id)}</td><td>${formatDate(order.date)}</td><td>${statusLabel(order.status)}</td><td class="num">${formatMoney(order.totalAmount)}</td></tr>`).join("") || emptyRow(4, "No hay pedidos para este cliente.")}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      `,
+      "dashboard"
+    );
+  }
+
+  function metricCard(label, value, note) {
+    return `
+      <div class="card metric">
+        <div class="metric-label">${escapeHtml(label)}</div>
+        <div class="metric-value">${escapeHtml(String(value))}</div>
+        <div class="metric-note">${escapeHtml(note)}</div>
+      </div>
+    `;
+  }
+
+  function renderNewOrder() {
+    const isCustomerOrder = isClientLikeRole(currentUser.role);
+    const clients = (isCustomerOrder
+      ? getCustomerVisibleClientIds().map((id) => getClient(id)).filter((client) => client && client.isActive !== false)
+      : activeClients())
+      .filter((client, index, list) => list.findIndex((item) => item.id === client.id) === index)
+      .sort(compareClientIds);
+    if (!clients.length) {
+      return pageShell(
+        "Nuevo Pedido",
+        "No hay una cuenta de cliente activa vinculada a este usuario.",
+        "",
+        `<div class="panel empty">No hay clientes disponibles para cargar pedidos.</div>`,
+        "nuevo-pedido"
+      );
+    }
+    if (isCustomerOrder && (!ui.selectedClientId || !clients.some((client) => client.id === ui.selectedClientId))) {
+      ui.selectedClientId = clients[0] ? clients[0].id : "";
+    } else if (ui.selectedClientId && !clients.some((client) => client.id === ui.selectedClientId)) {
+      ui.selectedClientId = "";
+    }
+    const client = getClient(ui.selectedClientId) || (isCustomerOrder ? clients[0] : null);
+    const minOrderDate = isCustomerOrder ? getCustomerMinOrderDate() : "";
+    if (isCustomerOrder && (!ui.selectedDate || ui.selectedDate < minOrderDate)) ui.selectedDate = minOrderDate;
+    const selectedDate = ui.selectedDate || todayISO();
+    const showCustomerLateWarning = currentUser.role === "customer" && isTimeBetween("05:30", "11:00");
+    const products = sortProductsForClient(client ? client.id : "");
+    const clientSelectorMarkup = isCustomerOrder
+      ? `<select id="order-client">
+          ${clients.map((item) => `<option value="${item.id}" ${item.id === (client && client.id) ? "selected" : ""}>${escapeHtml(item.id)} - ${escapeHtml(item.name)}</option>`).join("")}
+        </select>`
+      : `<input id="order-client-search" list="order-client-options" value="${escapeAttr(client ? client.id + " - " + client.name : "")}" placeholder="Buscar por nombre o numero" autocomplete="off" />
+        <input type="hidden" id="order-client" value="${escapeAttr(client ? client.id : "")}" />
+        <datalist id="order-client-options">
+          ${clients.map((item) => `<option value="${escapeAttr(item.id + " - " + item.name)}"></option>`).join("")}
+        </datalist>`;
+    const productRows = products.map((product) => {
+      const pref = getPreference(client ? client.id : "", product.id);
+      const price = getAdjustedProductPrice(product, client);
+      const unit = pref ? pref.preferredUnitType : product.unitType;
+      const hidden = ui.orderProductFilter && !product.name.toLowerCase().includes(ui.orderProductFilter.toLowerCase());
+      return `
+        <div class="order-row ${ui.orderView === "grid" ? "compact" : ""}" data-product-row="${product.id}" ${hidden ? `style="display:none"` : ""}>
+          <div class="order-product-title">
+            <div class="product-name">${escapeHtml(product.name)}</div>
+            ${pref ? `<div class="favorite-mark">Favorito: ultima unidad ${escapeHtml(pref.preferredUnitType)}${pref.lastQuantity ? `, ${formatNumber(pref.lastQuantity)}` : ""}</div>` : ""}
+          </div>
+          <div class="field order-qty-field">
+            <label>Cantidad</label>
+            <input data-qty value="" inputmode="decimal" placeholder="0" />
+            <input type="hidden" data-unit value="${escapeAttr(unit)}" />
+          </div>
+          <div class="order-thumb-field">
+            <img class="order-product-thumb" src="${productThumb(product)}" alt="" />
+          </div>
+          <div class="field order-note-field">
+            <label>Nota</label>
+            <input data-note placeholder="comentarios?" />
+          </div>
+          ${isCustomerOrder ? `<input type="hidden" data-price value="${formatAmountInput(price)}" />` : `<div class="field order-price-field">
+            <label>Precio unitario</label>
+            <input data-price value="${formatAmountInput(price)}" inputmode="decimal" />
+          </div>`}
+        </div>
+      `;
+    }).join("");
+
+    afterRender.push(bindNewOrder);
+    return pageShell(
+      "Nuevo Pedido",
+      isCustomerOrder ? "Cargue su pedido. Los precios se calculan internamente para la cuenta." : "Carga rapida con favoritos por cliente.",
+      `<button class="btn ghost" data-route="pedidos">${isCustomerOrder ? "Ver mis pedidos" : "Ver pedidos"}</button>`,
+      `
+      <form id="new-order-form" class="grid ${isCustomerOrder ? "customer-order-form" : "admin-order-form"}">
+        <div class="order-main-layout">
+        <div class="panel order-main-panel">
+          <div class="form-grid order-form-grid">
+            <div class="field order-client-field">
+              <label>Cliente</label>
+              <div class="input-with-button">${clientSelectorMarkup}<button class="btn small ghost" id="clear-order-client" type="button">X</button></div>
+            </div>
+            <div class="field order-date-field">
+              <label>Fecha</label>
+              <input type="date" id="order-date" value="${selectedDate}" ${isCustomerOrder ? `min="${minOrderDate}"` : ""} />
+            </div>
+            <div class="field order-notes-field">
+              <label>Notas del pedido</label>
+              <textarea id="order-notes" placeholder="Notas generales para reparto o remito"></textarea>
+            </div>
+            ${isCustomerOrder ? "" : `<div class="field order-vehicle-field">
+              <label>Vehiculo</label>
+              <select id="order-vehicle">
+                ${activeVehicles().map((vehicle) => `<option value="${vehicle.id}" ${client && client.vehicleId === vehicle.id ? "selected" : ""}>${escapeHtml(vehicle.name)}</option>`).join("")}
+              </select>
+            </div>`}
+            ${showCustomerLateWarning ? `<div class="alert order-late-warning">Los pedidos se toman hasta las 5:30 am, en caso de necesitarlo para hoy, por favor comunicarse al 3874566725</div>` : ""}
+            ${isCustomerOrder ? "" : `<label class="field span-2" style="display:flex;align-items:center;gap:8px;grid-template-columns:auto 1fr">
+              <input type="checkbox" id="order-paid-now" style="width:auto;min-height:auto" />
+              <span>Marcar como cobrado en efectivo al guardar</span>
+            </label>`}
+            <div class="field order-search-field">
+              <label>Buscar producto</label>
+              <div class="input-with-button"><input id="order-product-search" list="order-product-options" value="${escapeAttr(ui.orderProductFilter)}" placeholder="Escriba para filtrar productos" /><button class="btn small ghost" id="clear-order-search" type="button">X</button></div>
+              <datalist id="order-product-options">${activeProducts().map((product) => `<option value="${escapeAttr(product.name)}"></option>`).join("")}</datalist>
+            </div>
+            <div class="field order-quick-qty-field">
+              <label>Cantidad producto filtrado</label>
+              <input id="order-quick-qty" inputmode="decimal" placeholder="0" />
+            </div>
+            <div class="field order-quick-note-field">
+              <label>Nota producto filtrado</label>
+              <input id="order-quick-note" placeholder="Nota" />
+            </div>
+            <div class="field">
+              <label>Vista</label>
+              <select id="order-view">
+                <option value="grid" ${ui.orderView === "grid" ? "selected" : ""}>Cuadricula</option>
+                <option value="list" ${ui.orderView === "list" ? "selected" : ""}>Lista</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>&nbsp;</label>
+              <button class="btn blue" id="add-order-products" type="button">Agregar Productos</button>
+            </div>
+          </div>
+          ${isCustomerOrder ? "" : `<div class="panel order-whatsapp-panel">
+            <div class="field order-whatsapp-field">
+              <label>Pegar pedido de WhatsApp</label>
+              <textarea id="order-whatsapp-paste" placeholder="Banana 1/2 doc&#10;Cebolla morada 1kg&#10;Uva 500gr"></textarea>
+              <div class="order-whatsapp-actions">
+                <button class="btn ghost" id="parse-whatsapp-order" type="button">Cargar texto pegado</button>
+                <button class="btn ghost" id="open-order-aliases" type="button">Ver alias</button>
+                <button class="btn ghost" id="order-image-ocr-button" type="button">Subir imagen manuscrita</button>
+              </div>
+              <input type="file" id="order-image-ocr-file" accept="image/*" hidden />
+              <span class="muted" id="order-image-ocr-status"></span>
+              <div id="order-parse-warning" class="alert" style="display:none"></div>
+            </div>
+          </div>`}
+        </div>
+          <aside class="panel order-cart-panel">
+            <h2 class="page-title" style="font-size:18px">Carrito</h2>
+            <div id="order-cart" class="cart-list"><div class="empty compact">Sin productos agregados.</div></div>
+            ${isCustomerOrder ? "" : `<h2 class="page-title" style="font-size:18px">Total</h2>
+            <div class="metric-note" id="order-net-total">Subtotal $0</div>
+            <div class="metric-note" id="order-vat-total">IVA $0</div>
+            <div class="metric-value" id="order-total">$0</div>`}
+            <p class="muted">Los productos con cantidad mayor a cero se agregan al pedido.</p>
+            <button class="btn primary full" type="submit">Enviar Pedido</button>
+          </aside>
+        </div>
+        <div class="order-grid ${ui.orderView === "grid" ? "order-grid-cards" : ""}">${productRows}</div>
+      </form>
+      `,
+      "nuevo-pedido"
+    );
+  }
+
+  function bindNewOrder() {
+    const form = document.getElementById("new-order-form");
+    const clientSelect = document.getElementById("order-client");
+    const dateInput = document.getElementById("order-date");
+    const searchInput = document.getElementById("order-product-search");
+    const viewSelect = document.getElementById("order-view");
+    const pasteInput = document.getElementById("order-whatsapp-paste");
+    const warningBox = document.getElementById("order-parse-warning");
+    const isCustomerOrder = isClientLikeRole(currentUser.role);
+    const recalc = () => {
+      const client = getClient(clientSelect.value);
+      const items = collectOrderDraftItems(client, false);
+      const subtotalTotal = items.reduce((sum, item) => sum + item.subtotal, 0);
+      const vatTotal = items.reduce((sum, item) => sum + item.ivaAmount, 0);
+      document.getElementById("order-cart").innerHTML = renderOrderCart(items, { showPrices: !isCustomerOrder });
+      const netTotal = document.getElementById("order-net-total");
+      const vatTotalNode = document.getElementById("order-vat-total");
+      const orderTotal = document.getElementById("order-total");
+      if (netTotal) netTotal.textContent = "Subtotal " + formatMoney(subtotalTotal);
+      if (vatTotalNode) vatTotalNode.textContent = "IVA " + formatMoney(vatTotal);
+      if (orderTotal) orderTotal.textContent = formatMoney(subtotalTotal + vatTotal);
+    };
+    searchInput.addEventListener("input", () => {
+      ui.orderProductFilter = searchInput.value.trim();
+      document.querySelectorAll("[data-product-row]").forEach((row) => {
+        const product = getProduct(row.dataset.productRow);
+        row.style.display = !ui.orderProductFilter || (product && product.name.toLowerCase().includes(ui.orderProductFilter.toLowerCase())) ? "" : "none";
+      });
+    });
+    document.getElementById("clear-order-search").addEventListener("click", () => {
+      searchInput.value = "";
+      ui.orderProductFilter = "";
+      document.querySelectorAll("[data-product-row]").forEach((row) => {
+        row.style.display = "";
+      });
+    });
+    const clearClientButton = document.getElementById("clear-order-client");
+    if (clearClientButton) clearClientButton.addEventListener("click", () => {
+      const clientSearch = document.getElementById("order-client-search");
+      if (clientSearch) clientSearch.value = "";
+      clientSelect.value = "";
+      ui.selectedClientId = "";
+    });
+    viewSelect.addEventListener("change", () => {
+      ui.orderView = viewSelect.value;
+      render();
+    });
+    const applySelectedClient = (clientId, shouldRender) => {
+      clientSelect.value = clientId;
+      ui.selectedClientId = clientId;
+      const client = getClient(clientId);
+      const vehicleSelect = document.getElementById("order-vehicle");
+      if (client && vehicleSelect) vehicleSelect.value = client.vehicleId;
+      if (shouldRender) render();
+      else recalc();
+    };
+    const clientSearch = document.getElementById("order-client-search");
+    if (clientSearch) {
+      const commitClientSearch = () => {
+        const found = findClientByInput(clientSearch.value);
+        if (!found) return false;
+        const changed = found.id !== clientSelect.value;
+        clientSearch.value = found.id + " - " + found.name;
+        applySelectedClient(found.id, changed);
+        return true;
+      };
+      clientSearch.addEventListener("input", () => {
+        const found = findClientByInput(clientSearch.value);
+        if (found) clientSelect.value = found.id;
+      });
+      clientSearch.addEventListener("change", commitClientSearch);
+      clientSearch.addEventListener("blur", commitClientSearch);
+    } else {
+      clientSelect.addEventListener("change", () => {
+        applySelectedClient(clientSelect.value, true);
+      });
+    }
+    dateInput.addEventListener("change", () => {
+      ui.selectedDate = dateInput.value || todayISO();
+      if (isCustomerOrder && ui.selectedDate < getCustomerMinOrderDate()) {
+        ui.selectedDate = getCustomerMinOrderDate();
+        dateInput.value = ui.selectedDate;
+        alert("No se puede cargar un pedido para una fecha anterior a la permitida.");
+      }
+    });
+    document.querySelectorAll("[data-qty],[data-price]").forEach((input) => input.addEventListener("input", recalc));
+    document.getElementById("order-cart").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-remove-cart-item]");
+      if (!button) return;
+      const row = document.querySelector(`[data-product-row="${cssEscape(button.dataset.removeCartItem)}"]`);
+      if (!row) return;
+      row.querySelector("[data-qty]").value = "";
+      row.querySelector("[data-note]").value = "";
+      recalc();
+    });
+    document.getElementById("add-order-products").addEventListener("click", () => {
+      const quickQty = document.getElementById("order-quick-qty");
+      const quickNote = document.getElementById("order-quick-note");
+      const typedProduct = findProductByInput(searchInput.value);
+      const quantity = quickQty ? parseAmount(quickQty.value) : 0;
+      if (typedProduct && quantity > 0) {
+        const row = document.querySelector(`[data-product-row="${cssEscape(typedProduct.id)}"]`);
+        if (row) {
+          row.querySelector("[data-qty]").value = formatAmountInput(quantity);
+          row.querySelector("[data-note]").value = quickNote ? quickNote.value.trim() : "";
+        }
+      }
+      searchInput.value = "";
+      ui.orderProductFilter = "";
+      if (quickQty) quickQty.value = "";
+      if (quickNote) quickNote.value = "";
+      document.querySelectorAll("[data-product-row]").forEach((row) => {
+        row.style.display = "";
+      });
+      recalc();
+    });
+    const aliasButton = document.getElementById("open-order-aliases");
+    if (aliasButton) aliasButton.addEventListener("click", () => openOrderAliasesModal(clientSelect.value));
+    const parseButton = document.getElementById("parse-whatsapp-order");
+    if (parseButton) parseButton.addEventListener("click", () => {
+      const parsed = parseWhatsappOrder(pasteInput.value, clientSelect.value);
+      applyParsedOrderToRows(parsed, searchInput, warningBox);
+      if (parsed.unmatched.length && ["manager", "admin"].includes(currentUser.role)) {
+        openUnmatchedAliasModal(parsed.unmatched, clientSelect.value, () => {
+          alert("Alias guardados. Vuelva a cargar el texto pegado para aplicar las nuevas equivalencias.");
+        });
+      }
+      recalc();
+    });
+    const ocrButton = document.getElementById("order-image-ocr-button");
+    const ocrFile = document.getElementById("order-image-ocr-file");
+    const ocrStatus = document.getElementById("order-image-ocr-status");
+    if (ocrButton && ocrFile) {
+      ocrButton.addEventListener("click", () => ocrFile.click());
+      ocrFile.addEventListener("change", async () => {
+        const file = ocrFile.files && ocrFile.files[0];
+        if (!file) return;
+        try {
+          if (ocrStatus) ocrStatus.textContent = "Leyendo imagen...";
+          ui.pendingHandwritten = await compressImageFile(file, 1100, 0.7);
+          const text = await recognizeOrderImage(file, ocrStatus);
+          const cleaned = cleanupOcrOrderText(text, clientSelect ? clientSelect.value : "");
+          pasteInput.value = cleaned || text.trim();
+          if (ocrStatus) ocrStatus.textContent = (cleaned || text.trim()) ? "Texto reconocido y corregido. Revise y presione Cargar texto pegado." : "No se detecto texto claro.";
+        } catch (error) {
+          if (ocrStatus) ocrStatus.textContent = "";
+          alert("No se pudo interpretar la imagen: " + error.message);
+        } finally {
+          ocrFile.value = "";
+        }
+      });
+    }
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      if (clientSearch) {
+        const found = findClientByInput(clientSearch.value);
+        if (found) clientSelect.value = found.id;
+      }
+      const client = getClient(clientSelect.value);
+      if (!client) return alert("Seleccione un cliente.");
+      const items = collectOrderDraftItems(client, true);
+      if (!items.length) return alert("Ingrese al menos un producto con cantidad.");
+      const subtotalAmount = items.reduce((sum, item) => sum + item.subtotal, 0);
+      const ivaAmount = items.reduce((sum, item) => sum + item.ivaAmount, 0);
+      const date = document.getElementById("order-date").value || todayISO();
+      if (isCustomerOrder && date < getCustomerMinOrderDate()) return alert("Seleccione una fecha permitida para el pedido.");
+      const order = {
+        id: currentUser.role === "example" ? nextDatedId("EJ", state.exampleOrders || []) : nextDatedId("ORD", state.orders),
+        userId: currentUser.id,
+        exampleOnly: currentUser.role === "example",
+        date,
+        clientId: client.id,
+        deliveryVehicleId: document.getElementById("order-vehicle") ? document.getElementById("order-vehicle").value : client.vehicleId,
+        status: "pendiente",
+        items,
+        subtotalAmount,
+        ivaAmount,
+        totalAmount: subtotalAmount + ivaAmount,
+        priceTier: client.priceTier,
+        priceAdjustmentPct: Number(client.priceAdjustmentPct || 0),
+        paymentReceived: 0,
+        paymentStatus: "pending",
+        remitoPrinted: false,
+        notes: document.getElementById("order-notes").value.trim(),
+        createdAt: new Date().toISOString()
+      };
+      if (ui.pendingHandwritten) {
+        order.handwrittenImage = { name: fileDate(date) + " Pedido " + client.name + " " + order.id, data: ui.pendingHandwritten };
+        ui.pendingHandwritten = "";
+      }
+      if (currentUser.role === "example") {
+        state.exampleOrders = state.exampleOrders || [];
+        state.exampleOrders.push(order);
+        saveState();
+        ui.selectedClientId = "";
+        ui.orderProductFilter = "";
+        alert("Pedido guardado: " + order.id);
+        render();
+        return;
+      }
+      state.orders.push(order);
+      addSaldoEntry({
+        clientId: client.id,
+        type: "pedido",
+        description: "Pedido " + order.id,
+        amount: order.totalAmount,
+        relatedEntityId: order.id,
+        relatedEntityType: "order",
+        notes: "Deuda generada por pedido."
+      });
+      addCajaEntry({
+        type: "order_created",
+        concept: "Pedido creado - " + client.name + " - " + order.id,
+        relatedEntityId: order.id,
+        relatedEntityType: "order",
+        expectedAmount: order.totalAmount,
+        amountIngreso: 0,
+        amountEgreso: 0,
+        paymentStatus: "pending",
+        notes: "Registro de accountability. No suma caja hasta cobrar."
+      });
+      const paidNow = document.getElementById("order-paid-now");
+      if (paidNow && paidNow.checked) {
+        recordPayment({
+          clientId: client.id,
+          orderId: order.id,
+          amount: order.totalAmount,
+          method: "efectivo",
+          notes: "Cobrado al cargar pedido."
+        });
+      }
+      saveState();
+      ui.selectedClientId = "";
+      ui.orderProductFilter = "";
+      alert("Pedido guardado: " + order.id);
+      render();
+    });
+    recalc();
+  }
+
+  function applyParsedOrderToRows(parsed, searchInput, warningBox) {
+    document.querySelectorAll("[data-product-row]").forEach((row) => {
+      row.querySelector("[data-qty]").value = "";
+    });
+    parsed.items.forEach((entry) => {
+      const row = document.querySelector(`[data-product-row="${cssEscape(entry.product.id)}"]`);
+      if (!row) return;
+      row.querySelector("[data-qty]").value = formatAmountInput(entry.quantity);
+      row.querySelector("[data-unit]").value = entry.unitType;
+      if (entry.note) row.querySelector("[data-note]").value = entry.note;
+    });
+    if (searchInput) {
+      searchInput.value = "";
+      ui.orderProductFilter = "";
+    }
+    document.querySelectorAll("[data-product-row]").forEach((row) => {
+      row.style.display = "";
+    });
+    if (!warningBox) return;
+    if (parsed.unmatched.length) {
+      warningBox.style.display = "block";
+      warningBox.textContent = "No se encontraron estos productos: " + parsed.unmatched.join(", ");
+    } else {
+      warningBox.style.display = "none";
+      warningBox.textContent = "";
+    }
+  }
+
+  function collectOrderDraftItems(client, withIds) {
+    const items = [];
+    document.querySelectorAll("[data-product-row]").forEach((row) => {
+      const productId = row.dataset.productRow;
+      const qty = parseAmount(row.querySelector("[data-qty]").value);
+      if (qty <= 0) return;
+      const product = getProduct(productId);
+      const unitPrice = parseAmount(row.querySelector("[data-price]").value);
+      const unitType = row.querySelector("[data-unit]").value;
+      const note = row.querySelector("[data-note]").value.trim();
+      const subtotal = qty * unitPrice;
+      const ivaRate = shouldApplyInvoiceVat(client) ? getIvaRate(product && product.ivaType) : 0;
+      const ivaAmount = subtotal * (ivaRate / 100);
+      if (withIds && client) upsertPreference(client.id, productId, unitType, qty);
+      items.push({
+        id: withIds ? nextItemId() : productId,
+        productId,
+        productName: product ? product.name : productId,
+        quantity: qty,
+        unitType,
+        unitPrice,
+        subtotal,
+        ivaRate,
+        ivaAmount,
+        totalWithIva: subtotal + ivaAmount,
+        note,
+        assignedProviderId: "",
+        assignedToType: "",
+        assignedToId: ""
+      });
+    });
+    return items;
+  }
+
+  function renderOrderCart(items, options) {
+    const showPrices = !options || options.showPrices !== false;
+    if (!items.length) return `<div class="empty compact">Sin productos agregados.</div>`;
+    return items.map((item) => `
+      <div class="cart-line">
+        <span>${escapeHtml(item.productName)}${item.note ? `<br><small>${escapeHtml(item.note)}</small>` : ""}</span>
+        <strong>${formatNumber(item.quantity)} ${escapeHtml(item.unitType)}</strong>
+        ${showPrices ? `<b>${formatMoney(item.subtotal)}</b>` : ""}
+        <button class="btn icon danger" type="button" data-remove-cart-item="${escapeAttr(item.productId)}" title="Quitar">X</button>
+      </div>
+    `).join("");
+  }
+
+  function renderOrderInlineDetails(order, options) {
+    const hideMoney = !!(options && options.hideMoney);
+    const summary = options && options.summary ? options.summary : "Detalle";
+    const client = getClient(order.clientId);
+    const iva = getOrderIva(order);
+    const total = getOrderTotal(order);
+    const showIva = iva > 0 || shouldApplyInvoiceVat(client);
+    return `
+      <details>
+        <summary>${escapeHtml(summary)}</summary>
+        <div class="mini-table">
+          ${(order.items || []).map((item) => `<div>
+            <span>${escapeHtml(item.productName)}${item.note ? `<br><small>${escapeHtml(item.note)}</small>` : ""}</span>
+            <span>${formatNumber(item.quantity)} ${escapeHtml(item.unitType)}${hideMoney ? "" : ` x ${formatMoney(item.unitPrice)} = ${formatMoney(item.totalWithIva || item.subtotal)}`}</span>
+          </div>`).join("")}
+        </div>
+        ${hideMoney ? "" : `<div class="order-detail-total">
+          ${showIva ? `<div><span>IVA</span><strong>${formatMoney(iva)}</strong></div>` : ""}
+          <div><span>Total</span><strong>${formatMoney(total)}</strong></div>
+        </div>`}
+      </details>
+    `;
+  }
+
+  function renderOrders() {
+    if (isClientLikeRole(currentUser.role)) return renderCustomerOrders();
+    const showAnnulledTab = ["manager", "admin"].includes(currentUser.role);
+    const annulledView = showAnnulledTab && ui.ordersTab === "anulados";
+    const orders = (annulledView
+      ? state.orders.filter((order) => order.status === "anulado")
+      : visibleOrders().filter((order) => order.status !== "anulado")
+    ).slice().sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+    const canEditStatus = ["manager", "admin"].includes(currentUser.role) && !annulledView;
+    const showActions = currentUser.role !== "customer";
+    const rows = orders.map((order) => {
+      const client = getClient(order.clientId);
+      const vehicle = getVehicle(order.deliveryVehicleId);
+      const paid = order.paymentReceived || 0;
+      const creator = getUser(order.userId);
+      const metaLine = `<br><small class="muted order-meta">${escapeHtml(creator ? creator.name : "")}${creator && order.createdAt ? " - " : ""}${formatTimestampShort(order.createdAt)}</small>`;
+      return `
+        <tr>
+          <td><strong>${escapeHtml(order.id)}</strong> <span class="muted">${formatDateShort(order.date)}</span>${metaLine}</td>
+          <td><strong>${escapeHtml(order.clientId)} - ${escapeHtml(client ? client.name : order.clientId)}</strong> <span class="muted">${escapeHtml(vehicle ? vehicle.name : order.deliveryVehicleId)}</span></td>
+          <td>${renderOrderInlineDetails(order, { summary: order.items.length + " productos" })}</td>
+          <td class="num">${formatMoney(order.totalAmount)}</td>
+          ${canEditStatus ? "" : `<td class="num">${formatMoney(paid)}</td>
+          <td><span class="status ${statusClass(order.status)}">${statusLabel(order.status)}</span></td>`}
+          ${canEditStatus ? `<td>
+            <select data-order-status="${order.id}">
+              ${["pendiente", "preparando", "listo", "entregado", "cancelado"].map((status) => `<option value="${status}" ${order.status === status ? "selected" : ""}>${statusLabel(status)}</option>`).join("")}
+            </select>
+          </td>` : ""}
+          ${showActions ? `<td class="page-actions">
+            ${["manager", "admin", "employee"].includes(currentUser.role) ? `<button class="btn small ghost" data-edit-order="${order.id}">Editar</button>` : ""}
+            ${["manager", "admin", "employee"].includes(currentUser.role) ? `<button class="btn small ghost" data-print-order-remito="${order.id}" title="Imprimir" aria-label="Imprimir">&#128424;</button>` : ""}
+            ${order.handwrittenImage ? `<button class="btn small ghost" data-view-handwritten="${order.id}" title="Ver pedido manuscrito" aria-label="Pedido manuscrito">&#128196;</button>` : ""}
+            ${["manager", "admin"].includes(currentUser.role) ? (annulledView ? `<button class="btn small primary" data-restore-order="${order.id}">Restaurar</button>` : `<button class="btn small danger" data-annul-order="${order.id}" title="Anular pedido" aria-label="Anular">X</button>`) : ""}
+            ${currentUser.role === "employee" ? `<button class="btn small ghost" data-route="vehiculos">Vehiculo</button>` : ""}
+          </td>` : ""}
+        </tr>
+      `;
+    }).join("");
+    const headers = `<th>Pedido</th><th>Cliente</th><th>Productos</th><th>Total</th>${canEditStatus ? "<th>Estado</th>" : "<th>Cobrado</th><th>Estado</th>"}${showActions ? "<th>Acciones</th>" : ""}`;
+
+    afterRender.push(bindOrders);
+    return pageShell(
+      "Pedidos",
+      currentUser.role === "employee" ? "Pedidos de hoy para reparto y cobranza." : isClientLikeRole(currentUser.role) ? "Pedidos de su cuenta." : "Lista de pedidos y estados.",
+      ["manager", "admin"].includes(currentUser.role)
+        ? `<button class="btn primary" data-route="nuevo-pedido">Nuevo pedido</button>`
+        : currentUser.role === "employee" ? `<button class="btn primary" data-route="nuevo-pedido">Nuevo Pedido</button><button class="btn blue" data-route="pagos">Registrar pago</button>` : "",
+      `
+      ${showAnnulledTab ? `<div class="tabs"><button class="tab ${!annulledView ? "active" : ""}" data-orders-tab="activos">Pedidos</button><button class="tab ${annulledView ? "active" : ""}" data-orders-tab="anulados">Anulados (papelera)</button></div>` : ""}
+      ${["manager", "admin"].includes(currentUser.role) && !annulledView ? `<div class="panel" style="margin-bottom:14px"><div class="form-grid"><div class="field"><label>Estado masivo</label><select id="bulk-order-status">${["pendiente", "preparando", "listo", "entregado", "cancelado"].map((status) => `<option value="${status}">${statusLabel(status)}</option>`).join("")}</select></div><div class="field"><label>&nbsp;</label><button class="btn ghost" id="apply-bulk-order-status" type="button">Actualizar pedidos visibles</button></div></div></div>` : ""}
+      <div class="panel">
+        <div class="table-wrap orders-table">
+          <table>
+            <thead><tr>${headers}</tr></thead>
+            <tbody>${rows || emptyRow((canEditStatus ? 5 : 6) + (showActions ? 1 : 0), "Todavia no hay pedidos.")}</tbody>
+          </table>
+        </div>
+      </div>
+      `,
+      "pedidos"
+    );
+  }
+
+  function bindOrders() {
+    document.querySelectorAll("[data-order-status]").forEach((select) => {
+      select.addEventListener("change", () => {
+        const order = getOrder(select.dataset.orderStatus);
+        if (!order) return;
+        order.status = select.value;
+        saveState();
+        render();
+      });
+    });
+    document.querySelectorAll("[data-edit-order]").forEach((button) => {
+      button.addEventListener("click", () => openOrderForm(button.dataset.editOrder));
+    });
+    document.querySelectorAll("[data-orders-tab]").forEach((button) => button.addEventListener("click", () => {
+      ui.ordersTab = button.dataset.ordersTab;
+      render();
+    }));
+    document.querySelectorAll("[data-annul-order]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const order = getOrder(button.dataset.annulOrder);
+        if (!order) return;
+        if (!confirm("Anular el pedido " + order.id + "? Se descontara de los saldos y registros. Podra restaurarlo desde la papelera.")) return;
+        annulOrder(order);
+        saveState();
+        render();
+      });
+    });
+    document.querySelectorAll("[data-restore-order]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const order = getOrder(button.dataset.restoreOrder);
+        if (!order) return;
+        if (!confirm("Restaurar el pedido " + order.id + "? Volvera a sumar en saldos y registros.")) return;
+        restoreOrder(order);
+        saveState();
+        render();
+      });
+    });
+    document.querySelectorAll("[data-view-handwritten]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const order = getOrder(button.dataset.viewHandwritten);
+        if (!order || !order.handwrittenImage) return;
+        showModal(
+          order.handwrittenImage.name || "Pedido manuscrito",
+          `<img src="${escapeAttr(order.handwrittenImage.data)}" alt="Pedido manuscrito" style="max-width:100%;border-radius:8px" />
+           <div class="page-actions" style="margin-top:10px"><a class="btn blue" href="${escapeAttr(order.handwrittenImage.data)}" download="${escapeAttr((order.handwrittenImage.name || "pedido") + ".jpg")}">Descargar imagen</a></div>`,
+          null,
+          { cancelLabel: "Cerrar", hideSave: true, className: "wide" }
+        );
+      });
+    });
+    const bulkButton = document.getElementById("apply-bulk-order-status");
+    if (bulkButton) bulkButton.addEventListener("click", () => {
+      const status = document.getElementById("bulk-order-status").value;
+      const visibleIds = Array.from(document.querySelectorAll("[data-order-status]")).map((select) => select.dataset.orderStatus).filter(Boolean);
+      const ordersToUpdate = visibleIds.map((id) => getOrder(id)).filter(Boolean);
+      if (!ordersToUpdate.length) return alert("No hay pedidos visibles para actualizar.");
+      if (!confirm("Actualizar " + ordersToUpdate.length + " pedidos visibles a " + statusLabel(status) + "?")) return;
+      ordersToUpdate.forEach((order) => {
+        order.status = status;
+      });
+      saveState();
+      render();
+    });
+    document.querySelectorAll("[data-generate-remito]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const remito = generateRemito(button.dataset.generateRemito);
+        saveState();
+        navigate("remitos/imprimir/" + remito.id);
+      });
+    });
+    document.querySelectorAll("[data-print-order-remito]").forEach((button) => {
+      button.addEventListener("click", () => printOrderRemitoDirect(button.dataset.printOrderRemito));
+    });
+  }
+
+  function openOrderDetailModal(orderId) {
+    const order = getOrder(orderId);
+    if (!order) return alert("Pedido no encontrado.");
+    const client = getClient(order.clientId);
+    const vehicle = getVehicle(order.deliveryVehicleId);
+    const subtotal = getOrderSubtotal(order);
+    const iva = getOrderIva(order);
+    const total = subtotal + iva;
+    const rows = (order.items || []).map((item) => `
+      <tr>
+        <td>${escapeHtml(item.productName)}${item.note ? `<br><small>${escapeHtml(item.note)}</small>` : ""}</td>
+        <td class="num">${formatNumber(item.quantity)} ${escapeHtml(item.unitType)}</td>
+        <td class="num">${formatMoney(item.unitPrice)}</td>
+        <td class="num">${formatMoney(getOrderItemSubtotal(item))}</td>
+        <td class="num">${formatMoney(getOrderItemIva(item, order))}</td>
+        <td class="num"><strong>${formatMoney((item.totalWithIva || getOrderItemSubtotal(item) + getOrderItemIva(item, order)))}</strong></td>
+      </tr>
+    `).join("");
+    showModal(
+      "Detalle " + order.id,
+      `
+        <div class="detail-grid">
+          <div><span class="muted">Cliente</span><strong>${escapeHtml(order.clientId)} - ${escapeHtml(client ? client.name : order.clientId)}</strong></div>
+          <div><span class="muted">Fecha</span><strong>${formatDate(order.date)}</strong></div>
+          <div><span class="muted">Estado</span><strong>${statusLabel(order.status)}</strong></div>
+          <div><span class="muted">Vehiculo</span><strong>${escapeHtml(vehicle ? vehicle.name : order.deliveryVehicleId || "-")}</strong></div>
+        </div>
+        ${order.notes ? `<div class="note-card" style="margin:12px 0"><strong>Notas del pedido</strong><small>${escapeHtml(order.notes)}</small></div>` : ""}
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Producto</th><th>Cantidad</th><th>Precio unitario</th><th>Subtotal</th><th>IVA</th><th>Total</th></tr></thead>
+            <tbody>${rows || emptyRow(6, "Sin productos en este pedido.")}</tbody>
+          </table>
+        </div>
+        <div class="totals-list" style="margin-top:12px">
+          <div><span>Subtotal</span><strong>${formatMoney(subtotal)}</strong></div>
+          <div><span>IVA</span><strong>${formatMoney(iva)}</strong></div>
+          <div><span>Total</span><strong>${formatMoney(total)}</strong></div>
+        </div>
+      `,
+      null,
+      { cancelLabel: "Cerrar", hideSave: true, className: "wide" }
+    );
+  }
+
+  function getTodaysProductNotes() {
+    return getProductNotesByDate(todayISO());
+  }
+
+  function getProductNotesByDate(date) {
+    return ordersByDate(date || todayISO()).flatMap((order) => {
+      const client = getClient(order.clientId);
+      return order.items
+        .filter((item) => item.note)
+        .map((item) => ({
+          orderId: order.id,
+          clientId: order.clientId,
+          clientName: client ? client.name : order.clientId,
+          productName: item.productName,
+          note: item.note
+        }));
+    });
+  }
+
+  function getTodaysProductsWithoutPurchases() {
+    return getProductPurchaseShortages(todayISO()).filter((item) => item.shortageQuantity > 0);
+  }
+
+  function getPurchasedQuantities(date) {
+    const purchased = {};
+    state.purchases
+      .filter((purchase) => purchase.date === date && !["other_expense", "market_price", "provider_payment", "cash_movement"].includes(purchase.expenseType))
+      .forEach((purchase) => {
+        const items = Array.isArray(purchase.items) && purchase.items.length
+          ? purchase.items
+          : purchase.productId ? [{ productId: purchase.productId, quantity: purchase.quantity }] : [];
+        items.forEach((item) => {
+          if (!item.productId) return;
+          purchased[item.productId] = (purchased[item.productId] || 0) + Number(item.quantity || 0);
+        });
+      });
+    (state.productRelations || []).forEach((relation) => {
+      const wholesaleQty = Number(purchased[relation.wholesaleProductId] || 0);
+      const factor = Number(relation.retailPerWholesale || 0);
+      if (wholesaleQty > 0 && factor > 0) {
+        purchased[relation.retailProductId] = (purchased[relation.retailProductId] || 0) + wholesaleQty * factor;
+      }
+    });
+    return purchased;
+  }
+
+  function getOrderProductGroups(date) {
+    const groups = {};
+    ordersByDate(date).forEach((order) => {
+      order.items.forEach((item) => {
+        const key = item.productId + "|" + item.unitType;
+        const client = getClient(order.clientId);
+        if (!groups[key]) groups[key] = { key, productId: item.productId, productName: item.productName, unitType: item.unitType, quantity: 0, entries: [] };
+        groups[key].quantity += Number(item.quantity || 0);
+        groups[key].entries.push({ order, item, client });
+      });
+    });
+    return groups;
+  }
+
+  function getProductPurchaseShortages(date) {
+    const remaining = getPurchasedQuantities(date);
+    return Object.values(getOrderProductGroups(date)).map((group) => {
+      const available = Number(remaining[group.productId] || 0);
+      const purchasedQuantity = Math.min(available, Number(group.quantity || 0));
+      remaining[group.productId] = available - purchasedQuantity;
+      return {
+        ...group,
+        purchasedQuantity,
+        shortageQuantity: Math.max(0, Number(group.quantity || 0) - purchasedQuantity)
+      };
+    }).filter((group) => group.shortageQuantity > 0).sort((a, b) => a.productName.localeCompare(b.productName));
+  }
+
+  function renderCustomerOrders() {
+    const clientIds = getCustomerVisibleClientIds();
+    if (ui.customerDashboardClient !== "all" && !clientIds.includes(ui.customerDashboardClient)) ui.customerDashboardClient = "all";
+    const ids = ui.customerDashboardClient === "all" ? clientIds : [ui.customerDashboardClient];
+    const orders = getCustomerOrdersForIds(ids)
+      .sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+    const rows = orders.map((order) => {
+      const client = getClient(order.clientId);
+      const canEdit = canCustomerEditOrder(order);
+      const showIva = shouldApplyInvoiceVat(client);
+      const hideMoney = currentUser.role === "customer" && !canCustomerViewOrder(order);
+      const canViewRemito = canCustomerViewOrder(order);
+      return `
+        <tr>
+          <td>${formatDate(order.date)}<br><span class="muted">${escapeHtml(client ? client.name : order.clientId)}</span></td>
+          <td>${escapeHtml(order.id)}</td>
+          ${hideMoney ? `<td class="muted">Disponible 8:00</td><td class="num">-</td>` : `<td class="num">${formatMoney(getOrderTotal(order))}</td>
+          <td class="num">${showIva ? formatMoney(getOrderIva(order)) : "-"}</td>`}
+          <td>
+            ${renderOrderInlineDetails(order, { hideMoney, summary: "Detalle" })}
+          </td>
+          <td class="page-actions">
+            ${canViewRemito ? `<button class="btn small ghost" data-view-customer-remito="${order.id}">Remito</button>` : `<span class="muted">Remito disponible 8:00</span>`}
+            ${canEdit ? `<button class="btn small ghost" data-edit-order="${order.id}">Editar</button>` : `<span class="muted">Cerrado</span>`}
+          </td>
+        </tr>
+      `;
+    }).join("");
+    afterRender.push(() => {
+      document.querySelectorAll("[data-customer-order-client]").forEach((button) => button.addEventListener("click", () => {
+        ui.customerDashboardClient = button.dataset.customerOrderClient;
+        render();
+      }));
+      document.querySelectorAll("[data-view-customer-remito]").forEach((button) => button.addEventListener("click", () => openCustomerRemitoModal(button.dataset.viewCustomerRemito)));
+      document.querySelectorAll("[data-edit-order]").forEach((button) => button.addEventListener("click", () => openOrderForm(button.dataset.editOrder)));
+    });
+    return pageShell(
+      "Mis Pedidos",
+      "Pedidos de sus cuentas vinculadas.",
+      `<button class="btn primary" data-route="nuevo-pedido">Nuevo pedido</button><button class="btn blue" data-route="registrar-transferencia">Registrar transferencia</button>`,
+      `
+      <div class="tabs">
+        <button class="tab ${ui.customerDashboardClient === "all" ? "active" : ""}" data-customer-order-client="all">Todos</button>
+        ${clientIds.map((id) => {
+          const client = getClient(id);
+          return `<button class="tab ${ui.customerDashboardClient === id ? "active" : ""}" data-customer-order-client="${id}">${escapeHtml(client ? client.name : id)}</button>`;
+        }).join("")}
+      </div>
+      <div class="panel compact-table">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Fecha</th><th>Pedido</th><th>Total</th><th>IVA</th><th>Productos</th><th>Acciones</th></tr></thead>
+            <tbody>${rows || emptyRow(6, "No hay pedidos para esta cuenta.")}</tbody>
+          </table>
+        </div>
+      </div>
+      `,
+      "pedidos"
+    );
+  }
+
+  function openCustomerRemitoModal(orderId) {
+    const order = getOrder(orderId);
+    if (!order || !canCustomerViewOrder(order)) return alert("No puede ver este remito.");
+    if (order.exampleOnly) {
+      const fakeRemito = { id: "REM-" + order.id, orderId: order.id, date: order.date, clientId: order.clientId };
+      const body = `<div class="remito-modal-preview">${renderRemitoPrintSheetForOrder(order, fakeRemito)}</div>`;
+      showModal(
+        "Remito " + order.id,
+        body,
+        () => {
+          const printButton = document.getElementById("modal-save");
+          if (printButton) printButton.addEventListener("click", () => {
+            printHtmlDocument("Remito " + order.id, `<section class="print-page remito-print-page">${renderRemitoPrintSheetForOrder(order, fakeRemito)}</section>`);
+          });
+        },
+        { saveLabel: "Imprimir", cancelLabel: "Cerrar", className: "wide" }
+      );
+      return;
+    }
+    const remito = generateRemito(order.id);
+    saveState();
+    const body = `<div class="remito-modal-preview">${renderRemitoPrintSheet(remito.id)}</div>`;
+    showModal(
+      "Remito " + order.id,
+      body,
+      () => {
+        const printButton = document.getElementById("modal-save");
+        if (printButton) printButton.addEventListener("click", () => {
+          printHtmlDocument("Remito " + order.id, `<section class="print-page remito-print-page">${renderRemitoPrintSheet(remito.id)}</section>`);
+        });
+      },
+      { saveLabel: "Imprimir", cancelLabel: "Cerrar", className: "wide" }
+    );
+  }
+
+  function renderClients() {
+    const clients = state.clients.filter((client) => ui.tab === "inactivos" ? !client.isActive : client.isActive).sort(compareClientIds);
+    const rows = clients.map((client) => {
+      const balance = getClientBalance(client.id);
+      const vehicle = getVehicle(client.vehicleId);
+      return `
+        <tr>
+          <td><strong>${escapeHtml(client.id)}</strong></td>
+          <td>${escapeHtml(client.name)}<br><span class="muted">${escapeHtml(client.address || "")}</span></td>
+          <td>${escapeHtml(client.zone || "-")}</td>
+          <td>${escapeHtml(client.openingTime || "-")}</td>
+          <td>${escapeHtml(vehicle ? vehicle.name : client.vehicleId)}</td>
+          <td>${escapeHtml(paymentTypeLabel(client.paymentType))}</td>
+          <td>${escapeHtml(priceTierLabel(client.priceTier))}<br><span class="muted">${formatNumber(client.priceAdjustmentPct || 0)}%</span></td>
+          <td>${client.needsInvoice ? `<span class="pill blue">Factura</span>` : `<span class="pill gray">Sin factura</span>`}</td>
+          <td class="num">${formatMoney(balance)}</td>
+          <td class="page-actions">
+            <button class="btn small ghost" data-edit-client="${client.id}">Editar</button>
+            <button class="btn small ${client.isActive ? "danger" : "primary"}" data-toggle-client="${client.id}">${client.isActive ? "Desactivar" : "Activar"}</button>
+          </td>
+        </tr>
+      `;
+    }).join("");
+
+    afterRender.push(() => {
+      bindTabs();
+      document.querySelectorAll("[data-edit-client]").forEach((button) => button.addEventListener("click", () => openClientForm(button.dataset.editClient)));
+      document.querySelectorAll("[data-toggle-client]").forEach((button) => button.addEventListener("click", () => {
+        const client = getClient(button.dataset.toggleClient);
+        if (!client) return;
+        client.isActive = !client.isActive;
+        saveState();
+        render();
+      }));
+    });
+
+    return pageShell(
+      "Clientes",
+      "Alta, edicion, saldos y vehiculo asignado.",
+      `<button class="btn primary" data-add-client>Agregar cliente</button>`,
+      `
+      ${renderTabs()}
+      <div class="panel">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>ID</th><th>Cliente</th><th>Zona</th><th>Apertura</th><th>Vehiculo</th><th>Pago</th><th>Precio</th><th>Factura</th><th>Saldo</th><th>Acciones</th></tr></thead>
+            <tbody>${rows || emptyRow(10, "No hay clientes en esta vista.")}</tbody>
+          </table>
+        </div>
+      </div>
+      `,
+      "clientes"
+    );
+  }
+
+  function renderProducts() {
+    const products = state.products.filter((product) => ui.tab === "inactivos" ? !product.isActive : product.isActive);
+    const assignees = activeAssignees();
+    const rows = products.sort((a, b) => a.sortOrder - b.sortOrder).map((product) => {
+      const price = getProductPrice(product.id);
+      const assignedValue = product.assignedToType && product.assignedToId ? product.assignedToType + ":" + product.assignedToId : "";
+      return `
+        <tr>
+          <td><span class="product-with-thumb"><img class="product-thumb" src="${productThumb(product)}" alt="" />${escapeHtml(product.name)}</span></td>
+          <td>${escapeHtml(product.category)}</td>
+          <td>${escapeHtml(product.unitType)}</td>
+          <td><input type="checkbox" data-product-unit-weight="${product.id}" ${product.allowUnitWeight ? "checked" : ""} /></td>
+          <td>${escapeHtml(ivaLabel(product.ivaType || "10.5"))}</td>
+          <td class="num">${formatMoney(price)}</td>
+          <td>
+            <select data-product-assignee="${product.id}">
+              <option value="">Sin asignar</option>
+              ${assignees.map((entry) => `<option value="${entry.value}" ${assignedValue === entry.value ? "selected" : ""}>${escapeHtml(entry.label)}</option>`).join("")}
+            </select>
+          </td>
+          <td class="page-actions">
+            <button class="btn small ghost" data-edit-product="${product.id}">Editar</button>
+            <button class="btn small ${product.isActive ? "danger" : "primary"}" data-toggle-product="${product.id}">${product.isActive ? "Desactivar" : "Activar"}</button>
+          </td>
+        </tr>
+      `;
+    }).join("");
+    afterRender.push(() => {
+      bindTabs();
+      document.querySelectorAll("[data-edit-product]").forEach((button) => button.addEventListener("click", () => openProductForm(button.dataset.editProduct)));
+      document.querySelectorAll("[data-toggle-product]").forEach((button) => button.addEventListener("click", () => {
+        const product = getProduct(button.dataset.toggleProduct);
+        if (!product) return;
+        product.isActive = !product.isActive;
+        saveState();
+        render();
+      }));
+      document.querySelectorAll("[data-product-assignee]").forEach((select) => select.addEventListener("change", () => {
+        const product = getProduct(select.dataset.productAssignee);
+        if (!product) return;
+        setProductAssignee(product, select.value);
+        saveState();
+      }));
+      document.querySelectorAll("[data-product-unit-weight]").forEach((checkbox) => checkbox.addEventListener("change", () => {
+        const product = getProduct(checkbox.dataset.productUnitWeight);
+        if (!product) return;
+        product.allowUnitWeight = checkbox.checked;
+        saveState();
+      }));
+      bindProductRelationsPanel();
+    });
+    return pageShell(
+      "Productos",
+      "Catalogo editable con unidad por defecto.",
+      `<button class="btn primary" data-add-product>Agregar producto</button>`,
+      `
+      ${renderTabs()}
+      ${renderProductRelationsPanel()}
+      <div class="panel">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Producto</th><th>Categoria</th><th>Unidad</th><th>Unidades</th><th>IVA</th><th>Precio lista</th><th>Asignado a</th><th>Acciones</th></tr></thead>
+            <tbody>${rows || emptyRow(8, "No hay productos en esta vista.")}</tbody>
+          </table>
+        </div>
+      </div>
+      `,
+      "productos"
+    );
+  }
+
+  function renderProductRelationsPanel() {
+    const relations = state.productRelations || [];
+    const retailUnits = ["kg", "docena", "bandeja", "unidad", "maple", "cabeza", "ristra"];
+    const wholesaleUnits = ["cajon", "jaula", "bolsa"];
+    const retailProducts = activeProducts().filter((product) => retailUnits.includes(product.unitType));
+    const wholesaleProducts = activeProducts().filter((product) => wholesaleUnits.includes(product.unitType));
+    const rows = relations.map((relation, index) => {
+      const retail = getProduct(relation.retailProductId);
+      const wholesale = getProduct(relation.wholesaleProductId);
+      return `
+        <tr>
+          <td>${escapeHtml(retail ? retail.name + " (" + retail.unitType + ")" : relation.retailProductId)}</td>
+          <td>${escapeHtml(wholesale ? wholesale.name + " (" + wholesale.unitType + ")" : relation.wholesaleProductId)}</td>
+          <td class="num">${formatNumber(relation.retailPerWholesale)}</td>
+          <td><button class="btn small danger" data-delete-product-relation="${index}">Borrar</button></td>
+        </tr>
+      `;
+    }).join("");
+    return `
+      <div class="panel" style="margin-bottom:14px">
+        <h2 class="page-title" style="font-size:18px">Relaciones de productos (minorista / mayorista)</h2>
+        <p class="muted">Al comprar el producto por mayor, la cantidad equivalente cubre la falta del producto por menor en Compras/Gastos, Unidades y Remitos.</p>
+        <div class="form-grid" style="margin-top:10px">
+          <div class="field span-2">
+            <label>Producto minorista (kg, docena, bandeja...)</label>
+            <select id="relation-retail-product"><option value="">Seleccione producto</option>${retailProducts.map((product) => `<option value="${product.id}">${escapeHtml(product.name)} - ${escapeHtml(product.unitType)}</option>`).join("")}</select>
+          </div>
+          <div class="field span-2">
+            <label>Producto mayorista (cajon, jaula, bolsa)</label>
+            <select id="relation-wholesale-product"><option value="">Seleccione producto</option>${wholesaleProducts.map((product) => `<option value="${product.id}">${escapeHtml(product.name)} - ${escapeHtml(product.unitType)}</option>`).join("")}</select>
+          </div>
+          <div class="field">
+            <label>Unidades minoristas por 1 mayorista</label>
+            <input id="relation-units" inputmode="decimal" placeholder="Ej: 16" />
+          </div>
+          <div class="field">
+            <label>&nbsp;</label>
+            <button class="btn primary" type="button" id="add-product-relation">Agregar relacion</button>
+          </div>
+        </div>
+        <div class="table-wrap" style="margin-top:10px">
+          <table>
+            <thead><tr><th>Producto minorista</th><th>Producto mayorista</th><th>Equivale (unid. menor x 1 mayor)</th><th>Acciones</th></tr></thead>
+            <tbody>${rows || emptyRow(4, "Sin relaciones de productos.")}</tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  }
+
+  function bindProductRelationsPanel() {
+    const addButton = document.getElementById("add-product-relation");
+    if (addButton) addButton.addEventListener("click", () => {
+      const retailId = document.getElementById("relation-retail-product").value;
+      const wholesaleId = document.getElementById("relation-wholesale-product").value;
+      const units = parseAmount(document.getElementById("relation-units").value);
+      if (!retailId || !wholesaleId) return alert("Seleccione el producto minorista y el mayorista.");
+      if (retailId === wholesaleId) return alert("Seleccione productos diferentes.");
+      if (units <= 0) return alert("Ingrese cuantas unidades minoristas equivalen a 1 unidad mayorista.");
+      state.productRelations = state.productRelations || [];
+      const existing = state.productRelations.find((relation) => relation.retailProductId === retailId && relation.wholesaleProductId === wholesaleId);
+      if (existing) existing.retailPerWholesale = units;
+      else state.productRelations.push({ retailProductId: retailId, wholesaleProductId: wholesaleId, retailPerWholesale: units });
+      saveState();
+      render();
+    });
+    document.querySelectorAll("[data-delete-product-relation]").forEach((button) => button.addEventListener("click", () => {
+      const index = Number(button.dataset.deleteProductRelation);
+      if (!Number.isInteger(index)) return;
+      state.productRelations.splice(index, 1);
+      saveState();
+      render();
+    }));
+  }
+
+  function renderPrices() {
+    const rows = activeProducts().sort((a, b) => a.sortOrder - b.sortOrder).map((product) => {
+      const rec = state.prices[product.id] || { cost: product.baseCost || 0, price: product.salePrice || 0, marketPrice: 0, marginPct: calcMargin(product.baseCost, product.salePrice) };
+      return `
+        <tr data-price-row="${product.id}">
+          <td>${escapeHtml(product.name)}<br><span class="muted">${escapeHtml(product.category)} - ${escapeHtml(product.unitType)}</span></td>
+          <td><input data-cost value="${formatAmountInput(rec.cost)}" inputmode="decimal" /></td>
+          <td><input data-market-price value="${formatAmountInput(rec.marketPrice || 0)}" inputmode="decimal" /></td>
+          <td><input data-margin-pct value="${formatAmountInput(roundOne(rec.marginPct || calcMargin(rec.cost, rec.price)))}" inputmode="decimal" /></td>
+          <td><input data-sale-price value="${formatAmountInput(rec.price)}" inputmode="decimal" /></td>
+        </tr>
+      `;
+    }).join("");
+    const relationRows = state.costRelations.map((relation) => `
+      <tr data-relation-row="${relation.id}">
+        <td>${escapeHtml(getProduct(relation.sourceProductId) ? getProduct(relation.sourceProductId).name : relation.sourceProductId)}</td>
+        <td>${escapeHtml(getProduct(relation.targetProductId) ? getProduct(relation.targetProductId).name : relation.targetProductId)}</td>
+        <td class="num">${formatNumber(relation.divisor || 1)}</td>
+        <td class="num">${formatNumber(relation.multiplier || 1)}</td>
+        <td class="num">${relation.marginPct === null || relation.marginPct === "" ? "Mantener" : formatNumber(roundOne(relation.marginPct || 0)) + "%"}</td>
+        <td><button class="btn small danger" data-delete-relation="${relation.id}">Borrar</button></td>
+      </tr>
+    `).join("");
+    afterRender.push(bindPrices);
+    return pageShell(
+      "Precios",
+      "Entrada diaria de costo y precio de lista. Solo admin.",
+      `<button class="btn primary" id="save-prices">Guardar precios</button>`,
+      `
+      <div class="panel">
+        <div class="table-wrap">
+          <table class="prices-table">
+            <thead><tr><th>Producto</th><th>Costo</th><th>Precio mercado</th><th>Margen %</th><th>Precio lista</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>
+      <div class="panel" style="margin-top:14px">
+        <h2 class="page-title" style="font-size:18px">Relaciones de costo</h2>
+        <div class="form-grid" style="margin-top:10px">
+          <div class="field"><label>Producto origen</label><select id="relation-source">${activeProducts().map((product) => `<option value="${product.id}">${escapeHtml(product.name)}</option>`).join("")}</select></div>
+          <div class="field"><label>Producto destino</label><select id="relation-target">${activeProducts().map((product) => `<option value="${product.id}">${escapeHtml(product.name)}</option>`).join("")}</select></div>
+          <div class="field"><label>Dividir por</label><input id="relation-divisor" inputmode="decimal" placeholder="1" /></div>
+          <div class="field"><label>Multiplicar por</label><input id="relation-multiplier" inputmode="decimal" placeholder="1" /></div>
+          <div class="field"><label>Margen %</label><input id="relation-margin" inputmode="decimal" placeholder="25" /></div>
+          <div class="field"><label>&nbsp;</label><button class="btn ghost" id="add-cost-relation" type="button">Agregar relacion</button></div>
+        </div>
+        <div class="table-wrap" style="margin-top:10px">
+          <table>
+            <thead><tr><th>Origen</th><th>Destino</th><th>Divisor</th><th>Multiplicador</th><th>Margen</th><th>Accion</th></tr></thead>
+            <tbody>${relationRows || emptyRow(6, "Sin relaciones configuradas.")}</tbody>
+          </table>
+        </div>
+      </div>
+      `,
+      "precios"
+    );
+  }
+
+  function bindPrices() {
+    const recalcRow = (row, source) => {
+      const costInput = row.querySelector("[data-cost]");
+      const marginInput = row.querySelector("[data-margin-pct]");
+      const priceInput = row.querySelector("[data-sale-price]");
+      const cost = parseAmount(costInput.value);
+      const margin = parseAmount(marginInput.value);
+      const price = parseAmount(priceInput.value);
+      if (source && source.matches("[data-sale-price]")) {
+        if (cost > 0 && price > 0) marginInput.value = formatAmountInput(roundOne(calcMargin(cost, price)));
+        return;
+      }
+      if (cost > 0 && margin > 0) {
+        priceInput.value = formatAmountInput(Math.ceil(cost * (1 + margin / 100)));
+      } else if (cost > 0 && price > 0) {
+        marginInput.value = formatAmountInput(roundOne(calcMargin(cost, price)));
+      }
+    };
+    document.querySelectorAll("[data-cost],[data-sale-price],[data-market-price],[data-margin-pct]").forEach((input) => {
+      input.addEventListener("input", () => recalcRow(input.closest("[data-price-row]"), input));
+      input.addEventListener("change", () => recalcRow(input.closest("[data-price-row]"), input));
+    });
+    document.getElementById("save-prices").addEventListener("click", () => {
+      document.querySelectorAll("[data-price-row]").forEach((row) => {
+        const productId = row.dataset.priceRow;
+        const cost = parseAmount(row.querySelector("[data-cost]").value);
+        const marketPrice = parseAmount(row.querySelector("[data-market-price]").value);
+        const marginPct = parseAmount(row.querySelector("[data-margin-pct]").value);
+        const price = Math.ceil(parseAmount(row.querySelector("[data-sale-price]").value));
+        state.prices[productId] = {
+          productId,
+          date: todayISO(),
+          cost,
+          marketPrice,
+          marginPct,
+          price
+        };
+        const product = getProduct(productId);
+        if (product) {
+          product.baseCost = cost;
+          product.salePrice = price;
+        }
+        applyCostRelations({ productId, unitCost: cost, relationUnits: 0 }, marginPct || calcMargin(cost, price));
+      });
+      saveState();
+      alert("Precios guardados.");
+      render();
+    });
+    document.getElementById("add-cost-relation").addEventListener("click", () => {
+      const sourceProductId = document.getElementById("relation-source").value;
+      const targetProductId = document.getElementById("relation-target").value;
+      if (!sourceProductId || !targetProductId || sourceProductId === targetProductId) return alert("Seleccione origen y destino distintos.");
+      state.costRelations.push({
+        id: nextDatedId("REL", state.costRelations),
+        sourceProductId,
+        targetProductId,
+        divisor: parseAmount(document.getElementById("relation-divisor").value) || 1,
+        multiplier: parseAmount(document.getElementById("relation-multiplier").value) || 1,
+        marginPct: document.getElementById("relation-margin").value.trim() ? parseAmount(document.getElementById("relation-margin").value) : null
+      });
+      saveState();
+      render();
+    });
+    document.querySelectorAll("[data-delete-relation]").forEach((button) => button.addEventListener("click", () => {
+      state.costRelations = state.costRelations.filter((relation) => relation.id !== button.dataset.deleteRelation);
+      saveState();
+      render();
+    }));
+  }
+
+  function renderHistories() {
+    const from = ui.historyFrom || todayISO();
+    const to = ui.historyTo || from;
+    const dates = buildDateRange(from, to);
+    const purchaseRows = buildPurchaseHistoryMatrix(from, to);
+    const salesRows = buildSalesHistoryMatrix(from, to);
+    afterRender.push(bindHistories);
+    return pageShell(
+      "Historiales",
+      "Compras y ventas por rango, con una columna por dia.",
+      "",
+      `
+      <div class="panel" style="margin-bottom:14px">
+        <div class="form-grid">
+          <div class="field"><label>Desde</label><input type="date" id="history-from" value="${from}" /></div>
+          <div class="field"><label>Hasta</label><input type="date" id="history-to" value="${to}" /></div>
+        </div>
+      </div>
+      <div class="panel">
+        <h2 class="page-title" style="font-size:18px">Precios de compras</h2>
+        <p class="muted">Cada dia muestra el precio mas alto pagado y la cantidad total comprada.</p>
+        ${renderHistoryMatrixTable(purchaseRows, dates, "purchase")}
+      </div>
+      <div class="panel" style="margin-top:14px">
+        <h2 class="page-title" style="font-size:18px">Historial de ventas</h2>
+        <p class="muted">Cada dia muestra el precio de lista y la cantidad total vendida.</p>
+        ${renderHistoryMatrixTable(salesRows, dates, "sales")}
+      </div>
+      `,
+      "historiales"
+    );
+  }
+
+  function bindHistories() {
+    const from = document.getElementById("history-from");
+    const to = document.getElementById("history-to");
+    if (from) from.addEventListener("change", () => {
+      ui.historyFrom = from.value || todayISO();
+      if (ui.historyTo < ui.historyFrom) ui.historyTo = ui.historyFrom;
+      render();
+    });
+    if (to) to.addEventListener("change", () => {
+      ui.historyTo = to.value || ui.historyFrom || todayISO();
+      if (ui.historyTo < ui.historyFrom) ui.historyFrom = ui.historyTo;
+      render();
+    });
+  }
+
+  function renderHistoryMatrixTable(rows, dates, type) {
+    if (!rows.length) return `<div class="empty compact">Sin datos en el rango seleccionado.</div>`;
+    const dateHeaders = dates.map((date) => `<th class="num">${formatDateShort(date)}</th>`).join("");
+    const rowsByCategory = Array.from(new Set([...getProductCategories(), ...rows.map((row) => row.category || "OTROS")])).map((category) => {
+      const categoryRows = rows.filter((row) => (row.category || "OTROS") === category);
+      if (!categoryRows.length) return "";
+      return `
+        <tr class="history-category-row"><td colspan="${3 + dates.length}">${escapeHtml(category)}</td></tr>
+        ${categoryRows.map((row) => `
+          <tr>
+            <td>${escapeHtml(row.productName)}</td>
+            <td>${escapeHtml(row.unitType)}</td>
+            <td class="num"><strong>${formatMoney(row.totalAmount)}</strong><br><span class="muted">${formatNumber(row.totalQuantity)}</span></td>
+            ${dates.map((date) => {
+              const day = row.days[date] || { quantity: 0, amount: 0, price: 0 };
+              return `<td class="num">${day.quantity > 0 ? `<strong>${formatMoney(day.price)}</strong><br><span class="muted">${formatNumber(day.quantity)}</span>` : "-"}</td>`;
+            }).join("")}
+          </tr>
+        `).join("")}
+      `;
+    }).join("");
+    return `
+      <div class="table-wrap history-matrix">
+        <table>
+          <thead><tr><th>Producto</th><th>Unidad</th><th>${type === "purchase" ? "Total comprado" : "Total vendido"}</th>${dateHeaders}</tr></thead>
+          <tbody>${rowsByCategory}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  function buildPurchaseHistoryMatrix(from, to) {
+    const rows = {};
+    state.purchases
+      .filter((purchase) => isProductPurchaseExpense(purchase) && isDateInRange(purchase.date, from, to))
+      .forEach((purchase) => {
+        const date = String(purchase.date || "").slice(0, 10);
+        flattenPurchaseItems(purchase).forEach((item) => {
+          const product = getProduct(item.productId);
+          const key = item.productId || item.productName;
+          if (!rows[key]) rows[key] = {
+            productId: item.productId,
+            productName: item.productName || (product ? product.name : key),
+            category: product ? product.category : "OTROS",
+            unitType: item.unitType || (product ? product.unitType : ""),
+            totalQuantity: 0,
+            totalAmount: 0,
+            days: {}
+          };
+          if (!rows[key].days[date]) rows[key].days[date] = { quantity: 0, amount: 0, price: 0 };
+          const quantity = Number(item.quantity || 0);
+          const amount = Number(item.totalCost || quantity * Number(item.unitCost || 0));
+          rows[key].totalQuantity += quantity;
+          rows[key].totalAmount += amount;
+          rows[key].days[date].quantity += quantity;
+          rows[key].days[date].amount += amount;
+          rows[key].days[date].price = Math.max(rows[key].days[date].price, Number(item.unitCost || 0));
+        });
+      });
+    return Object.values(rows).sort((a, b) => String(a.category).localeCompare(String(b.category)) || String(a.productName).localeCompare(String(b.productName)));
+  }
+
+  function buildSalesHistoryMatrix(from, to) {
+    const rows = {};
+    state.orders
+      .filter((order) => !["cancelado", "anulado"].includes(order.status) && isDateInRange(order.date, from, to))
+      .forEach((order) => {
+        const date = String(order.date || "").slice(0, 10);
+        order.items.forEach((item) => {
+          const product = getProduct(item.productId);
+          const key = item.productId || item.productName;
+          if (!rows[key]) rows[key] = {
+            productId: item.productId,
+            productName: item.productName || (product ? product.name : key),
+            category: product ? product.category : "OTROS",
+            unitType: item.unitType || (product ? product.unitType : ""),
+            totalQuantity: 0,
+            totalAmount: 0,
+            days: {}
+          };
+          if (!rows[key].days[date]) rows[key].days[date] = { quantity: 0, amount: 0, price: product ? getProductPrice(product.id) : Number(item.unitPrice || 0) };
+          const quantity = Number(item.quantity || 0);
+          const amount = getOrderItemSubtotal(item);
+          rows[key].totalQuantity += quantity;
+          rows[key].totalAmount += amount;
+          rows[key].days[date].quantity += quantity;
+          rows[key].days[date].amount += amount;
+          rows[key].days[date].price = product ? getProductPrice(product.id) : Number(item.unitPrice || rows[key].days[date].price || 0);
+        });
+      });
+    return Object.values(rows).sort((a, b) => String(a.category).localeCompare(String(b.category)) || String(a.productName).localeCompare(String(b.productName)));
+  }
+
+  function renderHistoryTable(rows, type) {
+    const categories = Array.from(new Set([...getProductCategories(), ...rows.map((row) => row.category || "OTROS")]));
+    return categories.map((category) => {
+      const categoryRows = rows.filter((row) => (row.category || "OTROS") === category);
+      if (!categoryRows.length) return "";
+      const body = categoryRows.map((row) => type === "purchase" ? `
+        <tr>
+          <td>${escapeHtml(row.productName)}</td>
+          <td>${escapeHtml(row.unitType)}</td>
+          <td class="num">${formatNumber(row.quantity)}</td>
+          <td class="num">${row.quantity > 0 ? formatMoney(row.avgUnitCost) : "-"}</td>
+          <td class="num">${row.lastUnitCost > 0 ? formatMoney(row.lastUnitCost) : "-"}</td>
+          <td class="num">${formatMoney(row.totalCost)}</td>
+        </tr>
+      ` : `
+        <tr>
+          <td>${escapeHtml(row.productName)}</td>
+          <td>${escapeHtml(row.unitType)}</td>
+          <td class="num">${formatNumber(row.quantity)}</td>
+          <td class="num">${formatMoney(row.currentListPrice)}</td>
+          <td class="num">${row.quantity > 0 ? formatMoney(row.avgUnitPrice) : "-"}</td>
+          <td class="num">${formatMoney(row.totalSales)}</td>
+        </tr>
+      `).join("");
+      return `
+        <section class="history-category">
+          <h3>${escapeHtml(category)}</h3>
+          <div class="table-wrap">
+            <table>
+              ${type === "purchase"
+                ? `<thead><tr><th>Producto</th><th>Unidad</th><th>Cantidad comprada</th><th>Costo unitario prom.</th><th>Ultimo costo</th><th>Total compra</th></tr></thead>`
+                : `<thead><tr><th>Producto</th><th>Unidad</th><th>Cantidad vendida</th><th>Precio lista</th><th>Precio vendido prom.</th><th>Total vendido</th></tr></thead>`}
+              <tbody>${body}</tbody>
+            </table>
+          </div>
+        </section>
+      `;
+    }).join("") || `<div class="empty compact">Sin datos historicos.</div>`;
+  }
+
+  function buildPurchaseHistoryRows() {
+    const rows = {};
+    activeProducts().forEach((product) => {
+      rows[product.id] = {
+        productId: product.id,
+        productName: product.name,
+        category: product.category || "OTROS",
+        unitType: product.unitType || "",
+        quantity: 0,
+        totalCost: 0,
+        lastUnitCost: 0,
+        lastDate: ""
+      };
+    });
+    state.purchases
+      .filter((purchase) => isProductPurchaseExpense(purchase))
+      .forEach((purchase) => {
+        flattenPurchaseItems(purchase).forEach((item) => {
+          const product = getProduct(item.productId);
+          const key = item.productId || item.productName;
+          if (!rows[key]) {
+            rows[key] = {
+              productId: item.productId,
+              productName: item.productName,
+              category: product ? product.category : "OTROS",
+              unitType: item.unitType || (product ? product.unitType : ""),
+              quantity: 0,
+              totalCost: 0,
+              lastUnitCost: 0,
+              lastDate: ""
+            };
+          }
+          rows[key].quantity += Number(item.quantity || 0);
+          rows[key].totalCost += Number(item.totalCost || 0);
+          if (!rows[key].lastDate || String(purchase.date || "") >= rows[key].lastDate) {
+            rows[key].lastDate = String(purchase.date || "");
+            rows[key].lastUnitCost = Number(item.unitCost || 0);
+          }
+        });
+      });
+    return Object.values(rows)
+      .map((row) => ({ ...row, avgUnitCost: row.quantity > 0 ? row.totalCost / row.quantity : 0 }))
+      .sort((a, b) => String(a.category).localeCompare(String(b.category)) || String(a.productName).localeCompare(String(b.productName)));
+  }
+
+  function buildSalesHistoryRows() {
+    const rows = {};
+    activeProducts().forEach((product) => {
+      rows[product.id] = {
+        productId: product.id,
+        productName: product.name,
+        category: product.category || "OTROS",
+        unitType: product.unitType || "",
+        quantity: 0,
+        totalSales: 0,
+        currentListPrice: getProductPrice(product.id)
+      };
+    });
+    state.orders
+      .filter((order) => !["cancelado", "anulado"].includes(order.status))
+      .forEach((order) => {
+        order.items.forEach((item) => {
+          const product = getProduct(item.productId);
+          const key = item.productId || item.productName;
+          if (!rows[key]) {
+            rows[key] = {
+              productId: item.productId,
+              productName: item.productName,
+              category: product ? product.category : "OTROS",
+              unitType: item.unitType || (product ? product.unitType : ""),
+              quantity: 0,
+              totalSales: 0,
+              currentListPrice: product ? getProductPrice(product.id) : Number(item.unitPrice || 0)
+            };
+          }
+          const quantity = Number(item.quantity || 0);
+          rows[key].quantity += quantity;
+          rows[key].totalSales += Number(item.subtotal || quantity * Number(item.unitPrice || 0));
+        });
+      });
+    return Object.values(rows)
+      .map((row) => ({ ...row, avgUnitPrice: row.quantity > 0 ? row.totalSales / row.quantity : 0 }))
+      .sort((a, b) => String(a.category).localeCompare(String(b.category)) || String(a.productName).localeCompare(String(b.productName)));
+  }
+
+  function renderPerformance() {
+    const from = ui.performanceFrom || ui.performanceDate || todayISO();
+    const to = ui.performanceTo || from;
+    const week = getWeekBounds(from);
+    const month = getMonthBounds(from);
+    const ranges = [
+      { label: "Rango", start: from, end: to },
+      { label: "Semana", start: week.start, end: week.end },
+      { label: "Mes", start: month.start, end: month.end }
+    ];
+    const summaries = ranges.map((range) => ({ ...range, ...getPerformanceSummary(range.start, range.end) }));
+    const rangeSummary = summaries[0];
+    const dayExpenses = getPerformanceExpenseRows(from, to);
+    const adjustmentRows = state.performanceAdjustments
+      .slice()
+      .sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.id).localeCompare(String(a.id)))
+      .slice(0, 40)
+      .map((entry) => `
+        <tr>
+          <td>${formatDate(entry.date)}</td>
+          <td>${escapeHtml(performanceAdjustmentTypeLabel(entry.type))}</td>
+          <td>${escapeHtml(entry.description || "")}</td>
+          <td>${escapeHtml(getCashBoxName(entry.cashBoxId || "cash-general"))}</td>
+          <td class="num">${formatMoney(entry.amount)}</td>
+          <td><button class="btn small danger" data-delete-performance-adjustment="${entry.id}">Borrar</button></td>
+        </tr>
+      `).join("");
+    const expenseRows = dayExpenses.map((entry) => `
+      <tr>
+        <td>${formatDate(entry.date)}</td>
+        <td>${escapeHtml(entry.type)}</td>
+        <td>${escapeHtml(entry.description)}</td>
+        <td>${escapeHtml(entry.status)}</td>
+        <td class="num">${formatMoney(entry.amount)}</td>
+      </tr>
+    `).join("");
+    const summaryRows = summaries.map((item) => `
+      <tr>
+        <td><strong>${escapeHtml(item.label)}</strong><br><span class="muted">${formatDate(item.start)} - ${formatDate(item.end)}</span></td>
+        <td class="num">${formatMoney(item.paidExpenses)}</td>
+        <td class="num">${formatMoney(item.accountExpenses)}</td>
+        <td class="num">${formatMoney(item.collectedSales)}</td>
+        <td class="num">${formatMoney(item.receivableSales)}</td>
+        <td class="num">${formatMoney(item.totalSales)}</td>
+        <td class="num">${formatMoney(item.cashProfit)}</td>
+        <td class="num">${formatMoney(item.companyProfit)}</td>
+      </tr>
+    `).join("");
+    afterRender.push(bindPerformance);
+    return pageShell(
+      "Rendimiento",
+      "Gastos, ventas cobradas, saldos a cobrar y rendimiento de la empresa.",
+      "",
+      `
+      <div class="panel" style="margin-bottom:14px">
+        <div class="form-grid">
+          <div class="field"><label>Desde</label><input type="date" id="performance-from" value="${from}" /></div>
+          <div class="field"><label>Hasta</label><input type="date" id="performance-to" value="${to}" /></div>
+        </div>
+        <div class="preset-grid">
+          <button class="btn ghost" type="button" data-perf-preset="semana-pasada">Semana pasada</button>
+          <button class="btn ghost" type="button" data-perf-preset="7-dias">7 dias</button>
+          <button class="btn ghost" type="button" data-perf-preset="este-mes">Este mes</button>
+          <button class="btn ghost" type="button" data-perf-preset="mes-pasado">Mes pasado</button>
+          <button class="btn ghost" type="button" data-perf-preset="30-dias">30 dias</button>
+          <button class="btn ghost" type="button" data-perf-preset="3-meses">3 meses</button>
+        </div>
+      </div>
+      <div class="grid four">
+        ${metricCard("Ventas cobradas", formatMoney(rangeSummary.collectedSales), formatDate(from) + " - " + formatDate(to))}
+        ${metricCard("Saldos a cobrar", formatMoney(rangeSummary.receivableSales), "Pedidos pendientes del rango")}
+        ${metricCard("Gastos pagados", formatMoney(rangeSummary.paidExpenses), "Egresos registrados")}
+        ${metricCard("Rendimiento caja", formatMoney(rangeSummary.cashProfit), "Cobrado menos pagado")}
+      </div>
+      <div class="panel" style="margin-top:14px">
+        <h2 class="page-title" style="font-size:18px">Resumen dia, semana y mes</h2>
+        <div class="table-wrap" style="margin-top:10px">
+          <table>
+            <thead><tr><th>Periodo</th><th>Gastos pagados</th><th>Cuenta corriente</th><th>Ventas cobradas</th><th>Saldos a cobrar</th><th>Ventas totales</th><th>Resultado caja</th><th>Resultado empresa</th></tr></thead>
+            <tbody>${summaryRows}</tbody>
+          </table>
+        </div>
+      </div>
+      <div class="grid two" style="margin-top:14px">
+        <div class="panel">
+          <h2 class="page-title" style="font-size:18px">Gastos del rango</h2>
+          <div class="table-wrap" style="margin-top:10px">
+            <table>
+              <thead><tr><th>Fecha</th><th>Tipo</th><th>Detalle</th><th>Estado</th><th>Monto</th></tr></thead>
+              <tbody>${expenseRows || emptyRow(5, "No hay gastos para la fecha.")}</tbody>
+            </table>
+          </div>
+        </div>
+        <form id="performance-adjustment-form" class="panel">
+          <h2 class="page-title" style="font-size:18px">Otros gastos e impuestos</h2>
+          <div class="form-grid" style="margin-top:10px">
+            <div class="field"><label>Fecha</label><input type="date" id="performance-adjustment-date" value="${from}" /></div>
+            <div class="field"><label>Tipo</label><select id="performance-adjustment-type"><option value="other_expense">Otro gasto</option><option value="tax">Impuesto</option></select></div>
+            <div class="field"><label>Caja afectada</label><select id="performance-adjustment-cash-box">${renderCashBoxOptions("cash-general")}</select></div>
+            <div class="field span-2"><label>Descripcion</label><input id="performance-adjustment-description" placeholder="IVA, alquiler, combustible..." /></div>
+            <div class="field"><label>Monto</label><input id="performance-adjustment-amount" inputmode="decimal" placeholder="$0" /></div>
+            <div class="field"><label>&nbsp;</label><button class="btn primary" type="submit">Agregar</button></div>
+          </div>
+          <div class="table-wrap" style="margin-top:12px">
+            <table>
+              <thead><tr><th>Fecha</th><th>Tipo</th><th>Descripcion</th><th>Caja</th><th>Monto</th><th></th></tr></thead>
+              <tbody>${adjustmentRows || emptyRow(6, "Sin gastos extra cargados.")}</tbody>
+            </table>
+          </div>
+        </form>
+      </div>
+      `,
+      "rendimiento"
+    );
+  }
+
+  function bindPerformance() {
+    const fromInput = document.getElementById("performance-from");
+    const toInput = document.getElementById("performance-to");
+    if (fromInput) fromInput.addEventListener("change", () => {
+      ui.performanceFrom = fromInput.value || todayISO();
+      if (ui.performanceTo < ui.performanceFrom) ui.performanceTo = ui.performanceFrom;
+      ui.performanceDate = ui.performanceFrom;
+      render();
+    });
+    if (toInput) toInput.addEventListener("change", () => {
+      ui.performanceTo = toInput.value || ui.performanceFrom || todayISO();
+      if (ui.performanceTo < ui.performanceFrom) ui.performanceFrom = ui.performanceTo;
+      render();
+    });
+    const form = document.getElementById("performance-adjustment-form");
+    if (form) form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const amount = parseAmount(document.getElementById("performance-adjustment-amount").value);
+      const description = document.getElementById("performance-adjustment-description").value.trim();
+      if (amount <= 0 || !description) return alert("Complete descripcion y monto.");
+      const adjustment = {
+        id: nextDatedId("PERF", state.performanceAdjustments),
+        date: document.getElementById("performance-adjustment-date").value || ui.performanceFrom || todayISO(),
+        type: document.getElementById("performance-adjustment-type").value,
+        description,
+        amount,
+        cashBoxId: document.getElementById("performance-adjustment-cash-box").value,
+        recordedBy: currentUser.name,
+        createdAt: new Date().toISOString()
+      };
+      state.performanceAdjustments.push(adjustment);
+      addCajaEntry({
+        date: adjustment.date,
+        type: "performance_adjustment",
+        concept: performanceAdjustmentTypeLabel(adjustment.type) + " - " + adjustment.description,
+        relatedEntityId: adjustment.id,
+        relatedEntityType: "performance_adjustment",
+        amountIngreso: 0,
+        amountEgreso: adjustment.amount,
+        cashBoxId: adjustment.cashBoxId,
+        notes: "Cargado desde Rendimiento."
+      });
+      saveState();
+      render();
+    });
+    document.querySelectorAll("[data-delete-performance-adjustment]").forEach((button) => button.addEventListener("click", () => {
+      state.performanceAdjustments = state.performanceAdjustments.filter((entry) => entry.id !== button.dataset.deletePerformanceAdjustment);
+      state.caja = state.caja.filter((entry) => !(entry.relatedEntityId === button.dataset.deletePerformanceAdjustment && entry.relatedEntityType === "performance_adjustment"));
+      saveState();
+      render();
+    }));
+  }
+
+  function renderPurchases() {
+    const canUseProviders = ["manager", "admin"].includes(currentUser.role);
+    if (!canUseProviders) ui.purchaseTab = "registro";
+    const purchaseTab = ui.purchaseTab || "registro";
+    let visiblePurchases = currentUser.role === "employee"
+      ? state.purchases.filter((purchase) => purchase.userRole === "employee" || purchase.recordedBy === currentUser.name)
+      : state.purchases;
+    if (["manager", "admin"].includes(currentUser.role) && ui.purchaseAssigneeFilter !== "all") {
+      const [type, id] = ui.purchaseAssigneeFilter.split(":");
+      visiblePurchases = visiblePurchases.filter((purchase) => type === "provider" ? purchase.providerId === id : purchase.assignedEmployeeId === id);
+    }
+    const rows = visiblePurchases.slice().reverse().map((purchase) => {
+      const provider = getProvider(purchase.providerId);
+      const origin = provider ? provider.name : purchase.providerName || (purchase.expenseType === "other_expense" ? "Gasto general" : "Gasto producto");
+      const itemText = purchaseItemsSummary(purchase);
+      return `
+        <tr>
+          <td>${formatDate(purchase.date)}</td>
+          <td>${escapeHtml(expenseTypeLabel(purchase.expenseType || "purchase"))}</td>
+          <td>${escapeHtml(origin)}</td>
+          <td>${itemText}</td>
+          <td>${escapeHtml(purchaseStatusLabel(purchase.paymentStatus || "paid"))}</td>
+          <td>${escapeHtml(getCashBoxName(getPurchaseCashBoxId(purchase)))}</td>
+          <td class="num">${formatMoney(purchase.totalCost)}</td>
+          <td>${escapeHtml(purchase.recordedBy || "")}</td>
+          <td>${escapeHtml(purchase.notes || "")}</td>
+        </tr>
+      `;
+    }).join("");
+    const vendorRows = state.vendorLedger.slice().reverse().slice(0, 80).map((entry) => `
+      <tr>
+        <td>${formatDate(entry.date)}</td>
+        <td>${escapeHtml(entry.vendorName)}</td>
+        <td>${escapeHtml(entry.productName)}</td>
+        <td class="num">${formatNumber(entry.quantity)}</td>
+        <td class="num">${formatMoney(entry.unitCost)}</td>
+        <td>${escapeHtml(entry.recordedBy || "")}</td>
+      </tr>
+    `).join("");
+    afterRender.push(() => {
+      bindPurchaseTabs();
+      if (purchaseTab === "proveedores") bindProviderPaymentTab();
+      else bindPurchases();
+    });
+    return pageShell(
+      currentUser.role === "employee" ? "Gastos" : "Compras y Gastos",
+      currentUser.role === "employee" ? "Registre gastos por producto asignado u otros gastos operativos." : "Registro de compras y gastos. Cada egreso impacta Caja.",
+      canUseProviders ? `<button class="btn ghost" data-route="proveedores">Proveedores</button>` : "",
+      `
+      <div class="grid">
+        ${canUseProviders ? renderPurchaseTabs(purchaseTab) : ""}
+        ${["manager", "admin"].includes(currentUser.role) ? renderPurchaseAssigneeFilter() : ""}
+        ${purchaseTab === "proveedores" ? renderProviderPaymentTab() : (roleFlag(currentUser.role, "registrarGastos") ? renderPurchaseRegisterTab(canUseProviders) : `<div class="panel empty">Su rol no tiene permiso para registrar compras o gastos.</div>`)}
+        <div class="panel">
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Fecha</th><th>Tipo</th><th>Origen</th><th>Productos/Detalle</th><th>Estado</th><th>Caja</th><th>Total</th><th>Usuario</th><th>Notas</th></tr></thead>
+              <tbody>${rows || emptyRow(9, "Todavia no hay egresos.")}</tbody>
+            </table>
+          </div>
+        </div>
+        <div class="panel">
+          <h2 class="page-title" style="font-size:18px">Compras por vendedor</h2>
+          <div class="table-wrap" style="margin-top:10px">
+            <table>
+              <thead><tr><th>Fecha</th><th>Vendedor</th><th>Producto</th><th>Cantidad</th><th>Costo</th><th>Usuario</th></tr></thead>
+              <tbody>${vendorRows || emptyRow(6, "Sin compras asociadas a vendedores.")}</tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      `,
+      "compras"
+    );
+  }
+
+  function renderPurchaseTabs(activeTab) {
+    return `
+      <div class="tabs">
+        <button class="tab ${activeTab === "registro" ? "active" : ""}" data-purchase-tab="registro">Registrar compra/gasto</button>
+        <button class="tab ${activeTab === "proveedores" ? "active" : ""}" data-purchase-tab="proveedores">Cuenta proveedores</button>
+      </div>
+    `;
+  }
+
+  function renderPurchaseAssigneeFilter() {
+    const assignees = activeAssignees();
+    afterRender.push(() => {
+      const select = document.getElementById("purchase-assignee-filter");
+      if (select) select.addEventListener("change", () => {
+        ui.purchaseAssigneeFilter = select.value;
+        render();
+      });
+    });
+    return `
+      <div class="panel">
+        <div class="form-grid">
+          <div class="field span-2"><label>Ver asignados a</label><select id="purchase-assignee-filter"><option value="all">Todos</option>${assignees.map((entry) => `<option value="${entry.value}" ${ui.purchaseAssigneeFilter === entry.value ? "selected" : ""}>${escapeHtml(entry.label)}</option>`).join("")}</select></div>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderRequiredPurchaseGrid(selectedAssigneeValue) {
+    const assignedValue = currentUser.role === "employee" ? "employee:" + currentUser.id : (selectedAssigneeValue || "");
+    const shortages = getProductPurchaseShortages(todayISO());
+    const todaysGroups = Object.values(getOrderProductGroups(todayISO()));
+    const todaysIds = new Set(todaysGroups.map((group) => group.productId));
+    const relatedIds = new Set();
+    (state.productRelations || []).forEach((relation) => {
+      if (todaysIds.has(relation.retailProductId)) relatedIds.add(relation.wholesaleProductId);
+      if (todaysIds.has(relation.wholesaleProductId)) relatedIds.add(relation.retailProductId);
+    });
+    const [assigneeType, assigneeId] = String(assignedValue || "").split(":");
+    const provider = assigneeType === "provider" ? getProvider(assigneeId) : null;
+    const providerProducts = new Set(provider && Array.isArray(provider.productsSupplied) ? provider.productsSupplied : []);
+    const matchesAssignee = (group) => {
+      if (!assignedValue) return true;
+      if (providerProducts.has(group.productId)) return true;
+      return group.entries.some(({ item }) => getEffectiveItemAssigneeValue(item) === assignedValue);
+    };
+    const requiredItems = shortages.filter(matchesAssignee).map((item) => ({ ...item, favorite: true }));
+    const requiredIds = new Set(requiredItems.map((item) => item.productId));
+    const restItems = [];
+    shortages.forEach((group) => {
+      if (!requiredIds.has(group.productId)) restItems.push({ productId: group.productId, productName: group.productName, unitType: group.unitType, shortageQuantity: 0, favorite: false });
+    });
+    const seenIds = new Set([...requiredIds, ...restItems.map((item) => item.productId)]);
+    relatedIds.forEach((productId) => {
+      if (seenIds.has(productId)) return;
+      const product = getProduct(productId);
+      if (!product || product.isActive === false) return;
+      restItems.push({ productId: product.id, productName: product.name, unitType: product.unitType, shortageQuantity: 0, favorite: false });
+    });
+    const cards = [...requiredItems, ...restItems].map((item) => `
+      <button class="assigned-product-card ${item.favorite ? "favorite" : ""}" type="button" data-employee-assigned-product="${item.productId}" data-default-qty="${formatAmountInput(item.shortageQuantity || item.quantity || 0)}">
+        <span>${escapeHtml(item.productName)}</span>
+        <strong>${item.favorite ? "Falta " + formatNumber(item.shortageQuantity || item.quantity) + " " + escapeHtml(item.unitType) : "Agregar"}</strong>
+      </button>
+    `).join("");
+    return `<div class="assigned-products-grid">${cards || `<div class="empty compact">No hay productos pendientes de compra para hoy.</div>`}</div>`;
+  }
+
+  function isPreparedProductToday(productId, userId) {
+    return state.purchases.some((purchase) => purchase.date === todayISO() && purchase.expenseType === "prepared" && (purchase.assignedEmployeeId === userId || purchase.recordedBy === currentUser.name) && (purchase.productId === productId || (purchase.items || []).some((item) => item.productId === productId)));
+  }
+
+  function renderPurchaseRegisterTab(canUseProviders) {
+    const firstProvider = activeProviders()[0];
+    const canPayProviders = canUseProviders || currentUser.role === "employee";
+    const canPurchaseProviders = canUseProviders || currentUser.role === "employee";
+    const defaultPurchaseCashBox = getDefaultOutgoingCashBoxId();
+    const providerPaymentMethods = currentUser.role === "employee" ? ["efectivo"] : Object.keys(PAYMENT_METHODS);
+    return `
+      <form id="purchase-form" class="panel">
+          <div class="form-grid">
+            <div class="field">
+              <label>Fecha</label>
+              <input type="date" id="purchase-date" value="${todayISO()}" />
+            </div>
+            <div class="field">
+              <label>Tipo</label>
+              <select id="purchase-kind">
+                ${canPurchaseProviders ? `<option value="purchase">Compra a proveedor</option>` : ""}
+                ${canPayProviders ? `<option value="provider_payment">Pago a Proveedor</option>` : ""}
+                <option value="product_expense">Gasto de producto</option>
+                <option value="prepared">Preparado</option>
+                <option value="market_price">Actualizar precio mercado</option>
+                <option value="other_expense">Otro gasto</option>
+                <option value="cash_movement">Movimiento de Caja</option>
+              </select>
+            </div>
+            ${canPayProviders ? `
+            <div class="field span-2" id="purchase-provider-wrap">
+              <label>Proveedor</label>
+              <div class="input-with-button">
+                <select id="purchase-provider">
+                  ${activeProviders().map((provider) => `<option value="${provider.id}" ${firstProvider && firstProvider.id === provider.id ? "selected" : ""}>${escapeHtml(provider.name)}</option>`).join("")}
+                </select>
+                <button class="btn small ghost" type="button" data-add-provider>Agregar proveedor</button>
+              </div>
+            </div>
+            <div class="field" id="purchase-payment-status-wrap">
+              <label>Estado</label>
+              <select id="purchase-payment-status">
+                <option value="paid">Pagado</option>
+                <option value="account_current">Cuenta Corriente</option>
+              </select>
+            </div>
+            <div class="field" id="provider-payment-mode-wrap">
+              <label>Pago proveedor</label>
+              <select id="purchase-provider-payment-mode"><option value="full">Pago total</option><option value="partial">Pago parcial</option></select>
+            </div>
+            <div class="field" id="provider-payment-amount-wrap">
+              <label>Monto proveedor</label>
+              <input id="purchase-provider-payment-amount" inputmode="decimal" />
+            </div>
+            <div class="field" id="provider-payment-method-wrap">
+              <label>Metodo pago</label>
+              <select id="purchase-provider-payment-method">${providerPaymentMethods.map((method) => `<option value="${method}">${escapeHtml(PAYMENT_METHODS[method])}</option>`).join("")}</select>
+            </div>` : ""}
+            <div class="field" id="purchase-cash-box-wrap">
+              <label>Caja salida</label>
+              <select id="purchase-cash-box">${renderPurchaseCashBoxOptions(defaultPurchaseCashBox)}</select>
+            </div>
+            <div class="field span-2" id="cash-movement-target-wrap">
+              <label>Caja destino</label>
+              <select id="purchase-cash-transfer-target">${renderCashMovementTargetOptions()}</select>
+            </div>
+            <div class="field">
+              <label>Empleado asignado</label>
+              <select id="purchase-assigned-employee" ${currentUser.role === "employee" ? "disabled" : ""}>
+                ${(currentUser.role === "employee" ? [currentUser] : activeEmployees()).map((employee) => `<option value="${employee.id}" ${employee.id === currentUser.id ? "selected" : ""}>${escapeHtml(employee.name)}</option>`).join("")}
+              </select>
+            </div>
+            <div class="field span-2" id="purchase-vendor-wrap">
+              <label>Vendedor</label>
+              <div class="input-with-button"><input id="purchase-vendor" list="vendor-options" placeholder="Nombre del vendedor" /><button class="btn small ghost" type="button" data-register-vendor>Registrar</button></div>
+              <datalist id="vendor-options">${getKnownVendors().map((name) => `<option value="${escapeAttr(name)}"></option>`).join("")}</datalist>
+            </div>
+            <div class="field span-3" id="purchase-description-wrap">
+              <label>Descripcion de otro gasto</label>
+              <input id="purchase-description" placeholder="Combustible, peaje, bolsa, estacionamiento, etc." />
+            </div>
+            <div class="field" id="purchase-other-amount-wrap">
+              <label>Monto</label>
+              <input id="purchase-other-amount" inputmode="decimal" placeholder="0" />
+            </div>
+            <div class="field">
+              <label>Total</label>
+              <input id="purchase-total" disabled value="$0" />
+            </div>
+            <div class="field span-2">
+              <label>Notas</label>
+              <input id="purchase-notes" placeholder="Detalle de compra, gasto, cancelacion, etc." />
+            </div>
+          </div>
+          <div id="vendor-favorites-wrap" class="panel" style="box-shadow:none;margin-top:12px">
+            <div class="page-actions" style="justify-content:space-between">
+              <strong>Favoritos del vendedor</strong>
+              <select id="purchase-product-view" style="max-width:160px"><option value="list" ${ui.purchaseProductView === "list" ? "selected" : ""}>Lista</option><option value="grid" ${ui.purchaseProductView === "grid" ? "selected" : ""}>Cuadricula</option></select>
+            </div>
+            <div id="vendor-favorites" class="favorite-row ${ui.purchaseProductView === "grid" ? "favorite-grid" : ""}"></div>
+          </div>
+          <div id="purchase-items-wrap" class="grid" style="margin-top:12px">
+            <div class="page-actions">
+              <strong>Productos</strong>
+            </div>
+            <div id="required-purchase-grid">${renderRequiredPurchaseGrid()}</div>
+            ${canPurchaseProviders ? `<div id="provider-favorites-wrap" class="panel" style="box-shadow:none"><strong>Favoritos del proveedor</strong><div id="provider-favorites" class="favorite-row"></div></div>` : ""}
+            <div id="purchase-items" class="grid">
+              ${renderPurchaseItemRow()}
+            </div>
+          </div>
+          <div class="page-actions" style="margin-top:12px">
+            <button class="btn yellow" type="button" data-add-purchase-item>Agregar producto</button>
+            <button class="btn primary" type="submit">Guardar egreso</button>
+          </div>
+        </form>
+    `;
+  }
+
+  function renderProviderPaymentTab() {
+    const firstProvider = activeProviders()[0];
+    const balances = getProviderBalances();
+    const defaultProviderCashBox = getDefaultOutgoingCashBoxId();
+    const paymentRows = state.providerPayments.slice().reverse().map((payment) => {
+      const provider = getProvider(payment.providerId);
+      return `
+        <tr>
+          <td>${formatDate(payment.date)}</td>
+          <td>${escapeHtml(provider ? provider.name : payment.providerId)}</td>
+          <td>${escapeHtml(payment.fullPayment ? "Pago completo" : "Pago parcial")}</td>
+          <td>${escapeHtml(PAYMENT_METHODS[payment.method] || payment.method)}</td>
+          <td>${escapeHtml(getCashBoxName(payment.cashBoxId && !isDeprecatedCashBox({ id: payment.cashBoxId }) ? payment.cashBoxId : "cash-general"))}</td>
+          <td class="num">${formatMoney(payment.amount)}</td>
+          <td>${escapeHtml(payment.recordedBy || "")}</td>
+          <td>${escapeHtml(payment.notes || "")}</td>
+        </tr>
+      `;
+    }).join("");
+    return `
+      <div class="grid two">
+        <form id="provider-payment-form" class="panel">
+          <div class="form-grid">
+            <div class="field span-2">
+              <label>Proveedor</label>
+              <select id="provider-payment-provider">
+                ${activeProviders().map((provider) => `<option value="${provider.id}" ${firstProvider && firstProvider.id === provider.id ? "selected" : ""}>${escapeHtml(provider.name)}</option>`).join("")}
+              </select>
+            </div>
+            <div class="field">
+              <label>Saldo</label>
+              <input id="provider-current-balance" disabled value="$0" />
+            </div>
+            <div class="field">
+              <label>Pago</label>
+              <select id="provider-payment-mode">
+                <option value="full">Pago completo</option>
+                <option value="partial">Pago parcial</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Monto</label>
+              <input id="provider-payment-amount" inputmode="decimal" />
+            </div>
+            <div class="field">
+              <label>Metodo</label>
+              <select id="provider-payment-method">
+                ${Object.keys(PAYMENT_METHODS).map((method) => `<option value="${method}">${escapeHtml(PAYMENT_METHODS[method])}</option>`).join("")}
+              </select>
+            </div>
+            <div class="field">
+              <label>Caja</label>
+              <select id="provider-payment-cash-box">${renderCashBoxOptions(defaultProviderCashBox)}</select>
+            </div>
+            <div class="field span-2">
+              <label>Notas</label>
+              <input id="provider-payment-notes" placeholder="Cancelacion, pago parcial, transferencia, etc." />
+            </div>
+          </div>
+          <div class="page-actions" style="margin-top:12px">
+            <button class="btn primary" type="submit">Registrar pago a proveedor</button>
+          </div>
+        </form>
+        <div class="panel">
+          <h2 class="page-title" style="font-size:18px">Saldos proveedores</h2>
+          <div class="table-wrap" style="margin-top:10px">
+            <table>
+              <thead><tr><th>Proveedor</th><th>Saldo</th><th>Ultimo movimiento</th></tr></thead>
+              <tbody>${balances.map((item) => `<tr><td>${escapeHtml(item.providerName)}</td><td class="num">${formatMoney(item.balance)}</td><td>${item.lastDate ? formatDate(item.lastDate) : "-"}</td></tr>`).join("") || emptyRow(3, "Sin saldos de proveedores.")}</tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div class="panel">
+        <h2 class="page-title" style="font-size:18px">Pagos registrados</h2>
+        <div class="table-wrap" style="margin-top:10px">
+          <table>
+            <thead><tr><th>Fecha</th><th>Proveedor</th><th>Tipo</th><th>Metodo</th><th>Caja</th><th>Monto</th><th>Usuario</th><th>Notas</th></tr></thead>
+            <tbody>${paymentRows || emptyRow(8, "Todavia no hay pagos a proveedores.")}</tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  }
+
+  function bindPurchases() {
+    const kind = document.getElementById("purchase-kind");
+    const total = document.getElementById("purchase-total");
+    const itemsWrap = document.getElementById("purchase-items-wrap");
+    const itemsContainer = document.getElementById("purchase-items");
+    const descriptionWrap = document.getElementById("purchase-description-wrap");
+    const otherAmountWrap = document.getElementById("purchase-other-amount-wrap");
+    const otherAmount = document.getElementById("purchase-other-amount");
+    const providerInput = document.getElementById("purchase-provider");
+    const providerWrap = document.getElementById("purchase-provider-wrap");
+    const statusWrap = document.getElementById("purchase-payment-status-wrap");
+    const favoritesWrap = document.getElementById("provider-favorites-wrap");
+    const vendorInput = document.getElementById("purchase-vendor");
+    const vendorWrap = document.getElementById("purchase-vendor-wrap");
+    const vendorFavoritesWrap = document.getElementById("vendor-favorites-wrap");
+    const vendorFavorites = document.getElementById("vendor-favorites");
+    const purchaseProductView = document.getElementById("purchase-product-view");
+    const providerPaymentModeWrap = document.getElementById("provider-payment-mode-wrap");
+    const providerPaymentAmountWrap = document.getElementById("provider-payment-amount-wrap");
+    const providerPaymentMode = document.getElementById("purchase-provider-payment-mode");
+    const providerPaymentAmount = document.getElementById("purchase-provider-payment-amount");
+    const providerPaymentMethodWrap = document.getElementById("provider-payment-method-wrap");
+    const cashBoxSelect = document.getElementById("purchase-cash-box");
+    const cashBoxWrap = document.getElementById("purchase-cash-box-wrap");
+    const cashMovementTargetWrap = document.getElementById("cash-movement-target-wrap");
+    const assignedEmployeeSelect = document.getElementById("purchase-assigned-employee");
+    const requiredGrid = document.getElementById("required-purchase-grid");
+    const getSelectedAssigneeValue = () => {
+      if (currentUser.role === "employee") return "employee:" + currentUser.id;
+      if (kind.value === "purchase" && providerInput) {
+        const provider = findProviderByInput(providerInput.value);
+        if (provider) return "provider:" + provider.id;
+      }
+      if (assignedEmployeeSelect && assignedEmployeeSelect.value) return "employee:" + assignedEmployeeSelect.value;
+      return "";
+    };
+    const refreshRequiredGrid = () => {
+      if (!requiredGrid) return;
+      requiredGrid.innerHTML = renderRequiredPurchaseGrid(getSelectedAssigneeValue());
+    };
+    const recalc = () => {
+      if (kind.value === "cash_movement") {
+        total.value = formatMoney(parseAmount(otherAmount.value));
+        return;
+      }
+      if (kind.value === "provider_payment") {
+        const provider = providerInput ? findProviderByInput(providerInput.value) : null;
+        const balance = provider ? getProviderBalance(provider.id) : 0;
+        if (providerPaymentMode && providerPaymentMode.value === "full") providerPaymentAmount.value = formatAmountInput(Math.max(0, balance));
+        total.value = formatMoney(parseAmount(providerPaymentAmount ? providerPaymentAmount.value : 0));
+        return;
+      }
+      if (kind.value === "prepared") {
+        total.value = formatMoney(0);
+        return;
+      }
+      if (kind.value === "market_price") {
+        total.value = formatMoney(0);
+        return;
+      }
+      if (kind.value === "other_expense") {
+        total.value = formatMoney(parseAmount(otherAmount.value));
+        return;
+      }
+      let sum = 0;
+      itemsContainer.querySelectorAll("[data-purchase-item-row]").forEach((row) => {
+        const quantity = parseAmount(row.querySelector("[data-item-qty]").value);
+        const unitCost = parseAmount(row.querySelector("[data-item-cost]").value);
+        const subtotal = quantity * unitCost;
+        sum += subtotal;
+        row.querySelector("[data-item-total]").value = formatMoney(subtotal);
+      });
+      total.value = formatMoney(sum);
+    };
+    const updateKind = () => {
+      const isOther = kind.value === "other_expense";
+      const isPurchase = kind.value === "purchase";
+      const isProviderPayment = kind.value === "provider_payment";
+      const isPrepared = kind.value === "prepared";
+      const isMarketPrice = kind.value === "market_price";
+      const isCashMovement = kind.value === "cash_movement";
+      itemsWrap.style.display = isOther || isProviderPayment || isCashMovement ? "none" : "grid";
+      itemsContainer.classList.toggle("market-price-mode", isMarketPrice);
+      descriptionWrap.style.display = isOther ? "grid" : "none";
+      otherAmountWrap.style.display = isOther || isCashMovement ? "grid" : "none";
+      if (cashMovementTargetWrap) cashMovementTargetWrap.style.display = isCashMovement ? "grid" : "none";
+      if (cashBoxWrap) cashBoxWrap.style.display = isPrepared || isMarketPrice ? "none" : "grid";
+      if (cashBoxSelect) {
+        if (currentUser.role === "employee" || isCashMovement) cashBoxSelect.value = getDefaultOutgoingCashBoxId();
+        cashBoxSelect.disabled = currentUser.role === "employee" || isCashMovement;
+      }
+      if (providerWrap) providerWrap.style.display = isPurchase || isProviderPayment ? "grid" : "none";
+      if (statusWrap) statusWrap.style.display = isPurchase ? "grid" : "none";
+      if (favoritesWrap) favoritesWrap.style.display = isPurchase ? "block" : "none";
+      if (vendorWrap) vendorWrap.style.display = isCashMovement ? "none" : "grid";
+      if (vendorFavoritesWrap) vendorFavoritesWrap.style.display = isCashMovement ? "none" : "block";
+      if (providerPaymentModeWrap) providerPaymentModeWrap.style.display = isProviderPayment ? "grid" : "none";
+      if (providerPaymentAmountWrap) providerPaymentAmountWrap.style.display = isProviderPayment ? "grid" : "none";
+      if (providerPaymentMethodWrap) providerPaymentMethodWrap.style.display = isProviderPayment ? "grid" : "none";
+      if (providerWrap) providerWrap.style.display = isPurchase || isProviderPayment ? "grid" : "none";
+      refreshRequiredGrid();
+      recalc();
+    };
+    itemsContainer.addEventListener("input", (event) => {
+      if (event.target.matches("[data-product-filter]")) {
+        updatePurchaseProductSelect(event.target.closest("[data-purchase-item-row]"));
+      }
+      recalc();
+    });
+    itemsContainer.addEventListener("change", (event) => {
+      if (event.target.matches("[data-product-select]")) {
+        const product = getProduct(event.target.value);
+        const row = event.target.closest("[data-purchase-item-row]");
+        if (product && row) row.querySelector("[data-product-filter]").value = product.name;
+      }
+    });
+    otherAmount.addEventListener("input", recalc);
+    if (providerPaymentAmount) providerPaymentAmount.addEventListener("input", recalc);
+    if (providerPaymentMode) providerPaymentMode.addEventListener("change", recalc);
+    itemsContainer.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-remove-purchase-item]");
+      if (!button) return;
+      const rows = itemsContainer.querySelectorAll("[data-purchase-item-row]");
+      if (rows.length <= 1) {
+        rows[0].querySelector("[data-product-filter]").value = "";
+        rows[0].querySelector("[data-product-select]").value = "";
+        rows[0].querySelector("[data-item-qty]").value = "";
+        rows[0].querySelector("[data-item-cost]").value = "";
+        rows[0].querySelector("[data-item-relation-units]").value = "";
+        rows[0].querySelector("[data-item-market-price]").value = "";
+      } else {
+        button.closest("[data-purchase-item-row]").remove();
+      }
+      recalc();
+    });
+    document.querySelector("[data-add-purchase-item]").addEventListener("click", () => {
+      itemsContainer.insertAdjacentHTML("beforeend", renderPurchaseItemRow());
+    });
+    if (providerInput) {
+      const updateProviderSelection = () => {
+        renderProviderFavorites(findProviderByInput(providerInput.value));
+        refreshRequiredGrid();
+        recalc();
+      };
+      providerInput.addEventListener("input", updateProviderSelection);
+      providerInput.addEventListener("change", updateProviderSelection);
+      updateProviderSelection();
+    }
+    if (assignedEmployeeSelect) assignedEmployeeSelect.addEventListener("change", refreshRequiredGrid);
+    if (cashBoxSelect) cashBoxSelect.addEventListener("change", () => {
+      if (isUserCashBoxId(cashBoxSelect.value) && assignedEmployeeSelect && !assignedEmployeeSelect.disabled) {
+        const boxUserId = String(cashBoxSelect.value).replace("cash-user-", "");
+        const hasOption = Array.from(assignedEmployeeSelect.options).some((option) => option.value === boxUserId);
+        if (hasOption) {
+          assignedEmployeeSelect.value = boxUserId;
+          refreshRequiredGrid();
+        }
+      }
+    });
+    const providerPaymentMethodSelect = document.getElementById("purchase-provider-payment-method");
+    if (providerPaymentMethodSelect && cashBoxSelect) providerPaymentMethodSelect.addEventListener("change", () => {
+      if (["transferencia", "cheque"].includes(providerPaymentMethodSelect.value) && !cashBoxSelect.disabled) {
+        const hasBank = Array.from(cashBoxSelect.options).some((option) => option.value === "cash-banco");
+        if (hasBank) cashBoxSelect.value = "cash-banco";
+      }
+    });
+    if (vendorInput && vendorFavorites) {
+      const updateVendorFavorites = () => renderVendorFavorites(vendorInput.value.trim());
+      vendorInput.addEventListener("input", updateVendorFavorites);
+      vendorInput.addEventListener("change", updateVendorFavorites);
+      updateVendorFavorites();
+    }
+    document.querySelectorAll("[data-register-vendor]").forEach((button) => button.addEventListener("click", () => {
+      const name = prompt("Nombre del vendedor");
+      if (!name) return;
+      vendorInput.value = name.trim();
+      renderVendorFavorites(vendorInput.value);
+    }));
+    if (purchaseProductView) {
+      purchaseProductView.addEventListener("change", () => {
+        ui.purchaseProductView = purchaseProductView.value;
+        if (vendorFavorites) vendorFavorites.classList.toggle("favorite-grid", ui.purchaseProductView === "grid");
+        if (vendorInput && vendorFavorites) renderVendorFavorites(vendorInput.value.trim());
+      });
+    }
+    const favorites = document.getElementById("provider-favorites");
+    if (favorites) {
+      favorites.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-favorite-product]");
+        if (!button) return;
+        addProductLineFromFavorite(button.dataset.favoriteProduct);
+        recalc();
+      });
+    }
+    if (vendorFavorites) {
+      vendorFavorites.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-favorite-product]");
+        if (!button) return;
+        addProductLineFromFavorite(button.dataset.favoriteProduct);
+        recalc();
+      });
+    }
+    if (requiredGrid) {
+      requiredGrid.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-employee-assigned-product]");
+        if (!button) return;
+        const product = getProduct(button.dataset.employeeAssignedProduct);
+        if (!product) return;
+        addProductLineFromFavorite(product.id);
+        const rows = Array.from(document.querySelectorAll("[data-purchase-item-row]"));
+        const row = rows.find((entry) => entry.querySelector("[data-product-select]").value === product.id);
+        if (row) row.querySelector("[data-item-qty]").value = formatAmountInput(parseAmount(button.dataset.defaultQty));
+        recalc();
+      });
+    }
+    kind.addEventListener("change", updateKind);
+    updateKind();
+    document.getElementById("purchase-form").addEventListener("submit", (event) => {
+      event.preventDefault();
+      const expenseType = kind.value;
+      const provider = providerInput ? findProviderByInput(providerInput.value) : null;
+      const description = document.getElementById("purchase-description").value.trim();
+      const paymentStatus = document.getElementById("purchase-payment-status") ? document.getElementById("purchase-payment-status").value : "paid";
+      if (expenseType === "cash_movement") {
+        const amount = parseAmount(otherAmount.value);
+        const targetUser = getUser(document.getElementById("purchase-cash-transfer-target").value);
+        if (amount <= 0) return alert("Ingrese un monto mayor a cero.");
+        if (!targetUser) return alert("Seleccione la caja destino.");
+        if (targetUser.id === currentUser.id) return alert("Seleccione un usuario destino diferente.");
+        const sourceCashBoxId = getDefaultOutgoingCashBoxId();
+        const targetCashBoxId = getUserCashBoxId(targetUser.id);
+        if (amount > getCajaBalance(sourceCashBoxId)) return alert("El monto supera el balance disponible de su caja efectivo.");
+        const movement = {
+          id: nextDatedId("MOV", state.purchases),
+          date: document.getElementById("purchase-date").value || todayISO(),
+          expenseType: "cash_movement",
+          providerId: "",
+          providerName: "",
+          productId: "",
+          productName: "",
+          description: "Movimiento de caja a " + targetUser.name,
+          quantity: 1,
+          unitCost: amount,
+          items: [],
+          paymentStatus: "paid",
+          totalCost: amount,
+          cashBoxId: sourceCashBoxId,
+          targetCashBoxId,
+          targetUserId: targetUser.id,
+          targetUserName: targetUser.name,
+          notes: document.getElementById("purchase-notes").value.trim(),
+          assignedEmployeeId: currentUser.id,
+          vendorName: "",
+          recordedBy: currentUser.name,
+          userRole: currentUser.role
+        };
+        state.purchases.push(movement);
+        addCajaEntry({
+          date: movement.date,
+          type: "cash_movement_out",
+          concept: "Movimiento de caja a " + targetUser.name,
+          relatedEntityId: movement.id,
+          relatedEntityType: "cash_movement",
+          amountIngreso: 0,
+          amountEgreso: amount,
+          cashBoxId: sourceCashBoxId,
+          notes: movement.notes
+        });
+        addCajaEntry({
+          date: movement.date,
+          type: "cash_movement_in",
+          concept: "Movimiento de caja desde " + currentUser.name,
+          relatedEntityId: movement.id,
+          relatedEntityType: "cash_movement",
+          amountIngreso: amount,
+          amountEgreso: 0,
+          cashBoxId: targetCashBoxId,
+          notes: movement.notes
+        });
+        saveState();
+        render();
+        return;
+      }
+      if (expenseType === "provider_payment") {
+        if (!provider) return alert("Seleccione un proveedor.");
+        const providerPayment = processProviderPayment({
+          provider,
+          mode: document.getElementById("purchase-provider-payment-mode").value,
+          amount: parseAmount(document.getElementById("purchase-provider-payment-amount").value),
+          method: document.getElementById("purchase-provider-payment-method").value,
+          notes: document.getElementById("purchase-notes").value.trim(),
+          date: document.getElementById("purchase-date").value || todayISO(),
+          assignedEmployeeId: currentUser.role === "employee" ? currentUser.id : document.getElementById("purchase-assigned-employee").value,
+          cashBoxId: cashBoxSelect.value
+        });
+        if (!providerPayment) return;
+        saveState();
+        render();
+        return;
+      }
+      if (expenseType === "purchase" && !provider) return alert("Seleccione un proveedor.");
+      if (expenseType === "other_expense" && !description) return alert("Ingrese una descripcion para el gasto.");
+      const items = expenseType === "other_expense" ? [] : expenseType === "market_price" ? readMarketPriceItems() : readPurchaseItems(expenseType === "prepared");
+      const totalCost = expenseType === "other_expense"
+        ? parseAmount(otherAmount.value)
+        : expenseType === "market_price"
+          ? 0
+        : expenseType === "prepared"
+          ? 0
+        : items.reduce((sum, item) => sum + item.totalCost, 0);
+      if (expenseType !== "other_expense" && !items.length) return alert("Agregue al menos un producto valido.");
+      if (!["prepared", "market_price"].includes(expenseType) && totalCost <= 0) return alert("Complete el monto/costo.");
+      const purchase = {
+        id: nextDatedId("CMP", state.purchases),
+        date: document.getElementById("purchase-date").value || todayISO(),
+        expenseType,
+        providerId: provider ? provider.id : "",
+        providerName: provider ? provider.name : "",
+        productId: items.length === 1 ? items[0].productId : "",
+        productName: items.length === 1 ? items[0].productName : "",
+        description,
+        quantity: items.length === 1 ? items[0].quantity : items.length,
+        unitCost: items.length === 1 ? items[0].unitCost : 0,
+        items,
+        paymentStatus: expenseType === "purchase" ? paymentStatus : "paid",
+        totalCost,
+        cashBoxId: cashBoxSelect.value,
+        notes: document.getElementById("purchase-notes").value.trim(),
+        assignedEmployeeId: currentUser.role === "employee" ? currentUser.id : document.getElementById("purchase-assigned-employee").value,
+        vendorName: document.getElementById("purchase-vendor").value.trim(),
+        recordedBy: currentUser.name,
+        userRole: currentUser.role
+      };
+      state.purchases.push(purchase);
+      if (provider && items.length) rememberProviderProducts(provider.id, items);
+      if (purchase.vendorName && items.length) rememberVendorProducts(purchase.vendorName, items, purchase.date);
+      if (items.length && expenseType === "market_price") updateMarketPrices(items);
+      else if (items.length && expenseType !== "prepared") updateProductCostsFromPurchase(items, provider);
+      if (purchase.paymentStatus === "account_current" && provider) {
+        addProviderLedgerEntry({
+          providerId: provider.id,
+          date: purchase.date,
+          type: "deuda",
+          description: "Cuenta corriente - " + purchase.id,
+          amount: purchase.totalCost,
+          relatedEntityId: purchase.id,
+          relatedEntityType: "purchase",
+          notes: purchase.notes
+        });
+      } else if (!["prepared", "market_price"].includes(expenseType)) {
+        addCajaEntry({
+          date: purchase.date,
+          type: expenseType === "purchase" ? "purchase" : "expense",
+          concept: buildExpenseConcept(purchase),
+          relatedEntityId: purchase.id,
+          relatedEntityType: "purchase",
+          amountIngreso: 0,
+          amountEgreso: purchase.totalCost,
+          cashBoxId: purchase.cashBoxId,
+          notes: purchase.notes
+        });
+      }
+      saveState();
+      render();
+    });
+  }
+
+  function bindPurchaseTabs() {
+    document.querySelectorAll("[data-purchase-tab]").forEach((button) => {
+      button.addEventListener("click", () => {
+        ui.purchaseTab = button.dataset.purchaseTab;
+        render();
+      });
+    });
+  }
+
+  function renderPurchaseItemRow(productName) {
+    const selected = productName ? findProductByInput(productName) : null;
+    const listId = "purchase-product-list-" + nextItemId();
+    return `
+      <div class="purchase-line" data-purchase-item-row>
+        <div class="field purchase-product-combo">
+          <label>Producto</label>
+          <input data-product-filter list="${listId}" value="${escapeAttr(selected ? selected.name : "")}" placeholder="Buscar producto" autocomplete="off" />
+          <datalist id="${listId}" data-product-datalist>${purchaseProductDatalistOptions("")}</datalist>
+          <select data-product-select class="sr-select">
+            ${purchaseProductOptions(selected ? selected.id : "", selected ? selected.name : "")}
+          </select>
+        </div>
+        <div class="field">
+          <label>Cantidad</label>
+          <input data-item-qty inputmode="decimal" placeholder="0" />
+        </div>
+        <div class="field">
+          <label>Costo unitario</label>
+          <input data-item-cost inputmode="decimal" placeholder="0" />
+        </div>
+        <div class="field">
+          <label>Unid. calculo</label>
+          <input data-item-relation-units inputmode="decimal" placeholder="auto" />
+        </div>
+        <div class="field">
+          <label>Precio mercado</label>
+          <input data-item-market-price inputmode="decimal" placeholder="0" />
+        </div>
+        <div class="field">
+          <label>Subtotal</label>
+          <input data-item-total disabled value="$0" />
+        </div>
+        <button class="btn small ghost" type="button" data-remove-purchase-item title="Quitar">X</button>
+      </div>
+    `;
+  }
+
+  function purchaseProductOptions(selectedId, filter) {
+    const clean = normalizeText(filter);
+    const products = activeProducts()
+      .filter((product) => !clean || productMatchScore(product, clean) > 0 || normalizeText(product.category).includes(clean))
+      .sort((a, b) => clean ? productMatchScore(b, clean) - productMatchScore(a, clean) || a.name.localeCompare(b.name) : a.name.localeCompare(b.name));
+    const selected = selectedId ? getProduct(selectedId) : null;
+    if (selected && !products.some((product) => product.id === selected.id)) products.unshift(selected);
+    return `<option value="">Seleccione producto</option>` + products.map((product) => `<option value="${product.id}" ${product.id === selectedId ? "selected" : ""}>${escapeHtml(product.name)} - ${escapeHtml(product.unitType)}</option>`).join("");
+  }
+
+  function purchaseProductDatalistOptions(filter) {
+    const clean = normalizeText(filter);
+    return activeProducts()
+      .filter((product) => !clean || productMatchScore(product, clean) > 0 || normalizeText(product.category).includes(clean))
+      .sort((a, b) => clean ? productMatchScore(b, clean) - productMatchScore(a, clean) || a.name.localeCompare(b.name) : a.name.localeCompare(b.name))
+      .slice(0, 80)
+      .map((product) => `<option value="${escapeAttr(product.name)}"></option>`)
+      .join("");
+  }
+
+  function productMatchScore(product, cleanFilter) {
+    const name = normalizeText(product.name);
+    if (name === cleanFilter) return 100;
+    if (name.startsWith(cleanFilter)) return 80;
+    if (name.includes(cleanFilter)) return 60;
+    return cleanFilter.split(" ").reduce((sum, word) => sum + (name.includes(word) ? 10 : 0), 0);
+  }
+
+  function updatePurchaseProductSelect(row) {
+    if (!row) return;
+    const filter = row.querySelector("[data-product-filter]").value;
+    const select = row.querySelector("[data-product-select]");
+    const datalist = row.querySelector("[data-product-datalist]");
+    const previous = select.value;
+    const clean = normalizeText(filter);
+    const matches = activeProducts()
+      .filter((product) => !clean || productMatchScore(product, clean) > 0 || normalizeText(product.category).includes(clean))
+      .sort((a, b) => productMatchScore(b, clean) - productMatchScore(a, clean) || a.name.localeCompare(b.name));
+    if (datalist) datalist.innerHTML = purchaseProductDatalistOptions(filter);
+    select.innerHTML = purchaseProductOptions(previous, filter);
+    const exact = matches.find((product) => normalizeText(product.name) === clean || product.id.toLowerCase() === String(filter || "").trim().toLowerCase());
+    if (exact) {
+      select.value = exact.id;
+    } else if (previous && Array.from(select.options).some((option) => option.value === previous)) {
+      select.value = previous;
+    } else if (matches.length === 1) {
+      select.value = matches[0].id;
+    } else {
+      select.value = "";
+    }
+  }
+
+  function renderProviderFavorites(provider) {
+    const target = document.getElementById("provider-favorites");
+    if (!target) return;
+    const products = provider ? getProviderFavoriteProducts(provider.id) : [];
+    target.innerHTML = products.length
+      ? products.map((product) => `<button class="btn small ghost" type="button" data-favorite-product="${escapeAttr(product.id)}">${escapeHtml(product.name)}</button>`).join("")
+      : `<span class="muted">Todavia no hay favoritos. Se guardan automaticamente al registrar compras.</span>`;
+  }
+
+  function renderVendorFavorites(vendorName) {
+    const target = document.getElementById("vendor-favorites");
+    if (!target) return;
+    const favorites = getVendorFavoriteProducts(vendorName);
+    const favoriteIds = new Set(favorites.map((product) => product.id));
+    if (ui.purchaseProductView === "grid") {
+      const rest = activeProducts().filter((product) => !favoriteIds.has(product.id)).sort((a, b) => a.name.localeCompare(b.name));
+      const products = [...favorites.map((product) => ({ product, favorite: true })), ...rest.map((product) => ({ product, favorite: false }))];
+      target.innerHTML = products.map(({ product, favorite }) => `
+        <button class="assigned-product-card ${favorite ? "favorite" : ""}" type="button" data-favorite-product="${escapeAttr(product.id)}">
+          <span class="product-name"><img class="product-thumb" src="${productThumb(product)}" alt="" />${escapeHtml(product.name)}</span>
+          <strong>${favorite ? "Favorito" : escapeHtml(product.unitType)}</strong>
+        </button>
+      `).join("") || `<span class="muted">No hay productos activos.</span>`;
+      return;
+    }
+    target.innerHTML = favorites.length
+      ? favorites.map((product) => `<button class="btn small ghost" type="button" data-favorite-product="${escapeAttr(product.id)}">${escapeHtml(product.name)}</button>`).join("")
+      : `<span class="muted">Todavia no hay favoritos para este vendedor.</span>`;
+  }
+
+  function addProductLineFromFavorite(productId) {
+    const container = document.getElementById("purchase-items");
+    const product = getProduct(productId) || findProductByInput(productId);
+    if (!product) return;
+    const firstEmpty = Array.from(container.querySelectorAll("[data-purchase-item-row]")).find((row) => !row.querySelector("[data-product-select]").value);
+    if (firstEmpty) {
+      firstEmpty.querySelector("[data-product-filter]").value = product.name;
+      firstEmpty.querySelector("[data-product-select]").innerHTML = purchaseProductOptions(product.id, product.name);
+      firstEmpty.querySelector("[data-product-select]").value = product.id;
+      firstEmpty.querySelector("[data-item-qty]").focus();
+      return;
+    }
+    container.insertAdjacentHTML("beforeend", renderPurchaseItemRow(product.id));
+  }
+
+  function readPurchaseItems(allowZeroCost) {
+    const items = [];
+    let invalidProduct = "";
+    document.querySelectorAll("[data-purchase-item-row]").forEach((row) => {
+      updatePurchaseProductSelect(row);
+      const rawProduct = row.querySelector("[data-product-select]").value.trim();
+      const quantity = parseAmount(row.querySelector("[data-item-qty]").value);
+      const unitCost = parseAmount(row.querySelector("[data-item-cost]").value);
+      const relationUnits = parseAmount(row.querySelector("[data-item-relation-units]").value);
+      const marketPrice = parseAmount(row.querySelector("[data-item-market-price]").value);
+      if (!rawProduct && quantity <= 0 && unitCost <= 0) return;
+      const product = findProductByInput(rawProduct);
+      if (!product) {
+        invalidProduct = row.querySelector("[data-product-filter]").value.trim() || "producto sin nombre";
+        return;
+      }
+      if (quantity <= 0 || (!allowZeroCost && unitCost <= 0)) return;
+      items.push({
+        productId: product.id,
+        productName: product.name,
+        quantity,
+        unitCost,
+        relationUnits,
+        marketPrice,
+        totalCost: quantity * unitCost
+      });
+    });
+    if (invalidProduct) {
+      alert("Producto no encontrado: " + invalidProduct);
+      return [];
+    }
+    return items;
+  }
+
+  function readMarketPriceItems() {
+    const items = [];
+    let invalidProduct = "";
+    document.querySelectorAll("[data-purchase-item-row]").forEach((row) => {
+      updatePurchaseProductSelect(row);
+      const productValue = row.querySelector("[data-product-select]").value.trim();
+      const product = findProductByInput(productValue) || findProductByInput(row.querySelector("[data-product-filter]").value);
+      const marketPrice = parseAmount(row.querySelector("[data-item-market-price]").value);
+      if (!product && !row.querySelector("[data-product-filter]").value.trim() && marketPrice <= 0) return;
+      if (!product) {
+        invalidProduct = row.querySelector("[data-product-filter]").value.trim() || "producto sin nombre";
+        return;
+      }
+      if (marketPrice <= 0) return;
+      items.push({
+        productId: product.id,
+        productName: product.name,
+        quantity: 0,
+        unitCost: 0,
+        relationUnits: 0,
+        marketPrice,
+        totalCost: 0
+      });
+    });
+    if (invalidProduct) {
+      alert("Producto no encontrado: " + invalidProduct);
+      return [];
+    }
+    return items;
+  }
+
+  function bindProviderPaymentTab() {
+    const providerInput = document.getElementById("provider-payment-provider");
+    const balanceInput = document.getElementById("provider-current-balance");
+    const mode = document.getElementById("provider-payment-mode");
+    const amountInput = document.getElementById("provider-payment-amount");
+    const updateAmount = () => {
+      const provider = findProviderByInput(providerInput.value);
+      const balance = provider ? getProviderBalance(provider.id) : 0;
+      balanceInput.value = formatMoney(balance);
+      if (mode.value === "full") amountInput.value = formatAmountInput(Math.max(balance, 0));
+    };
+    providerInput.addEventListener("input", updateAmount);
+    providerInput.addEventListener("change", updateAmount);
+    mode.addEventListener("change", updateAmount);
+    const providerMethodSelect = document.getElementById("provider-payment-method");
+    const providerCashBoxSelect = document.getElementById("provider-payment-cash-box");
+    if (providerMethodSelect && providerCashBoxSelect) providerMethodSelect.addEventListener("change", () => {
+      if (["transferencia", "cheque"].includes(providerMethodSelect.value)) {
+        const hasBank = Array.from(providerCashBoxSelect.options).some((option) => option.value === "cash-banco");
+        if (hasBank) providerCashBoxSelect.value = "cash-banco";
+      }
+    });
+    updateAmount();
+    document.getElementById("provider-payment-form").addEventListener("submit", (event) => {
+      event.preventDefault();
+      const provider = findProviderByInput(providerInput.value);
+      if (!provider) return alert("Seleccione un proveedor valido.");
+      const balance = getProviderBalance(provider.id);
+      const fullPayment = mode.value === "full";
+      const amount = fullPayment ? balance : parseAmount(amountInput.value);
+      if (balance <= 0) return alert("Este proveedor no tiene saldo pendiente.");
+      if (amount <= 0) return alert("Ingrese un monto mayor a cero.");
+      if (amount > balance) return alert("El pago no puede superar el saldo del proveedor.");
+      const payment = {
+        id: nextDatedId("PPAY", state.providerPayments),
+        date: todayISO(),
+        timestamp: new Date().toISOString(),
+        providerId: provider.id,
+        amount,
+        fullPayment,
+        method: document.getElementById("provider-payment-method").value,
+        cashBoxId: document.getElementById("provider-payment-cash-box").value,
+        notes: document.getElementById("provider-payment-notes").value.trim(),
+        recordedBy: currentUser.name,
+        userRole: currentUser.role
+      };
+      state.providerPayments.push(payment);
+      addProviderLedgerEntry({
+        providerId: provider.id,
+        date: payment.date,
+        type: "pago",
+        description: (fullPayment ? "Pago completo" : "Pago parcial") + " - " + provider.name,
+        amount: -amount,
+        relatedEntityId: payment.id,
+        relatedEntityType: "provider_payment",
+        paymentMethod: payment.method,
+        notes: payment.notes
+      });
+      addCajaEntry({
+        date: payment.date,
+        type: "provider_payment",
+        concept: "Pago proveedor - " + provider.name,
+        relatedEntityId: payment.id,
+        relatedEntityType: "provider_payment",
+        amountIngreso: 0,
+        amountEgreso: amount,
+        paymentMethod: payment.method,
+        cashBoxId: payment.cashBoxId,
+        notes: payment.notes
+      });
+      saveState();
+      render();
+    });
+  }
+
+  function renderDividePurchases() {
+    const assignees = activeAssignees();
+    const assignables = getDivideAssignables();
+    const rows = assignables.map(({ order, item }) => {
+        const client = getClient(order.clientId);
+        const product = getProduct(item.productId);
+        const assignedValue = getEffectiveItemAssigneeValue(item);
+        const assignee = getAssigneeByValue(assignedValue);
+        return `
+          <tr>
+            <td>${escapeHtml(order.id)}<br><span class="muted">${escapeHtml(client ? client.name : order.clientId)}</span></td>
+            <td>${escapeHtml(item.productName)}<br>${item.note ? `<span class="note-text">${escapeHtml(item.note)}</span>` : `<span class="muted">Sin nota</span>`}</td>
+            <td class="num">${formatNumber(item.quantity)} ${escapeHtml(item.unitType)}</td>
+          <td>${assignee ? `<span class="pill green">Asignado a ${escapeHtml(assignee.name)}</span>` : `<span class="pill amber">Sin asignar</span>`}</td>
+          <td>
+            <select data-assign-product="${item.productId}">
+              <option value="">Sin asignar</option>
+              ${assignees.map((entry) => `<option value="${entry.value}" ${assignedValue === entry.value ? "selected" : ""}>${escapeHtml(entry.label)}</option>`).join("")}
+            </select>
+            ${!product ? `<span class="muted">Producto no encontrado</span>` : ""}
+          </td>
+          <td><button class="btn small ghost" data-log-item-expense="${order.id}|${item.id}">Gasto</button></td>
+        </tr>
+      `;
+      }).join("");
+    afterRender.push(() => {
+      document.querySelectorAll("[data-assign-product]").forEach((select) => {
+        select.addEventListener("change", () => {
+          const product = getProduct(select.dataset.assignProduct);
+          if (!product) return;
+          setProductAssignee(product, select.value);
+          saveState();
+          render();
+        });
+      });
+      const assigneeView = document.getElementById("divide-assignee-view");
+      if (assigneeView) assigneeView.addEventListener("change", () => {
+        ui.divideAssignee = assigneeView.value;
+        render();
+      });
+      document.querySelectorAll("[data-log-item-expense]").forEach((button) => {
+        button.addEventListener("click", () => openItemExpenseForm(button.dataset.logItemExpense));
+      });
+      document.querySelectorAll("[data-copy-divide]").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const text = buildDivideClipboardText(button.dataset.copyDivide || ui.divideAssignee || "all");
+          try {
+            await navigator.clipboard.writeText(text);
+            alert("Texto copiado para WhatsApp.");
+          } catch (error) {
+            prompt("Copie este texto para WhatsApp", text);
+          }
+        });
+      });
+      document.querySelectorAll("[data-print-divide]").forEach((button) => {
+        button.addEventListener("click", () => printDivideDocument(button.dataset.printDivide || "all"));
+      });
+    });
+    return pageShell(
+      "Dividir Compras",
+      "Agrupacion diaria por producto y por cliente segun la asignacion cargada en Productos.",
+      `<button class="btn primary" data-add-provider>Agregar proveedor</button>
+       <button class="btn ghost" data-print-divide="all">PDF todos</button>
+       <button class="btn ghost" data-print-divide="${escapeAttr(ui.divideAssignee || "all")}">PDF seleccionado</button>
+       <button class="btn ghost" data-copy-divide="${escapeAttr(ui.divideAssignee || "all")}">Copiar WhatsApp</button>`,
+      `
+      <div class="panel" style="margin-bottom:14px">
+        <div class="form-grid">
+          <div class="field span-2">
+            <label>Empleado o proveedor</label>
+            <select id="divide-assignee-view">
+              <option value="all" ${ui.divideAssignee === "all" ? "selected" : ""}>Todos</option>
+              ${assignees.map((entry) => `<option value="${entry.value}" ${ui.divideAssignee === entry.value ? "selected" : ""}>${escapeHtml(entry.label)}</option>`).join("")}
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="grid two">
+        <div class="panel">
+          <h2 class="page-title" style="font-size:18px">Agrupado por producto</h2>
+          <div class="assigned-group-list">${renderDivideProductGroups(assignables, ui.divideAssignee || "all")}</div>
+        </div>
+        <div class="panel">
+          <h2 class="page-title" style="font-size:18px">Agrupado por cliente</h2>
+          <div class="assigned-group-list">${renderDivideClientGroups(assignables, ui.divideAssignee || "all")}</div>
+        </div>
+      </div>
+      <div class="panel" style="margin-top:14px">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Pedido</th><th>Producto y nota</th><th>Cantidad</th><th>Estado</th><th>Asignacion del producto</th><th>Gasto</th></tr></thead>
+            <tbody>${rows || emptyRow(6, "No hay items de pedidos de hoy.")}</tbody>
+          </table>
+        </div>
+      </div>
+      `,
+      "dividir"
+    );
+  }
+
+  function getDivideAssignables() {
+    return state.orders
+      .filter((order) => order.date === todayISO() && !["cancelado", "anulado"].includes(order.status))
+      .flatMap((order) => order.items.map((item) => ({ order, item })));
+  }
+
+  function filterDivideAssignables(assignables, assigneeValue) {
+    if (!assigneeValue || assigneeValue === "all") return assignables;
+    return assignables.filter(({ item }) => getEffectiveItemAssigneeValue(item) === assigneeValue);
+  }
+
+  function renderDivideProductGroups(assignables, assigneeValue) {
+    const filtered = filterDivideAssignables(assignables, assigneeValue);
+    if (!filtered.length) return `<div class="empty compact">Sin productos asignados para esta vista.</div>`;
+    const groups = {};
+    filtered.forEach(({ order, item }) => {
+      const assigned = getAssigneeByValue(getEffectiveItemAssigneeValue(item));
+      const key = item.productId + "|" + item.productName + "|" + item.unitType + "|" + (assigned ? assigned.value : "");
+      if (!groups[key]) {
+        groups[key] = { productName: item.productName, unitType: item.unitType, assigneeName: assigned ? assigned.name : "Sin asignar", clients: {} };
+      }
+      groups[key].clients[order.clientId] = (groups[key].clients[order.clientId] || 0) + Number(item.quantity || 0);
+    });
+    return Object.values(groups).map((group) => `
+      <div class="assigned-group">
+        <strong>${escapeHtml(group.productName)}${assigneeValue === "all" ? " - " + escapeHtml(group.assigneeName) : ""}</strong>
+        <span>${Object.keys(group.clients).sort(compareClientIdStrings).map((clientId) => `${escapeHtml(clientId)}) ${formatNumber(group.clients[clientId])}`).join(", ")}</span>
+      </div>
+    `).join("");
+  }
+
+  function renderDivideClientGroups(assignables, assigneeValue) {
+    const filtered = filterDivideAssignables(assignables, assigneeValue);
+    if (!filtered.length) return `<div class="empty compact">Sin productos asignados para esta vista.</div>`;
+    const groups = {};
+    filtered.forEach(({ order, item }) => {
+      const client = getClient(order.clientId);
+      if (!groups[order.clientId]) groups[order.clientId] = { clientName: client ? client.name : order.clientId, items: [] };
+      const assigned = getAssigneeByValue(getEffectiveItemAssigneeValue(item));
+      groups[order.clientId].items.push({ ...item, assigneeName: assigned ? assigned.name : "Sin asignar" });
+    });
+    return Object.keys(groups).sort(compareClientIdStrings).map((clientId) => {
+      const group = groups[clientId];
+      return `
+        <div class="assigned-group">
+          <strong>Pedido del cliente ${escapeHtml(clientId)})</strong>
+          <span>${escapeHtml(group.clientName)}</span>
+          <div>${group.items.map((item) => `${formatNumber(item.quantity)} ${escapeHtml(item.unitType)} ${escapeHtml(item.productName)}${assigneeValue === "all" ? " - " + escapeHtml(item.assigneeName) : ""}${item.note ? " (" + escapeHtml(item.note) + ")" : ""}`).join("<br>")}</div>
+          <div class="divide-client-spacer" aria-hidden="true">&nbsp;</div>
+        </div>
+      `;
+    }).join("");
+  }
+
+  function buildDivideClipboardText(assigneeValue) {
+    const assignables = filterDivideAssignables(getDivideAssignables(), assigneeValue || "all");
+    const assignee = getAssigneeByValue(assigneeValue);
+    const title = "Dividir compras - " + (assignee ? assignee.label : "Todos") + " - " + formatDate(todayISO());
+    const byProduct = {};
+    const byClient = {};
+    assignables.forEach(({ order, item }) => {
+      const assigned = getAssigneeByValue(getEffectiveItemAssigneeValue(item));
+      const productKey = item.productName + "|" + item.unitType + "|" + (assigned ? assigned.name : "Sin asignar");
+      if (!byProduct[productKey]) byProduct[productKey] = { name: item.productName, assigneeName: assigned ? assigned.name : "Sin asignar", clients: {} };
+      byProduct[productKey].clients[order.clientId] = (byProduct[productKey].clients[order.clientId] || 0) + Number(item.quantity || 0);
+      if (!byClient[order.clientId]) byClient[order.clientId] = [];
+      byClient[order.clientId].push(`${formatNumber(item.quantity)} ${item.unitType} ${item.productName}${assigneeValue === "all" ? " - " + (assigned ? assigned.name : "Sin asignar") : ""}`);
+    });
+    const productText = Object.values(byProduct).map((group) => {
+      const clients = Object.keys(group.clients).sort(compareClientIdStrings).map((clientId) => `${clientId}) ${formatNumber(group.clients[clientId])}`).join(", ");
+      return `${group.name}${assigneeValue === "all" ? " - " + group.assigneeName : ""}: ${clients}`;
+    }).join("\n");
+    const clientText = Object.keys(byClient).sort(compareClientIdStrings).map((clientId) => `${clientId})\n${byClient[clientId].join("\n")}`).join("\n\n");
+    return `${title}\n\nAgrupado por producto\n${productText || "Sin productos"}\n\nAgrupado por cliente\n${clientText || "Sin productos"}`;
+  }
+
+  function printDivideDocument(id) {
+    const assignables = getDivideAssignables();
+    const assignee = getAssigneeByValue(id);
+    const body = `
+      <div class="print-compact">
+        <h1 style="margin:0 0 2px;font-size:18px">${BUSINESS_NAME}</h1>
+        <h2 style="margin:0 0 2px;font-size:14px">${escapeHtml(tplGet("dividir", "titulo", "Dividir compras"))} - ${escapeHtml(assignee ? assignee.label : "Todos")}</h2>
+        <p style="margin:0 0 8px;font-size:11px">Fecha: ${formatDate(todayISO())}</p>
+        <h3 style="margin:6px 0 4px;font-size:12px">Agrupado por producto</h3>
+        ${renderDivideProductGroups(assignables, id || "all")}
+        <h3 style="margin:10px 0 4px;font-size:12px">Agrupado por cliente</h3>
+        <div class="divide-two-col">${renderDivideClientGroups(assignables, id || "all")}</div>
+      </div>
+    `;
+    const title = !id || id === "all"
+      ? fileDate(todayISO()) + " Compras"
+      : fileDate(todayISO()) + " Compras " + (assignee ? assignee.label : id);
+    printHtmlDocument(title, body);
+  }
+
+  function compareClientIdStrings(a, b) {
+    const an = Number(a);
+    const bn = Number(b);
+    if (Number.isFinite(an) && Number.isFinite(bn) && an !== bn) return an - bn;
+    return String(a).localeCompare(String(b));
+  }
+
+  function renderDividePrint(id) {
+    const assignables = getDivideAssignables();
+    const assignee = getAssigneeByValue(id);
+    return `
+      <section class="print-page">
+        <div class="print-controls no-print">
+          <button class="btn ghost" data-route="dividir">&lt; Volver</button>
+          <button class="btn primary" data-print>Exportar PDF / Imprimir</button>
+        </div>
+        <article class="print-sheet">
+          <div class="print-title">
+            <div><h1>${BUSINESS_NAME.toUpperCase()}</h1><strong>Productos asignados</strong></div>
+            <div>Fecha: ${formatDate(todayISO())}<br>${escapeHtml(assignee ? assignee.label : "Todos")}</div>
+          </div>
+          <h2 style="font-size:16px">Agrupado por producto</h2>
+          <div class="assigned-group-list print-assigned">${renderDivideProductGroups(assignables, id || "all")}</div>
+          <h2 style="font-size:16px">Agrupado por cliente</h2>
+          <div class="assigned-group-list print-assigned">${renderDivideClientGroups(assignables, id || "all")}</div>
+        </article>
+      </section>
+    `;
+  }
+
+  function renderVehicles() {
+    const date = ui.vehicleDate || todayISO();
+    const canManageVehicles = ["manager", "admin"].includes(currentUser.role);
+    const columns = activeVehicles().map((vehicle) => {
+      const totals = getVehicleTotals(vehicle.id, date);
+      const productTotals = Object.values(totals.products).sort((a, b) => a.productName.localeCompare(b.productName));
+      return `
+        <section class="vehicle-column">
+          <div class="vehicle-head">
+            <div>
+              <strong>${escapeHtml(vehicle.name)}</strong>
+              <div class="muted">${escapeHtml(vehicle.type)} ${vehicle.driverName ? "- " + escapeHtml(vehicle.driverName) : ""}</div>
+            </div>
+            <div class="page-actions">
+              <button class="btn small ghost" data-print-vehicle="${vehicle.id}">Imprimir</button>
+              ${canManageVehicles ? `<button class="btn small ghost" data-edit-vehicle="${vehicle.id}">Editar</button><button class="btn small danger" data-delete-vehicle="${vehicle.id}">Borrar</button>` : ""}
+            </div>
+          </div>
+          <div class="vehicle-body">
+            <div class="metric-note">Pedidos: ${totals.orders.length} | Items: ${totals.itemCount} | Valor: ${formatMoney(totals.totalValue)}</div>
+            ${totals.orders.map((order) => renderVehicleOrderCard(order)).join("") || `<div class="empty">Sin pedidos</div>`}
+            <div class="panel" style="box-shadow:none;padding:10px">
+              <strong>Totales de carga</strong>
+              <div class="totals-list">
+                ${productTotals.map((item) => `<div class="total-line"><span>${escapeHtml(item.productName)}</span><strong>${formatNumber(item.quantity)} ${escapeHtml(item.unitType)}</strong></div>`).join("") || `<span class="muted">Sin productos</span>`}
+              </div>
+            </div>
+          </div>
+        </section>
+      `;
+    }).join("");
+    afterRender.push(bindVehicles);
+    return pageShell(
+      "Vehiculos",
+      "Carga por vehiculo con suma consolidada de productos.",
+      `<button class="btn ghost" data-print-vehicle="all">Imprimir todos los vehiculos</button>
+       <button class="btn ghost" data-print-vehicle="flat">Imprimir sin dividir</button>
+       ${canManageVehicles ? `<button class="btn primary" data-add-vehicle>Agregar vehiculo</button>` : ""}`,
+      `
+      <div class="panel" style="margin-bottom:14px">
+        <div class="form-grid">
+          <div class="field">
+            <label>Fecha</label>
+            <input type="date" id="vehicle-date" value="${date}" />
+          </div>
+        </div>
+      </div>
+      <div class="vehicle-board">${columns}</div>
+      `,
+      "vehiculos"
+    );
+  }
+
+  function renderVehicleOrderCard(order) {
+    const client = getClient(order.clientId);
+    return `
+      <article class="order-card">
+        <div class="order-card-title">${escapeHtml(client ? client.name : order.clientId)}</div>
+        <div class="muted">${escapeHtml(order.id)} - ${order.items.length} items - ${formatMoney(order.totalAmount)}</div>
+        ${order.notes ? `<div class="note-text" style="margin-top:6px">${escapeHtml(order.notes)}</div>` : ""}
+        <div class="field" style="margin-top:8px">
+          <label>Mover a vehiculo</label>
+          <select data-move-order="${order.id}">
+            ${activeVehicles().map((vehicle) => `<option value="${vehicle.id}" ${order.deliveryVehicleId === vehicle.id ? "selected" : ""}>${escapeHtml(vehicle.name)}</option>`).join("")}
+          </select>
+        </div>
+      </article>
+    `;
+  }
+
+  function bindVehicles() {
+    const dateInput = document.getElementById("vehicle-date");
+    if (dateInput) dateInput.addEventListener("change", () => {
+      ui.vehicleDate = dateInput.value || todayISO();
+      render();
+    });
+    document.querySelectorAll("[data-move-order]").forEach((select) => {
+      select.addEventListener("change", () => {
+        const order = getOrder(select.dataset.moveOrder);
+        if (!order) return;
+        order.deliveryVehicleId = select.value;
+        saveState();
+        render();
+      });
+    });
+    document.querySelectorAll("[data-edit-vehicle]").forEach((button) => {
+      button.addEventListener("click", () => openVehicleForm(button.dataset.editVehicle));
+    });
+    document.querySelectorAll("[data-delete-vehicle]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const vehicle = getVehicle(button.dataset.deleteVehicle);
+        if (!vehicle) return;
+        if (!confirm("Borrar/desactivar vehiculo " + vehicle.name + "?")) return;
+        vehicle.isActive = false;
+        saveState();
+        render();
+      });
+    });
+    document.querySelectorAll("[data-add-vehicle]").forEach((button) => {
+      button.addEventListener("click", () => openVehicleForm());
+    });
+    document.querySelectorAll("[data-print-vehicle]").forEach((button) => {
+      button.addEventListener("click", () => printVehicleDirect(button.dataset.printVehicle));
+    });
+  }
+
+  function printVehicleDirect(vehicleId) {
+    const date = ui.vehicleDate || todayISO();
+    const html = stripPrintControls(vehicleId === "flat" ? renderVehicleFlatPrint(date) : renderVehiclePrint(vehicleId));
+    let title;
+    if (vehicleId === "all") {
+      title = fileDate(date) + " Vehiculos Todos";
+    } else if (vehicleId === "flat") {
+      title = fileDate(date) + " Pedidos";
+    } else {
+      const vehicle = getVehicle(vehicleId);
+      title = fileDate(date) + " Pedidos " + (vehicle ? vehicle.name : vehicleId) + (vehicle && vehicle.driverName ? " " + vehicle.driverName : "");
+    }
+    printHtmlDocument(title, html);
+  }
+
+  function stripPrintControls(html) {
+    return String(html || "").replace(/<div class="print-controls no-print">[\s\S]*?<\/div>/g, "");
+  }
+
+  function renderVehiclePrint(vehicleId) {
+    if (vehicleId === "flat") return renderVehicleFlatPrint(ui.vehicleDate || todayISO());
+    const ids = vehicleId === "all" ? activeVehicles().map((vehicle) => vehicle.id) : [vehicleId];
+    const sheets = ids.map((id) => renderVehiclePrintSheet(id, ui.vehicleDate || todayISO())).join("");
+    const allHeader = vehicleId === "all" ? `
+      <div class="print-title">
+        <div><h1>${BUSINESS_NAME.toUpperCase()}</h1><strong>Todos los vehiculos</strong></div>
+        <div>Fecha: ${formatDate(ui.vehicleDate || todayISO())}</div>
+      </div>` : "";
+    return `
+      <section class="print-page">
+        <div class="print-controls no-print">
+          <button class="btn ghost" data-route="vehiculos">&lt; Volver</button>
+          <button class="btn primary" data-print>Imprimir</button>
+        </div>
+        ${allHeader}
+        ${sheets}
+      </section>
+    `;
+  }
+
+  function renderVehicleFlatPrint(date) {
+    const orders = ordersByDate(date);
+    const totals = {};
+    orders.forEach((order) => {
+      order.items.forEach((item) => {
+        const product = getProduct(item.productId);
+        if (product && product.showInVehicleTotals === false) return;
+        const key = item.productId + "|" + item.unitType;
+        if (!totals[key]) totals[key] = { productName: item.productName, unitType: item.unitType, quantity: 0 };
+        totals[key].quantity += Number(item.quantity || 0);
+      });
+    });
+    const productTotals = Object.values(totals).sort((a, b) => a.productName.localeCompare(b.productName));
+    return `
+      <section class="print-page">
+        <div class="print-controls no-print">
+          <button class="btn ghost" data-route="vehiculos">&lt; Volver</button>
+          <button class="btn primary" data-print>Imprimir</button>
+        </div>
+        <article class="print-sheet print-compact">
+          <div class="print-title">
+            <div><h1>${BUSINESS_NAME.toUpperCase()}</h1><strong>${escapeHtml(tplGet("vehiculos", "tituloSinDividir", "Pedidos sin dividir"))}</strong></div>
+            <div>Fecha: ${formatDate(date)}</div>
+          </div>
+          <table class="print-table borderless-table">
+            <thead><tr><th>Cliente</th><th>Pedido</th><th>Vehiculo</th><th>Productos</th></tr></thead>
+            <tbody>${orders.map((order) => {
+              const client = getClient(order.clientId);
+              return `<tr><td>${escapeHtml(client ? client.name : order.clientId)}<br>${escapeHtml(order.clientId)}</td><td>${escapeHtml(order.id)}</td><td>${escapeHtml(getVehicleName(order.deliveryVehicleId))}</td><td>${order.items.map((item) => `${escapeHtml(item.productName)}: ${formatNumber(item.quantity)} ${escapeHtml(item.unitType)}${item.note ? " (" + escapeHtml(item.note) + ")" : ""}`).join("<br>")}</td></tr>`;
+            }).join("") || `<tr><td colspan="4">Sin pedidos</td></tr>`}</tbody>
+          </table>
+          <h2 style="font-size:14px;margin:8px 0 4px">Sumatoria total de productos</h2>
+          ${renderProductSumColumns(productTotals)}
+        </article>
+      </section>
+    `;
+  }
+
+  function renderVehiclePrintSheet(vehicleId, date) {
+    const vehicle = getVehicle(vehicleId);
+    const totals = getVehicleTotals(vehicleId, date);
+    const productTotals = Object.values(totals.products).sort((a, b) => a.productName.localeCompare(b.productName));
+    return `
+      <article class="print-sheet print-compact">
+        <div class="print-title">
+          <div>
+            <h1>${BUSINESS_NAME.toUpperCase()}</h1>
+            <strong>${escapeHtml(tplGet("vehiculos", "titulo", "Planilla de vehiculo"))}: ${escapeHtml(vehicle ? vehicle.name : vehicleId)}</strong>
+          </div>
+          <div>
+            <div>Fecha: ${formatDate(date)}</div>
+            <div>Conductor: ${escapeHtml(vehicle && vehicle.driverName ? vehicle.driverName : "-")}</div>
+          </div>
+        </div>
+        <table class="print-table borderless-table">
+          <thead><tr><th>Cliente</th><th>Pedido</th><th>Productos</th><th>Total</th></tr></thead>
+          <tbody>
+            ${totals.orders.map((order) => {
+              const client = getClient(order.clientId);
+              return `<tr>
+                <td>${escapeHtml(client ? client.name : order.clientId)}<br>${escapeHtml(client ? client.address : "")}</td>
+                <td>${escapeHtml(order.id)}${order.notes ? `<br>Nota: ${escapeHtml(order.notes)}` : ""}</td>
+                <td>${order.items.map((item) => `${escapeHtml(item.productName)}: ${formatNumber(item.quantity)} ${escapeHtml(item.unitType)}${item.note ? " (" + escapeHtml(item.note) + ")" : ""}`).join("<br>")}</td>
+                <td class="num">${formatMoney(order.totalAmount)}</td>
+              </tr>`;
+            }).join("") || `<tr><td colspan="4">Sin pedidos</td></tr>`}
+          </tbody>
+        </table>
+        <h2 style="font-size:14px;margin:8px 0 4px">Suma de productos</h2>
+        ${renderProductSumColumns(productTotals)}
+      </article>
+    `;
+  }
+
+  function renderProductSumColumns(productTotals) {
+    if (!productTotals.length) return `<p class="muted" style="font-size:10px">Sin productos</p>`;
+    const lines = productTotals.map((item) => `
+      <div class="product-sum-line"><span>${escapeHtml(item.productName)}</span><strong>${formatNumber(item.quantity)} ${escapeHtml(item.unitType)}</strong></div>
+    `).join("");
+    return `<div class="product-sum-grid">${lines}</div>`;
+  }
+
+  function renderRemitos() {
+    const todaysNotes = getTodaysProductNotes();
+    const missingPurchases = getProductPurchaseShortages(todayISO());
+    const from = ui.remitosFrom || todayISO();
+    const to = ui.remitosTo || from;
+    const clientOptions = activeClients().sort(compareClientIds);
+    if (ui.remitosClientId !== "all" && !clientOptions.some((client) => client.id === ui.remitosClientId)) ui.remitosClientId = "all";
+    const linkedClientIds = ui.remitosClientId === "all" ? [] : getLinkedClientIdsForClient(ui.remitosClientId);
+    if (ui.remitosLinkedClientId !== "all" && !linkedClientIds.includes(ui.remitosLinkedClientId)) ui.remitosLinkedClientId = "all";
+    const remitoClientIds = ui.remitosClientId === "all"
+      ? clientOptions.map((client) => client.id)
+      : ui.remitosLinkedClientId === "all" ? linkedClientIds : [ui.remitosLinkedClientId];
+    const clientOrderRows = state.orders
+      .filter((order) => remitoClientIds.includes(order.clientId) && !["cancelado", "anulado"].includes(order.status) && isDateInRange(order.date, from, to))
+      .sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.createdAt || "").localeCompare(String(a.createdAt || "")))
+      .map((order) => renderRemitosClientOrderRow(order))
+      .join("");
+    afterRender.push(() => {
+      const clientSelect = document.getElementById("remitos-client-filter");
+      const linkedSelect = document.getElementById("remitos-linked-client-filter");
+      const fromInput = document.getElementById("remitos-from");
+      const toInput = document.getElementById("remitos-to");
+      if (clientSelect) clientSelect.addEventListener("change", () => {
+        ui.remitosClientId = clientSelect.value;
+        ui.remitosLinkedClientId = "all";
+        render();
+      });
+      if (linkedSelect) linkedSelect.addEventListener("change", () => {
+        ui.remitosLinkedClientId = linkedSelect.value;
+        render();
+      });
+      if (fromInput) fromInput.addEventListener("change", () => {
+        ui.remitosFrom = fromInput.value || todayISO();
+        if (!ui.remitosTo || ui.remitosTo < ui.remitosFrom) ui.remitosTo = ui.remitosFrom;
+        render();
+      });
+      if (toInput) toInput.addEventListener("change", () => {
+        ui.remitosTo = toInput.value || ui.remitosFrom || todayISO();
+        if (ui.remitosFrom && ui.remitosTo < ui.remitosFrom) ui.remitosFrom = ui.remitosTo;
+        render();
+      });
+      document.querySelectorAll("[data-remitos-date-preset]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const date = button.dataset.remitosDatePreset === "yesterday" ? addDaysISO(todayISO(), -1) : todayISO();
+          ui.remitosFrom = date;
+          ui.remitosTo = date;
+          render();
+        });
+      });
+      document.querySelectorAll("[data-print-order-remito]").forEach((button) => {
+        button.addEventListener("click", () => printOrderRemitoDirect(button.dataset.printOrderRemito));
+      });
+      document.querySelectorAll("[data-view-remito]").forEach((button) => {
+        button.addEventListener("click", () => openOperationalRemitoModal(button.dataset.viewRemito));
+      });
+      document.querySelectorAll("[data-clear-today-notes]").forEach((button) => {
+        button.addEventListener("click", () => {
+          if (!confirm("Borrar todas las notas de productos de pedidos de hoy?")) return;
+          ordersByDate(todayISO()).forEach((order) => order.items.forEach((item) => {
+            item.note = "";
+          }));
+          saveState();
+          render();
+        });
+      });
+      document.querySelectorAll("[data-export-today-remitos]").forEach((button) => {
+        button.addEventListener("click", () => {
+          if (todaysNotes.length && !confirm("Todavia hay notas en productos de pedidos de hoy. Exportar igual?")) return;
+          if (missingPurchases.length && !confirm("Hay productos de hoy sin compra registrada. Exportar igual?")) return;
+          printTodayRemitosDirect();
+        });
+      });
+    });
+    return pageShell(
+      "Remitos",
+      "Generacion e impresion de remitos por pedido.",
+      `<button class="btn primary" data-export-today-remitos>Exportar PDF remitos de hoy</button>`,
+      `
+      <div class="panel ${todaysNotes.length ? "highlight-panel" : ""}" style="margin-bottom:14px">
+        <div class="page-actions" style="justify-content:space-between">
+          <div>
+            <h2 class="page-title" style="font-size:18px">Notas de productos de hoy</h2>
+            <p class="muted">${todaysNotes.length ? "Hay productos con notas para revisar antes de generar remitos." : "No hay notas de productos para hoy."}</p>
+          </div>
+          ${todaysNotes.length ? `<button class="btn danger" data-clear-today-notes>Borrar notas de hoy</button>` : ""}
+        </div>
+        ${todaysNotes.length ? `<div class="note-grid">${todaysNotes.map((entry) => `<div class="note-card"><strong>${escapeHtml(entry.clientId)} - ${escapeHtml(entry.clientName)}</strong><span>${escapeHtml(entry.productName)}</span><small>${escapeHtml(entry.note)}</small></div>`).join("")}</div>` : ""}
+      </div>
+      <div class="panel ${missingPurchases.length ? "highlight-panel" : ""}" style="margin-bottom:14px">
+        <h2 class="page-title" style="font-size:18px">Productos sin compra o compra insuficiente</h2>
+        ${missingPurchases.length ? `<div class="note-grid">${missingPurchases.map((item) => `<div class="note-card"><strong>${escapeHtml(item.productName)}</strong><span>Pedido ${formatNumber(item.quantity)} ${escapeHtml(item.unitType)} - Comprado ${formatNumber(item.purchasedQuantity || 0)} - Falta ${formatNumber(item.shortageQuantity || item.quantity)}</span></div>`).join("")}</div>` : `<p class="muted">Todos los productos de hoy tienen compra o gasto asociado.</p>`}
+      </div>
+      <div class="panel" style="margin-bottom:14px">
+        <h2 class="page-title" style="font-size:18px">Pedidos por cliente</h2>
+        <div class="form-grid" style="margin-top:10px">
+          <div class="field span-2"><label>Cliente</label><select id="remitos-client-filter"><option value="all" ${ui.remitosClientId === "all" ? "selected" : ""}>Todos</option>${clientOptions.map((client) => `<option value="${client.id}" ${ui.remitosClientId === client.id ? "selected" : ""}>${escapeHtml(client.id)} - ${escapeHtml(client.name)}</option>`).join("")}</select></div>
+          <div class="field"><label>Desde</label><input type="date" id="remitos-from" value="${escapeAttr(from)}" /></div>
+          <div class="field"><label>Hasta</label><input type="date" id="remitos-to" value="${escapeAttr(to)}" /></div>
+          <div class="field"><label>&nbsp;</label><button class="btn ghost" type="button" data-remitos-date-preset="today">Hoy</button></div>
+          <div class="field"><label>&nbsp;</label><button class="btn ghost" type="button" data-remitos-date-preset="yesterday">Ayer</button></div>
+          ${ui.remitosClientId !== "all" && linkedClientIds.length > 1 ? `<div class="field span-2"><label>Cuenta vinculada</label><select id="remitos-linked-client-filter"><option value="all" ${ui.remitosLinkedClientId === "all" ? "selected" : ""}>Todos</option>${linkedClientIds.map((id) => {
+            const linkedClient = getClient(id);
+            return `<option value="${id}" ${ui.remitosLinkedClientId === id ? "selected" : ""}>${escapeHtml(id)} - ${escapeHtml(linkedClient ? linkedClient.name : id)}</option>`;
+          }).join("")}</select></div>` : ""}
+        </div>
+        <div class="table-wrap" style="margin-top:10px">
+          <table>
+            <thead><tr><th>Fecha</th><th>Pedido</th><th>Total</th><th>Productos</th><th>Acciones</th></tr></thead>
+            <tbody>${clientOrderRows || emptyRow(5, "No hay pedidos para esta seleccion.")}</tbody>
+          </table>
+        </div>
+      </div>
+      `,
+      "remitos"
+    );
+  }
+
+  function renderRemitosClientOrderRow(order) {
+    const client = getClient(order.clientId);
+    return `
+      <tr>
+        <td>${formatDate(order.date)}<br><span class="muted">${escapeHtml(client ? client.name : order.clientId)}</span></td>
+        <td>${escapeHtml(order.id)}</td>
+        <td class="num">${formatMoney(getOrderTotal(order))}</td>
+        <td>
+          ${renderOrderInlineDetails(order, { summary: "Ver productos" })}
+        </td>
+        <td class="page-actions">
+          <button class="btn small ghost" data-view-remito="${escapeAttr(order.id)}">Ver</button>
+          <button class="btn small ghost" data-print-order-remito="${escapeAttr(order.id)}">Imprimir</button>
+        </td>
+      </tr>
+    `;
+  }
+
+  function getLinkedClientIdsForClient(clientId) {
+    const users = state.users.filter((user) => isClientLikeRole(user.role) && user.clientId === clientId);
+    return Array.from(new Set([clientId, ...users.flatMap((user) => user.linkedClientIds || [])].filter(Boolean)));
+  }
+
+  function printOrderRemitoDirect(orderId) {
+    const order = getOrder(orderId);
+    if (!order) return alert("Pedido no encontrado.");
+    const remito = order.exampleOnly
+      ? { id: "REM-" + order.id, orderId: order.id, date: order.date, clientId: order.clientId }
+      : generateRemito(order.id);
+    saveState();
+    const sheet = order.exampleOnly ? renderRemitoPrintSheetForOrder(order, remito) : renderRemitoPrintSheet(remito.id);
+    printHtmlDocument(buildOrderRemitoFileName(order), `<section class="print-page remito-print-page">${sheet}</section>`);
+  }
+
+  function buildOrderRemitoFileName(order) {
+    const client = getClient(order.clientId);
+    return fileDate(todayISO()) + " Remito " + (client ? client.name : order.clientId);
+  }
+
+  function openOperationalRemitoModal(orderId) {
+    const order = getOrder(orderId);
+    if (!order) return alert("Pedido no encontrado.");
+    const remito = order.exampleOnly
+      ? { id: "REM-" + order.id, orderId: order.id, date: order.date, clientId: order.clientId }
+      : generateRemito(order.id);
+    saveState();
+    const sheet = order.exampleOnly ? renderRemitoPrintSheetForOrder(order, remito) : renderRemitoPrintSheet(remito.id);
+    showModal(
+      "Remito " + order.id,
+      `<div class="remito-modal-preview">${sheet}</div>`,
+      () => {
+        const printButton = document.getElementById("modal-save");
+        if (printButton) printButton.addEventListener("click", () => {
+          printHtmlDocument(buildOrderRemitoFileName(order), `<section class="print-page remito-print-page">${sheet}</section>`);
+        });
+      },
+      { saveLabel: "Imprimir", cancelLabel: "Cerrar", className: "wide" }
+    );
+  }
+
+  function printTodayRemitosDirect() {
+    const todaysOrders = ordersByDate(todayISO());
+    const remitos = todaysOrders.map((order) => generateRemito(order.id));
+    saveState();
+    const body = `<section class="print-page remito-print-page">${remitos.map((remito) => renderRemitoPrintSheet(remito.id)).join("") || `<div class="panel">No hay remitos de hoy.</div>`}</section>`;
+    printHtmlDocument(fileDate(todayISO()) + " Remitos Pare carrito", body);
+  }
+
+  function businessLogoDataUri() {
+    return "./assets/logo.png";
+  }
+
+  function tplGet(key, field, fallback) {
+    const templates = state.appSettings && state.appSettings.printTemplates ? state.appSettings.printTemplates : {};
+    const value = templates[key] ? templates[key][field] : undefined;
+    return value === undefined || value === null || value === "" ? fallback : value;
+  }
+
+  function tplScale(key) {
+    const value = Number(tplGet(key, "escala", 1));
+    return Number.isFinite(value) && value >= 0.7 && value <= 1.4 ? value : 1;
+  }
+
+  function getRemitoTotalStyle() {
+    return state.appSettings && state.appSettings.remitoTotalStyle ? state.appSettings.remitoTotalStyle : "box";
+  }
+
+  function renderRemitoPrint(remitoId) {
+    const remito = state.remitos.find((item) => item.id === remitoId);
+    if (!remito) {
+      return pageShell("Remito", "No encontrado", "", `<div class="panel">Remito no encontrado.</div>`, "remitos");
+    }
+    return `
+      <section class="print-page">
+        <div class="print-controls no-print">
+          <button class="btn ghost" data-route="remitos">&lt; Volver</button>
+          <button class="btn primary" data-print>Imprimir</button>
+        </div>
+        ${renderRemitoPrintSheet(remito.id)}
+      </section>
+    `;
+  }
+
+  function renderTodayRemitosPrint() {
+    const todaysOrders = ordersByDate(todayISO());
+    const remitos = todaysOrders.map((order) => generateRemito(order.id));
+    saveState();
+    return `
+      <section class="print-page">
+        <div class="print-controls no-print">
+          <button class="btn ghost" data-route="remitos">&lt; Volver</button>
+          <button class="btn primary" data-print>Exportar PDF / Imprimir</button>
+        </div>
+        ${remitos.map((remito) => renderRemitoPrintSheet(remito.id)).join("") || `<div class="panel">No hay remitos de hoy.</div>`}
+      </section>
+    `;
+  }
+
+  function renderRemitoPrintSheet(remitoId) {
+    const remito = state.remitos.find((item) => item.id === remitoId);
+    if (!remito) return "";
+    const order = getOrder(remito.orderId);
+    if (!order) return "";
+    return renderRemitoPrintSheetForOrder(order, remito);
+  }
+
+  function renderRemitoPrintSheetForOrder(order, remito) {
+    const client = getClient(remito.clientId || order.clientId);
+    const subtotal = getOrderSubtotal(order);
+    const iva = getOrderIva(order);
+    const total = subtotal + iva;
+    const minRows = order.items.length > 4 ? order.items.length : 4;
+    const blankRows = Math.max(0, minRows - order.items.length);
+    return `
+      <article class="print-sheet remito-sheet" style="font-size:${tplScale("remito")}em">
+        <header class="remito-header">
+          <div class="remito-left">
+            <div class="remito-number">${escapeHtml(remito.number || remito.clientId + "-")}</div>
+            <strong>${BUSINESS_NAME}</strong><br>
+            Cuit: 30-71794095/0<br>
+            Inicio de Act: 10/2022<br>
+            Responsable Inscripto
+          </div>
+          <div class="remito-title">
+            <h1>${escapeHtml(tplGet("remito", "titulo", "Remito"))}</h1>
+            <small>${formatDate(remito.date)}</small>
+          </div>
+          <div class="remito-brand">
+            <img class="remito-logo" src="${businessLogoDataUri()}" alt="Pare Carrito" />
+            <div>Insumos frescos para Gastronomicos</div>
+            <strong>Cofruthos Puesto 72 A - Cel: 3874566725</strong><br>
+            <strong>www.parecarrito.com.ar</strong>
+          </div>
+        </header>
+        <div class="remito-client">${escapeHtml(client ? client.name : remito.clientId)}</div>
+        <table class="remito-table">
+          <thead><tr><th style="width:42px">Cantidad</th><th>Descripcion</th><th class="num" style="width:116px">Precio unitario</th><th class="num" style="width:116px">Precio total</th></tr></thead>
+          <tbody>
+            ${order.items.map((item) => `<tr><td class="num">${formatNumber(item.quantity)}</td><td><strong>${escapeHtml(item.productName)}</strong>${item.note ? `<br>Nota: ${escapeHtml(item.note)}` : ""}</td><td class="num">${formatMoney(item.unitPrice)}</td><td class="num"><strong>${formatMoney(getOrderItemSubtotal(item))}</strong></td></tr>`).join("")}
+            ${Array.from({ length: blankRows }).map(() => `<tr class="blank-row"><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>`).join("")}
+          </tbody>
+        </table>
+        <footer class="remito-footer">
+          <div>
+            <div>Notas: ${escapeHtml(order.notes || "")}</div>
+            ${tplGet("remito", "leyenda", "") ? `<div>${escapeHtml(tplGet("remito", "leyenda", ""))}</div>` : ""}
+            <div class="received">Recibi conforme:</div>
+          </div>
+          <div class="remito-summary remito-total-style-${escapeAttr(getRemitoTotalStyle())}">
+            <div><span>Subtotal</span><strong>${formatMoney(subtotal)}</strong></div>
+            ${iva > 0 ? `<div><span>IVA</span><strong>${formatMoney(iva)}</strong></div>` : ""}
+            <div class="remito-total"><span>Total</span><strong class="remito-total-line">${formatMoney(total)}</strong></div>
+          </div>
+        </footer>
+      </article>
+    `;
+  }
+
+  function renderUnits() {
+    const date = ui.unitsDate || todayISO();
+    const unitItems = getUnitWeightGroups(date).filter((group) => group.unitProduct && group.pendingEntries.length);
+    const missingPurchases = getProductPurchaseShortages(date);
+    const todaysNotes = getProductNotesByDate(date);
+    const unitRows = unitItems.map((group) => renderUnitProductCard(group, true)).join("");
+    const shortageRows = missingPurchases.map((group) => renderUnitProductCard(group, false)).join("");
+    afterRender.push(bindUnits);
+    return pageShell(
+      "Unidades",
+      "Ajuste de productos vendidos por unidad y cobrados por peso, pendientes de compra y remitos.",
+      `<button class="btn primary" data-export-today-remitos>Exportar PDF remitos de hoy</button>`,
+      `
+      <div class="panel" style="margin-bottom:14px">
+        <div class="form-grid">
+          <div class="field"><label>Fecha</label><input type="date" id="units-date" value="${date}" /></div>
+        </div>
+      </div>
+      <div class="panel ${todaysNotes.length ? "highlight-panel" : ""}" style="margin-bottom:14px">
+        <div class="page-actions" style="justify-content:space-between">
+          <div>
+            <h2 class="page-title" style="font-size:18px">Notas de productos de hoy</h2>
+            <p class="muted">${todaysNotes.length ? "Hay productos con notas para revisar antes de generar remitos." : "No hay notas de productos para esta fecha."}</p>
+          </div>
+          ${todaysNotes.length ? `<button class="btn danger" data-clear-units-notes>Borrar notas de hoy</button>` : ""}
+        </div>
+        ${todaysNotes.length ? `<div class="note-grid">${todaysNotes.map((entry) => `<div class="note-card"><strong>${escapeHtml(entry.clientId)} - ${escapeHtml(entry.clientName)}</strong><span>${escapeHtml(entry.productName)}</span><small>${escapeHtml(entry.note)}</small></div>`).join("")}</div>` : ""}
+      </div>
+      <div class="panel" style="margin-bottom:14px">
+        <h2 class="page-title" style="font-size:18px">Productos por unidades pendientes</h2>
+        <div class="assigned-products-grid" style="margin-top:10px">${unitRows || `<div class="empty compact">No hay productos con casilla Unidades pendientes para esta fecha.</div>`}</div>
+      </div>
+      <div class="panel ${missingPurchases.length ? "highlight-panel" : ""}">
+        <h2 class="page-title" style="font-size:18px">Productos sin compra o compra insuficiente</h2>
+        <div class="assigned-products-grid" style="margin-top:10px">${shortageRows || `<div class="empty compact">Todos los productos de hoy tienen compra suficiente.</div>`}</div>
+      </div>
+      `,
+      "unidades"
+    );
+  }
+
+  function renderUnitProductCard(group, allowBulkUpdate) {
+    const entries = allowBulkUpdate ? group.pendingEntries : group.entries;
+    return `
+      <div class="assigned-product-card" data-unit-group="${escapeAttr(group.key)}">
+        <span class="product-name"><img class="product-thumb" src="${productThumb(getProduct(group.productId))}" alt="" />${escapeHtml(group.productName)}</span>
+        <strong>Pedido: ${formatNumber(group.quantity)} ${escapeHtml(group.unitType)}</strong>
+        <span class="muted">Comprado: ${formatNumber(group.purchasedQuantity || 0)} ${escapeHtml(group.unitType)}${group.shortageQuantity > 0 ? ` - Falta ${formatNumber(group.shortageQuantity)} ${escapeHtml(group.unitType)}` : ""}</span>
+        <div class="unit-order-list">
+          ${entries.map(({ order, item, client }) => `<div class="unit-order-line">
+            <span>${escapeHtml(order.clientId)} - ${escapeHtml(client ? client.name : order.clientId)}</span>
+            <strong>${formatNumber(item.quantity)} ${escapeHtml(item.unitType)}</strong>
+            <button class="btn small ghost" type="button" data-edit-unit-order="${escapeAttr(order.id)}">Editar</button>
+            <button class="btn small danger" type="button" data-remove-unit-order-item="${escapeAttr(order.id + "|" + item.id)}">X</button>
+          </div>`).join("")}
+        </div>
+        ${allowBulkUpdate ? `<div class="field"><label>Nueva cantidad</label><input data-unit-new-qty inputmode="decimal" value="${formatAmountInput(group.pendingQuantity || group.quantity)}" /></div>
+        <button class="btn small primary" type="button" data-update-unit-group="${escapeAttr(group.key)}">Actualizar</button>` : ""}
+      </div>
+    `;
+  }
+
+  function bindUnits() {
+    const dateInput = document.getElementById("units-date");
+    if (dateInput) dateInput.addEventListener("change", () => {
+      ui.unitsDate = dateInput.value || todayISO();
+      render();
+    });
+    document.querySelectorAll("[data-update-unit-group]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const card = button.closest("[data-unit-group]");
+        const quantity = parseAmount(card.querySelector("[data-unit-new-qty]").value);
+        if (quantity <= 0) return alert("Ingrese una cantidad mayor a cero.");
+        updateUnitWeightGroup(button.dataset.updateUnitGroup, ui.unitsDate || todayISO(), quantity);
+        saveState();
+        render();
+      });
+    });
+    document.querySelectorAll("[data-remove-missing-product]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const [productId, unitType] = button.dataset.removeMissingProduct.split("|");
+        const product = getProduct(productId);
+        if (!confirm("Eliminar " + (product ? product.name : productId) + " de todos los pedidos de hoy?")) return;
+        removeProductFromOrders(productId, unitType, ui.unitsDate || todayISO());
+        saveState();
+        render();
+      });
+    });
+    document.querySelectorAll("[data-edit-unit-order]").forEach((button) => {
+      button.addEventListener("click", () => openOrderForm(button.dataset.editUnitOrder));
+    });
+    document.querySelectorAll("[data-remove-unit-order-item]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const [orderId, itemId] = button.dataset.removeUnitOrderItem.split("|");
+        const order = getOrder(orderId);
+        if (!order) return;
+        const item = order.items.find((entry) => entry.id === itemId);
+        if (!item) return;
+        if (!confirm("Eliminar " + item.productName + " del pedido del cliente " + order.clientId + "?")) return;
+        order.items = order.items.filter((entry) => entry.id !== itemId);
+        recalcOrderTotals(order);
+        updateOrderAccounting(order);
+        saveState();
+        render();
+      });
+    });
+    document.querySelectorAll("[data-clear-units-notes]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const date = ui.unitsDate || todayISO();
+        if (!confirm("Borrar todas las notas de productos de esta fecha?")) return;
+        ordersByDate(date).forEach((order) => order.items.forEach((item) => {
+          item.note = "";
+        }));
+        saveState();
+        render();
+      });
+    });
+    document.querySelectorAll("[data-export-today-remitos]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const date = ui.unitsDate || todayISO();
+        const unitItems = getUnitWeightGroups(date).filter((group) => group.unitProduct && group.pendingEntries.length);
+        const missingPurchases = getProductPurchaseShortages(date);
+        const notes = getProductNotesByDate(date);
+        if (unitItems.length && !confirm("Hay productos por unidades pendientes. Exportar remitos igual?")) return;
+        if (missingPurchases.length && !confirm("Hay productos sin compra o compra insuficiente. Exportar remitos igual?")) return;
+        if (notes.length && !confirm("Hay notas de productos pendientes. Exportar remitos igual?")) return;
+        printTodayRemitosDirect();
+      });
+    });
+  }
+
+  function getUnitWeightGroups(date) {
+    const purchased = getPurchasedQuantities(date);
+    return Object.values(getOrderProductGroups(date)).map((group) => {
+      const product = getProduct(group.productId);
+      const purchasedQuantity = Number(purchased[group.key] || 0);
+      const pendingEntries = group.entries.filter(({ item }) => !item.unitAdjusted);
+      const pendingQuantity = pendingEntries.reduce((sum, entry) => sum + Number(entry.item.quantity || 0), 0);
+      return {
+        ...group,
+        purchasedQuantity,
+        shortageQuantity: Math.max(0, Number(group.quantity || 0) - purchasedQuantity),
+        unitProduct: !!(product && product.allowUnitWeight),
+        pendingEntries,
+        pendingQuantity
+      };
+    }).filter((group) => group.unitProduct || group.shortageQuantity > 0).sort((a, b) => a.productName.localeCompare(b.productName));
+  }
+
+  function updateUnitWeightGroup(key, date, newQuantity) {
+    const group = getUnitWeightGroups(date).find((item) => item.key === key);
+    if (!group || group.pendingQuantity <= 0) return;
+    const ratio = newQuantity / group.pendingQuantity;
+    const touchedOrders = new Set();
+    group.pendingEntries.forEach(({ order, item }) => {
+      item.quantity = Number(item.quantity || 0) * ratio;
+      item.subtotal = item.quantity * Number(item.unitPrice || 0);
+      item.ivaAmount = item.subtotal * (Number(item.ivaRate || 0) / 100);
+      item.totalWithIva = item.subtotal + item.ivaAmount;
+      item.unitAdjusted = true;
+      touchedOrders.add(order);
+    });
+    touchedOrders.forEach((order) => {
+      recalcOrderTotals(order);
+      updateOrderAccounting(order);
+    });
+  }
+
+  function removeProductFromOrders(productId, unitType, date) {
+    ordersByDate(date).forEach((order) => {
+      const before = order.items.length;
+      order.items = order.items.filter((item) => !(item.productId === productId && item.unitType === unitType));
+      if (order.items.length !== before) {
+        recalcOrderTotals(order);
+        updateOrderAccounting(order);
+      }
+    });
+  }
+
+  function renderPayments() {
+    const methods = ["efectivo", "transferencia", "cheque"];
+    const paymentRows = state.payments.slice().reverse().map((payment) => {
+      const client = getClient(payment.clientId);
+      return `
+        <tr>
+          <td>${formatDate(payment.date)}<br><span class="muted">${escapeHtml(payment.recordedBy || "")}</span></td>
+          <td>${escapeHtml(client ? client.name : payment.clientId)}</td>
+          <td>${escapeHtml(payment.receivedByName || payment.recordedBy || "")}</td>
+          <td>${escapeHtml(PAYMENT_METHODS[payment.method] || payment.method)}</td>
+          <td>${escapeHtml(getCashBoxName(payment.cashBoxId || getPaymentCashBoxId(payment, getUser(payment.receivedByUserId))))}</td>
+          <td class="num">${formatMoney(payment.amount)}</td>
+          <td>${payment.transferProofFile ? `<span class="pill green">Con comprobante</span>` : payment.method === "transferencia" ? `<span class="pill amber">Sin comprobante</span>` : `<span class="pill gray">No aplica</span>`}</td>
+          <td>${Number(payment.pendingDifference || 0) > 0 ? `<span class="pill amber">Pendiente ${formatMoney(payment.pendingDifference)}</span><br>` : ""}${escapeHtml(payment.notes || "")}</td>
+        </tr>
+      `;
+    }).join("");
+
+    afterRender.push(bindPayments);
+    return pageShell(
+      "Pagos",
+      currentUser.role === "employee" ? "Registro de cobranza en ruta para cualquier cliente." : "Registro de cobros con transferencia y comprobantes.",
+      "",
+      `
+      <div class="grid">
+        <form id="payment-form" class="panel">
+          <div class="form-grid payment-form-grid">
+            <div class="field payment-client-field">
+              <label>Cliente</label>
+              <select id="payment-client">${activeClients().map((client) => `<option value="${client.id}">${escapeHtml(client.id)} - ${escapeHtml(client.name)} - saldo ${formatMoney(getClientBalance(client.id))}</option>`).join("")}</select>
+            </div>
+            <div class="field payment-amount-field">
+              <label>Monto recibido</label>
+              <input id="payment-amount" inputmode="decimal" placeholder="0" />
+            </div>
+            <div class="field payment-method-field">
+              <label>Metodo</label>
+              <select id="payment-method">${methods.map((method) => `<option value="${method}">${escapeHtml(PAYMENT_METHODS[method])}</option>`).join("")}</select>
+            </div>
+            <div class="field">
+              <label>Quien recibio</label>
+              <select id="payment-receiver" ${currentUser.role === "employee" ? "disabled" : ""}>
+                ${(currentUser.role === "employee" ? [currentUser] : activeCashReceivers()).map((employee) => `<option value="${employee.id}" ${employee.id === currentUser.id ? "selected" : ""}>${escapeHtml(employee.name)} - ${escapeHtml(roleLabel(employee.role))}</option>`).join("")}
+              </select>
+            </div>
+            <div class="field payment-orders-field">
+              <label>Pedidos relacionados</label>
+              <div id="payment-orders" class="grid">${renderPaymentOrderSelect("", activeClients()[0] ? activeClients()[0].id : "")}</div>
+              <div class="page-actions" style="margin-top:8px">
+                <button class="btn small ghost" type="button" data-add-payment-order>Agregar otro pedido</button>
+                <span class="muted" id="payment-orders-total">Total pedidos $0</span>
+                <span class="muted" id="payment-orders-difference"></span>
+              </div>
+            </div>
+            <div class="field payment-notes-field">
+              <label>Notas</label>
+              <input id="payment-notes" placeholder="Recibido por ruta, parcial, etc." />
+            </div>
+            ${["manager", "admin"].includes(currentUser.role) ? `
+            <div class="field span-4" id="transfer-upload-wrap">
+              <label>Comprobante transferencia (JPG, PNG o PDF)</label>
+              <input type="file" id="payment-proof" accept="image/png,image/jpeg,application/pdf" />
+              <span class="muted">Se guarda en el navegador como base64. Use archivos pequenos para no llenar localStorage.</span>
+            </div>` : ""}
+          </div>
+          <div class="page-actions" style="margin-top:12px">
+            <button class="btn primary" type="submit">Registrar pago recibido</button>
+          </div>
+        </form>
+        <div class="panel">
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Fecha</th><th>Cliente</th><th>Recibio</th><th>Metodo</th><th>Caja</th><th>Monto</th><th>Comprobante</th><th>Notas</th></tr></thead>
+              <tbody>${paymentRows || emptyRow(8, "Todavia no hay pagos.")}</tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      `,
+      "pagos"
+    );
+  }
+
+  function renderPaymentOrderSelect(value, clientId, selectedIds) {
+    const allowed = getPaymentClientIds(clientId);
+    const selected = new Set(selectedIds || []);
+    return `
+      <div class="payment-order-line" data-payment-order-row>
+        <select data-payment-order>
+          <option value="">Sin pedido especifico</option>
+          ${state.orders.filter((order) => {
+            const remaining = Math.max(0, Number(order.totalAmount || 0) - Number(order.paymentReceived || 0));
+            return !["cancelado", "anulado"].includes(order.status) && allowed.includes(order.clientId) && (remaining > 0 || order.id === value) && (!selected.has(order.id) || order.id === value);
+          }).map((order) => {
+            const client = getClient(order.clientId);
+            const remaining = Math.max(0, Number(order.totalAmount || 0) - Number(order.paymentReceived || 0));
+            return `<option value="${order.id}" ${value === order.id ? "selected" : ""}>${escapeHtml(order.id)} - ${escapeHtml(client ? client.name : order.clientId)} - pendiente ${formatMoney(remaining)}</option>`;
+          }).join("")}
+        </select>
+        <button class="btn small ghost" type="button" data-remove-payment-order>Quitar</button>
+      </div>
+    `;
+  }
+
+  function bindPayments() {
+    const method = document.getElementById("payment-method");
+    const uploadWrap = document.getElementById("transfer-upload-wrap");
+    const updateUpload = () => {
+      if (!uploadWrap) return;
+      uploadWrap.style.display = method.value === "transferencia" ? "grid" : "none";
+    };
+    method.addEventListener("change", updateUpload);
+    updateUpload();
+    const ordersBox = document.getElementById("payment-orders");
+    const amountInput = document.getElementById("payment-amount");
+    const refreshPaymentOrderOptions = () => {
+      const selectedIds = Array.from(document.querySelectorAll("[data-payment-order]")).map((select) => select.value).filter(Boolean);
+      document.querySelectorAll("[data-payment-order]").forEach((select) => {
+        const current = select.value;
+        select.innerHTML = renderPaymentOrderSelect(current, document.getElementById("payment-client").value, selectedIds).match(/<select data-payment-order>([\s\S]*?)<\/select>/)[1];
+        select.value = current;
+      });
+    };
+    const updatePaymentOrders = (syncAmount) => {
+      const orderIds = Array.from(document.querySelectorAll("[data-payment-order]")).map((select) => select.value).filter(Boolean);
+      const orders = orderIds.map((id) => getOrder(id)).filter(Boolean);
+      if (orders.length) document.getElementById("payment-client").value = orders[0].clientId;
+      const total = orders.reduce((sum, order) => sum + Math.max(0, Number(order.totalAmount || 0) - Number(order.paymentReceived || 0)), 0);
+      document.getElementById("payment-orders-total").textContent = "Total pedidos " + formatMoney(total);
+      if (syncAmount !== false && total > 0) amountInput.value = formatAmountInput(total);
+      const difference = Math.max(0, total - parseAmount(amountInput.value));
+      const differenceNode = document.getElementById("payment-orders-difference");
+      if (differenceNode) {
+        differenceNode.textContent = difference > 0 ? "Diferencia pendiente " + formatMoney(difference) : "";
+        differenceNode.className = difference > 500 ? "pill amber" : "muted";
+      }
+      refreshPaymentOrderOptions();
+    };
+    amountInput.addEventListener("input", () => updatePaymentOrders(false));
+    document.getElementById("payment-client").addEventListener("change", () => {
+      ordersBox.innerHTML = renderPaymentOrderSelect("", document.getElementById("payment-client").value);
+      updatePaymentOrders(true);
+    });
+    ordersBox.addEventListener("change", () => updatePaymentOrders(true));
+    ordersBox.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-remove-payment-order]");
+      if (!button) return;
+      const rows = document.querySelectorAll("[data-payment-order-row]");
+      if (rows.length > 1) button.closest("[data-payment-order-row]").remove();
+      else rows[0].querySelector("[data-payment-order]").value = "";
+      updatePaymentOrders(true);
+    });
+    document.querySelector("[data-add-payment-order]").addEventListener("click", () => {
+      const selectedIds = Array.from(document.querySelectorAll("[data-payment-order]")).map((select) => select.value).filter(Boolean);
+      ordersBox.insertAdjacentHTML("beforeend", renderPaymentOrderSelect("", document.getElementById("payment-client").value, selectedIds));
+      updatePaymentOrders(true);
+    });
+    document.getElementById("payment-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const amount = parseAmount(document.getElementById("payment-amount").value);
+      if (amount <= 0) return alert("Ingrese un monto mayor a cero.");
+      let transferProofFile = "";
+      const fileInput = document.getElementById("payment-proof");
+      if (fileInput && fileInput.files && fileInput.files[0]) {
+        const file = fileInput.files[0];
+        if (file.size > 2 * 1024 * 1024) return alert("Use un comprobante menor a 2 MB para esta version localStorage.");
+        transferProofFile = await compressImageFile(file, 1200, 0.75);
+      }
+      recordPayment({
+        clientId: document.getElementById("payment-client").value,
+        orderIds: Array.from(document.querySelectorAll("[data-payment-order]")).map((select) => select.value).filter(Boolean),
+        amount,
+        method: method.value,
+        receivedByUserId: currentUser.role === "employee" ? currentUser.id : document.getElementById("payment-receiver").value,
+        notes: document.getElementById("payment-notes").value.trim(),
+        transferProofFile
+      });
+      saveState();
+      alert("Pago registrado.");
+      render();
+    });
+  }
+
+  function renderBalances() {
+    if (isClientLikeRole(currentUser.role)) return renderCustomerBalances();
+    const balances = getClientBalances().filter((item) => {
+      if (["manager", "admin", "employee"].includes(currentUser.role)) return true;
+      return getCustomerVisibleClientIds().includes(item.clientId);
+    });
+    const rows = balances.map((item) => {
+      const client = getClient(item.clientId);
+      return `
+        <tr>
+          <td>${escapeHtml(client ? client.id : item.clientId)}</td>
+          <td>${escapeHtml(client ? client.name : item.clientId)}</td>
+          <td class="num">${formatMoney(item.balance)}</td>
+          <td class="num">${client && shouldApplyInvoiceVat(client) ? formatMoney(getClientAccumulatedIva(item.clientId)) : "-"}</td>
+          <td>${escapeHtml(client ? paymentTypeLabel(client.paymentType) : "")}</td>
+          <td><button class="btn small ghost" data-show-balance="${item.clientId}">Ver movimientos</button></td>
+        </tr>
+      `;
+    }).join("");
+    afterRender.push(() => {
+      const fromInput = document.getElementById("balance-from");
+      const toInput = document.getElementById("balance-to");
+      if (fromInput) fromInput.addEventListener("change", () => {
+        ui.balanceFrom = fromInput.value || todayISO();
+      });
+      if (toInput) toInput.addEventListener("change", () => {
+        ui.balanceTo = toInput.value || todayISO();
+      });
+      document.querySelectorAll("[data-show-balance]").forEach((button) => button.addEventListener("click", () => openBalanceHistory(button.dataset.showBalance)));
+    });
+    return pageShell(
+      "Saldos",
+      isClientLikeRole(currentUser.role) ? "Estado de su cuenta corriente." : "Cuenta corriente por cliente. Los pagos restan saldo, los pedidos suman deuda.",
+      isClientLikeRole(currentUser.role) ? `<button class="btn blue" data-route="registrar-transferencia">Registrar transferencia</button>` : `<button class="btn blue" data-route="pagos">Registrar pago</button>`,
+      `
+      <div class="panel" style="margin-bottom:14px">
+        <div class="form-grid">
+          <div class="field"><label>Desde movimientos</label><input type="date" id="balance-from" value="${ui.balanceFrom}" /></div>
+          <div class="field"><label>Hasta movimientos</label><input type="date" id="balance-to" value="${ui.balanceTo}" /></div>
+          <div class="field span-2"><label>&nbsp;</label><span class="muted">El rango se usa al abrir Ver movimientos y al imprimir/exportar.</span></div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>ID</th><th>Cliente</th><th>Saldo</th><th>IVA acumulado</th><th>Tipo</th><th>Detalle</th></tr></thead>
+            <tbody>${rows || emptyRow(6, "No hay saldos para mostrar.")}</tbody>
+          </table>
+        </div>
+      </div>
+      `,
+      "saldos"
+    );
+  }
+
+  function renderCustomerBalances() {
+    const clientIds = getCustomerVisibleClientIds();
+    if (!Array.isArray(ui.balanceAccounts)) ui.balanceAccounts = clientIds.slice();
+    ui.balanceAccounts = ui.balanceAccounts.filter((id) => clientIds.includes(id));
+    const selectedIds = ui.balanceAccounts;
+    const isExample = currentUser.role === "example";
+    const balanceRows = clientIds.map((clientId) => {
+      const client = getClient(clientId);
+      const balance = isExample ? 0 : getClientBalance(clientId);
+      return `
+        <tr>
+          <td>${escapeHtml(client ? client.id : clientId)}</td>
+          <td>${escapeHtml(client ? client.name : clientId)}</td>
+          <td class="num">${formatMoney(balance)}</td>
+          <td>${escapeHtml(client ? paymentTypeLabel(client.paymentType) : "")}</td>
+        </tr>
+      `;
+    }).join("");
+    const movements = selectedIds
+      .flatMap((clientId) => {
+        const client = getClient(clientId);
+        return getSaldoMovements(clientId, ui.balanceFrom, ui.balanceTo).map((entry) => ({ ...entry, clientName: client ? client.name : clientId }));
+      })
+      .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.id).localeCompare(String(b.id)));
+    const showClientColumn = clientIds.length > 1;
+    const movementRows = movements.map((entry) => `
+      <tr>
+        <td>${formatDate(entry.date)}</td>
+        ${showClientColumn ? `<td>${escapeHtml(entry.clientName)}</td>` : ""}
+        <td>${escapeHtml(entry.type)}</td>
+        <td>${escapeHtml(entry.description)}</td>
+        <td class="num">${formatMoney(entry.amount)}</td>
+        <td class="num">${formatMoney(entry.balance)}</td>
+      </tr>
+    `).join("");
+    const movementHead = `<th>Fecha</th>${showClientColumn ? "<th>Cuenta</th>" : ""}<th>Tipo</th><th>Descripcion</th><th>Monto</th><th>Saldo</th>`;
+    const movementColumns = showClientColumn ? 6 : 5;
+    afterRender.push(() => {
+      const fromInput = document.getElementById("balance-from");
+      const toInput = document.getElementById("balance-to");
+      if (fromInput) fromInput.addEventListener("change", () => {
+        ui.balanceFrom = fromInput.value || todayISO();
+        render();
+      });
+      if (toInput) toInput.addEventListener("change", () => {
+        ui.balanceTo = toInput.value || todayISO();
+        render();
+      });
+      document.querySelectorAll("[data-balance-range]").forEach((button) => button.addEventListener("click", () => {
+        const range = button.dataset.balanceRange;
+        if (range === "today") {
+          ui.balanceTo = todayISO();
+        } else {
+          const days = Number(range);
+          ui.balanceTo = todayISO();
+          ui.balanceFrom = addDaysISO(todayISO(), -days);
+        }
+        render();
+      }));
+      document.querySelectorAll("[data-balance-account]").forEach((button) => button.addEventListener("click", () => {
+        const value = button.dataset.balanceAccount;
+        if (value === "all") {
+          ui.balanceAccounts = ui.balanceAccounts.length === clientIds.length ? [] : clientIds.slice();
+        } else if (ui.balanceAccounts.includes(value)) {
+          ui.balanceAccounts = ui.balanceAccounts.filter((id) => id !== value);
+        } else {
+          ui.balanceAccounts = [...ui.balanceAccounts, value];
+        }
+        render();
+      }));
+      const printButton = document.getElementById("print-balance-movements");
+      if (printButton) printButton.addEventListener("click", () => {
+        const names = selectedIds.map((id) => {
+          const client = getClient(id);
+          return client ? client.name : id;
+        }).join(", ");
+        printHtmlDocument(
+          fileDate(todayISO()) + " Movimientos " + names,
+          `<div class="print-compact">
+            <h1 style="margin:0 0 2px;font-size:18px">${BUSINESS_NAME}</h1>
+            <h2 style="margin:0 0 2px;font-size:14px">Movimientos - ${escapeHtml(names)}</h2>
+            <p style="margin:0 0 8px;font-size:11px">Rango: ${formatDate(ui.balanceFrom)} - ${formatDate(ui.balanceTo)}</p>
+            <table class="borderless-table"><thead><tr>${movementHead}</tr></thead><tbody>${movementRows || `<tr><td colspan="${movementColumns}">Sin movimientos.</td></tr>`}</tbody></table>
+          </div>`
+        );
+      });
+    });
+    const accountButtons = clientIds.length > 1 ? `
+      <div class="field span-4">
+        <label>Cuentas</label>
+        <div class="page-actions">
+          <button class="btn small ${selectedIds.length === clientIds.length ? "blue" : "ghost"}" type="button" data-balance-account="all">Todos</button>
+          ${clientIds.map((id) => {
+            const client = getClient(id);
+            return `<button class="btn small ${selectedIds.includes(id) ? "blue" : "ghost"}" type="button" data-balance-account="${escapeAttr(id)}">${escapeHtml(client ? client.name : id)}</button>`;
+          }).join("")}
+        </div>
+      </div>` : "";
+    return pageShell(
+      "Saldos",
+      "Estado de su cuenta corriente.",
+      `<button class="btn blue" data-route="registrar-transferencia">Registrar transferencia</button>`,
+      `
+      <div class="panel" style="margin-bottom:14px">
+        <h2 class="page-title" style="font-size:18px">Saldos del cliente</h2>
+        <div class="table-wrap" style="margin-top:10px">
+          <table>
+            <thead><tr><th>ID</th><th>Cliente</th><th>Saldo</th><th>Tipo</th></tr></thead>
+            <tbody>${balanceRows || emptyRow(4, "No hay saldos para mostrar.")}</tbody>
+          </table>
+        </div>
+      </div>
+      <div class="panel" style="margin-bottom:14px">
+        <div class="form-grid">
+          <div class="field"><label>Desde movimientos</label><input type="date" id="balance-from" value="${ui.balanceFrom}" /></div>
+          <div class="field"><label>Hasta movimientos</label><input type="date" id="balance-to" value="${ui.balanceTo}" /></div>
+          <div class="field"><label>&nbsp;</label><button class="btn ghost" type="button" data-balance-range="today">Hasta hoy</button></div>
+          <div class="field"><label>&nbsp;</label><button class="btn ghost" type="button" data-balance-range="7">Ultimos 7 dias</button></div>
+          <div class="field"><label>&nbsp;</label><button class="btn ghost" type="button" data-balance-range="30">Ultimos 30 dias</button></div>
+          ${accountButtons}
+        </div>
+      </div>
+      <div class="panel">
+        <div class="page-actions" style="justify-content:space-between">
+          <h2 class="page-title" style="font-size:18px">Detalle de movimientos</h2>
+          <button class="btn primary" type="button" id="print-balance-movements">Imprimir / Exportar PDF</button>
+        </div>
+        <p class="muted">Rango: ${formatDate(ui.balanceFrom)} - ${formatDate(ui.balanceTo)}</p>
+        <div class="table-wrap" style="margin-top:10px">
+          <table>
+            <thead><tr>${movementHead}</tr></thead>
+            <tbody>${movementRows || emptyRow(movementColumns, "Sin movimientos en el rango seleccionado.")}</tbody>
+          </table>
+        </div>
+      </div>
+      `,
+      "saldos"
+    );
+  }
+
+  function renderCustomerTransferRegistration() {
+    const clientIds = getCustomerVisibleClientIds();
+    if (!clientIds.length) {
+      return pageShell(
+        "Registrar Transferencia",
+        "No hay cuentas de cliente vinculadas.",
+        "",
+        `<div class="panel empty">No hay cuentas disponibles para registrar transferencias.</div>`,
+        "registrar-transferencia"
+      );
+    }
+    if (clientIds.length === 1) ui.transferClientId = clientIds[0];
+    if (!ui.transferClientId || (ui.transferClientId !== "all" && !clientIds.includes(ui.transferClientId))) ui.transferClientId = clientIds.length > 1 ? "all" : clientIds[0];
+    const selectedIds = ui.transferClientId === "all" ? clientIds : [ui.transferClientId];
+    const balance = selectedIds.reduce((sum, id) => sum + Math.max(0, getClientBalance(id)), 0);
+    const pendingOrders = getCustomerOrdersForIds(selectedIds)
+      .filter((order) => Math.max(0, Number(order.totalAmount || 0) - Number(order.paymentReceived || 0)) > 0)
+      .sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+    const orderRows = pendingOrders.map((order) => {
+      const client = getClient(order.clientId);
+      const pending = Math.max(0, Number(order.totalAmount || 0) - Number(order.paymentReceived || 0));
+      return `
+        <label class="transfer-order-row">
+          <input type="checkbox" data-transfer-order="${order.id}" data-transfer-pending="${formatAmountInput(pending)}" />
+          <span><strong>${escapeHtml(order.id)}</strong><br><small>${formatDate(order.date)} - ${escapeHtml(client ? client.id + " - " + client.name : order.clientId)}</small></span>
+          <b>${formatMoney(pending)}</b>
+        </label>
+      `;
+    }).join("");
+    const transfers = (state.clientTransfers || [])
+      .filter((transfer) => (transfer.clientIds || [transfer.clientId]).some((id) => clientIds.includes(id)))
+      .slice()
+      .reverse();
+    const transferRows = transfers.map((transfer) => `
+      <tr>
+        <td>${formatDate(transfer.date)}<br><span class="muted">${escapeHtml(transfer.id)}</span></td>
+        <td>${(transfer.clientIds || [transfer.clientId]).map((id) => {
+          const client = getClient(id);
+          return escapeHtml(client ? client.id + " - " + client.name : id);
+        }).join("<br>")}</td>
+        <td class="num">${formatMoney(transfer.amount)}</td>
+        <td>${transferStatusPill(transfer.status)}</td>
+        <td>${escapeHtml(transfer.notes || "")}</td>
+      </tr>
+    `).join("");
+    afterRender.push(bindCustomerTransferRegistration);
+    return pageShell(
+      "Registrar Transferencia",
+      "Envie los datos de una transferencia para que administracion la compruebe.",
+      "",
+      `
+      <div class="grid">
+        <form id="customer-transfer-form" class="panel">
+          <div class="form-grid">
+            <div class="field span-2"><label>Cuenta</label><select id="transfer-client">
+              ${clientIds.length > 1 ? `<option value="all" ${ui.transferClientId === "all" ? "selected" : ""}>Todas las cuentas vinculadas</option>` : ""}
+              ${clientIds.map((id) => {
+                const client = getClient(id);
+                return `<option value="${id}" ${ui.transferClientId === id ? "selected" : ""}>${escapeHtml(client ? client.id + " - " + client.name : id)}</option>`;
+              }).join("")}
+            </select></div>
+            <div class="field"><label>Saldo</label><input id="transfer-balance" disabled value="${formatMoney(balance)}" /></div>
+            <div class="field"><label>Fecha de la transferencia</label><input type="date" id="transfer-date" value="${todayISO()}" /></div>
+            <div class="field"><label>Pago</label><select id="transfer-mode"><option value="full">Pago total</option><option value="partial">Pago parcial</option></select></div>
+            <div class="field"><label>Monto</label><input id="transfer-amount" inputmode="decimal" value="${formatAmountInput(balance)}" /></div>
+            <div class="field span-2"><label>Comprobante requerido</label><input id="transfer-proof" type="file" accept="image/png,image/jpeg,application/pdf" required /></div>
+            <div class="field span-4"><label>Pedidos relacionados</label><div id="transfer-orders" class="transfer-order-list">${orderRows || `<div class="empty compact">Sin pedidos pendientes. Puede enviar una transferencia a cuenta del saldo.</div>`}</div></div>
+            <div class="field span-4"><label>Notas</label><input id="transfer-notes" placeholder="Banco, titular, detalle opcional" /></div>
+          </div>
+          <div class="page-actions" style="margin-top:12px">
+            <span class="muted" id="transfer-selected-total">Seleccionado ${formatMoney(0)}</span>
+            <button class="btn primary" type="submit">Enviar datos de transferencia</button>
+          </div>
+        </form>
+      </div>
+      <div class="panel" style="margin-top:14px">
+        <h2 class="page-title" style="font-size:18px">Transferencias enviadas</h2>
+        <div class="table-wrap" style="margin-top:10px">
+          <table>
+            <thead><tr><th>Fecha</th><th>Cuenta</th><th>Monto</th><th>Estado</th><th>Notas</th></tr></thead>
+            <tbody>${transferRows || emptyRow(5, "Todavia no hay transferencias enviadas.")}</tbody>
+          </table>
+        </div>
+      </div>
+      `,
+      "registrar-transferencia"
+    );
+  }
+
+  function bindCustomerTransferRegistration() {
+    const form = document.getElementById("customer-transfer-form");
+    if (!form) return;
+    const clientSelect = document.getElementById("transfer-client");
+    const amountInput = document.getElementById("transfer-amount");
+    const modeSelect = document.getElementById("transfer-mode");
+    const selectedTotal = document.getElementById("transfer-selected-total");
+    const balance = parseAmount(document.getElementById("transfer-balance").value);
+    const updateAmount = () => {
+      const checked = Array.from(document.querySelectorAll("[data-transfer-order]:checked"));
+      const orderTotal = checked.reduce((sum, input) => sum + parseAmount(input.dataset.transferPending), 0);
+      if (selectedTotal) selectedTotal.textContent = "Seleccionado " + formatMoney(orderTotal);
+      if (modeSelect.value === "full") amountInput.value = formatAmountInput(orderTotal || balance);
+    };
+    clientSelect.addEventListener("change", () => {
+      ui.transferClientId = clientSelect.value;
+      render();
+    });
+    modeSelect.addEventListener("change", updateAmount);
+    document.querySelectorAll("[data-transfer-order]").forEach((input) => input.addEventListener("change", updateAmount));
+    updateAmount();
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const proofInput = document.getElementById("transfer-proof");
+      const file = proofInput.files && proofInput.files[0];
+      if (!file) return alert("Adjunte el comprobante de transferencia.");
+      if (file.size > 2 * 1024 * 1024) return alert("Use un comprobante menor a 2 MB para esta version localStorage.");
+      const clientIds = getCustomerVisibleClientIds();
+      const selectedClientIds = clientSelect.value === "all" ? clientIds : [clientSelect.value];
+      const orderIds = Array.from(document.querySelectorAll("[data-transfer-order]:checked")).map((input) => input.dataset.transferOrder);
+      const amount = parseAmount(amountInput.value);
+      if (amount <= 0) return alert("Ingrese un monto mayor a cero.");
+      state.clientTransfers = state.clientTransfers || [];
+      state.clientTransfers.push({
+        id: nextDatedId("TRF", state.clientTransfers),
+        date: document.getElementById("transfer-date").value || todayISO(),
+        timestamp: new Date().toISOString(),
+        clientId: selectedClientIds[0] || "",
+        clientIds: selectedClientIds,
+        orderIds,
+        amount,
+        method: "transferencia",
+        proofFile: await compressImageFile(file, 1200, 0.75),
+        proofName: file.name,
+        notes: document.getElementById("transfer-notes").value.trim(),
+        status: "pending",
+        createdByUserId: currentUser.id,
+        createdByName: currentUser.name
+      });
+      saveState();
+      alert("Los datos de trasferencia han sido enviados, una vez comprobada, se descontara de su saldo");
+      render();
+    });
+  }
+
+  function renderTransferApprovals() {
+    const transfers = (state.clientTransfers || []).slice().reverse();
+    const rows = transfers.map((transfer) => {
+      const clients = (transfer.clientIds || [transfer.clientId]).map((id) => {
+        const client = getClient(id);
+        return escapeHtml(client ? client.id + " - " + client.name : id);
+      }).join("<br>");
+      return `
+        <tr>
+          <td>${formatDate(transfer.date)}<br><span class="muted">${escapeHtml(transfer.id)}</span></td>
+          <td>${clients}</td>
+          <td>${(transfer.orderIds || []).map(escapeHtml).join("<br>") || "<span class=\"muted\">A cuenta</span>"}</td>
+          <td class="num">${formatMoney(transfer.amount)}</td>
+          <td>${transferStatusPill(transfer.status)}</td>
+          <td>${transfer.proofFile ? `<button class="btn small ghost" type="button" data-download-proof="${escapeAttr(transfer.id)}">Ver comprobante</button>` : `<span class="muted">Sin archivo</span>`}</td>
+          <td class="page-actions">
+            ${transfer.status === "pending" ? `<button class="btn small primary" data-accept-transfer="${transfer.id}">Aceptar</button><button class="btn small danger" data-reject-transfer="${transfer.id}">Rechazar</button>` : `<span class="muted">${escapeHtml(transfer.reviewedBy || "")}</span>`}
+          </td>
+        </tr>
+      `;
+    }).join("");
+    afterRender.push(() => {
+      document.querySelectorAll("[data-accept-transfer]").forEach((button) => button.addEventListener("click", () => approveClientTransfer(button.dataset.acceptTransfer)));
+      document.querySelectorAll("[data-reject-transfer]").forEach((button) => button.addEventListener("click", () => rejectClientTransfer(button.dataset.rejectTransfer)));
+      document.querySelectorAll("[data-download-proof]").forEach((button) => button.addEventListener("click", () => downloadTransferProof(button.dataset.downloadProof)));
+    });
+    return pageShell(
+      "Comprobar Transferencias",
+      "Acepte o rechace pagos enviados por clientes antes de impactar saldos y Banco.",
+      "",
+      `
+      <div class="panel">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Fecha</th><th>Cliente</th><th>Pedidos</th><th>Monto</th><th>Estado</th><th>Comprobante</th><th>Acciones</th></tr></thead>
+            <tbody>${rows || emptyRow(7, "No hay transferencias para comprobar.")}</tbody>
+          </table>
+        </div>
+      </div>
+      `,
+      "comprobar-transferencias"
+    );
+  }
+
+  function approveClientTransfer(id) {
+    const transfer = (state.clientTransfers || []).find((item) => item.id === id);
+    if (!transfer || transfer.status !== "pending") return;
+    if (!confirm("Aceptar transferencia " + transfer.id + " por " + formatMoney(transfer.amount) + "?")) return;
+    const paymentIds = [];
+    if (Array.isArray(transfer.orderIds) && transfer.orderIds.length) {
+      const paymentRecord = recordPayment({
+        clientId: transfer.clientId,
+        orderIds: transfer.orderIds,
+        amount: transfer.amount,
+        method: "transferencia",
+        receivedByUserId: currentUser.id,
+        notes: "Transferencia cliente aprobada - " + transfer.id + (transfer.notes ? " - " + transfer.notes : ""),
+        transferProofFile: transfer.proofFile || ""
+      });
+      if (paymentRecord) paymentIds.push(paymentRecord.id);
+    } else {
+      let remaining = Number(transfer.amount || 0);
+      const ids = transfer.clientIds && transfer.clientIds.length ? transfer.clientIds : [transfer.clientId];
+      ids.forEach((clientId, index) => {
+        if (remaining <= 0) return;
+        const balance = Math.max(0, getClientBalance(clientId));
+        const amount = index === ids.length - 1 ? remaining : Math.min(remaining, balance || remaining);
+        if (amount <= 0) return;
+        const paymentRecord = recordPayment({
+          clientId,
+          amount,
+          method: "transferencia",
+          receivedByUserId: currentUser.id,
+          notes: "Transferencia cliente aprobada - " + transfer.id + (transfer.notes ? " - " + transfer.notes : ""),
+          transferProofFile: transfer.proofFile || ""
+        });
+        if (paymentRecord) paymentIds.push(paymentRecord.id);
+        remaining -= amount;
+      });
+    }
+    transfer.status = "accepted";
+    transfer.paymentIds = paymentIds;
+    transfer.reviewedBy = currentUser.name;
+    transfer.reviewedAt = new Date().toISOString();
+    saveState();
+    render();
+  }
+
+  function rejectClientTransfer(id) {
+    const transfer = (state.clientTransfers || []).find((item) => item.id === id);
+    if (!transfer || transfer.status !== "pending") return;
+    if (!confirm("Rechazar transferencia " + transfer.id + "?")) return;
+    transfer.status = "rejected";
+    transfer.reviewedBy = currentUser.name;
+    transfer.reviewedAt = new Date().toISOString();
+    saveState();
+    render();
+  }
+
+  function downloadTransferProof(id) {
+    const transfer = (state.clientTransfers || []).find((item) => item.id === id);
+    if (!transfer || !transfer.proofFile) return alert("La transferencia no tiene archivo adjunto.");
+    const name = buildTransferProofName(transfer);
+    fetch(transfer.proofFile)
+      .then((response) => response.blob())
+      .then((blob) => {
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = name;
+        document.body.appendChild(link);
+        link.click();
+        setTimeout(() => {
+          URL.revokeObjectURL(url);
+          link.remove();
+        }, 1000);
+      })
+      .catch(() => {
+        window.open(transfer.proofFile, "_blank");
+      });
+  }
+
+  function buildTransferProofName(transfer) {
+    const client = getClient(transfer.clientId || (transfer.clientIds || [])[0]);
+    const clientName = client ? client.name : transfer.clientId || "Cliente";
+    const extMatch = String(transfer.proofName || "").match(/\.[a-z0-9]{2,5}$/i);
+    const ext = extMatch ? extMatch[0] : guessDataUrlExtension(transfer.proofFile);
+    return `${fileDate(transfer.date)} ${clientName} ${formatMoney(transfer.amount)}${ext}`.replace(/[\\/:*?"<>|]/g, "-");
+  }
+
+  function guessDataUrlExtension(dataUrl) {
+    const match = String(dataUrl || "").match(/^data:[a-z0-9.+-]+\/([a-z0-9.+-]+)/i);
+    if (!match) return "";
+    const sub = match[1].toLowerCase();
+    if (sub.includes("jpeg") || sub.includes("jpg")) return ".jpg";
+    if (sub.includes("png")) return ".png";
+    if (sub.includes("pdf")) return ".pdf";
+    if (sub.includes("webp")) return ".webp";
+    return "";
+  }
+
+  function transferStatusPill(status) {
+    if (status === "accepted") return `<span class="pill green">Pago aceptado</span>`;
+    if (status === "rejected") return `<span class="pill red">Pago rechazado</span>`;
+    return `<span class="pill amber">Pendiente de aprobacion</span>`;
+  }
+
+  function renderCaja() {
+    const visibleBoxes = activeCashBoxesForRole(currentUser.role);
+    if (ui.cajaSelectedId !== "all" && !visibleBoxes.some((box) => box.id === ui.cajaSelectedId)) ui.cajaSelectedId = "all";
+    const selectedId = ui.cajaSelectedId || "all";
+    const selectedEntries = getCajaEntriesForSelection(selectedId);
+    const balanceById = {};
+    let running = 0;
+    selectedEntries.slice().sort((a, b) => String(a.timestamp || a.date).localeCompare(String(b.timestamp || b.date))).forEach((entry) => {
+      running += Number(entry.amountIngreso || 0) - Number(entry.amountEgreso || 0);
+      balanceById[entry.id] = running;
+    });
+    const incomeTotal = selectedEntries.reduce((sum, entry) => sum + Number(entry.amountIngreso || 0), 0);
+    const expenseTotal = selectedEntries.reduce((sum, entry) => sum + Number(entry.amountEgreso || 0), 0);
+    const boxRows = currentUser.role === "manager" ? (state.cashBoxes || []).filter((box) => !isDeprecatedCashBox(box)).map((box) => `
+      <tr>
+        <td>${escapeHtml(box.name)}</td>
+        <td>${box.isActive !== false ? `<span class="pill green">Activa</span>` : `<span class="pill gray">Inactiva</span>`}</td>
+        <td><input type="checkbox" data-cash-box-visible-admin="${box.id}" ${box.visibleToAdmin !== false ? "checked" : ""} /></td>
+        <td><input type="checkbox" data-cash-box-active="${box.id}" ${box.isActive !== false ? "checked" : ""} /></td>
+        <td>${escapeHtml(box.notes || "")}</td>
+        <td><button class="btn small ghost" data-edit-cash-box="${box.id}">Editar</button></td>
+      </tr>
+    `).join("") : "";
+    const rows = selectedEntries.slice().sort((a, b) => String(b.timestamp || b.date).localeCompare(String(a.timestamp || a.date))).map((entry) => `
+      <tr>
+        <td>${formatDate(entry.date)}<br><span class="muted">${escapeHtml(String(entry.timestamp || "").slice(11, 19))}</span></td>
+        <td>${escapeHtml(getCashBoxName(resolveCajaEntryCashBoxId(entry)))}</td>
+        <td>${escapeHtml(entry.type)}</td>
+        <td>${escapeHtml(entry.concept)}</td>
+        <td class="num">${entry.expectedAmount ? formatMoney(entry.expectedAmount) : "-"}</td>
+        <td class="num">${formatMoney(entry.amountIngreso || 0)}</td>
+        <td class="num">${formatMoney(entry.amountEgreso || 0)}</td>
+        <td class="num">${formatMoney(balanceById[entry.id] || 0)}</td>
+        <td>${escapeHtml(entry.recordedBy || "")}</td>
+      </tr>
+    `).join("");
+    afterRender.push(bindCaja);
+    return pageShell(
+      "Caja / Rendicion",
+      "Accountability central. Pedidos quedan registrados como esperados; pagos son ingresos reales.",
+      `<button class="btn blue" data-route="pagos">Registrar pago</button>${currentUser.role === "manager" ? `<button class="btn ghost" data-add-cash-box>Agregar caja</button>` : ""}`,
+      `
+      <div class="panel" style="margin-bottom:14px">
+        <div class="form-grid">
+          <div class="field span-2">
+            <label>Caja</label>
+            <select id="caja-filter">
+              <option value="all" ${selectedId === "all" ? "selected" : ""}>Todos</option>
+              ${visibleBoxes.map((box) => `<option value="${box.id}" ${selectedId === box.id ? "selected" : ""}>${escapeHtml(box.name)}</option>`).join("")}
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="grid three">
+        ${metricCard("Balance caja", formatMoney(incomeTotal - expenseTotal), selectedId === "all" ? "Todas las cajas visibles" : getCashBoxName(selectedId))}
+        ${metricCard("Ingresos", formatMoney(incomeTotal), "Pagos recibidos")}
+        ${metricCard("Egresos", formatMoney(expenseTotal), "Compras y gastos")}
+      </div>
+      ${currentUser.role === "manager" ? `
+      <div class="panel" style="margin-top:14px">
+        <div class="page-actions" style="justify-content:space-between">
+          <h2 class="page-title" style="font-size:18px">Administrar cajas</h2>
+          <button class="btn primary" data-add-cash-box>Agregar caja</button>
+        </div>
+        <div class="table-wrap" style="margin-top:10px">
+          <table>
+            <thead><tr><th>Caja</th><th>Estado</th><th>Visible admin</th><th>Activa</th><th>Notas</th><th>Editar</th></tr></thead>
+            <tbody>${boxRows || emptyRow(6, "Sin cajas configuradas.")}</tbody>
+          </table>
+        </div>
+      </div>` : ""}
+      <div class="panel" style="margin-top:14px">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Fecha</th><th>Caja</th><th>Tipo</th><th>Concepto</th><th>Esperado</th><th>Ingreso</th><th>Egreso</th><th>Balance</th><th>Usuario</th></tr></thead>
+            <tbody>${rows || emptyRow(9, "Caja sin movimientos.")}</tbody>
+          </table>
+        </div>
+      </div>
+      `,
+      "caja"
+    );
+  }
+
+  function bindCaja() {
+    const filter = document.getElementById("caja-filter");
+    if (filter) filter.addEventListener("change", () => {
+      ui.cajaSelectedId = filter.value;
+      render();
+    });
+    document.querySelectorAll("[data-add-cash-box]").forEach((button) => button.addEventListener("click", () => openCashBoxForm()));
+    document.querySelectorAll("[data-edit-cash-box]").forEach((button) => button.addEventListener("click", () => openCashBoxForm(button.dataset.editCashBox)));
+    document.querySelectorAll("[data-cash-box-visible-admin]").forEach((checkbox) => checkbox.addEventListener("change", () => {
+      const box = getCashBox(checkbox.dataset.cashBoxVisibleAdmin);
+      if (!box) return;
+      box.visibleToAdmin = checkbox.checked;
+      saveState();
+      render();
+    }));
+    document.querySelectorAll("[data-cash-box-active]").forEach((checkbox) => checkbox.addEventListener("change", () => {
+      const box = getCashBox(checkbox.dataset.cashBoxActive);
+      if (!box) return;
+      box.isActive = checkbox.checked;
+      saveState();
+      render();
+    }));
+  }
+
+  function renderProviders() {
+    const providers = state.providers.filter((provider) => ui.tab === "inactivos" ? !provider.isActive : provider.isActive);
+    if (!ui.providerSelectedId || (ui.providerSelectedId !== "all" && !providers.some((provider) => provider.id === ui.providerSelectedId))) ui.providerSelectedId = "all";
+    const isAllProviders = ui.providerSelectedId === "all";
+    const selectedProvider = isAllProviders ? null : getProvider(ui.providerSelectedId);
+    const providerBalanceValue = isAllProviders
+      ? providers.reduce((sum, provider) => sum + Math.max(0, getProviderBalance(provider.id)), 0)
+      : selectedProvider ? getProviderBalance(selectedProvider.id) : 0;
+    const providerMovements = getProviderMovements(isAllProviders ? providers.map((provider) => provider.id) : ui.providerSelectedId, ui.providerFrom, ui.providerTo);
+    if (ui.providerProductId && !getProduct(ui.providerProductId)) ui.providerProductId = "";
+    const providerProductHistory = ui.providerProductId ? getProviderProductHistory(ui.providerProductId) : [];
+    const providerProductRows = providerProductHistory.map((entry) => `
+      <tr>
+        <td>${escapeHtml(entry.providerName)}${entry.linkedOnly ? ` <span class="pill gray">Vinculado</span>` : ""}</td>
+        <td class="num">${entry.unitCost == null ? "" : formatMoney(entry.unitCost)}</td>
+        <td class="num">${entry.quantity == null ? "" : formatNumber(entry.quantity) + " " + escapeHtml(entry.unitType || "")}</td>
+        <td>${entry.date ? formatDate(entry.date) : ""}</td>
+        <td>${escapeHtml(entry.purchaseId || "")}</td>
+      </tr>
+    `).join("");
+    const rows = providers.map((provider) => `
+      <tr>
+        <td><strong>${escapeHtml(provider.name)}</strong><br><span class="muted">${escapeHtml(provider.contactName || "")}</span></td>
+        <td>${escapeHtml(provider.phone || "")}</td>
+        <td>${escapeHtml(provider.paymentTerms || "")}</td>
+        <td class="num">${formatNumber(provider.defaultMargin || 0)}%</td>
+        <td>${escapeHtml(provider.notes || "")}</td>
+        <td class="page-actions">
+          <button class="btn small ghost" data-edit-provider="${provider.id}">Editar</button>
+          <button class="btn small ${provider.isActive ? "danger" : "primary"}" data-toggle-provider="${provider.id}">${provider.isActive ? "Desactivar" : "Activar"}</button>
+        </td>
+      </tr>
+    `).join("");
+    afterRender.push(() => {
+      bindTabs();
+      const providerSelect = document.getElementById("provider-account-select");
+      const providerFrom = document.getElementById("provider-account-from");
+      const providerTo = document.getElementById("provider-account-to");
+      if (providerSelect) providerSelect.addEventListener("change", () => {
+        ui.providerSelectedId = providerSelect.value;
+        render();
+      });
+      if (providerFrom) providerFrom.addEventListener("change", () => {
+        ui.providerFrom = providerFrom.value || todayISO();
+        render();
+      });
+      if (providerTo) providerTo.addEventListener("change", () => {
+        ui.providerTo = providerTo.value || todayISO();
+        render();
+      });
+      const productSelect = document.getElementById("provider-product-search");
+      if (productSelect) productSelect.addEventListener("change", () => {
+        ui.providerProductId = productSelect.value;
+        render();
+      });
+      document.querySelectorAll("[data-pay-provider]").forEach((button) => button.addEventListener("click", () => openProviderQuickPayment(button.dataset.payProvider)));
+      document.querySelectorAll("[data-edit-provider]").forEach((button) => button.addEventListener("click", () => openProviderForm(button.dataset.editProvider)));
+      document.querySelectorAll("[data-toggle-provider]").forEach((button) => button.addEventListener("click", () => {
+        const provider = getProvider(button.dataset.toggleProvider);
+        if (!provider) return;
+        provider.isActive = !provider.isActive;
+        saveState();
+        render();
+      }));
+    });
+    return pageShell(
+      "Proveedores",
+      "Alta y mantenimiento de proveedores para compras y division.",
+      `<button class="btn primary" data-add-provider>Agregar proveedor</button>`,
+      `
+      ${renderTabs()}
+      <div class="panel" style="margin-bottom:14px">
+        <div class="form-grid">
+          <div class="field span-2"><label>Proveedor</label><select id="provider-account-select"><option value="all" ${isAllProviders ? "selected" : ""}>TODOS</option>${providers.map((provider) => `<option value="${provider.id}" ${provider.id === ui.providerSelectedId ? "selected" : ""}>${escapeHtml(provider.name)}</option>`).join("")}</select></div>
+          <div class="field"><label>Desde</label><input type="date" id="provider-account-from" value="${ui.providerFrom}" /></div>
+          <div class="field"><label>Hasta</label><input type="date" id="provider-account-to" value="${ui.providerTo}" /></div>
+          <div class="field"><label>Saldo</label><input disabled value="${formatMoney(providerBalanceValue)}" /></div>
+          <div class="field"><label>&nbsp;</label><button class="btn blue" type="button" data-pay-provider="${selectedProvider ? selectedProvider.id : ""}">Pagar</button></div>
+          <div class="field"><label>&nbsp;</label><button class="btn ghost" data-print type="button">PDF / Imprimir proveedor</button></div>
+        </div>
+        <div class="table-wrap" style="margin-top:10px">
+          <table>
+            <thead><tr><th>Fecha</th><th>Proveedor</th><th>Tipo</th><th>Descripcion</th><th>Monto</th><th>Saldo</th><th>Notas</th></tr></thead>
+            <tbody>${providerMovements.map((entry) => `<tr><td>${formatDate(entry.date)}</td><td>${escapeHtml(entry.providerName || "")}</td><td>${escapeHtml(entry.type)}</td><td>${escapeHtml(entry.description)}</td><td class="num">${formatMoney(entry.amount)}</td><td class="num">${formatMoney(entry.balance || 0)}</td><td>${escapeHtml(entry.notes || "")}</td></tr>`).join("") || emptyRow(7, "Sin movimientos para este rango.")}</tbody>
+          </table>
+        </div>
+      </div>
+      <div class="panel" style="margin-bottom:14px">
+        <h2 class="page-title" style="font-size:18px">Buscar producto</h2>
+        <div class="form-grid" style="margin-top:10px">
+          <div class="field span-2"><label>Producto</label><select id="provider-product-search"><option value="">Seleccione producto</option>${activeProducts().map((product) => `<option value="${product.id}" ${ui.providerProductId === product.id ? "selected" : ""}>${escapeHtml(product.name)} - ${escapeHtml(product.unitType)}</option>`).join("")}</select></div>
+        </div>
+        <div class="table-wrap" style="margin-top:10px">
+          <table>
+            <thead><tr><th>Proveedor</th><th>Ultimo costo unitario</th><th>Cantidad</th><th>Fecha</th><th>Compra</th></tr></thead>
+            <tbody>${providerProductRows || emptyRow(5, ui.providerProductId ? "Sin compras registradas para este producto." : "Seleccione un producto para ver proveedores.")}</tbody>
+          </table>
+        </div>
+      </div>
+      <div class="panel no-print">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Proveedor</th><th>Telefono</th><th>Pago</th><th>Margen</th><th>Notas</th><th>Acciones</th></tr></thead>
+            <tbody>${rows || emptyRow(6, "No hay proveedores en esta vista.")}</tbody>
+          </table>
+        </div>
+      </div>
+      `,
+      "proveedores"
+    );
+  }
+
+  function renderEmployees() {
+    const employees = activeEmployees();
+    const defaultEmployeeCashBox = getDefaultOutgoingCashBoxId();
+    const employeeRows = employees.map((employee) => {
+      const summary = getWeeklyAttendanceSummary(employee.id);
+      return `
+        <tr>
+          <td><strong>${escapeHtml(employee.name)}</strong><br><span class="muted">${escapeHtml(employee.username)}</span></td>
+          <td>${escapeHtml(employee.email || "")}<br><span class="muted">${escapeHtml(employee.phone || "")}</span></td>
+          <td class="num">${formatMoney(getEmployeeCajaTotal(employee.id))}</td>
+          <td class="num">${summary.hoursText}</td>
+          <td class="num">${formatMoney(summary.due)}</td>
+          <td class="page-actions">
+            <button class="btn small ghost" data-edit-employee="${employee.id}">Editar</button>
+            <button class="btn small danger" data-disable-user="${employee.id}">Desactivar</button>
+          </td>
+        </tr>
+      `;
+    }).join("");
+    const attendanceRows = state.attendance.slice().sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, 30).map((entry) => {
+      const employee = getUser(entry.userId);
+      return `
+        <tr>
+          <td>${formatDate(entry.date)}</td>
+          <td>${escapeHtml(employee ? employee.name : entry.userId)}</td>
+          <td>${entry.present ? `<span class="pill green">Presente</span>` : `<span class="pill gray">Ausente</span>`}</td>
+          <td>${escapeHtml(entry.startTime || "-")} / ${escapeHtml(entry.endTime || "-")}</td>
+          <td class="num">${formatNumber(getAttendanceHours(entry))} hs</td>
+          <td>${escapeHtml(entry.notes || "")}</td>
+          <td><button class="btn small ghost" data-edit-attendance="${entry.id}">Editar</button></td>
+        </tr>
+      `;
+    }).join("");
+    const paymentRows = state.employeePayments.slice().reverse().map((payment) => {
+      const employee = getUser(payment.userId);
+      return `
+        <tr>
+          <td>${formatDate(payment.date)}</td>
+          <td>${escapeHtml(employee ? employee.name : payment.userId)}</td>
+          <td>${formatDate(payment.weekStart)} - ${formatDate(payment.weekEnd)}</td>
+          <td>${escapeHtml(PAYMENT_METHODS[payment.method] || payment.method)}</td>
+          <td>${escapeHtml(getCashBoxName(payment.cashBoxId && !isDeprecatedCashBox({ id: payment.cashBoxId }) ? payment.cashBoxId : "cash-general"))}</td>
+          <td class="num">${formatMoney(payment.amount)}</td>
+          <td>${escapeHtml(payment.notes || "")}</td>
+        </tr>
+      `;
+    }).join("");
+    afterRender.push(bindEmployees);
+    return pageShell(
+      "Empleados",
+      "Alta de empleados, usuarios de acceso, caja, horarios y pago semanal.",
+      `<button class="btn primary" data-add-employee>Agregar empleado</button>`,
+      `
+      <div class="grid three">
+        ${metricCard("Empleados activos", employees.length, "Usuarios con rol empleado")}
+        ${metricCard("Caja empleados", formatMoney(getEmployeeCashTotals().reduce((sum, item) => sum + item.total, 0)), "Cobros recibidos por empleados")}
+        ${metricCard("Sueldos semana", formatMoney(employees.reduce((sum, employee) => sum + getWeeklyPayDue(employee.id), 0)), "Pendiente segun horarios")}
+      </div>
+      <div class="grid two" style="margin-top:14px">
+        <div class="panel">
+          <h2 class="page-title" style="font-size:18px">Planilla empleados</h2>
+          <div class="table-wrap" style="margin-top:10px">
+            <table>
+              <thead><tr><th>Empleado</th><th>Contacto</th><th>Caja</th><th>Horas semana</th><th>Pago semana</th><th>Acciones</th></tr></thead>
+              <tbody>${employeeRows || emptyRow(6, "No hay empleados activos.")}</tbody>
+            </table>
+          </div>
+        </div>
+        <form id="employee-payment-form" class="panel">
+          <h2 class="page-title" style="font-size:18px">Registrar pago semanal</h2>
+          <div class="form-grid" style="margin-top:10px">
+            <div class="field span-2"><label>Empleado</label><select id="employee-payment-user">${employees.map((employee) => `<option value="${employee.id}">${escapeHtml(employee.name)}</option>`).join("")}</select></div>
+            <div class="field"><label>Fecha</label><input type="date" id="employee-payment-date" value="${todayISO()}" /></div>
+            <div class="field"><label>Metodo</label><select id="employee-payment-method">${Object.keys(PAYMENT_METHODS).map((method) => `<option value="${method}">${escapeHtml(PAYMENT_METHODS[method])}</option>`).join("")}</select></div>
+            <div class="field"><label>Caja</label><select id="employee-payment-cash-box">${renderCashBoxOptions(defaultEmployeeCashBox)}</select></div>
+            <div class="field"><label>Monto</label><input id="employee-payment-amount" inputmode="decimal" /></div>
+            <div class="field"><label>Pago extra</label><input id="employee-payment-extra" inputmode="decimal" placeholder="0" /></div>
+            <div class="field span-3"><label>Notas</label><input id="employee-payment-notes" placeholder="Pago semanal, adelanto, ajuste, etc." /></div>
+          </div>
+          <div class="page-actions" style="margin-top:12px">
+            <button class="btn primary" type="submit">Registrar pago</button>
+            <button class="btn ghost" type="button" data-add-attendance>Agregar horario</button>
+          </div>
+        </form>
+        <form id="admin-reimbursement-form" class="panel">
+          <h2 class="page-title" style="font-size:18px">Gastos para Reintegro</h2>
+          <div class="form-grid" style="margin-top:10px">
+            <div class="field span-2"><label>Empleado</label><select id="admin-reimbursement-user">${employees.map((employee) => `<option value="${employee.id}">${escapeHtml(employee.name)}</option>`).join("")}</select></div>
+            <div class="field"><label>Fecha</label><input type="date" id="admin-reimbursement-date" value="${todayISO()}" /></div>
+            <div class="field"><label>Monto</label><input id="admin-reimbursement-amount" inputmode="decimal" /></div>
+            <div class="field span-3"><label>Descripcion</label><input id="admin-reimbursement-description" placeholder="Peaje, combustible, compra menor..." /></div>
+          </div>
+          <div class="page-actions" style="margin-top:12px"><button class="btn primary" type="submit">Registrar reintegro</button></div>
+        </form>
+      </div>
+      <div class="grid two" style="margin-top:14px">
+        <div class="panel">
+          <h2 class="page-title" style="font-size:18px">Horarios recientes</h2>
+          <div class="table-wrap" style="margin-top:10px">
+            <table>
+              <thead><tr><th>Fecha</th><th>Empleado</th><th>Presencia</th><th>Horario</th><th>Horas</th><th>Notas</th><th>Editar</th></tr></thead>
+              <tbody>${attendanceRows || emptyRow(7, "Todavia no hay horarios cargados.")}</tbody>
+            </table>
+          </div>
+        </div>
+        <div class="panel">
+          <h2 class="page-title" style="font-size:18px">Pagos registrados</h2>
+          <div class="table-wrap" style="margin-top:10px">
+            <table>
+              <thead><tr><th>Fecha</th><th>Empleado</th><th>Semana</th><th>Metodo</th><th>Caja</th><th>Monto</th><th>Notas</th></tr></thead>
+              <tbody>${paymentRows || emptyRow(7, "Sin pagos de empleados.")}</tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      `,
+      "empleados"
+    );
+  }
+
+  function bindEmployees() {
+    document.querySelectorAll("[data-add-employee]").forEach((button) => button.addEventListener("click", () => openEmployeeForm()));
+    document.querySelectorAll("[data-edit-employee]").forEach((button) => button.addEventListener("click", () => openEmployeeForm(button.dataset.editEmployee)));
+    document.querySelectorAll("[data-disable-user]").forEach((button) => button.addEventListener("click", () => {
+      const user = getUser(button.dataset.disableUser);
+      if (!user) return;
+      if (!confirm("Desactivar usuario " + user.name + "?")) return;
+      user.isActive = false;
+      saveState();
+      render();
+    }));
+    document.querySelectorAll("[data-edit-attendance]").forEach((button) => button.addEventListener("click", () => openAttendanceForm(button.dataset.editAttendance)));
+    document.querySelectorAll("[data-add-attendance]").forEach((button) => button.addEventListener("click", () => openAttendanceForm()));
+    const form = document.getElementById("employee-payment-form");
+    const userSelect = document.getElementById("employee-payment-user");
+    const amountInput = document.getElementById("employee-payment-amount");
+    const refreshAmount = () => {
+      amountInput.value = formatAmountInput(getWeeklyPayDue(userSelect.value));
+    };
+    if (userSelect) {
+      userSelect.addEventListener("change", refreshAmount);
+      refreshAmount();
+    }
+    if (form) {
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+      const user = getUser(userSelect.value);
+        const amount = parseAmount(amountInput.value) + parseAmount(document.getElementById("employee-payment-extra").value);
+        if (!user) return alert("Seleccione un empleado.");
+        if (amount <= 0) return alert("Ingrese un monto mayor a cero.");
+        registerEmployeeSalaryPayment({
+          userId: user.id,
+          date: document.getElementById("employee-payment-date").value || todayISO(),
+          amount,
+          method: document.getElementById("employee-payment-method").value,
+          cashBoxId: document.getElementById("employee-payment-cash-box").value,
+          notes: document.getElementById("employee-payment-notes").value.trim()
+        });
+        saveState();
+        render();
+      });
+    }
+    const reimbursementForm = document.getElementById("admin-reimbursement-form");
+    if (reimbursementForm) reimbursementForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      registerEmployeeReimbursement({
+        userId: document.getElementById("admin-reimbursement-user").value,
+        date: document.getElementById("admin-reimbursement-date").value || todayISO(),
+        amount: parseAmount(document.getElementById("admin-reimbursement-amount").value),
+        description: document.getElementById("admin-reimbursement-description").value.trim()
+      });
+      saveState();
+      render();
+    });
+  }
+
+  function renderAttendance() {
+    const summary = getWeeklyAttendanceSummary(currentUser.id);
+    const todayEntry = getAttendanceEntry(currentUser.id, todayISO());
+    const rows = state.attendance.filter((entry) => entry.userId === currentUser.id).slice().sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, 12).map((entry) => `
+      <tr>
+        <td>${formatDate(entry.date)}</td>
+        <td>${entry.present ? `<span class="pill green">Presente</span>` : `<span class="pill gray">Ausente</span>`}</td>
+        <td>${escapeHtml(entry.startTime || "-")} / ${escapeHtml(entry.endTime || "-")}</td>
+        <td class="num">${formatNumber(getAttendanceHours(entry))} hs</td>
+        <td>${escapeHtml(entry.notes || "")}</td>
+      </tr>
+    `).join("");
+    afterRender.push(bindAttendance);
+    return pageShell(
+      "Horarios",
+      "Registro de presencialidad y finalizacion del dia.",
+      "",
+      `
+      <div class="grid three">
+        ${metricCard("Horas semana", summary.hoursText, formatDate(summary.weekStart) + " - " + formatDate(summary.weekEnd))}
+        ${metricCard("Cobro semana", formatMoney(summary.due), "Disponible los sabados segun planilla")}
+        ${metricCard("Mi caja", formatMoney(getEmployeeCajaTotal(currentUser.id)), "Cobros registrados a mi nombre")}
+      </div>
+      <form id="attendance-form" class="panel" style="margin-top:14px">
+        <div class="form-grid">
+          <div class="field"><label>Fecha</label><input type="date" id="attendance-date" value="${todayEntry ? todayEntry.date : todayISO()}" /></div>
+          <label class="field" style="display:flex;align-items:center;gap:8px;grid-template-columns:auto 1fr">
+            <input type="checkbox" id="attendance-present" style="width:auto;min-height:auto" ${!todayEntry || todayEntry.present ? "checked" : ""} />
+            <span>Presente</span>
+          </label>
+          <div class="field"><label>Inicio</label><input type="time" id="attendance-start" value="${escapeAttr(todayEntry ? todayEntry.startTime || "05:45" : "05:45")}" /></div>
+          <div class="field"><label>Fin del dia</label><input type="time" id="attendance-end" value="${escapeAttr(todayEntry ? todayEntry.endTime || currentTimeHHMM() : currentTimeHHMM())}" /></div>
+          <div class="field span-4"><label>Notas</label><input id="attendance-notes" value="${escapeAttr(todayEntry ? todayEntry.notes || "" : "")}" placeholder="Retiro temprano, franco, reemplazo, etc." /></div>
+        </div>
+        <div class="page-actions" style="margin-top:12px"><button class="btn primary" type="submit">Guardar horario</button></div>
+      </form>
+      <div class="grid two" style="margin-top:14px">
+        <form id="employee-reimbursement-form" class="panel">
+          <h2 class="page-title" style="font-size:18px">Gastos para reintegro</h2>
+          <div class="form-grid" style="margin-top:10px">
+            <div class="field"><label>Fecha</label><input type="date" id="reimbursement-date" value="${todayISO()}" /></div>
+            <div class="field"><label>Monto</label><input id="reimbursement-amount" inputmode="decimal" placeholder="0" /></div>
+            <div class="field span-2"><label>Descripcion</label><input id="reimbursement-description" placeholder="Peaje, combustible, compra menor..." /></div>
+          </div>
+          <div class="page-actions" style="margin-top:12px"><button class="btn primary" type="submit">Registrar reintegro</button></div>
+        </form>
+        <form id="employee-salary-collection-form" class="panel">
+          <h2 class="page-title" style="font-size:18px">Cobro de sueldo</h2>
+          <div class="form-grid" style="margin-top:10px">
+            <div class="field"><label>Fecha</label><input type="date" id="salary-collection-date" value="${todayISO()}" /></div>
+            <div class="field"><label>Tipo</label><select id="salary-collection-mode"><option value="total">Total</option><option value="partial">Pago parcial</option></select></div>
+            <div class="field"><label>Monto</label><input id="salary-collection-amount" inputmode="decimal" value="${formatAmountInput(summary.due)}" /></div>
+            <div class="field span-2"><label>Notas</label><input id="salary-collection-notes" placeholder="Cobro semanal, adelanto..." /></div>
+          </div>
+          <div class="page-actions" style="margin-top:12px"><button class="btn primary" type="submit">Registrar cobro</button></div>
+        </form>
+      </div>
+      <div class="panel" style="margin-top:14px">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Fecha</th><th>Presencia</th><th>Horario</th><th>Horas</th><th>Notas</th></tr></thead>
+            <tbody>${rows || emptyRow(5, "Todavia no hay horarios.")}</tbody>
+          </table>
+        </div>
+      </div>
+      `,
+      "horarios"
+    );
+  }
+
+  function bindAttendance() {
+    document.getElementById("attendance-form").addEventListener("submit", (event) => {
+      event.preventDefault();
+      upsertAttendance({
+        userId: currentUser.id,
+        date: document.getElementById("attendance-date").value || todayISO(),
+        present: document.getElementById("attendance-present").checked,
+        startTime: document.getElementById("attendance-start").value,
+        endTime: document.getElementById("attendance-end").value,
+        notes: document.getElementById("attendance-notes").value.trim()
+      });
+      saveState();
+      alert("Horario guardado.");
+      render();
+    });
+    const reimbursementForm = document.getElementById("employee-reimbursement-form");
+    if (reimbursementForm) reimbursementForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      registerEmployeeReimbursement({
+        userId: currentUser.id,
+        date: document.getElementById("reimbursement-date").value || todayISO(),
+        amount: parseAmount(document.getElementById("reimbursement-amount").value),
+        description: document.getElementById("reimbursement-description").value.trim()
+      });
+      saveState();
+      render();
+    });
+    const salaryForm = document.getElementById("employee-salary-collection-form");
+    const salaryMode = document.getElementById("salary-collection-mode");
+    const salaryAmount = document.getElementById("salary-collection-amount");
+    if (salaryMode) salaryMode.addEventListener("change", () => {
+      if (salaryMode.value === "total") salaryAmount.value = formatAmountInput(getWeeklyPayDue(currentUser.id, document.getElementById("salary-collection-date").value || todayISO()));
+    });
+    if (salaryForm) salaryForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      registerEmployeeSalaryPayment({
+        userId: currentUser.id,
+        date: document.getElementById("salary-collection-date").value || todayISO(),
+        amount: salaryMode.value === "total" ? getWeeklyPayDue(currentUser.id, document.getElementById("salary-collection-date").value || todayISO()) : parseAmount(salaryAmount.value),
+        method: "efectivo",
+        cashBoxId: getUserCashBoxId(currentUser.id),
+        notes: document.getElementById("salary-collection-notes").value.trim() || "Cobro registrado por empleado"
+      });
+      saveState();
+      render();
+    });
+  }
+
+  function renderCustomerReports() {
+    const clientIds = getCustomerVisibleClientIds();
+    if (ui.customerReportClient !== "all" && !clientIds.includes(ui.customerReportClient)) ui.customerReportClient = "all";
+    const orders = getCustomerReportOrders(ui.customerReportClient, ui.customerReportFrom, ui.customerReportTo);
+    const summary = buildCustomerProductSummary(orders);
+    const subtotalTotal = orders.reduce((sum, order) => sum + getOrderSubtotal(order), 0);
+    const ivaTotal = orders.reduce((sum, order) => sum + getOrderIva(order), 0);
+    const total = subtotalTotal + ivaTotal;
+    const selectedReportClientIds = ui.customerReportClient === "all" ? clientIds : [ui.customerReportClient];
+    const showIvaColumn = orders.some((order) => shouldApplyInvoiceVat(getClient(order.clientId))) || selectedReportClientIds.some((id) => shouldApplyInvoiceVat(getClient(id)));
+    const orderRows = orders.map((order) => {
+      const client = getClient(order.clientId);
+      return `
+        <tr>
+          <td>${formatDate(order.date)}<br><span class="muted">${escapeHtml(client ? client.name : order.clientId)}</span></td>
+          <td>${escapeHtml(order.id)}</td>
+          <td class="num">${formatMoney(getOrderTotal(order))}</td>
+          ${showIvaColumn ? `<td class="num">${shouldApplyInvoiceVat(client) ? formatMoney(getOrderIva(order)) : "-"}</td>` : ""}
+          <td>
+            <details>
+              <summary>Ver productos</summary>
+              <div class="mini-table">
+                ${order.items.map((item) => `<div><span>${escapeHtml(item.productName)}</span><span>${formatNumber(item.quantity)} ${escapeHtml(item.unitType)} x ${formatMoney(item.unitPrice)} = ${formatMoney(item.totalWithIva || item.subtotal)}</span></div>`).join("")}
+              </div>
+            </details>
+          </td>
+        </tr>
+      `;
+    }).join("");
+    const productRows = summary.map((item) => `
+      <tr>
+        <td>
+          <details>
+            <summary>${escapeHtml(item.name)}</summary>
+            <div class="mini-table">${getProductOrderDates(orders, item.productId, item.unitType).map((entry) => `<div><span>${formatDate(entry.date)} - ${escapeHtml(entry.orderId)}</span><span>${formatNumber(entry.quantity)} ${escapeHtml(entry.unitType)} - ${formatMoney(entry.amount)}</span></div>`).join("")}</div>
+          </details>
+        </td>
+        <td class="num">${formatNumber(item.quantity)} ${escapeHtml(item.unitType)}</td>
+        <td class="num">${formatMoney(item.amount)}</td>
+      </tr>
+    `).join("");
+    afterRender.push(bindCustomerReports);
+    return pageShell(
+      "Analisis de Compras",
+      "Reporte por rango de fechas, productos y cuentas vinculadas.",
+      "",
+      `
+      <div class="tabs">
+        <button class="tab ${ui.customerReportClient === "all" ? "active" : ""}" data-report-client="all">Todos</button>
+        ${clientIds.map((id) => {
+          const client = getClient(id);
+          return `<button class="tab ${ui.customerReportClient === id ? "active" : ""}" data-report-client="${id}">${escapeHtml(client ? client.name : id)}</button>`;
+        }).join("")}
+      </div>
+      <div class="panel">
+        <div class="form-grid">
+          <div class="field"><label>Desde</label><input type="date" id="report-from" value="${ui.customerReportFrom}" /></div>
+          <div class="field"><label>Hasta</label><input type="date" id="report-to" value="${ui.customerReportTo}" /></div>
+          <div class="field"><label>Subtotal rango</label><input disabled value="${formatMoney(subtotalTotal)}" /></div>
+          <div class="field"><label>IVA rango</label><input disabled value="${formatMoney(ivaTotal)}" /></div>
+          <div class="field"><label>Total rango</label><input disabled value="${formatMoney(total)}" /></div>
+          <div class="field"><label>Pedidos</label><input disabled value="${orders.length}" /></div>
+        </div>
+      </div>
+      <div class="grid two" style="margin-top:14px">
+        <div class="panel">${renderPieChart(summary)}</div>
+        <div class="panel">${renderBarChart(summary)}</div>
+      </div>
+      <div class="grid two" style="margin-top:14px">
+        <div class="panel customer-orders-table">
+          <h2 class="page-title" style="font-size:18px">Pedidos del rango</h2>
+          <div class="table-wrap" style="margin-top:10px">
+            <table>
+              <thead><tr><th>Fecha</th><th>Pedido</th><th>Precios</th>${showIvaColumn ? "<th>IVA</th>" : ""}<th>Detalle</th></tr></thead>
+              <tbody>${orderRows || emptyRow(showIvaColumn ? 5 : 4, "No hay pedidos en este rango.")}</tbody>
+            </table>
+          </div>
+          <div class="range-summary">
+            <span>Subtotal</span><strong>${formatMoney(subtotalTotal)}</strong>
+            <span>IVA</span><strong>${formatMoney(ivaTotal)}</strong>
+            <span>Total</span><strong>${formatMoney(total)}</strong>
+          </div>
+        </div>
+        <div class="panel customer-product-table">
+          <h2 class="page-title" style="font-size:18px">Total por producto</h2>
+          <div class="table-wrap" style="margin-top:10px">
+            <table>
+              <thead><tr><th>Producto</th><th>Cantidad</th><th>Gastado</th></tr></thead>
+              <tbody>${productRows || emptyRow(3, "No hay productos para resumir.")}</tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      `,
+      "mis-pedidos"
+    );
+  }
+
+  function bindCustomerReports() {
+    document.querySelectorAll("[data-report-client]").forEach((button) => button.addEventListener("click", () => {
+      ui.customerReportClient = button.dataset.reportClient;
+      render();
+    }));
+    document.getElementById("report-from").addEventListener("change", (event) => {
+      ui.customerReportFrom = event.target.value || todayISO();
+      render();
+    });
+    document.getElementById("report-to").addEventListener("change", (event) => {
+      ui.customerReportTo = event.target.value || todayISO();
+      render();
+    });
+  }
+
+  function renderCustomerPriceList() {
+    const clientIds = getCustomerVisibleClientIds();
+    if (!ui.priceListClient || !clientIds.includes(ui.priceListClient)) ui.priceListClient = clientIds[0] || "";
+    const client = getClient(ui.priceListClient);
+    const products = sortProductsForClient(client ? client.id : "");
+    const rows = products.map((product) => {
+      const netPrice = getAdjustedProductPrice(product, client);
+      const ivaRate = shouldApplyInvoiceVat(client) ? getIvaRate(product.ivaType) : 0;
+      const ivaAmount = netPrice * (ivaRate / 100);
+      const finalPrice = netPrice + ivaAmount;
+      const priceRecord = state.prices[product.id] || {};
+      return `
+        <article class="price-list-card">
+          <div class="price-list-product">
+            <span>${escapeHtml(product.name)}</span>
+            <img class="order-product-thumb" src="${productThumb(product)}" alt="" />
+          </div>
+          <div class="price-list-values">
+            ${ivaRate > 0 ? `
+              <div><span>Precio unitario</span><strong>${formatMoney(netPrice)}</strong></div>
+              <div><span>IVA ${ivaLabel(product.ivaType)}</span><strong>${formatMoney(ivaAmount)}</strong></div>
+              <div><span>Precio final</span><strong>${formatMoney(finalPrice)}</strong></div>
+            ` : `<div><span>Precio unitario</span><strong>${formatMoney(finalPrice)}</strong></div>`}
+            <div><span>ult act</span><strong>${formatDate(priceRecord.date || todayISO())}</strong></div>
+          </div>
+        </article>
+      `;
+    }).join("");
+    afterRender.push(() => {
+      const select = document.getElementById("price-list-client");
+      if (select) select.addEventListener("change", () => {
+        ui.priceListClient = select.value;
+        render();
+      });
+    });
+    return pageShell(
+      "Lista de Precios",
+      "Precios de referencia de la ultima compra, los precios pueden cambiar de manera diaria",
+      "",
+      `
+      ${clientIds.length > 1 ? `<div class="panel" style="margin-bottom:14px"><div class="form-grid"><div class="field span-2"><label>Cuenta</label><select id="price-list-client">${clientIds.map((id) => {
+        const item = getClient(id);
+        return `<option value="${id}" ${id === ui.priceListClient ? "selected" : ""}>${escapeHtml(id)} - ${escapeHtml(item ? item.name : id)}</option>`;
+      }).join("")}</select></div></div></div>` : ""}
+      <div class="price-list-grid">${rows || `<div class="empty compact">No hay productos para mostrar.</div>`}</div>
+      `,
+      "lista-precios"
+    );
+  }
+
+  function getBillingPendingForClient(client) {
+    let lastCut = "";
+    for (const log of state.billingLog || []) {
+      if (log.clientId === client.id && ["ok", "simulada"].includes(log.status) && log.to > lastCut) lastCut = log.to;
+    }
+    const from = lastCut ? addDaysISO(lastCut, 1) : todayISO().slice(0, 8) + "01";
+    const orders = state.orders.filter((order) => order.clientId === client.id && order.date >= from && order.date <= todayISO() && !["cancelado", "anulado"].includes(order.status));
+    return {
+      from,
+      total: orders.reduce((sum, order) => sum + Number(order.totalAmount || 0), 0),
+      iva: orders.reduce((sum, order) => sum + Number(order.ivaAmount || 0), 0),
+      orders: orders.length
+    };
+  }
+
+  function renderFacturacion() {
+    const clients = activeClients().filter((client) => client.needsInvoice && ["Factura A", "Factura B"].includes(client.invoiceType));
+    const rows = clients.map((client) => {
+      const pending = getBillingPendingForClient(client);
+      return `
+        <tr>
+          <td><strong>${escapeHtml(client.id)} - ${escapeHtml(client.name)}</strong><br><span class="muted">${escapeHtml(client.legalName || "")}</span></td>
+          <td>${escapeHtml(client.cuit || "")}<br><span class="muted">${escapeHtml(client.invoiceType)}</span></td>
+          <td>${escapeHtml(client.invoiceFrequency || "mensual")}</td>
+          <td>${escapeHtml(client.billingEmail || client.email || "")}</td>
+          <td>${formatDate(pending.from)}<br><span class="muted">${pending.orders} pedidos</span></td>
+          <td class="num">${formatMoney(pending.total)}</td>
+          <td class="num">${formatMoney(pending.iva)}</td>
+        </tr>
+      `;
+    }).join("");
+    const logRows = (state.billingLog || []).slice(-30).reverse().map((log) => `
+      <tr>
+        <td>${formatTimestampShort(log.emittedAt)}</td>
+        <td>${escapeHtml(log.clientName || log.clientId)}</td>
+        <td>${formatDate(log.from)} - ${formatDate(log.to)}</td>
+        <td class="num">${formatMoney(log.total)}</td>
+        <td>${log.status === "ok" ? `<span class="pill green">Emitida</span>` : log.status === "simulada" ? `<span class="pill amber">Simulada</span>` : `<span class="pill red">Error</span>`}</td>
+        <td>${log.cae ? "CAE " + escapeHtml(log.cae) + (log.pdf ? ` - <a href="${escapeAttr(log.pdf)}" target="_blank" rel="noopener">PDF</a>` : "") : escapeHtml(log.detail || "")}</td>
+      </tr>
+    `).join("");
+    afterRender.push(() => {
+      const statusNode = document.getElementById("billing-server-status");
+      const config = getCloudSyncConfig();
+      if (statusNode && config.username && cloudSyncReady(config)) {
+        cloudRequest(config, "/billing/status", { method: "GET" })
+          .then((response) => response.ok ? response.json() : null)
+          .then((payload) => {
+            if (!payload || !statusNode) return;
+            statusNode.innerHTML = payload.enabled
+              ? `<span class="pill green">TusFacturas conectado (PDV ${escapeHtml(String(payload.puntoVenta))})</span>`
+              : `<span class="pill amber">Credenciales de TusFacturas pendientes (modo simulacion)</span>`;
+          })
+          .catch(() => {});
+      } else if (statusNode) {
+        statusNode.innerHTML = `<span class="pill gray">Requiere el servidor propio (Opcion F) para emitir</span>`;
+      }
+      document.querySelectorAll("[data-billing-run]").forEach((button) => button.addEventListener("click", async () => {
+        const simulate = button.dataset.billingRun === "simulate";
+        const cfg = getCloudSyncConfig();
+        if (!cfg.username || !cloudSyncReady(cfg)) return alert("La emision corre en el servidor propio (Opcion F). Configure el ingreso con usuario y contrasena.");
+        if (!confirm(simulate ? "Simular la emision de las facturas pendientes? (no emite nada real)" : "Emitir AHORA las facturas pendientes via TusFacturas?")) return;
+        try {
+          const response = await cloudRequest(cfg, "/billing/run", { method: "POST", body: JSON.stringify({ simulate }) });
+          const result = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(result.error || "HTTP " + response.status);
+          alert("Proceso terminado: " + (result.count || 0) + " comprobante(s) procesado(s)" + (result.simulate ? " en modo simulacion." : "."));
+          await cloudPull(false);
+          render();
+        } catch (error) {
+          alert("No se pudo ejecutar: " + error.message);
+        }
+      }));
+    });
+    return pageShell(
+      "Facturacion",
+      "Clientes con factura, acumulados del periodo y emision automatica via TusFacturasAPP (diaria 23hs, semanal sabados 23hs con corte de fin de mes, mensual ultimo dia 23hs).",
+      currentUser.role === "manager" ? `<button class="btn ghost" data-billing-run="simulate">Simular emision</button>
+       <button class="btn primary" data-billing-run="real">Emitir pendientes ahora</button>` : "",
+      `
+      <div class="panel" style="margin-bottom:14px">
+        <div class="page-actions" style="justify-content:space-between">
+          <h2 class="page-title" style="font-size:18px">Estado del servicio</h2>
+          <span id="billing-server-status"><span class="muted">Consultando...</span></span>
+        </div>
+        <p class="muted">Las credenciales (apikey, apitoken, usertoken) se configuran en el archivo .env del servidor. Sin credenciales, la emision corre en modo simulacion para que pruebe los periodos sin facturar de verdad.</p>
+      </div>
+      <div class="panel" style="margin-bottom:14px">
+        <h2 class="page-title" style="font-size:18px">Clientes con factura</h2>
+        <div class="table-wrap" style="margin-top:10px">
+          <table>
+            <thead><tr><th>Cliente</th><th>CUIT / Tipo</th><th>Periodicidad</th><th>Correo de facturacion</th><th>Acumula desde</th><th>Total acumulado</th><th>IVA acumulado</th></tr></thead>
+            <tbody>${rows || emptyRow(7, "No hay clientes marcados con factura A o B.")}</tbody>
+          </table>
+        </div>
+      </div>
+      <div class="panel">
+        <h2 class="page-title" style="font-size:18px">Historial de emisiones</h2>
+        <div class="table-wrap" style="margin-top:10px">
+          <table>
+            <thead><tr><th>Fecha</th><th>Cliente</th><th>Periodo</th><th>Total</th><th>Estado</th><th>CAE / Detalle</th></tr></thead>
+            <tbody>${logRows || emptyRow(6, "Todavia no se emitieron facturas.")}</tbody>
+          </table>
+        </div>
+      </div>
+      `,
+      "facturacion"
+    );
+  }
+
+  function renderUsers() {
+    const rows = state.users.map((user) => {
+      const client = user.clientId ? getClient(user.clientId) : null;
+      return `
+        <tr>
+          <td><strong>${escapeHtml(user.name)}</strong><br><span class="muted">${escapeHtml(user.username)}</span></td>
+          <td>${escapeHtml(roleLabel(user.role))}</td>
+          <td>${escapeHtml(user.email || "")}<br><span class="muted">${escapeHtml(user.phone || "")}</span></td>
+          <td>${client ? escapeHtml(client.name) : "-"}</td>
+          <td>${user.isActive !== false ? `<span class="pill green">Activo</span>` : `<span class="pill red">Inactivo</span>`}</td>
+          <td class="page-actions">
+            <button class="btn small ghost" data-edit-user="${user.id}">Editar</button>
+            <button class="btn small ${user.isActive !== false ? "warn" : "primary"}" data-toggle-user="${user.id}">${user.isActive !== false ? "Desactivar" : "Activar"}</button>
+            ${user.id !== currentUser.id ? `<button class="btn small danger" data-delete-user="${user.id}">Borrar</button>` : ""}
+          </td>
+        </tr>
+      `;
+    }).join("");
+    afterRender.push(bindUsers);
+    return pageShell(
+      "Usuarios",
+      "Solo Gerente: crear, editar y borrar usuarios del sistema.",
+      `<button class="btn primary" data-add-user>Agregar usuario</button>`,
+      `
+      <div class="panel">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Usuario</th><th>Rol</th><th>Contacto</th><th>Cliente</th><th>Estado</th><th>Acciones</th></tr></thead>
+            <tbody>${rows || emptyRow(6, "No hay usuarios.")}</tbody>
+          </table>
+        </div>
+      </div>
+      `,
+      "usuarios"
+    );
+  }
+
+  function bindUsers() {
+    document.querySelectorAll("[data-add-user]").forEach((button) => button.addEventListener("click", () => openUserForm()));
+    document.querySelectorAll("[data-edit-user]").forEach((button) => button.addEventListener("click", () => openUserForm(button.dataset.editUser)));
+    document.querySelectorAll("[data-toggle-user]").forEach((button) => button.addEventListener("click", () => {
+      const user = getUser(button.dataset.toggleUser);
+      if (!user) return;
+      user.isActive = user.isActive === false;
+      saveState();
+      render();
+    }));
+    document.querySelectorAll("[data-delete-user]").forEach((button) => button.addEventListener("click", () => {
+      const user = getUser(button.dataset.deleteUser);
+      if (!user) return;
+      if (!confirm("Borrar usuario " + user.name + "?")) return;
+      state.users = state.users.filter((item) => item.id !== user.id);
+      saveState();
+      render();
+    }));
+  }
+
+  function renderSettings() {
+    if (currentUser.role === "example") {
+      return pageShell(
+        "Configuracion",
+        "Usuario de demostracion con datos bloqueados.",
+        "",
+        `
+        <div class="panel">
+          <div class="form-grid">
+            <div class="field span-2"><label>Nombre</label><input value="${escapeAttr(currentUser.name)}" disabled /></div>
+            <div class="field"><label>Usuario</label><input value="${escapeAttr(currentUser.username)}" disabled /></div>
+            <div class="field"><label>Rol</label><input value="${escapeAttr(roleLabel(currentUser.role))}" disabled /></div>
+            <div class="field span-2"><label>Correo</label><input value="${escapeAttr(currentUser.email || "")}" disabled /></div>
+            <div class="field"><label>Telefono</label><input value="${escapeAttr(currentUser.phone || "")}" disabled /></div>
+          </div>
+          <p class="muted" style="margin-top:12px">Esta cuenta usa datos ficticios y no permite modificar configuracion ni datos de contacto.</p>
+        </div>
+        `,
+        "configuracion"
+      );
+    }
+    const linkedIds = getCustomerVisibleClientIds();
+    const linkedRows = isClientLikeRole(currentUser.role) ? linkedIds.map((id) => {
+      const client = getClient(id);
+      return `<div class="linked-account"><span>${escapeHtml(client ? client.name : id)}</span>${id !== currentUser.clientId ? `<button class="btn small ghost" data-unlink-client="${id}">Quitar</button>` : `<span class="pill gray">Principal</span>`}</div>`;
+    }).join("") : "";
+    const canEditSystemSettings = ["manager", "admin"].includes(currentUser.role);
+    const remitoStyle = getRemitoTotalStyle();
+    const categoryRows = canEditSystemSettings ? getProductCategories().map((category) => {
+      const inUse = state.products.some((product) => product.category === category);
+      return `
+        <div class="sidebar-order-row">
+          <span>${escapeHtml(category)}${inUse ? ` <small class="muted">en uso</small>` : ""}</span>
+          <button class="btn small ${inUse ? "ghost" : "danger"}" type="button" data-remove-product-category="${escapeAttr(category)}" ${inUse ? "disabled" : ""}>Quitar</button>
+        </div>
+      `;
+    }).join("") : "";
+    const sidebarRows = canEditSystemSettings ? getOrderedMenuItems().map((item, index) => `
+      <div class="sidebar-order-row">
+        <span>${escapeHtml(menuLabel(item))}</span>
+        <div class="page-actions">
+          <button class="btn small ghost" type="button" data-sidebar-move="${item.id}" data-direction="up" ${index === 0 ? "disabled" : ""}>Subir</button>
+          <button class="btn small ghost" type="button" data-sidebar-move="${item.id}" data-direction="down" ${index === menu.length - 1 ? "disabled" : ""}>Bajar</button>
+        </div>
+      </div>
+    `).join("") : "";
+    afterRender.push(bindSettings);
+    return pageShell(
+      "Configuracion",
+      "Datos de acceso y contacto del usuario.",
+      currentUser.role === "manager" ? `<button class="btn ghost" data-route="usuarios">Administrar usuarios</button>` : "",
+      `
+      <div class="grid two">
+        <form id="settings-form" class="panel">
+          <div class="form-grid">
+            <div class="field span-2"><label>Nombre</label><input id="settings-name" value="${escapeAttr(currentUser.name)}" /></div>
+            <div class="field"><label>Usuario</label><input value="${escapeAttr(currentUser.username)}" disabled /></div>
+            ${isClientLikeRole(currentUser.role) ? "" : `<div class="field"><label>Rol</label><input value="${escapeAttr(roleLabel(currentUser.role))}" disabled /></div>`}
+            <div class="field span-2"><label>Correo</label><input id="settings-email" type="email" value="${escapeAttr(currentUser.email || "")}" /></div>
+            <div class="field"><label>Telefono</label><input id="settings-phone" value="${escapeAttr(currentUser.phone || "")}" /></div>
+            <div class="field"><label>Nueva contrasena</label><input id="settings-password" type="password" placeholder="Dejar vacio para no cambiar" /></div>
+          </div>
+          <div class="page-actions" style="margin-top:12px"><button class="btn primary" type="submit">Guardar configuracion</button></div>
+        </form>
+        ${currentUser.role === "customer" ? `
+        <div class="panel">
+          <h2 class="page-title" style="font-size:18px">Cuentas vinculadas</h2>
+          <div class="linked-list" style="margin-top:10px">${linkedRows}</div>
+          <div class="form-grid" style="margin-top:12px">
+            <div class="field span-2"><label>Usuario de la cuenta</label><input id="settings-link-username" autocomplete="username" /></div>
+            <div class="field"><label>Contrasena</label><input id="settings-link-password" type="password" autocomplete="current-password" /></div>
+            <div class="field"><label>&nbsp;</label><button class="btn ghost" type="button" data-link-client>Vincular</button></div>
+          </div>
+        </div>` : currentUser.role === "manager" ? `
+        <div class="panel">
+          <h2 class="page-title" style="font-size:18px">Permisos</h2>
+          <p class="muted">Gerente administra todos los usuarios. Admin gestiona la operacion completa. Empleado opera rutas, division, gastos, caja propia y cobros. Cliente consulta sus cuentas.</p>
+        </div>` : ""}
+      </div>
+      ${canEditSystemSettings ? `
+      <div class="grid two" style="margin-top:14px">
+        <form id="remito-settings-form" class="panel">
+          <h2 class="page-title" style="font-size:18px">Formato del remito</h2>
+          <div class="form-grid" style="margin-top:10px">
+            <div class="field span-2">
+              <label>Subrayado del total</label>
+              <select id="remito-total-style">
+                <option value="box" ${remitoStyle === "box" ? "selected" : ""}>Recuadro</option>
+                <option value="line" ${remitoStyle === "line" ? "selected" : ""}>Linea inferior</option>
+                <option value="none" ${remitoStyle === "none" ? "selected" : ""}>Sin subrayado</option>
+              </select>
+            </div>
+          </div>
+          <div class="page-actions" style="margin-top:12px"><button class="btn primary" type="submit">Guardar formato</button></div>
+        </form>
+        <div class="panel">
+          <h2 class="page-title" style="font-size:18px">Orden del sidebar</h2>
+          <div class="sidebar-order-list" style="margin-top:10px">${sidebarRows}</div>
+          <div class="page-actions" style="margin-top:12px"><button class="btn ghost" type="button" id="reset-sidebar-order">Restablecer orden</button></div>
+        </div>
+        <div class="panel">
+          <h2 class="page-title" style="font-size:18px">Categorias de productos</h2>
+          <div class="sidebar-order-list" style="margin-top:10px">${categoryRows}</div>
+          <div class="form-grid" style="margin-top:12px">
+            <div class="field"><label>Nueva categoria</label><input id="new-product-category" placeholder="Ej: LACTEOS" /></div>
+            <div class="field"><label>&nbsp;</label><button class="btn primary" type="button" id="add-product-category">Agregar categoria</button></div>
+          </div>
+        </div>
+      </div>` : ""}
+      ${currentUser.role === "manager" ? `
+      <div class="panel" style="margin-top:14px">
+        <h2 class="page-title" style="font-size:18px">Importaciones masivas</h2>
+        <div class="form-grid" style="margin-top:10px">
+          <div class="field span-2"><label>Tipo</label><select id="mass-import-type">
+            <option value="purchases">Historiales de compra</option>
+            <option value="sales">Historiales de venta</option>
+            <option value="orders">Pedidos</option>
+            <option value="payments">Pagos</option>
+          </select></div>
+          <div class="field span-2"><label>Archivo CSV</label><input type="file" id="mass-import-file" accept=".csv,text/csv" /></div>
+        </div>
+        <div class="page-actions" style="margin-top:12px">
+          <button class="btn ghost" type="button" data-download-template="purchases">Plantilla compras</button>
+          <button class="btn ghost" type="button" data-download-template="sales">Plantilla ventas</button>
+          <button class="btn ghost" type="button" data-download-template="orders">Plantilla pedidos</button>
+          <button class="btn ghost" type="button" data-download-template="payments">Plantilla pagos</button>
+          <button class="btn primary" type="button" id="run-mass-import">Importar archivo</button>
+        </div>
+      </div>` : ""}
+      ${renderRolePermissionsPanel()}
+      ${renderPrintTemplatesPanel()}
+      `,
+      "configuracion"
+    );
+  }
+
+  const CONFIGURABLE_ROLES = ["admin", "employee", "customer", "contador"];
+  const ROLE_FLAGS = [
+    { id: "verCajas", label: "Ver cajas y totales de caja" },
+    { id: "verRendimiento", label: "Ver rendimiento" },
+    { id: "editarProveedores", label: "Agregar / editar proveedores" },
+    { id: "registrarGastos", label: "Registrar compras y gastos" }
+  ];
+
+  function renderRolePermissionsPanel() {
+    if (currentUser.role !== "manager") return "";
+    const role = ui.permRole || "employee";
+    const perm = rolePermissionFor(role) || { pages: {}, flags: {} };
+    const orderByRole = (state.appSettings.sidebarOrderByRole && state.appSettings.sidebarOrderByRole[role]) || [];
+    const orderedMenu = menu.slice().sort((a, b) => {
+      const ai = orderByRole.indexOf(a.id);
+      const bi = orderByRole.indexOf(b.id);
+      return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+    });
+    return `
+      <div class="panel" style="margin-top:14px">
+        <h2 class="page-title" style="font-size:18px">Permisos y sidebar por rol</h2>
+        <p class="muted">Configure que paginas ve cada rol, su orden en la sidebar y que acciones puede realizar. El rol gerente siempre ve todo.</p>
+        <div class="form-grid" style="margin-top:10px">
+          <div class="field span-2"><label>Rol a configurar</label><select id="perm-role">${CONFIGURABLE_ROLES.map((r) => `<option value="${r}" ${role === r ? "selected" : ""}>${escapeHtml(roleLabel(r))}</option>`).join("")}</select></div>
+        </div>
+        <div class="grid two" style="margin-top:12px">
+          <div>
+            <strong>Paginas visibles y orden</strong>
+            <div class="sidebar-order-list" style="margin-top:8px">
+              ${orderedMenu.map((item) => `
+                <div class="sidebar-order-row">
+                  <label class="check-item" style="padding:0"><input type="checkbox" data-perm-page="${item.id}" ${pageVisibleForRole(item, role) ? "checked" : ""} /><span>${escapeHtml(item.label)}</span></label>
+                  <span class="page-actions"><button class="btn small ghost" type="button" data-perm-move="${item.id}|up">&#9650;</button><button class="btn small ghost" type="button" data-perm-move="${item.id}|down">&#9660;</button></span>
+                </div>`).join("")}
+            </div>
+          </div>
+          <div>
+            <strong>Acciones permitidas</strong>
+            <div class="grid" style="margin-top:8px;gap:8px">
+              ${ROLE_FLAGS.map((flag) => `<label class="check-item"><input type="checkbox" data-perm-flag="${flag.id}" ${roleFlag(role, flag.id) ? "checked" : ""} /><span>${escapeHtml(flag.label)}</span></label>`).join("")}
+            </div>
+            <div class="page-actions" style="margin-top:14px">
+              <button class="btn primary" type="button" id="perm-save">Guardar permisos del rol</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  const PRINT_TEMPLATE_KEYS = [
+    { id: "remito", label: "Remitos", hasLeyenda: true },
+    { id: "vehiculos", label: "Vehiculos", hasLeyenda: false },
+    { id: "dividir", label: "Dividir compras", hasLeyenda: false },
+    { id: "saldos", label: "Saldos / movimientos", hasLeyenda: false }
+  ];
+
+  function renderPrintTemplatesPanel() {
+    if (currentUser.role !== "manager") return "";
+    const key = ui.tplKey || "remito";
+    const def = PRINT_TEMPLATE_KEYS.find((t) => t.id === key) || PRINT_TEMPLATE_KEYS[0];
+    return `
+      <div class="panel" style="margin-top:14px">
+        <h2 class="page-title" style="font-size:18px">Plantillas de imprimibles</h2>
+        <p class="muted">Personalice el titulo, la leyenda y el tamano de letra de cada documento imprimible.</p>
+        <div class="form-grid" style="margin-top:10px">
+          <div class="field"><label>Plantilla</label><select id="tpl-key">${PRINT_TEMPLATE_KEYS.map((t) => `<option value="${t.id}" ${key === t.id ? "selected" : ""}>${escapeHtml(t.label)}</option>`).join("")}</select></div>
+          <div class="field"><label>Titulo</label><input id="tpl-titulo" value="${escapeAttr(tplGet(key, "titulo", ""))}" placeholder="(por defecto)" /></div>
+          ${def.hasLeyenda ? `<div class="field span-2"><label>Leyenda al pie</label><input id="tpl-leyenda" value="${escapeAttr(tplGet(key, "leyenda", ""))}" placeholder="Ej: Gracias por su compra" /></div>` : ""}
+          <div class="field"><label>Tamano de letra (0.8 a 1.3)</label><input id="tpl-escala" inputmode="decimal" value="${escapeAttr(String(tplGet(key, "escala", 1)))}" /></div>
+          <div class="field"><label>&nbsp;</label><button class="btn primary" type="button" id="tpl-save">Guardar plantilla</button></div>
+        </div>
+      </div>
+    `;
+  }
+
+  function bindRolePermissionsPanel() {
+    const roleSelect = document.getElementById("perm-role");
+    if (!roleSelect) return;
+    roleSelect.addEventListener("change", () => {
+      ui.permRole = roleSelect.value;
+      render();
+    });
+    document.querySelectorAll("[data-perm-move]").forEach((button) => button.addEventListener("click", () => {
+      const [id, direction] = button.dataset.permMove.split("|");
+      const role = ui.permRole || "employee";
+      state.appSettings.sidebarOrderByRole = state.appSettings.sidebarOrderByRole || {};
+      let order = state.appSettings.sidebarOrderByRole[role];
+      if (!Array.isArray(order) || !order.length) order = menu.map((item) => item.id);
+      const index = order.indexOf(id);
+      if (index === -1) return;
+      const target = direction === "up" ? index - 1 : index + 1;
+      if (target < 0 || target >= order.length) return;
+      [order[index], order[target]] = [order[target], order[index]];
+      state.appSettings.sidebarOrderByRole[role] = order;
+      saveState();
+      render();
+    }));
+    const saveButton = document.getElementById("perm-save");
+    if (saveButton) saveButton.addEventListener("click", () => {
+      const role = ui.permRole || "employee";
+      const pages = {};
+      document.querySelectorAll("[data-perm-page]").forEach((checkbox) => {
+        pages[checkbox.dataset.permPage] = checkbox.checked;
+      });
+      const flags = {};
+      document.querySelectorAll("[data-perm-flag]").forEach((checkbox) => {
+        flags[checkbox.dataset.permFlag] = checkbox.checked;
+      });
+      state.appSettings.rolePermissions = state.appSettings.rolePermissions || {};
+      state.appSettings.rolePermissions[role] = { pages, flags };
+      saveState();
+      alert("Permisos guardados para el rol " + roleLabel(role) + ".");
+      render();
+    });
+  }
+
+  function bindPrintTemplatesPanel() {
+    const keySelect = document.getElementById("tpl-key");
+    if (!keySelect) return;
+    keySelect.addEventListener("change", () => {
+      ui.tplKey = keySelect.value;
+      render();
+    });
+    const saveButton = document.getElementById("tpl-save");
+    if (saveButton) saveButton.addEventListener("click", () => {
+      const key = ui.tplKey || "remito";
+      state.appSettings.printTemplates = state.appSettings.printTemplates || {};
+      const tpl = state.appSettings.printTemplates[key] || {};
+      tpl.titulo = document.getElementById("tpl-titulo").value.trim();
+      const leyendaInput = document.getElementById("tpl-leyenda");
+      if (leyendaInput) tpl.leyenda = leyendaInput.value.trim();
+      const escala = parseAmount(document.getElementById("tpl-escala").value);
+      tpl.escala = escala >= 0.7 && escala <= 1.4 ? escala : 1;
+      state.appSettings.printTemplates[key] = tpl;
+      saveState();
+      alert("Plantilla guardada.");
+      render();
+    });
+  }
+
+  function bindSettings() {
+    bindRolePermissionsPanel();
+    bindPrintTemplatesPanel();
+    const settingsForm = document.getElementById("settings-form");
+    if (settingsForm) settingsForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const email = document.getElementById("settings-email").value.trim();
+      if (isEmailTaken(email, currentUser.id, allowsLinkedEmailDuplicate(currentUser.role, currentUser.linkedClientIds || []))) return alert("Ese correo ya esta usado por otro usuario.");
+      currentUser.name = document.getElementById("settings-name").value.trim() || currentUser.name;
+      currentUser.email = email;
+      currentUser.phone = document.getElementById("settings-phone").value.trim();
+      const password = document.getElementById("settings-password").value;
+      if (password) currentUser.password = password;
+      saveState();
+      alert("Configuracion guardada.");
+      render();
+    });
+    document.querySelectorAll("[data-link-client]").forEach((button) => button.addEventListener("click", () => {
+      const username = document.getElementById("settings-link-username").value.trim().toLowerCase();
+      const password = document.getElementById("settings-link-password").value;
+      const linkedUser = state.users.find((user) => user.role === "customer" && user.username.toLowerCase() === username && user.password === password && user.clientId);
+      if (!linkedUser) return alert("Usuario o contrasena de la cuenta vinculada incorrectos.");
+      currentUser.linkedClientIds = Array.from(new Set([...(currentUser.linkedClientIds || []), currentUser.clientId, linkedUser.clientId].filter(Boolean)));
+      saveState();
+      render();
+    }));
+    document.querySelectorAll("[data-unlink-client]").forEach((button) => button.addEventListener("click", () => {
+      currentUser.linkedClientIds = (currentUser.linkedClientIds || []).filter((id) => id !== button.dataset.unlinkClient);
+      saveState();
+      render();
+    }));
+    const remitoForm = document.getElementById("remito-settings-form");
+    if (remitoForm) remitoForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      state.appSettings.remitoTotalStyle = document.getElementById("remito-total-style").value;
+      saveState();
+      alert("Formato de remito guardado.");
+      render();
+    });
+    document.querySelectorAll("[data-sidebar-move]").forEach((button) => button.addEventListener("click", () => {
+      moveSidebarItem(button.dataset.sidebarMove, button.dataset.direction);
+      saveState();
+      render();
+    }));
+    const resetSidebar = document.getElementById("reset-sidebar-order");
+    if (resetSidebar) resetSidebar.addEventListener("click", () => {
+      state.appSettings.sidebarOrder = [];
+      saveState();
+      render();
+    });
+    const addCategory = document.getElementById("add-product-category");
+    if (addCategory) addCategory.addEventListener("click", () => {
+      const input = document.getElementById("new-product-category");
+      const value = String(input.value || "").trim().toUpperCase();
+      if (!value) return alert("Ingrese una categoria.");
+      const categories = getProductCategories();
+      if (categories.includes(value)) return alert("Esa categoria ya existe.");
+      state.appSettings.productCategories = normalizeProductCategories([...categories, value]);
+      saveState();
+      render();
+    });
+    document.querySelectorAll("[data-remove-product-category]").forEach((button) => button.addEventListener("click", () => {
+      const category = button.dataset.removeProductCategory;
+      if (state.products.some((product) => product.category === category)) return alert("No se puede quitar una categoria con productos asignados.");
+      state.appSettings.productCategories = getProductCategories().filter((item) => item !== category);
+      saveState();
+      render();
+    }));
+    document.querySelectorAll("[data-download-template]").forEach((button) => button.addEventListener("click", () => downloadMassImportTemplate(button.dataset.downloadTemplate)));
+    const runImport = document.getElementById("run-mass-import");
+    if (runImport) runImport.addEventListener("click", async () => {
+      const fileInput = document.getElementById("mass-import-file");
+      const file = fileInput && fileInput.files ? fileInput.files[0] : null;
+      if (!file) return alert("Adjunte un archivo CSV.");
+      const type = document.getElementById("mass-import-type").value;
+      const text = await file.text();
+      const count = importMassiveCsv(type, text);
+      saveState();
+      alert("Importacion completa: " + count + " registros.");
+      render();
+    });
+  }
+
+  function downloadMassImportTemplate(type) {
+    const templates = {
+      purchases: "date,providerName,productName,quantity,unitCost,paymentStatus,notes\n" + todayISO() + ",Mercado Central,Bananas Kg,10,2500,paid,Ejemplo\n",
+      sales: "date,clientId,productName,quantity,unitPrice,notes\n" + todayISO() + ",021,Bananas Kg,2,3500,Venta ejemplo\n",
+      orders: "date,clientId,productName,quantity,unitPrice,status,notes\n" + todayISO() + ",021,Bananas Kg,2,3500,pendiente,Pedido ejemplo\n",
+      payments: "date,clientId,amount,method,receivedByUsername,notes\n" + todayISO() + ",021,7000,efectivo,admin,Pago ejemplo\n"
+    };
+    downloadTextFile("plantilla-" + type + ".csv", templates[type] || templates.purchases, "text/csv");
+  }
+
+  function importMassiveCsv(type, text) {
+    const rows = parseCsvRows(text);
+    let count = 0;
+    rows.forEach((row) => {
+      if (type === "purchases" && importPurchaseRow(row)) count += 1;
+      if (type === "sales" && importOrderRow(row, "VENTA")) count += 1;
+      if (type === "orders" && importOrderRow(row, "IMP")) count += 1;
+      if (type === "payments" && importPaymentRow(row)) count += 1;
+    });
+    return count;
+  }
+
+  function importPurchaseRow(row) {
+    const product = findProductByInput(row.productName || row.productId || "");
+    if (!product) return false;
+    const provider = findProviderByInput(row.providerName || row.providerId || "");
+    const quantity = parseAmount(row.quantity);
+    const unitCost = parseAmount(row.unitCost);
+    if (quantity <= 0 || unitCost <= 0) return false;
+    const item = { productId: product.id, productName: product.name, quantity, unitCost, totalCost: quantity * unitCost, unitType: product.unitType };
+    const purchase = {
+      id: nextDatedId("CMP", state.purchases),
+      date: row.date || todayISO(),
+      expenseType: "purchase",
+      providerId: provider ? provider.id : "",
+      providerName: provider ? provider.name : row.providerName || "",
+      productId: product.id,
+      productName: product.name,
+      description: "Importacion masiva",
+      quantity,
+      unitCost,
+      items: [item],
+      paymentStatus: row.paymentStatus === "account_current" ? "account_current" : "paid",
+      totalCost: item.totalCost,
+      cashBoxId: "cash-general",
+      notes: row.notes || "",
+      assignedEmployeeId: "",
+      vendorName: "",
+      recordedBy: currentUser.name,
+      userRole: currentUser.role
+    };
+    state.purchases.push(purchase);
+    if (provider && purchase.paymentStatus === "account_current") addProviderLedgerEntry({ providerId: provider.id, date: purchase.date, type: "deuda", description: "Importacion - " + purchase.id, amount: purchase.totalCost, relatedEntityId: purchase.id, relatedEntityType: "purchase", notes: purchase.notes });
+    if (provider) rememberProviderProducts(provider.id, [item]);
+    updateProductCostsFromPurchase([item], provider);
+    return true;
+  }
+
+  function importOrderRow(row, prefix) {
+    const client = getClient(row.clientId);
+    const product = findProductByInput(row.productName || row.productId || "");
+    if (!client || !product) return false;
+    const quantity = parseAmount(row.quantity);
+    const unitPrice = parseAmount(row.unitPrice) || getAdjustedProductPrice(product, client);
+    if (quantity <= 0 || unitPrice <= 0) return false;
+    const item = buildImportedOrderItem(product, client, quantity, unitPrice, row.notes || "");
+    const order = {
+      id: nextDatedId(prefix || "IMP", state.orders),
+      date: row.date || todayISO(),
+      clientId: client.id,
+      deliveryVehicleId: client.vehicleId,
+      status: row.status || "entregado",
+      items: [item],
+      subtotalAmount: item.subtotal,
+      ivaAmount: item.ivaAmount,
+      totalAmount: item.totalWithIva,
+      priceTier: client.priceTier,
+      priceAdjustmentPct: Number(client.priceAdjustmentPct || 0),
+      paymentReceived: 0,
+      paymentStatus: "pending",
+      remitoPrinted: false,
+      notes: row.notes || "Importacion masiva",
+      createdAt: new Date().toISOString()
+    };
+    state.orders.push(order);
+    addSaldoEntry({ clientId: client.id, type: "pedido", description: "Importacion pedido " + order.id, amount: order.totalAmount, relatedEntityId: order.id, relatedEntityType: "order", notes: order.notes });
+    return true;
+  }
+
+  function importPaymentRow(row) {
+    const client = getClient(row.clientId);
+    const amount = parseAmount(row.amount);
+    if (!client || amount <= 0) return false;
+    const receiver = state.users.find((user) => user.username === row.receivedByUsername) || currentUser;
+    recordPayment({ clientId: client.id, amount, method: row.method || "efectivo", receivedByUserId: receiver.id, notes: row.notes || "Importacion masiva" });
+    const payment = state.payments[state.payments.length - 1];
+    if (payment && row.date) {
+      payment.date = row.date;
+      state.saldos.filter((entry) => entry.relatedEntityId === payment.id).forEach((entry) => entry.date = row.date);
+      state.caja.filter((entry) => entry.relatedEntityId === payment.id).forEach((entry) => entry.date = row.date);
+    }
+    return true;
+  }
+
+  function buildImportedOrderItem(product, client, quantity, unitPrice, note) {
+    const subtotal = quantity * unitPrice;
+    const ivaRate = shouldApplyInvoiceVat(client) ? getIvaRate(product.ivaType) : 0;
+    const ivaAmount = subtotal * (ivaRate / 100);
+    return { id: nextItemId(), productId: product.id, productName: product.name, quantity, unitType: product.unitType, unitPrice, subtotal, ivaRate, ivaAmount, totalWithIva: subtotal + ivaAmount, note: note || "", assignedProviderId: "", assignedToType: "", assignedToId: "" };
+  }
+
+  function parseCsvRows(text) {
+    const lines = String(text || "").split(/\r?\n/).filter((line) => line.trim());
+    if (lines.length < 2) return [];
+    const headers = splitCsvLine(lines[0]).map((header) => header.trim());
+    return lines.slice(1).map((line) => {
+      const values = splitCsvLine(line);
+      const row = {};
+      headers.forEach((header, index) => row[header] = values[index] || "");
+      return row;
+    });
+  }
+
+  function splitCsvLine(line) {
+    const result = [];
+    let current = "";
+    let quoted = false;
+    String(line || "").split("").forEach((char) => {
+      if (char === "\"") quoted = !quoted;
+      else if (char === "," && !quoted) {
+        result.push(current.trim());
+        current = "";
+      } else current += char;
+    });
+    result.push(current.trim());
+    return result;
+  }
+
+  function downloadTextFile(filename, text, type) {
+    const blob = new Blob([text], { type: type || "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function moveSidebarItem(id, direction) {
+    const order = getOrderedMenuItems().map((item) => item.id);
+    const index = order.indexOf(id);
+    if (index < 0) return;
+    const target = direction === "up" ? index - 1 : index + 1;
+    if (target < 0 || target >= order.length) return;
+    [order[index], order[target]] = [order[target], order[index]];
+    state.appSettings.sidebarOrder = order;
+  }
+
+  function renderBackup() {
+    afterRender.push(bindBackup);
+    return pageShell(
+      "Backup",
+      "Exportar e importar datos locales para pruebas, mudanza de navegador o despliegue.",
+      "",
+      `
+      <div class="grid two">
+        <div class="panel">
+          <h2 class="page-title" style="font-size:18px">Exportar</h2>
+          <p class="muted">Descarga todos los datos actuales como JSON.</p>
+          <button class="btn primary" id="export-backup">Descargar backup</button>
+        </div>
+        <div class="panel">
+          <h2 class="page-title" style="font-size:18px">Importar</h2>
+          <p class="muted">Restaura un backup JSON exportado por este sistema.</p>
+          <input type="file" id="import-backup" accept="application/json" />
+        </div>
+      </div>
+      <div class="panel" style="margin-top:14px">
+        <h2 class="page-title" style="font-size:18px">Sincronizacion en la nube (Cloudflare)</h2>
+        <p class="muted">Conecte el backend de la Opcion E (DEPLOYMENT.md) para compartir los datos entre dispositivos. Version de la app: <strong>${APP_VERSION}</strong>. Ultima sincronizacion: <strong id="cloud-sync-status">${escapeHtml(getCloudSyncConfig().lastSync ? formatTimestampShort(getCloudSyncConfig().lastSync) : "nunca")}</strong></p>
+        ${getCloudSyncConfig().lastError ? `<div class="alert">${escapeHtml(getCloudSyncConfig().lastError)}</div>` : ""}
+        <div class="form-grid" style="margin-top:10px">
+          <div class="field span-2"><label>URL del backend</label><input id="cloud-sync-url" placeholder="https://api.sudominio.com o https://...workers.dev" value="${escapeAttr(getCloudSyncConfig().url || "")}" /></div>
+          <div class="field"><label>Usuario (servidor propio)</label><input id="cloud-sync-username" placeholder="gerente" autocomplete="off" value="${escapeAttr(getCloudSyncConfig().username || "")}" /></div>
+          <div class="field"><label>Contrasena (servidor propio)</label><input id="cloud-sync-password" type="password" autocomplete="new-password" value="${escapeAttr(getCloudSyncConfig().password || "")}" /></div>
+          <div class="field span-2"><label>Token (solo para Cloudflare Workers)</label><input id="cloud-sync-token" type="password" placeholder="dejar vacio si usa usuario y contrasena" value="${escapeAttr(getCloudSyncConfig().token || "")}" /></div>
+          <label class="field" style="display:flex;align-items:center;gap:8px;grid-template-columns:auto 1fr">
+            <input type="checkbox" id="cloud-sync-auto" style="width:auto;min-height:auto" ${getCloudSyncConfig().auto === false ? "" : "checked"} />
+            <span>Sincronizacion automatica (sube cada cambio y descarga al abrir)</span>
+          </label>
+        </div>
+        <div class="page-actions" style="margin-top:12px">
+          <button class="btn ghost" id="cloud-sync-save" type="button">Guardar configuracion</button>
+          <button class="btn ghost" id="cloud-sync-test" type="button">Probar conexion</button>
+          <button class="btn blue" id="cloud-sync-push" type="button">Subir datos ahora</button>
+          <button class="btn primary" id="cloud-sync-pull" type="button">Descargar datos ahora</button>
+        </div>
+      </div>
+      ${currentUser.role === "manager" ? `
+      <div class="panel" style="margin-top:14px">
+        <h2 class="page-title" style="font-size:18px">Exportacion e importacion masiva por registro</h2>
+        <p class="muted">Exporte un registro completo a JSON, o importe un archivo exportado para actualizar todos los datos historicos de ese registro. La importacion <strong>reemplaza</strong> el registro completo.</p>
+        <div class="page-actions" style="margin-top:10px">
+          ${Object.keys(MASS_REGISTROS).map((key) => `<button class="btn blue" type="button" data-mass-export="${key}">Exportar ${escapeHtml(MASS_REGISTROS[key].label)}</button>`).join("")}
+        </div>
+        <div class="form-grid" style="margin-top:14px">
+          <div class="field span-2"><label>Registro a importar</label><select id="mass-import-type">${Object.keys(MASS_REGISTROS).map((key) => `<option value="${key}">${escapeHtml(MASS_REGISTROS[key].label)}</option>`).join("")}</select></div>
+          <div class="field span-2"><label>Archivo exportado (.json)</label><input type="file" id="mass-import-file" accept="application/json" /></div>
+          <div class="field"><label>&nbsp;</label><button class="btn warn" type="button" id="mass-import-run">Importar y reemplazar</button></div>
+        </div>
+      </div>` : ""}
+      ${["manager", "admin"].includes(currentUser.role) ? `
+      <div class="panel" style="margin-top:14px">
+        <h2 class="page-title" style="font-size:18px">Reportes del servidor (PostgreSQL)</h2>
+        <p class="muted">Disponible con el servidor propio (modo usuario y contrasena). Los calculos corren en la base de datos.</p>
+        <div class="form-grid" style="margin-top:10px">
+          <div class="field"><label>Desde</label><input type="date" id="server-report-from" value="${escapeAttr(addDaysISO(todayISO(), -29))}" /></div>
+          <div class="field"><label>Hasta</label><input type="date" id="server-report-to" value="${escapeAttr(todayISO())}" /></div>
+        </div>
+        <div class="page-actions" style="margin-top:12px">
+          <button class="btn blue" type="button" data-server-report="sales">Ventas por dia</button>
+          <button class="btn blue" type="button" data-server-report="top-products">Top productos</button>
+          <button class="btn blue" type="button" data-server-report="top-clients">Top clientes</button>
+          <button class="btn primary" type="button" id="server-export-csv">Descargar pedidos (CSV)</button>
+          ${currentUser.role === "manager" ? `<button class="btn ghost" type="button" id="server-export-backup">Backup del servidor (JSON)</button>` : ""}
+        </div>
+      </div>` : ""}
+      <div class="alert" style="margin-top:14px">Sin la sincronizacion en la nube, los datos viven solo en este navegador. Exporte un backup antes de actualizar o cambiar de dispositivo.</div>
+      `,
+      "backup"
+    );
+  }
+
+  async function openServerReport(kind) {
+    const config = getCloudSyncConfig();
+    if (!config.username) return alert("Los reportes del servidor requieren el modo usuario y contrasena (servidor propio).");
+    const from = document.getElementById("server-report-from").value || addDaysISO(todayISO(), -29);
+    const to = document.getElementById("server-report-to").value || todayISO();
+    try {
+      const response = await cloudRequest(config, "/reports/" + kind + "?from=" + from + "&to=" + to, { method: "GET" });
+      if (!response.ok) throw new Error("HTTP " + response.status + (await readCloudErrorDetail(response)));
+      const payload = await response.json();
+      let head = "";
+      let body = "";
+      if (kind === "sales") {
+        head = "<th>Fecha</th><th>Pedidos</th><th>Ventas</th><th>Gastos</th><th>Resultado</th>";
+        body = (payload.days || []).map((d) => `<tr><td>${formatDate(d.date)}</td><td class="num">${d.orders}</td><td class="num">${formatMoney(d.sales)}</td><td class="num">${formatMoney(d.expenses)}</td><td class="num">${formatMoney(d.result)}</td></tr>`).join("");
+      } else if (kind === "top-products") {
+        head = "<th>Producto</th><th>Cantidad</th><th>Facturado</th><th>Pedidos</th>";
+        body = (payload.products || []).map((p) => `<tr><td>${escapeHtml(p.product_name)}</td><td class="num">${formatNumber(p.quantity)} ${escapeHtml(p.unit_type || "")}</td><td class="num">${formatMoney(p.revenue)}</td><td class="num">${p.orders}</td></tr>`).join("");
+      } else {
+        head = "<th>Cliente</th><th>Pedidos</th><th>Total</th>";
+        body = (payload.clients || []).map((c) => `<tr><td>${escapeHtml(c.client_name)}</td><td class="num">${c.orders}</td><td class="num">${formatMoney(c.total)}</td></tr>`).join("");
+      }
+      showModal(
+        "Reporte del servidor - " + (kind === "sales" ? "Ventas por dia" : kind === "top-products" ? "Top productos" : "Top clientes"),
+        `<p class="muted">Rango: ${formatDate(from)} - ${formatDate(to)}</p>
+         <div class="table-wrap"><table><thead><tr>${head}</tr></thead><tbody>${body || emptyRow(5, "Sin datos en el rango.")}</tbody></table></div>`,
+        null,
+        { cancelLabel: "Cerrar", hideSave: true, className: "wide" }
+      );
+    } catch (error) {
+      alert("No se pudo obtener el reporte: " + error.message);
+    }
+  }
+
+  async function downloadServerFile(path, fileName) {
+    const config = getCloudSyncConfig();
+    if (!config.username) return alert("Requiere el modo usuario y contrasena (servidor propio).");
+    try {
+      const response = await cloudRequest(config, path, { method: "GET" });
+      if (!response.ok) throw new Error("HTTP " + response.status + (await readCloudErrorDetail(response)));
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      setTimeout(() => {
+        URL.revokeObjectURL(url);
+        link.remove();
+      }, 1000);
+    } catch (error) {
+      alert("No se pudo descargar: " + error.message);
+    }
+  }
+
+  function bindBackup() {
+    document.getElementById("export-backup").addEventListener("click", () => {
+      const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "pare-carrito-sas-backup-" + todayISO() + ".json";
+      link.click();
+      URL.revokeObjectURL(url);
+    });
+    document.getElementById("import-backup").addEventListener("change", async (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+      const text = await file.text();
+      try {
+        const parsed = JSON.parse(text);
+        if (!parsed.clients || !parsed.products) throw new Error("Backup invalido.");
+        if (!confirm("Importar este backup reemplazara los datos locales actuales. Continuar?")) return;
+        state = { ...seedState(), ...parsed };
+        saveState();
+        render();
+      } catch (error) {
+        alert("No se pudo importar: " + error.message);
+      }
+    });
+    const cloudSave = document.getElementById("cloud-sync-save");
+    if (cloudSave) cloudSave.addEventListener("click", () => {
+      const config = getCloudSyncConfig();
+      config.url = document.getElementById("cloud-sync-url").value.trim();
+      config.username = document.getElementById("cloud-sync-username").value.trim();
+      config.password = document.getElementById("cloud-sync-password").value;
+      config.token = document.getElementById("cloud-sync-token").value.trim();
+      config.auto = document.getElementById("cloud-sync-auto").checked;
+      config.jwt = "";
+      saveCloudSyncConfig(config);
+      startCloudAutoSync();
+      alert("Configuracion guardada en este dispositivo.");
+    });
+    const cloudTestButton = document.getElementById("cloud-sync-test");
+    if (cloudTestButton) cloudTestButton.addEventListener("click", () => {
+      const saveButton = document.getElementById("cloud-sync-save");
+      if (saveButton) saveButton.click();
+      cloudTest();
+    });
+    const cloudPushButton = document.getElementById("cloud-sync-push");
+    if (cloudPushButton) cloudPushButton.addEventListener("click", () => cloudPush(true));
+    const cloudPullButton = document.getElementById("cloud-sync-pull");
+    if (cloudPullButton) cloudPullButton.addEventListener("click", () => cloudPull(true));
+    document.querySelectorAll("[data-server-report]").forEach((button) => button.addEventListener("click", () => openServerReport(button.dataset.serverReport)));
+    const csvButton = document.getElementById("server-export-csv");
+    if (csvButton) csvButton.addEventListener("click", () => {
+      const from = document.getElementById("server-report-from").value || addDaysISO(todayISO(), -29);
+      const to = document.getElementById("server-report-to").value || todayISO();
+      downloadServerFile("/exports/orders.csv?from=" + from + "&to=" + to, fileDate(todayISO()) + " Pedidos " + from + " a " + to + ".csv");
+    });
+    const backupButton = document.getElementById("server-export-backup");
+    if (backupButton) backupButton.addEventListener("click", () => downloadServerFile("/exports/backup.json", fileDate(todayISO()) + " Backup servidor.json"));
+    document.querySelectorAll("[data-mass-export]").forEach((button) => button.addEventListener("click", () => exportMassRegistro(button.dataset.massExport)));
+    const massImportButton = document.getElementById("mass-import-run");
+    if (massImportButton) massImportButton.addEventListener("click", importMassRegistro);
+  }
+
+  const MASS_REGISTROS = {
+    pedidos: { label: "Pedidos", keys: ["orders", "remitos"] },
+    compras: { label: "Compras", keys: ["purchases", "vendorLedger", "providerLedger", "providerPayments"] },
+    precios: { label: "Precios", keys: ["prices", "costRelations"] },
+    usuarios: { label: "Usuarios", keys: ["users"] },
+    productos: { label: "Productos", keys: ["products", "productRelations"] },
+    clientes: { label: "Clientes", keys: ["clients"] },
+    proveedores: { label: "Proveedores", keys: ["providers"] },
+    alias: { label: "Alias de productos", keys: ["productAliases", "clientProductAliases", "quantityAliases", "clientQuantityAliases"] },
+    pagos_saldos: { label: "Pagos y saldos", keys: ["payments", "saldos", "caja", "clientTransfers"] }
+  };
+
+  function exportMassRegistro(key) {
+    const registro = MASS_REGISTROS[key];
+    if (!registro) return;
+    const data = {};
+    registro.keys.forEach((stateKey) => {
+      data[stateKey] = state[stateKey];
+    });
+    const payload = { type: key, label: registro.label, exportedAt: new Date().toISOString(), appVersion: APP_VERSION, data };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileDate(todayISO()) + " Export " + registro.label + ".json";
+    document.body.appendChild(link);
+    link.click();
+    setTimeout(() => {
+      URL.revokeObjectURL(url);
+      link.remove();
+    }, 1000);
+  }
+
+  async function importMassRegistro() {
+    const typeSelect = document.getElementById("mass-import-type");
+    const fileInput = document.getElementById("mass-import-file");
+    const registro = MASS_REGISTROS[typeSelect.value];
+    if (!registro) return;
+    const file = fileInput.files && fileInput.files[0];
+    if (!file) return alert("Seleccione el archivo JSON exportado.");
+    try {
+      const parsed = JSON.parse(await file.text());
+      if (!parsed || parsed.type !== typeSelect.value || !parsed.data) {
+        return alert("El archivo no corresponde al registro seleccionado (" + registro.label + "). Fue exportado como: " + (parsed && parsed.label ? parsed.label : "desconocido") + ".");
+      }
+      if (!confirm("Esto REEMPLAZA todos los datos historicos de " + registro.label + " con el contenido del archivo. Continuar?")) return;
+      registro.keys.forEach((stateKey) => {
+        if (parsed.data[stateKey] !== undefined) state[stateKey] = parsed.data[stateKey];
+      });
+      state = normalizeLoadedState({ ...seedState(), ...state }, seedState());
+      saveState();
+      render();
+      alert(registro.label + " importado correctamente. Los saldos y datos derivados fueron recalculados.");
+    } catch (error) {
+      alert("No se pudo importar: " + error.message);
+    }
+  }
+
+  function openCashBoxForm(id) {
+    const box = id ? getCashBox(id) : null;
+    showModal(
+      box ? "Editar caja" : "Agregar caja",
+      `
+      <form id="cash-box-form" class="form-grid">
+        <div class="field span-2"><label>Nombre</label><input id="cash-box-name" value="${escapeAttr(box ? box.name : "")}" required /></div>
+        <label class="field" style="display:flex;align-items:center;gap:8px;grid-template-columns:auto 1fr">
+          <input type="checkbox" id="cash-box-active" style="width:auto;min-height:auto" ${!box || box.isActive !== false ? "checked" : ""} />
+          <span>Activa</span>
+        </label>
+        <label class="field" style="display:flex;align-items:center;gap:8px;grid-template-columns:auto 1fr">
+          <input type="checkbox" id="cash-box-visible-admin" style="width:auto;min-height:auto" ${!box || box.visibleToAdmin !== false ? "checked" : ""} />
+          <span>Visible para admin</span>
+        </label>
+        <div class="field span-4"><label>Notas</label><input id="cash-box-notes" value="${escapeAttr(box ? box.notes || "" : "")}" /></div>
+      </form>
+      `,
+      () => {
+        document.getElementById("modal-save").addEventListener("click", () => {
+          const name = document.getElementById("cash-box-name").value.trim();
+          if (!name) return alert("Ingrese el nombre de la caja.");
+          if (isDeprecatedCashBox({ id: box ? box.id : makeCashBoxId(name), name })) return alert("Use las cajas efectivo por usuario o Banco. Proveedores tiene su cuenta propia.");
+          const payload = {
+            id: box ? box.id : makeCashBoxId(name),
+            name,
+            isActive: document.getElementById("cash-box-active").checked,
+            visibleToAdmin: document.getElementById("cash-box-visible-admin").checked,
+            notes: document.getElementById("cash-box-notes").value.trim()
+          };
+          if (box) Object.assign(box, payload);
+          else state.cashBoxes.push(payload);
+          saveState();
+          closeModal();
+        });
+      }
+    );
+  }
+
+  function makeCashBoxId(name) {
+    const base = "cash-" + normalizeText(name).replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
+    let id = base || "cash-box";
+    let counter = 1;
+    while (state.cashBoxes.some((box) => box.id === id)) {
+      counter += 1;
+      id = base + "-" + counter;
+    }
+    return id;
+  }
+
+  function openClientForm(id) {
+    const client = id ? getClient(id) : null;
+    const nextId = suggestClientId();
+    showModal(
+      client ? "Editar cliente" : "Agregar cliente",
+      `
+      <form id="client-form" class="form-grid">
+        <div class="field"><label>ID</label><input id="client-id" value="${escapeAttr(client ? client.id : nextId)}" ${client ? "disabled" : ""} /></div>
+        <div class="field span-2"><label>Nombre</label><input id="client-name" value="${escapeAttr(client ? client.name : "")}" required /></div>
+        <div class="field"><label>Direccion</label><input id="client-address" value="${escapeAttr(client ? client.address : "")}" /></div>
+        <div class="field"><label>Zona</label><input id="client-zone" value="${escapeAttr(client ? client.zone || "" : "")}" /></div>
+        <div class="field"><label>Horario apertura</label><input id="client-opening-time" type="time" value="${escapeAttr(client ? client.openingTime || "" : "")}" /></div>
+        <div class="field"><label>Entrega max.</label><input id="client-max-delivery-time" type="time" value="${escapeAttr(client ? client.maxDeliveryTime || "" : "")}" /></div>
+        <div class="field"><label>Telefono</label><input id="client-phone" value="${escapeAttr(client ? client.phone : "")}" /></div>
+        <div class="field span-2"><label>Correo</label><input id="client-email" type="email" value="${escapeAttr(client ? client.email || "" : "")}" /></div>
+        <div class="field span-2"><label>Correo facturacion</label><input id="client-billing-email" type="email" value="${escapeAttr(client ? client.billingEmail || "" : "")}" /></div>
+        <div class="field"><label>Tipo pago</label><select id="client-payment">${["cuenta_corriente", "contado", "semanal", "contra_factura"].map((type) => `<option value="${type}" ${client && client.paymentType === type ? "selected" : ""}>${escapeHtml(paymentTypeLabel(type))}</option>`).join("")}</select></div>
+        <div class="field"><label>Precio</label><select id="client-tier"><option value="general" ${client && client.priceTier === "general" ? "selected" : ""}>General</option><option value="preferencial" ${client && client.priceTier === "preferencial" ? "selected" : ""}>Preferencial</option><option value="con_factura" ${client && client.priceTier === "con_factura" ? "selected" : ""}>Con Factura</option></select></div>
+        <div class="field"><label>Ajuste precio %</label><input id="client-adjustment" inputmode="decimal" value="${formatAmountInput(client ? client.priceAdjustmentPct || 0 : 0)}" /></div>
+        <div class="field"><label>Vehiculo</label><select id="client-vehicle">${activeVehicles().map((vehicle) => `<option value="${vehicle.id}" ${client && client.vehicleId === vehicle.id ? "selected" : ""}>${escapeHtml(vehicle.name)}</option>`).join("")}</select></div>
+        <label class="field" style="display:flex;align-items:center;gap:8px;grid-template-columns:auto 1fr">
+          <input type="checkbox" id="client-needs-invoice" style="width:auto;min-height:auto" ${client && client.needsInvoice ? "checked" : ""} />
+          <span>Necesita factura</span>
+        </label>
+        <div class="field"><label>CUIT</label><input id="client-cuit" value="${escapeAttr(client ? client.cuit || "" : "")}" /></div>
+        <div class="field span-2"><label>Nombre legal</label><input id="client-legal-name" value="${escapeAttr(client ? client.legalName || "" : "")}" /></div>
+        <div class="field"><label>Tipo factura</label><select id="client-invoice-type">${["Sin Factura", "Factura A", "Factura B", "Factura C"].map((type) => `<option value="${type}" ${(!client && type === "Sin Factura") || (client && (client.invoiceType || "Sin Factura") === type) ? "selected" : ""}>${type}</option>`).join("")}</select></div>
+        <div class="field"><label>Frecuencia</label><select id="client-invoice-frequency">${["diaria", "semanal", "quincenal", "mensual"].map((freq) => `<option value="${freq}" ${client && client.invoiceFrequency === freq ? "selected" : ""}>${freq}</option>`).join("")}</select></div>
+        <div class="field span-4"><label>Notas</label><textarea id="client-notes">${escapeHtml(client ? client.notes || "" : "")}</textarea></div>
+      </form>
+      `,
+      () => {
+        const tierSelect = document.getElementById("client-tier");
+        const invoiceType = document.getElementById("client-invoice-type");
+        const needsInvoice = document.getElementById("client-needs-invoice");
+        const syncInvoiceDefaults = () => {
+          if (tierSelect.value === "con_factura") {
+            needsInvoice.checked = true;
+            if (invoiceType.value === "Sin Factura") invoiceType.value = "Factura A";
+          } else {
+            needsInvoice.checked = false;
+            invoiceType.value = "Sin Factura";
+          }
+        };
+        tierSelect.addEventListener("change", syncInvoiceDefaults);
+        document.getElementById("modal-save").addEventListener("click", () => {
+          const idValue = client ? client.id : document.getElementById("client-id").value.trim();
+          if (!idValue || !document.getElementById("client-name").value.trim()) return alert("Complete ID y nombre.");
+          const priceTierValue = document.getElementById("client-tier").value;
+          const invoiceTypeValue = priceTierValue === "con_factura"
+            ? (document.getElementById("client-invoice-type").value === "Sin Factura" ? "Factura A" : document.getElementById("client-invoice-type").value)
+            : "Sin Factura";
+          const payload = {
+            id: idValue,
+            name: document.getElementById("client-name").value.trim(),
+            address: document.getElementById("client-address").value.trim(),
+            zone: document.getElementById("client-zone").value.trim(),
+            openingTime: document.getElementById("client-opening-time").value,
+            maxDeliveryTime: document.getElementById("client-max-delivery-time").value,
+            phone: document.getElementById("client-phone").value.trim(),
+            email: document.getElementById("client-email").value.trim(),
+            billingEmail: document.getElementById("client-billing-email").value.trim(),
+            contactName: "",
+            paymentType: document.getElementById("client-payment").value,
+            priceTier: priceTierValue,
+            priceAdjustmentPct: parseAmount(document.getElementById("client-adjustment").value),
+            needsInvoice: priceTierValue === "con_factura" || document.getElementById("client-needs-invoice").checked,
+            cuit: document.getElementById("client-cuit").value.trim(),
+            legalName: document.getElementById("client-legal-name").value.trim(),
+            invoiceType: invoiceTypeValue,
+            invoiceFrequency: document.getElementById("client-invoice-frequency").value,
+            vehicleId: document.getElementById("client-vehicle").value,
+            isActive: client ? client.isActive : true,
+            notes: document.getElementById("client-notes").value.trim()
+          };
+          const customerUser = state.users.find((user) => user.role === "customer" && user.clientId === idValue);
+          if (payload.email && isEmailTaken(payload.email, customerUser ? customerUser.id : "", allowsLinkedEmailDuplicate("customer", customerUser ? customerUser.linkedClientIds : [idValue]))) {
+            return alert("Ese correo ya esta usado por otro usuario.");
+          }
+          if (client) {
+            Object.assign(client, payload);
+            syncCustomerUserForClient(payload);
+          }
+          else {
+            state.clients.push(payload);
+            const generatedPassword = createCustomerUserForClient(payload);
+            if (payload.email) {
+              const user = state.users.find((item) => item.role === "customer" && item.clientId === payload.id);
+              alert("Cliente creado. Usuario: " + (user ? user.username : "cliente" + payload.id) + " / Contrasena: " + generatedPassword + ". Se preparo el correo en el boton de mail del navegador.");
+              window.location.href = buildClientPasswordMailto(payload, generatedPassword);
+            }
+          }
+          saveState();
+          closeModal();
+        });
+      }
+    );
+  }
+
+  function openOrderAliasesModal(clientId) {
+    const selectedClient = getClient(clientId);
+    showModal(
+      "Alias de productos",
+      `
+        <div class="form-grid">
+          <div class="field span-4">
+            <label>Cliente seleccionado</label>
+            <input disabled value="${escapeAttr(selectedClient ? selectedClient.id + " - " + selectedClient.name : clientId || "-")}" />
+          </div>
+          <div class="field span-4">
+            <label>Producto</label>
+            <select id="alias-product-select">${activeProducts().map((product) => `<option value="${product.id}">${escapeHtml(product.name)}</option>`).join("")}</select>
+          </div>
+        </div>
+        <div class="note-grid">
+          <div class="note-card">
+            <strong>Alias generales</strong>
+            <span id="alias-general-list">-</span>
+          </div>
+          <div class="note-card">
+            <strong>Alias de este cliente</strong>
+            <span id="alias-client-list">-</span>
+          </div>
+          <div class="note-card">
+            <strong>Cantidades de este cliente</strong>
+            <span id="quantity-alias-client-list">-</span>
+          </div>
+        </div>
+        <div class="panel" style="box-shadow:none;margin-top:12px">
+          <strong>Todos los alias cargados</strong>
+          <div class="mini-table">${renderAllAliasesSummary()}</div>
+        </div>
+        ${["manager", "admin"].includes(currentUser.role) ? `
+        <div class="form-grid" style="margin-top:12px">
+          <div class="field span-2"><label>Agregar alias general</label><input id="alias-new-general" placeholder="banana, naranja bolsa, dc" /></div>
+          <div class="field span-2"><label>Agregar alias de este cliente</label><input id="alias-new-client" placeholder="como lo pide este cliente" /></div>
+          <div class="field"><label>Alias cantidad general</label><input id="quantity-alias-new-general" placeholder="1/2, ½, media" /></div>
+          <div class="field"><label>Valor general</label><input id="quantity-alias-value-general" inputmode="decimal" placeholder="0,5" /></div>
+          <div class="field"><label>Alias cantidad cliente</label><input id="quantity-alias-new-client" placeholder="medio, cuarto" /></div>
+          <div class="field"><label>Valor cliente</label><input id="quantity-alias-value-client" inputmode="decimal" placeholder="0,5" /></div>
+        </div>` : ""}
+      `,
+      () => {
+        const select = document.getElementById("alias-product-select");
+        const update = () => {
+          const productId = select.value;
+          const general = state.productAliases.filter((alias) => alias.productId === productId).map((alias) => alias.alias);
+          const clientAliases = state.clientProductAliases.filter((alias) => alias.productId === productId && alias.clientId === clientId).map((alias) => alias.alias);
+          document.getElementById("alias-general-list").textContent = general.length ? general.join(", ") : "Sin alias generales";
+          document.getElementById("alias-client-list").textContent = clientAliases.length ? clientAliases.join(", ") : "Sin alias particular";
+          document.getElementById("quantity-alias-client-list").textContent = renderQuantityAliasList(clientId);
+        };
+        select.addEventListener("change", update);
+        if (["manager", "admin"].includes(currentUser.role)) {
+          document.getElementById("modal-save").textContent = "Guardar alias";
+          document.getElementById("modal-save").addEventListener("click", () => {
+            const productId = select.value;
+            const general = document.getElementById("alias-new-general").value.trim();
+            const clientAlias = document.getElementById("alias-new-client").value.trim();
+            if (general && !state.productAliases.some((alias) => alias.productId === productId && normalizeText(alias.alias) === normalizeText(general))) {
+              state.productAliases.push({ productId, alias: general });
+            }
+            if (clientId && clientAlias && !state.clientProductAliases.some((alias) => alias.productId === productId && alias.clientId === clientId && normalizeText(alias.alias) === normalizeText(clientAlias))) {
+              state.clientProductAliases.push({ clientId, productId, alias: clientAlias });
+            }
+            upsertQuantityAlias(document.getElementById("quantity-alias-new-general").value.trim(), parseAmount(document.getElementById("quantity-alias-value-general").value), "");
+            upsertQuantityAlias(document.getElementById("quantity-alias-new-client").value.trim(), parseAmount(document.getElementById("quantity-alias-value-client").value), clientId);
+            saveState();
+            document.getElementById("alias-new-general").value = "";
+            document.getElementById("alias-new-client").value = "";
+            document.getElementById("quantity-alias-new-general").value = "";
+            document.getElementById("quantity-alias-value-general").value = "";
+            document.getElementById("quantity-alias-new-client").value = "";
+            document.getElementById("quantity-alias-value-client").value = "";
+            update();
+          });
+        } else {
+          document.getElementById("modal-save").textContent = "Cerrar";
+          document.getElementById("modal-save").addEventListener("click", closeModal);
+        }
+        update();
+      }
+    );
+  }
+
+  function openUnmatchedAliasModal(unmatched, clientId, onApply) {
+    const rows = unmatched.map((line, index) => {
+      const parsed = parseOrderLine(line, clientId);
+      const aliasName = parsed ? parsed.name : line;
+      return `
+        <div class="order-edit-line" data-unmatched-alias-row="${index}">
+          <strong>${escapeHtml(line)}</strong>
+          <input type="hidden" data-unmatched-alias-name value="${escapeAttr(aliasName)}" />
+          <div class="field span-2"><label>Producto existente</label><select data-unmatched-product><option value="">No vincular</option>${activeProducts().map((product) => `<option value="${product.id}">${escapeHtml(product.name)}</option>`).join("")}</select></div>
+          <label class="field" style="display:flex;align-items:center;gap:8px;grid-template-columns:auto 1fr">
+            <input type="checkbox" data-unmatched-general style="width:auto;min-height:auto" />
+            <span>Alias general</span>
+          </label>
+        </div>
+      `;
+    }).join("");
+    showModal(
+      "Vincular productos no reconocidos",
+      `<p class="muted">Seleccione el producto correcto para guardar el alias y reconocerlo la proxima vez.</p><div class="grid">${rows}</div>`,
+      () => {
+        document.getElementById("modal-save").textContent = "Guardar alias";
+        document.getElementById("modal-save").addEventListener("click", () => {
+          document.querySelectorAll("[data-unmatched-alias-row]").forEach((row) => {
+            const productId = row.querySelector("[data-unmatched-product]").value;
+            const aliasName = row.querySelector("[data-unmatched-alias-name]").value.trim();
+            const useGeneral = row.querySelector("[data-unmatched-general]").checked;
+            if (!productId || !aliasName) return;
+            if (useGeneral) {
+              if (!state.productAliases.some((alias) => alias.productId === productId && normalizeText(alias.alias) === normalizeText(aliasName))) {
+                state.productAliases.push({ productId, alias: aliasName });
+              }
+            } else if (clientId && !state.clientProductAliases.some((alias) => alias.productId === productId && alias.clientId === clientId && normalizeText(alias.alias) === normalizeText(aliasName))) {
+              state.clientProductAliases.push({ clientId, productId, alias: aliasName });
+            }
+          });
+          saveState();
+          closeModal();
+          if (onApply) onApply();
+        });
+      }
+    );
+  }
+
+  function openProductForm(id) {
+    const product = id ? getProduct(id) : null;
+    const generalAliases = product ? state.productAliases.filter((alias) => alias.productId === product.id).map((alias) => alias.alias).join(", ") : "";
+    const clientAliases = product ? state.clientProductAliases.filter((alias) => alias.productId === product.id).map((alias) => alias.clientId + ":" + alias.alias).join(", ") : "";
+    const assignedValue = product ? getProductAssigneeValue(product.id) : "";
+    showModal(
+      product ? "Editar producto" : "Agregar producto",
+      `
+      <form id="product-form" class="form-grid">
+        <div class="field span-2"><label>Nombre</label><input id="product-name" value="${escapeAttr(product ? product.name : "")}" required /></div>
+        <div class="field"><label>Categoria</label><select id="product-category">${getProductCategories().map((category) => `<option value="${category}" ${product && product.category === category ? "selected" : ""}>${category}</option>`).join("")}</select></div>
+        <div class="field"><label>Unidad</label><select id="product-unit">${unitOptions(product ? product.unitType : "kg")}</select></div>
+        <div class="field"><label>Tipo IVA</label><select id="product-iva">${IVA_OPTIONS.map((item) => `<option value="${item.value}" ${(!product && item.value === "10.5") || (product && (product.ivaType || "10.5") === item.value) ? "selected" : ""}>${escapeHtml(item.label)}</option>`).join("")}</select></div>
+        <label class="field" style="display:flex;align-items:center;gap:8px;grid-template-columns:auto 1fr">
+          <input type="checkbox" id="product-unit-weight" style="width:auto;min-height:auto" ${product && product.allowUnitWeight ? "checked" : ""} />
+          <span>Unidades</span>
+        </label>
+        <label class="field" style="display:flex;align-items:center;gap:8px;grid-template-columns:auto 1fr">
+          <input type="checkbox" id="product-show-vehicle" style="width:auto;min-height:auto" ${!product || product.showInVehicleTotals !== false ? "checked" : ""} />
+          <span>Mostrar en suma de vehiculos</span>
+        </label>
+        <div class="field span-2"><label>Asignado a</label><select id="product-assignee-modal"><option value="">Sin asignar</option>${activeAssignees().map((entry) => `<option value="${entry.value}" ${assignedValue === entry.value ? "selected" : ""}>${escapeHtml(entry.label)}</option>`).join("")}</select></div>
+        <div class="field span-4">
+          <label>Proveedores que venden este producto</label>
+          <div id="product-providers" class="check-grid">
+            ${activeProviders().map((prov) => `<label class="check-item"><input type="checkbox" value="${prov.id}" ${product && Array.isArray(prov.productsSupplied) && prov.productsSupplied.includes(product.id) ? "checked" : ""} /><span>${escapeHtml(prov.name)}</span></label>`).join("") || `<span class="muted">No hay proveedores activos.</span>`}
+          </div>
+        </div>
+        <div class="field"><label>Costo</label><input id="product-cost" value="${formatAmountInput(product ? product.baseCost : 0)}" inputmode="decimal" /></div>
+        <div class="field"><label>Precio lista</label><input id="product-price" value="${formatAmountInput(product ? getProductPrice(product.id) : 0)}" inputmode="decimal" /></div>
+        <div class="field span-2"><label>Imagen URL</label><input id="product-image-url" value="${escapeAttr(product ? product.imageUrl || "" : "")}" placeholder="https://..." /></div>
+        <div class="field span-2"><label>Subir imagen</label><input id="product-image-file" type="file" accept="image/png,image/jpeg,image/webp" /></div>
+        <div class="field span-2"><label>Alias generales</label><input id="product-aliases" value="${escapeAttr(generalAliases)}" placeholder="banana, cherry, tomate cherry" /></div>
+        <div class="field span-2"><label>Alias por cliente</label><input id="product-client-aliases" value="${escapeAttr(clientAliases)}" placeholder="002:banana, 021:cherry" /></div>
+        <div class="field span-4"><label>Notas</label><textarea id="product-notes">${escapeHtml(product ? product.notes || "" : "")}</textarea></div>
+      </form>
+      `,
+      () => {
+        document.getElementById("modal-save").addEventListener("click", async () => {
+          const name = document.getElementById("product-name").value.trim();
+          if (!name) return alert("Complete nombre.");
+          const productId = product ? product.id : nextProductId();
+          let imageData = product ? product.imageData || "" : "";
+          const fileInput = document.getElementById("product-image-file");
+          if (fileInput && fileInput.files && fileInput.files[0]) {
+            imageData = await compressImageFile(fileInput.files[0], 700, 0.7);
+          }
+          const payload = {
+            id: productId,
+            name,
+            category: document.getElementById("product-category").value,
+            unitType: document.getElementById("product-unit").value,
+            ivaType: document.getElementById("product-iva").value,
+            allowUnitWeight: document.getElementById("product-unit-weight").checked,
+            showInVehicleTotals: document.getElementById("product-show-vehicle").checked,
+            baseCost: parseAmount(document.getElementById("product-cost").value),
+            salePrice: Math.ceil(parseAmount(document.getElementById("product-price").value)),
+            imageUrl: document.getElementById("product-image-url").value.trim(),
+            imageData,
+            isActive: product ? product.isActive : true,
+            sortOrder: product ? product.sortOrder : state.products.length,
+            notes: document.getElementById("product-notes").value.trim()
+          };
+          const [assignedType, assignedId] = String(document.getElementById("product-assignee-modal").value || "").split(":");
+          payload.assignedToType = assignedType || "";
+          payload.assignedToId = assignedId || "";
+          if (product) Object.assign(product, payload);
+          else state.products.push(payload);
+          state.prices[productId] = {
+            productId,
+            date: todayISO(),
+            cost: payload.baseCost,
+            price: payload.salePrice,
+            marginPct: calcMargin(payload.baseCost, payload.salePrice)
+          };
+          saveProductAliases(productId, document.getElementById("product-aliases").value, document.getElementById("product-client-aliases").value);
+          const providersWrap = document.getElementById("product-providers");
+          if (providersWrap) {
+            providersWrap.querySelectorAll("input[type=checkbox]").forEach((checkbox) => {
+              const providerEntry = getProvider(checkbox.value);
+              if (!providerEntry) return;
+              providerEntry.productsSupplied = Array.isArray(providerEntry.productsSupplied) ? providerEntry.productsSupplied : [];
+              const linked = providerEntry.productsSupplied.includes(productId);
+              if (checkbox.checked && !linked) providerEntry.productsSupplied.push(productId);
+              if (!checkbox.checked && linked) providerEntry.productsSupplied = providerEntry.productsSupplied.filter((id) => id !== productId);
+            });
+          }
+          applyCostRelations({ productId, unitCost: payload.baseCost, relationUnits: 0 }, calcMargin(payload.baseCost, payload.salePrice));
+          saveState();
+          closeModal();
+        });
+      }
+    );
+  }
+
+  function openProviderForm(id) {
+    if (currentUser && !roleFlag(currentUser.role, "editarProveedores")) return alert("Su rol no tiene permiso para agregar o editar proveedores.");
+    const provider = id ? getProvider(id) : null;
+    const selectedProducts = new Set(provider && Array.isArray(provider.productsSupplied) ? provider.productsSupplied : []);
+    showModal(
+      provider ? "Editar proveedor" : "Agregar proveedor",
+      `
+      <form id="provider-form" class="form-grid">
+        <div class="field span-2"><label>Nombre</label><input id="provider-name" value="${escapeAttr(provider ? provider.name : "")}" required /></div>
+        <div class="field"><label>Contacto</label><input id="provider-contact" value="${escapeAttr(provider ? provider.contactName || "" : "")}" /></div>
+        <div class="field"><label>Telefono</label><input id="provider-phone" value="${escapeAttr(provider ? provider.phone || "" : "")}" /></div>
+        <div class="field span-2"><label>Email</label><input id="provider-email" value="${escapeAttr(provider ? provider.email || "" : "")}" /></div>
+        <div class="field span-2"><label>Direccion</label><input id="provider-address" value="${escapeAttr(provider ? provider.address || "" : "")}" /></div>
+        <div class="field"><label>Pago</label><select id="provider-terms">${["contado", "semanal", "quincenal", "mensual"].map((term) => `<option value="${term}" ${provider && provider.paymentTerms === term ? "selected" : ""}>${term}</option>`).join("")}</select></div>
+        <div class="field"><label>Margen defecto %</label><input id="provider-margin" value="${formatAmountInput(provider ? provider.defaultMargin || 0 : 25)}" inputmode="decimal" /></div>
+        <div class="field span-4">
+          <label>Productos que vende (marque varios)</label>
+          <input id="provider-products-filter" placeholder="Filtrar productos..." autocomplete="off" />
+          <div class="page-actions" style="margin:6px 0">
+            <button class="btn small ghost" type="button" id="provider-products-select-visible">Seleccionar visibles</button>
+            <button class="btn small ghost" type="button" id="provider-products-clear">Quitar todos</button>
+            <span class="muted" id="provider-products-count"></span>
+          </div>
+          <div id="provider-products" class="check-grid">
+            ${activeProducts().map((product) => `<label class="check-item" data-check-name="${escapeAttr(normalizeText(product.name))}"><input type="checkbox" value="${product.id}" ${selectedProducts.has(product.id) ? "checked" : ""} /><span>${escapeHtml(product.name)} - ${escapeHtml(product.unitType)}</span></label>`).join("")}
+          </div>
+        </div>
+        <div class="field span-4"><label>Notas</label><textarea id="provider-notes">${escapeHtml(provider ? provider.notes || "" : "")}</textarea></div>
+      </form>
+      `,
+      () => {
+        const productsWrap = document.getElementById("provider-products");
+        const filterInput = document.getElementById("provider-products-filter");
+        const countNode = document.getElementById("provider-products-count");
+        const updateCount = () => {
+          if (countNode) countNode.textContent = productsWrap.querySelectorAll("input:checked").length + " seleccionados";
+        };
+        if (filterInput) filterInput.addEventListener("input", () => {
+          const clean = normalizeText(filterInput.value);
+          productsWrap.querySelectorAll("[data-check-name]").forEach((item) => {
+            item.style.display = !clean || item.dataset.checkName.includes(clean) ? "" : "none";
+          });
+        });
+        const selectVisibleButton = document.getElementById("provider-products-select-visible");
+        if (selectVisibleButton) selectVisibleButton.addEventListener("click", () => {
+          productsWrap.querySelectorAll("[data-check-name]").forEach((item) => {
+            if (item.style.display !== "none") item.querySelector("input").checked = true;
+          });
+          updateCount();
+        });
+        const clearButton = document.getElementById("provider-products-clear");
+        if (clearButton) clearButton.addEventListener("click", () => {
+          productsWrap.querySelectorAll("input").forEach((input) => {
+            input.checked = false;
+          });
+          updateCount();
+        });
+        productsWrap.addEventListener("change", updateCount);
+        updateCount();
+        document.getElementById("modal-save").addEventListener("click", () => {
+          const name = document.getElementById("provider-name").value.trim();
+          if (!name) return alert("Complete nombre.");
+          const payload = {
+            id: provider ? provider.id : nextProviderId(),
+            name,
+            contactName: document.getElementById("provider-contact").value.trim(),
+            phone: document.getElementById("provider-phone").value.trim(),
+            email: document.getElementById("provider-email").value.trim(),
+            address: document.getElementById("provider-address").value.trim(),
+            paymentTerms: document.getElementById("provider-terms").value,
+            defaultMargin: parseAmount(document.getElementById("provider-margin").value),
+            productsSupplied: Array.from(productsWrap.querySelectorAll("input:checked")).map((input) => input.value),
+            isActive: provider ? provider.isActive : true,
+            notes: document.getElementById("provider-notes").value.trim()
+          };
+          if (provider) Object.assign(provider, payload);
+          else state.providers.push(payload);
+          saveState();
+          closeModal();
+        });
+      }
+    );
+  }
+
+  function openVehicleForm(id) {
+    const vehicle = id ? getVehicle(id) : null;
+    showModal(
+      vehicle ? "Editar vehiculo" : "Agregar vehiculo",
+      `
+      <form id="vehicle-form" class="form-grid">
+        <div class="field"><label>ID</label><input id="vehicle-id" value="${escapeAttr(vehicle ? vehicle.id : "VH-" + String(state.vehicles.length + 1).padStart(3, "0"))}" ${vehicle ? "disabled" : ""} /></div>
+        <div class="field span-2"><label>Nombre</label><input id="vehicle-name" value="${escapeAttr(vehicle ? vehicle.name : "")}" required /></div>
+        <div class="field"><label>Tipo</label><select id="vehicle-type">${["Chico", "Mediano", "Camioneta"].map((type) => `<option value="${type}" ${vehicle && vehicle.type === type ? "selected" : ""}>${type}</option>`).join("")}</select></div>
+        <div class="field span-2"><label>Chofer</label><input id="vehicle-driver" value="${escapeAttr(vehicle ? vehicle.driverName || "" : "")}" /></div>
+        <div class="field"><label>Capacidad pedidos</label><input id="vehicle-capacity" inputmode="decimal" value="${escapeAttr(vehicle ? vehicle.capacity || "" : "")}" /></div>
+      </form>
+      `,
+      () => {
+        document.getElementById("modal-save").addEventListener("click", () => {
+          const idValue = vehicle ? vehicle.id : document.getElementById("vehicle-id").value.trim();
+          const name = document.getElementById("vehicle-name").value.trim();
+          if (!idValue || !name) return alert("Complete ID y nombre.");
+          const payload = {
+            id: idValue,
+            name,
+            type: document.getElementById("vehicle-type").value,
+            driverName: document.getElementById("vehicle-driver").value.trim(),
+            capacity: parseAmount(document.getElementById("vehicle-capacity").value) || 10,
+            isActive: true
+          };
+          if (vehicle) Object.assign(vehicle, payload);
+          else state.vehicles.push(payload);
+          saveState();
+          closeModal();
+        });
+      }
+    );
+  }
+
+  function openOrderForm(id) {
+    const order = getOrder(id);
+    if (!order) return;
+    const isCustomerEdit = isClientLikeRole(currentUser.role);
+    if (isCustomerEdit && !canCustomerEditOrder(order)) return alert("Este pedido ya no se puede editar desde el portal.");
+    const itemRows = order.items.map((item) => `
+      <div class="order-edit-line" data-edit-order-item="${item.id}">
+        <strong>${escapeHtml(item.productName)}</strong>
+        <div class="field"><label>Cantidad</label><input data-edit-qty inputmode="decimal" value="${formatAmountInput(item.quantity)}" /></div>
+        ${isCustomerEdit ? `<input type="hidden" data-edit-unit value="${escapeAttr(item.unitType)}" />` : `<div class="field"><label>Unidad</label><select data-edit-unit>${unitOptions(item.unitType)}</select></div>`}
+        ${isCustomerEdit ? `<input type="hidden" data-edit-price value="${formatAmountInput(item.unitPrice)}" />` : `<div class="field"><label>Precio</label><input data-edit-price inputmode="decimal" value="${formatAmountInput(item.unitPrice)}" /></div>`}
+        <div class="field"><label>Nota</label><input data-edit-note value="${escapeAttr(item.note || "")}" /></div>
+      </div>
+    `).join("");
+    showModal(
+      "Editar pedido " + order.id,
+      `
+      <form id="order-edit-form" class="grid">
+        <div class="form-grid">
+          <div class="field"><label>Fecha</label><input type="date" id="edit-order-date" value="${escapeAttr(order.date)}" /></div>
+          ${isCustomerEdit ? "" : `<div class="field"><label>Vehiculo</label><select id="edit-order-vehicle">${activeVehicles().map((vehicle) => `<option value="${vehicle.id}" ${order.deliveryVehicleId === vehicle.id ? "selected" : ""}>${escapeHtml(vehicle.name)}</option>`).join("")}</select></div>
+          <div class="field"><label>Estado</label><select id="edit-order-status">${["pendiente", "preparando", "listo", "entregado", "cancelado"].map((status) => `<option value="${status}" ${order.status === status ? "selected" : ""}>${statusLabel(status)}</option>`).join("")}</select></div>`}
+          <div class="field span-4"><label>Notas pedido</label><textarea id="edit-order-notes">${escapeHtml(order.notes || "")}</textarea></div>
+        </div>
+        <div class="grid">${itemRows}</div>
+      </form>
+      `,
+      () => {
+        document.getElementById("modal-save").addEventListener("click", () => {
+          if (isCustomerEdit && !canCustomerEditOrder(order)) return alert("Este pedido ya no se puede editar desde el portal.");
+          order.date = document.getElementById("edit-order-date").value || order.date;
+          if (!isCustomerEdit) {
+            order.deliveryVehicleId = document.getElementById("edit-order-vehicle").value;
+            order.status = document.getElementById("edit-order-status").value;
+          }
+          order.notes = document.getElementById("edit-order-notes").value.trim();
+          document.querySelectorAll("[data-edit-order-item]").forEach((row) => {
+            const item = order.items.find((entry) => entry.id === row.dataset.editOrderItem);
+            if (!item) return;
+            const product = getProduct(item.productId);
+            const client = getClient(order.clientId);
+            item.quantity = parseAmount(row.querySelector("[data-edit-qty]").value);
+            item.unitType = row.querySelector("[data-edit-unit]").value;
+            item.unitPrice = parseAmount(row.querySelector("[data-edit-price]").value);
+            item.note = row.querySelector("[data-edit-note]").value.trim();
+            item.subtotal = item.quantity * item.unitPrice;
+            item.ivaRate = shouldApplyInvoiceVat(client) ? getIvaRate(product && product.ivaType) : 0;
+            item.ivaAmount = item.subtotal * (item.ivaRate / 100);
+            item.totalWithIva = item.subtotal + item.ivaAmount;
+          });
+          recalcOrderTotals(order);
+          if (!order.exampleOnly) updateOrderAccounting(order);
+          saveState();
+          closeModal();
+        });
+      }
+    );
+  }
+
+  function openEmployeeForm(id) {
+    const employee = id ? getUser(id) : null;
+    showModal(
+      employee ? "Editar empleado" : "Agregar empleado",
+      `
+      <form id="employee-form" class="form-grid">
+        <div class="field span-2"><label>Nombre</label><input id="employee-name" value="${escapeAttr(employee ? employee.name : "")}" required /></div>
+        <div class="field"><label>Usuario</label><input id="employee-username" value="${escapeAttr(employee ? employee.username : "")}" required /></div>
+        <div class="field"><label>Contrasena</label><input id="employee-password" value="${escapeAttr(employee ? employee.password : generatePassword())}" required /></div>
+        <div class="field span-2"><label>Correo</label><input id="employee-email" type="email" value="${escapeAttr(employee ? employee.email || "" : "")}" /></div>
+        <div class="field"><label>Telefono</label><input id="employee-phone" value="${escapeAttr(employee ? employee.phone || "" : "")}" /></div>
+        <div class="field"><label>Valor hora</label><input id="employee-hourly-rate" inputmode="decimal" value="${formatAmountInput(employee ? employee.hourlyRate || 2500 : 2500)}" /></div>
+        <div class="field"><label>Valor hora extra</label><input id="employee-overtime-rate" inputmode="decimal" value="${formatAmountInput(employee ? employee.overtimeRate || 3500 : 3500)}" /></div>
+        <div class="field"><label>Inicio jornada</label><input type="time" id="employee-shift-start" value="${escapeAttr(employee ? employee.shiftStart || "05:45" : "05:45")}" /></div>
+        <div class="field"><label>Fin jornada</label><input type="time" id="employee-shift-end" value="${escapeAttr(employee ? employee.shiftEnd || "13:45" : "13:45")}" /></div>
+        <div class="field"><label>Hora extra desde</label><input type="time" id="employee-overtime-start" value="${escapeAttr(employee ? employee.overtimeStart || "14:00" : "14:00")}" /></div>
+      </form>
+      `,
+      () => {
+        document.getElementById("modal-save").addEventListener("click", () => {
+          const username = document.getElementById("employee-username").value.trim();
+          const email = document.getElementById("employee-email").value.trim();
+          if (!document.getElementById("employee-name").value.trim() || !username) return alert("Complete nombre y usuario.");
+          if (isUsernameTaken(username, employee ? employee.id : "")) return alert("Ese usuario ya existe.");
+          if (isEmailTaken(email, employee ? employee.id : "", false)) return alert("Ese correo ya esta usado por otro usuario.");
+          const payload = {
+            id: employee ? employee.id : nextUserId(),
+            name: document.getElementById("employee-name").value.trim(),
+            username,
+            password: document.getElementById("employee-password").value || generatePassword(),
+            role: "employee",
+            email,
+            phone: document.getElementById("employee-phone").value.trim(),
+            hourlyRate: parseAmount(document.getElementById("employee-hourly-rate").value) || 2500,
+            overtimeRate: parseAmount(document.getElementById("employee-overtime-rate").value) || 3500,
+            shiftStart: document.getElementById("employee-shift-start").value || "05:45",
+            shiftEnd: document.getElementById("employee-shift-end").value || "13:45",
+            overtimeStart: document.getElementById("employee-overtime-start").value || "14:00",
+            isActive: true
+          };
+          if (employee) Object.assign(employee, payload);
+          else state.users.push(payload);
+          saveState();
+          closeModal();
+        });
+      }
+    );
+  }
+
+  function openAttendanceForm(id) {
+    const entry = id ? state.attendance.find((item) => item.id === id) : null;
+    const employeeId = entry ? entry.userId : (activeEmployees()[0] ? activeEmployees()[0].id : "");
+    showModal(
+      entry ? "Editar horario" : "Agregar horario",
+      `
+      <form id="attendance-admin-form" class="form-grid">
+        <div class="field span-2"><label>Empleado</label><select id="attendance-admin-user">${activeEmployees().map((employee) => `<option value="${employee.id}" ${employee.id === employeeId ? "selected" : ""}>${escapeHtml(employee.name)}</option>`).join("")}</select></div>
+        <div class="field"><label>Fecha</label><input type="date" id="attendance-admin-date" value="${escapeAttr(entry ? entry.date : todayISO())}" /></div>
+        <label class="field" style="display:flex;align-items:center;gap:8px;grid-template-columns:auto 1fr">
+          <input type="checkbox" id="attendance-admin-present" style="width:auto;min-height:auto" ${!entry || entry.present ? "checked" : ""} />
+          <span>Presente</span>
+        </label>
+        <div class="field"><label>Inicio</label><input type="time" id="attendance-admin-start" value="${escapeAttr(entry ? entry.startTime || "05:45" : "05:45")}" /></div>
+        <div class="field"><label>Fin</label><input type="time" id="attendance-admin-end" value="${escapeAttr(entry ? entry.endTime || "13:45" : "13:45")}" /></div>
+        <div class="field span-2"><label>Notas</label><input id="attendance-admin-notes" value="${escapeAttr(entry ? entry.notes || "" : "")}" /></div>
+      </form>
+      `,
+      () => {
+        document.getElementById("modal-save").addEventListener("click", () => {
+          const payload = {
+            userId: document.getElementById("attendance-admin-user").value,
+            date: document.getElementById("attendance-admin-date").value || todayISO(),
+            present: document.getElementById("attendance-admin-present").checked,
+            startTime: document.getElementById("attendance-admin-start").value,
+            endTime: document.getElementById("attendance-admin-end").value,
+            notes: document.getElementById("attendance-admin-notes").value.trim()
+          };
+          if (!payload.userId) return alert("Seleccione un empleado.");
+          if (entry) Object.assign(entry, payload, { updatedAt: new Date().toISOString() });
+          else upsertAttendance(payload);
+          saveState();
+          closeModal();
+        });
+      }
+    );
+  }
+
+  function openUserForm(id) {
+    const user = id ? getUser(id) : null;
+    const clientOptions = activeClients().map((client) => `<option value="${client.id}" ${user && user.clientId === client.id ? "selected" : ""}>${escapeHtml(client.id)} - ${escapeHtml(client.name)}</option>`).join("");
+    showModal(
+      user ? "Editar usuario" : "Agregar usuario",
+      `
+      <form id="user-form" class="form-grid">
+        <div class="field span-2"><label>Nombre</label><input id="user-name" value="${escapeAttr(user ? user.name : "")}" required /></div>
+        <div class="field"><label>Usuario</label><input id="user-username" value="${escapeAttr(user ? user.username : "")}" required /></div>
+        <div class="field"><label>Contrasena</label><input id="user-password" value="${escapeAttr(user ? user.password : generatePassword())}" required /></div>
+        <div class="field"><label>Rol</label><select id="user-role">${["manager", "admin", "employee", "customer", "contador", "example"].map((role) => `<option value="${role}" ${user && user.role === role ? "selected" : ""}>${escapeHtml(roleLabel(role))}</option>`).join("")}</select></div>
+        <div class="field span-2"><label>Correo</label><input id="user-email" type="email" value="${escapeAttr(user ? user.email || "" : "")}" /></div>
+        <div class="field"><label>Telefono</label><input id="user-phone" value="${escapeAttr(user ? user.phone || "" : "")}" /></div>
+        <div class="field"><label>Valor hora</label><input id="user-hourly-rate" inputmode="decimal" value="${formatAmountInput(user ? user.hourlyRate || 0 : 0)}" /></div>
+        <div class="field"><label>Valor extra</label><input id="user-overtime-rate" inputmode="decimal" value="${formatAmountInput(user ? user.overtimeRate || 0 : 0)}" /></div>
+        <div class="field"><label>Inicio jornada</label><input type="time" id="user-shift-start" value="${escapeAttr(user ? user.shiftStart || "05:45" : "05:45")}" /></div>
+        <div class="field"><label>Fin jornada</label><input type="time" id="user-shift-end" value="${escapeAttr(user ? user.shiftEnd || "13:45" : "13:45")}" /></div>
+        <div class="field"><label>Extra desde</label><input type="time" id="user-overtime-start" value="${escapeAttr(user ? user.overtimeStart || "14:00" : "14:00")}" /></div>
+        <div class="field span-4 user-client-fields" style="${user && !isClientLikeRole(user.role) ? "display:none" : ""}">
+          <div class="form-grid">
+            <div class="field span-2"><label>Cliente principal</label><select id="user-client"><option value="">Sin cliente</option>${clientOptions}</select></div>
+            <div class="field span-2"><label>Cuentas vinculadas cliente</label><select id="user-linked-clients" multiple size="5">${activeClients().map((client) => `<option value="${client.id}" ${user && Array.isArray(user.linkedClientIds) && user.linkedClientIds.includes(client.id) ? "selected" : ""}>${escapeHtml(client.id)} - ${escapeHtml(client.name)}</option>`).join("")}</select></div>
+          </div>
+        </div>
+        <label class="field" style="display:flex;align-items:center;gap:8px;grid-template-columns:auto 1fr">
+          <input type="checkbox" id="user-active" style="width:auto;min-height:auto" ${!user || user.isActive !== false ? "checked" : ""} />
+          <span>Activo</span>
+        </label>
+      </form>
+      `,
+      () => {
+        document.getElementById("user-role").addEventListener("change", () => {
+          document.querySelector(".user-client-fields").style.display = isClientLikeRole(document.getElementById("user-role").value) ? "grid" : "none";
+        });
+        document.getElementById("modal-save").addEventListener("click", () => {
+          const username = document.getElementById("user-username").value.trim();
+          if (!document.getElementById("user-name").value.trim() || !username) return alert("Complete nombre y usuario.");
+          if (isUsernameTaken(username, user ? user.id : "")) return alert("Ese usuario ya existe.");
+          const role = document.getElementById("user-role").value;
+          const linked = Array.from(document.getElementById("user-linked-clients").selectedOptions).map((option) => option.value);
+          const clientId = document.getElementById("user-client").value;
+          const linkedClientIds = isClientLikeRole(role) ? Array.from(new Set([clientId, ...linked].filter(Boolean))) : [];
+          const email = document.getElementById("user-email").value.trim();
+          if (isEmailTaken(email, user ? user.id : "", allowsLinkedEmailDuplicate(role, linkedClientIds))) return alert("Ese correo ya esta usado por otro usuario.");
+          const payload = {
+            id: user ? user.id : nextUserId(),
+            name: document.getElementById("user-name").value.trim(),
+            username,
+            password: document.getElementById("user-password").value || generatePassword(),
+            role,
+            email,
+            phone: document.getElementById("user-phone").value.trim(),
+            hourlyRate: parseAmount(document.getElementById("user-hourly-rate").value),
+            overtimeRate: parseAmount(document.getElementById("user-overtime-rate").value),
+            shiftStart: document.getElementById("user-shift-start").value || "05:45",
+            shiftEnd: document.getElementById("user-shift-end").value || "13:45",
+            overtimeStart: document.getElementById("user-overtime-start").value || "14:00",
+            clientId: isClientLikeRole(role) ? clientId : "",
+            linkedClientIds,
+            isActive: document.getElementById("user-active").checked
+          };
+          if (user) Object.assign(user, payload);
+          else state.users.push(payload);
+          saveState();
+          closeModal();
+        });
+      }
+    );
+  }
+
+  function openBalanceHistory(clientId) {
+    const client = getClient(clientId);
+    const movements = getSaldoMovements(clientId, ui.balanceFrom, ui.balanceTo);
+    const rows = movements.map((entry) => `
+      <tr>
+        <td>${formatDate(entry.date)}</td>
+        <td>${escapeHtml(entry.type)}</td>
+        <td>${escapeHtml(entry.description)}</td>
+        <td class="num">${formatMoney(entry.amount)}</td>
+        <td class="num">${formatMoney(entry.balance)}</td>
+      </tr>
+    `).join("");
+    showModal(
+      "Movimientos - " + (client ? client.name : clientId),
+      `
+      <div class="print-controls no-print" style="margin-bottom:10px">
+        <button class="btn primary" data-print-balance-history type="button">Exportar PDF / Imprimir</button>
+        <span class="muted">Rango: ${formatDate(ui.balanceFrom)} - ${formatDate(ui.balanceTo)}</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Fecha</th><th>Tipo</th><th>Descripcion</th><th>Monto</th><th>Saldo</th></tr></thead>
+          <tbody>${rows || emptyRow(5, "Sin movimientos.")}</tbody>
+        </table>
+      </div>
+      `,
+      () => {
+        document.querySelector("[data-print-balance-history]").addEventListener("click", () => {
+          printHtmlDocument(
+            "Movimientos - " + (client ? client.name : clientId),
+            `<h1>${BUSINESS_NAME}</h1><h2>Movimientos - ${escapeHtml(client ? client.name : clientId)}</h2><p>Rango: ${formatDate(ui.balanceFrom)} - ${formatDate(ui.balanceTo)}</p><table><thead><tr><th>Fecha</th><th>Tipo</th><th>Descripcion</th><th>Monto</th><th>Saldo</th></tr></thead><tbody>${movements.map((entry) => `<tr><td>${formatDate(entry.date)}</td><td>${escapeHtml(entry.type)}</td><td>${escapeHtml(entry.description)}</td><td>${formatMoney(entry.amount)}</td><td>${formatMoney(entry.balance)}</td></tr>`).join("")}</tbody></table>`
+          );
+        });
+      }
+    );
+  }
+
+  function openItemExpenseForm(key) {
+    const [orderId, itemId] = key.split("|");
+    const order = getOrder(orderId);
+    const item = order && order.items.find((entry) => entry.id === itemId);
+    if (!order || !item) return;
+    showModal(
+      "Registrar gasto de producto",
+      `
+      <form id="item-expense-form" class="form-grid">
+        <div class="field span-2">
+          <label>Producto</label>
+          <input value="${escapeAttr(item.productName)}" disabled />
+        </div>
+        <div class="field">
+          <label>Pedido</label>
+          <input value="${escapeAttr(order.id)}" disabled />
+        </div>
+        <div class="field">
+          <label>Fecha</label>
+          <input type="date" id="item-expense-date" value="${todayISO()}" />
+        </div>
+        <div class="field">
+          <label>Cantidad</label>
+          <input id="item-expense-qty" inputmode="decimal" value="${formatAmountInput(item.quantity)}" />
+        </div>
+        <div class="field">
+          <label>Costo / monto</label>
+          <input id="item-expense-cost" inputmode="decimal" placeholder="0" />
+        </div>
+        <div class="field span-2">
+          <label>Notas</label>
+          <input id="item-expense-notes" placeholder="Flete, diferencia de mercado, bolsas, etc." />
+        </div>
+      </form>
+      `,
+      () => {
+        document.getElementById("modal-save").addEventListener("click", () => {
+          const quantity = parseAmount(document.getElementById("item-expense-qty").value);
+          const unitCost = parseAmount(document.getElementById("item-expense-cost").value);
+          if (quantity <= 0 || unitCost <= 0) return alert("Complete cantidad y monto.");
+          const purchase = {
+            id: nextDatedId("CMP", state.purchases),
+            date: document.getElementById("item-expense-date").value || todayISO(),
+            expenseType: "product_expense",
+            providerId: item.assignedProviderId || "",
+            providerName: getProvider(item.assignedProviderId) ? getProvider(item.assignedProviderId).name : "",
+            productId: item.productId,
+            productName: item.productName,
+            description: "Gasto cargado desde Dividir",
+            quantity,
+            unitCost,
+            totalCost: quantity * unitCost,
+            cashBoxId: getDefaultOutgoingCashBoxId(),
+            notes: document.getElementById("item-expense-notes").value.trim(),
+            assignedEmployeeId: currentUser.id,
+            recordedBy: currentUser.name,
+            userRole: currentUser.role,
+            orderId: order.id,
+            orderItemId: item.id
+          };
+          state.purchases.push(purchase);
+          addCajaEntry({
+            date: purchase.date,
+            type: "expense",
+            concept: buildExpenseConcept(purchase),
+            relatedEntityId: purchase.id,
+            relatedEntityType: "purchase",
+            amountIngreso: 0,
+            amountEgreso: purchase.totalCost,
+            cashBoxId: purchase.cashBoxId,
+            notes: purchase.notes
+          });
+          saveState();
+          closeModal();
+        });
+      }
+    );
+  }
+
+  function showModal(title, body, bind, options) {
+    ui.modal = { title, body, bind, ...(options || {}) };
+    render();
+  }
+
+  function closeModal() {
+    ui.modal = null;
+    render();
+  }
+
+  function renderModal() {
+    if (!ui.modal) return "";
+    afterRender.push(() => {
+      document.querySelectorAll("[data-close-modal]").forEach((button) => button.addEventListener("click", closeModal));
+      if (ui.modal && ui.modal.bind) ui.modal.bind();
+    });
+    return `
+      <div class="modal-backdrop">
+        <div class="modal ${escapeAttr(ui.modal.className || "")}">
+          <div class="modal-head">
+            <strong>${escapeHtml(ui.modal.title)}</strong>
+            <button class="btn small ghost" data-close-modal>Cerrar</button>
+          </div>
+          <div class="modal-body">${ui.modal.body}</div>
+          <div class="modal-foot">
+            <button class="btn ghost" data-close-modal>${escapeHtml(ui.modal.cancelLabel || "Cancelar")}</button>
+            ${ui.modal.hideSave ? "" : `<button class="btn primary" id="modal-save">${escapeHtml(ui.modal.saveLabel || "Guardar")}</button>`}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function bindCommon() {
+    document.querySelectorAll("[data-route]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const sidebar = document.querySelector(".sidebar");
+        const overlay = document.querySelector(".sidebar-overlay");
+        if (sidebar) sidebar.classList.remove("open");
+        if (overlay) overlay.classList.remove("open");
+        const toggle = document.querySelector("[data-mobile-menu-toggle]");
+        if (toggle) toggle.setAttribute("aria-expanded", "false");
+        navigate(button.dataset.route);
+      });
+    });
+    document.querySelectorAll("[data-back]").forEach((button) => {
+      button.addEventListener("click", () => {
+        if (history.length > 1) history.back();
+        else navigate(roleHome());
+      });
+    });
+    document.querySelectorAll("[data-logout]").forEach((button) => {
+      button.addEventListener("click", () => {
+        setCurrentUser(null);
+        render();
+      });
+    });
+    document.querySelectorAll("[data-print]").forEach((button) => button.addEventListener("click", () => window.print()));
+
+    // Mobile drawer toggle
+    document.querySelectorAll("[data-mobile-menu-toggle]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const sidebar = document.querySelector(".sidebar");
+        const overlay = document.querySelector(".sidebar-overlay");
+        const isOpen = sidebar && sidebar.classList.contains("open");
+        if (sidebar) sidebar.classList.toggle("open", !isOpen);
+        if (overlay) overlay.classList.toggle("open", !isOpen);
+        button.setAttribute("aria-expanded", String(!isOpen));
+      });
+    });
+    document.querySelectorAll(".sidebar-overlay").forEach((overlay) => {
+      overlay.addEventListener("click", () => {
+        const sidebar = document.querySelector(".sidebar");
+        if (sidebar) sidebar.classList.remove("open");
+        overlay.classList.remove("open");
+        const toggle = document.querySelector("[data-mobile-menu-toggle]");
+        if (toggle) toggle.setAttribute("aria-expanded", "false");
+      });
+    });
+
+    document.querySelectorAll("[data-perf-preset]").forEach((button) => button.addEventListener("click", () => {
+      const range = performancePresetRange(button.dataset.perfPreset);
+      if (!range) return;
+      ui.performanceFrom = range.from;
+      ui.performanceTo = range.to;
+      render();
+    }));
+    document.querySelectorAll("[data-add-provider]").forEach((button) => button.addEventListener("click", () => {
+      if (!roleFlag(currentUser.role, "editarProveedores")) return alert("Su rol no tiene permiso para agregar o editar proveedores.");
+      openProviderForm();
+    }));
+    document.querySelectorAll("[data-add-client]").forEach((button) => button.addEventListener("click", () => openClientForm()));
+    document.querySelectorAll("[data-add-product]").forEach((button) => button.addEventListener("click", () => openProductForm()));
+  }
+
+  function performancePresetRange(name) {
+    const today = todayISO();
+    const date = parseISODate(today);
+    if (name === "7-dias") return { from: addDaysISO(today, -7), to: today };
+    if (name === "30-dias") return { from: addDaysISO(today, -30), to: today };
+    if (name === "este-mes") return { from: today.slice(0, 8) + "01", to: today };
+    if (name === "mes-pasado") {
+      const first = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() - 1, 1));
+      const last = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 0));
+      return { from: dateToISO(first), to: dateToISO(last) };
+    }
+    if (name === "3-meses") {
+      const first = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() - 3, 1));
+      const last = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 0));
+      return { from: dateToISO(first), to: dateToISO(last) };
+    }
+    if (name === "semana-pasada") {
+      // lunes a sabado de la ultima semana completa
+      const weekday = date.getUTCDay(); // 0 domingo
+      const daysSinceMonday = (weekday + 6) % 7;
+      const monday = addDaysISO(today, -daysSinceMonday - 7);
+      return { from: monday, to: addDaysISO(monday, 5) };
+    }
+    return null;
+  }
+
+  function bindTabs() {
+    document.querySelectorAll("[data-tab]").forEach((button) => {
+      button.addEventListener("click", () => {
+        ui.tab = button.dataset.tab;
+        render();
+      });
+    });
+  }
+
+  function renderTabs() {
+    return `
+      <div class="tabs">
+        <button class="tab ${ui.tab === "activos" ? "active" : ""}" data-tab="activos">Activos</button>
+        <button class="tab ${ui.tab === "inactivos" ? "active" : ""}" data-tab="inactivos">Inactivos</button>
+      </div>
+    `;
+  }
+
+  function navigate(route, replace) {
+    const hash = "#/" + route.replace(/^#?\//, "");
+    if (replace) location.replace(hash);
+    else location.hash = hash;
+  }
+
+  function getRoute() {
+    const raw = (location.hash || "#/dashboard").replace(/^#\/?/, "");
+    const parts = raw.split("/");
+    if (parts[0] === "dividir" && parts[1] === "imprimir") return { base: "dividir-print", id: decodeURIComponent(parts[2] || "all") };
+    if (parts[0] === "vehiculos" && parts[1] === "imprimir") return { base: "vehiculos-print", id: parts[2] || "all" };
+    if (parts[0] === "remitos" && parts[1] === "imprimir-hoy") return { base: "remitos-today-print", id: todayISO() };
+    if (parts[0] === "remitos" && parts[1] === "imprimir") return { base: "remito-print", id: parts[2] || "" };
+    return { base: parts[0] || "dashboard", id: parts[1] || "" };
+  }
+
+  function rolePermissionFor(role) {
+    return (state.appSettings && state.appSettings.rolePermissions && state.appSettings.rolePermissions[role]) || null;
+  }
+
+  function pageVisibleForRole(item, role) {
+    if (role === "manager") return item.roles.includes("manager");
+    const perm = rolePermissionFor(role);
+    if (perm && perm.pages && Object.prototype.hasOwnProperty.call(perm.pages, item.id)) return !!perm.pages[item.id];
+    return item.roles.includes(role);
+  }
+
+  function roleFlag(role, flag) {
+    if (role === "manager" || role === "admin") return true;
+    const perm = rolePermissionFor(role);
+    if (perm && perm.flags && Object.prototype.hasOwnProperty.call(perm.flags, flag)) return !!perm.flags[flag];
+    return true;
+  }
+
+  function canAccess(route) {
+    if (route === "vehiculos-print") return ["manager", "admin", "employee"].includes(currentUser.role);
+    if (route === "dividir-print") return ["manager", "admin", "employee"].includes(currentUser.role);
+    if (route === "remito-print") return ["manager", "admin", "employee"].includes(currentUser.role);
+    if (route === "remitos-today-print") return ["manager", "admin", "employee"].includes(currentUser.role);
+    const item = menu.find((entry) => entry.id === route);
+    return item ? pageVisibleForRole(item, currentUser.role) : true;
+  }
+
+  function roleHome() {
+    if (currentUser && currentUser.role === "contador") return "saldos";
+    return "dashboard";
+  }
+
+  function roleLabel(role) {
+    return {
+      manager: "Gerente",
+      admin: "Admin",
+      employee: "Empleado",
+      customer: "Cliente",
+      contador: "Contador",
+      example: "Ejemplo"
+    }[role] || role;
+  }
+
+  function isClientLikeRole(role) {
+    return role === "customer" || role === "example";
+  }
+
+  function visibleOrders() {
+    if (isClientLikeRole(currentUser.role)) {
+      return getCustomerOrdersForIds(getCustomerVisibleClientIds());
+    }
+    if (currentUser.role === "employee") {
+      return state.orders.filter((order) => order.date === todayISO() && !["cancelado", "anulado"].includes(order.status));
+    }
+    return state.orders;
+  }
+
+  function canCustomerEditOrder(order) {
+    if (!order || !isClientLikeRole(currentUser.role)) return false;
+    if (currentUser.role === "example") return !!order.exampleOnly;
+    if (!getCustomerVisibleClientIds().includes(order.clientId)) return false;
+    const deadline = new Date(String(order.date || todayISO()) + "T05:00:00");
+    return new Date() < deadline && !["cancelado", "anulado"].includes(order.status);
+  }
+
+  function canCustomerViewOrder(order) {
+    if (!order || !isClientLikeRole(currentUser.role)) return false;
+    if (currentUser.role === "example") return !!order.exampleOnly;
+    const deliveryDate = String(order.date || todayISO());
+    if (deliveryDate > todayISO()) return false;
+    if (deliveryDate === todayISO() && currentTimeHHMM() < "08:00") return false;
+    return getCustomerVisibleClientIds().includes(order.clientId) && !["cancelado", "anulado"].includes(order.status);
+  }
+
+  function reconcileOrderSaldos(loaded) {
+    const saldos = Array.isArray(loaded.saldos) ? loaded.saldos.slice() : [];
+    const orders = Array.isArray(loaded.orders) ? loaded.orders : [];
+    const payments = Array.isArray(loaded.payments) ? loaded.payments : [];
+    saldos.forEach((entry) => {
+      if (entry.clientId) return;
+      if (entry.relatedEntityType === "order") {
+        const order = orders.find((item) => item.id === entry.relatedEntityId);
+        if (order) entry.clientId = order.clientId;
+      }
+      if (entry.relatedEntityType === "payment") {
+        const payment = payments.find((item) => item.id === entry.relatedEntityId);
+        if (payment) entry.clientId = payment.clientId;
+      }
+    });
+    orders.forEach((order) => {
+      const existing = saldos.find((entry) => entry.relatedEntityId === order.id && entry.relatedEntityType === "order" && entry.type === "pedido");
+      if (existing) {
+        existing.clientId = existing.clientId || order.clientId;
+        existing.date = existing.date || order.date || todayISO();
+        existing.amount = Number(order.totalAmount || existing.amount || 0);
+        existing.description = existing.description || "Pedido " + order.id;
+        return;
+      }
+      const previous = saldos.filter((entry) => entry.clientId === order.clientId).reduce((sum, entry) => sum + Number(entry.amount || 0), 0);
+      saldos.push({
+        id: "SAL-" + String(order.id || nextItemId()),
+        date: order.date || todayISO(),
+        clientId: order.clientId,
+        type: "pedido",
+        description: "Pedido " + order.id,
+        amount: Number(order.totalAmount || 0),
+        balance: previous + Number(order.totalAmount || 0),
+        relatedEntityId: order.id,
+        relatedEntityType: "order",
+        paymentMethod: "",
+        notes: "Deuda generada por pedido."
+      });
+    });
+    payments.forEach((payment) => {
+      const existingPayments = saldos.filter((entry) => entry.relatedEntityId === payment.id && entry.relatedEntityType === "payment" && entry.type === "pago");
+      if (existingPayments.length) {
+        existingPayments.forEach((entry) => {
+          entry.clientId = entry.clientId || payment.clientId;
+          entry.date = entry.date || payment.date || todayISO();
+          entry.amount = Number(entry.amount || 0) <= 0 ? Number(entry.amount || 0) : -Math.abs(Number(entry.amount || payment.amount || 0));
+          entry.description = entry.description || "Pago recibido";
+        });
+        return;
+      }
+      const allocations = inferPaymentAllocations(payment, orders);
+      allocations.forEach((allocation) => {
+        const previous = saldos.filter((entry) => entry.clientId === allocation.clientId).reduce((sum, entry) => sum + Number(entry.amount || 0), 0);
+        saldos.push({
+          id: "SAL-" + String(payment.id || nextItemId()) + "-" + allocation.clientId,
+          date: payment.date || todayISO(),
+          clientId: allocation.clientId,
+          type: "pago",
+          description: "Pago recibido",
+          amount: -Math.abs(Number(allocation.amount || 0)),
+          balance: previous - Math.abs(Number(allocation.amount || 0)),
+          relatedEntityId: payment.id,
+          relatedEntityType: "payment",
+          paymentMethod: payment.method || "",
+          notes: payment.notes || ""
+        });
+      });
+    });
+    Array.from(new Set(saldos.map((entry) => entry.clientId).filter(Boolean))).forEach((clientId) => {
+      let balance = 0;
+      saldos
+        .filter((entry) => entry.clientId === clientId)
+        .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.id).localeCompare(String(b.id)))
+        .forEach((entry) => {
+          balance += Number(entry.amount || 0);
+          entry.balance = balance;
+        });
+    });
+    return saldos;
+  }
+
+  function inferPaymentAllocations(payment, orders) {
+    const orderIds = Array.isArray(payment.orderIds) ? payment.orderIds : [payment.orderId].filter(Boolean);
+    const relatedOrders = orderIds.map((id) => orders.find((order) => order.id === id)).filter(Boolean);
+    const amount = Math.abs(Number(payment.amount || 0));
+    if (!relatedOrders.length) return [{ clientId: payment.clientId, amount }];
+    const allocations = [];
+    let remaining = amount;
+    relatedOrders.forEach((order) => {
+      if (remaining <= 0) return;
+      const pending = Math.max(0, Number(order.totalAmount || 0));
+      const applied = Math.min(remaining, pending || remaining);
+      allocations.push({ clientId: order.clientId, amount: applied });
+      remaining -= applied;
+    });
+    if (remaining > 0) allocations.push({ clientId: payment.clientId, amount: remaining });
+    return allocations;
+  }
+
+  function getTodaysAssignableItems() {
+    return state.orders
+      .filter((order) => order.date === todayISO() && !["cancelado", "anulado"].includes(order.status))
+      .flatMap((order) => order.items);
+  }
+
+  function getVehicleName(vehicleId) {
+    const vehicle = getVehicle(vehicleId);
+    return vehicle ? vehicle.name : vehicleId || "-";
+  }
+
+  function nextUserId() {
+    const nums = state.users.map((user) => Number(String(user.id || "").replace(/\D/g, ""))).filter((num) => Number.isFinite(num));
+    return "USR-" + String((Math.max(0, ...nums) + 1)).padStart(3, "0");
+  }
+
+  function generatePassword() {
+    return "PC" + Math.random().toString(36).slice(2, 8).toUpperCase();
+  }
+
+  function isUsernameTaken(username, exceptId) {
+    const clean = String(username || "").trim().toLowerCase();
+    return state.users.some((user) => user.id !== exceptId && String(user.username || "").toLowerCase() === clean);
+  }
+
+  function isEmailTaken(email, exceptId, allowLinkedAccountDuplicate) {
+    const clean = String(email || "").trim().toLowerCase();
+    if (!clean || allowLinkedAccountDuplicate) return false;
+    return state.users.some((user) => user.id !== exceptId && String(user.email || "").trim().toLowerCase() === clean);
+  }
+
+  function allowsLinkedEmailDuplicate(role, linkedClientIds) {
+    return isClientLikeRole(role) && Array.isArray(linkedClientIds) && linkedClientIds.filter(Boolean).length > 1;
+  }
+
+  function createCustomerUserForClient(client) {
+    const existing = state.users.find((user) => user.role === "customer" && user.clientId === client.id);
+    const password = existing ? existing.password || generatePassword() : generatePassword();
+    if (existing) {
+      existing.name = "Cliente " + client.name;
+      existing.email = client.email || existing.email || "";
+      existing.phone = client.phone || existing.phone || "";
+      existing.password = password;
+      existing.linkedClientIds = Array.from(new Set([client.id, ...(existing.linkedClientIds || [])]));
+      existing.isActive = true;
+      return password;
+    }
+    let username = "cliente" + client.id;
+    if (isUsernameTaken(username, "")) username = username + String(state.users.length + 1);
+    state.users.push({
+      id: nextUserId(),
+      name: "Cliente " + client.name,
+      username,
+      password,
+      role: "customer",
+      clientId: client.id,
+      linkedClientIds: [client.id],
+      email: client.email || "",
+      phone: client.phone || "",
+      isActive: true
+    });
+    return password;
+  }
+
+  function syncCustomerUserForClient(client) {
+    state.users
+      .filter((user) => user.role === "customer" && user.clientId === client.id)
+      .forEach((user) => {
+        user.name = "Cliente " + client.name;
+        user.email = client.email || user.email || "";
+        user.phone = client.phone || user.phone || "";
+        user.linkedClientIds = Array.from(new Set([client.id, ...(user.linkedClientIds || [])]));
+      });
+  }
+
+  function saveProductAliases(productId, generalText, clientText) {
+    state.productAliases = state.productAliases.filter((alias) => alias.productId !== productId);
+    state.clientProductAliases = state.clientProductAliases.filter((alias) => alias.productId !== productId);
+    String(generalText || "").split(",").map((alias) => alias.trim()).filter(Boolean).forEach((alias) => {
+      state.productAliases.push({ productId, alias });
+    });
+    String(clientText || "").split(",").map((entry) => entry.trim()).filter(Boolean).forEach((entry) => {
+      const index = entry.indexOf(":");
+      if (index <= 0) return;
+      const clientId = entry.slice(0, index).trim();
+      const alias = entry.slice(index + 1).trim();
+      if (clientId && alias) state.clientProductAliases.push({ clientId, productId, alias });
+    });
+  }
+
+  function upsertQuantityAlias(aliasText, quantity, clientId) {
+    const alias = String(aliasText || "").trim();
+    const amount = Number(quantity || 0);
+    if (!alias || amount <= 0) return;
+    const target = clientId ? state.clientQuantityAliases : state.quantityAliases;
+    const existing = target.find((item) => normalizeAliasKey(item.alias) === normalizeAliasKey(alias) && (!clientId || item.clientId === clientId));
+    if (existing) {
+      existing.quantity = amount;
+      if (clientId) existing.clientId = clientId;
+      return;
+    }
+    target.push(clientId ? { clientId, alias, quantity: amount } : { alias, quantity: amount });
+  }
+
+  function renderQuantityAliasList(clientId) {
+    const aliases = clientId
+      ? state.clientQuantityAliases.filter((alias) => alias.clientId === clientId)
+      : state.quantityAliases;
+    return aliases.length
+      ? aliases.map((alias) => `${alias.alias} = ${formatNumber(alias.quantity)}`).join(", ")
+      : "Sin alias de cantidades";
+  }
+
+  function renderAllAliasesSummary() {
+    const rows = [];
+    state.productAliases.forEach((alias) => {
+      const product = getProduct(alias.productId);
+      rows.push(`<div><span>${escapeHtml(alias.alias)}</span><span>${escapeHtml(product ? product.name : alias.productId)} · General</span></div>`);
+    });
+    state.clientProductAliases.forEach((alias) => {
+      const product = getProduct(alias.productId);
+      const client = getClient(alias.clientId);
+      rows.push(`<div><span>${escapeHtml(alias.alias)}</span><span>${escapeHtml(product ? product.name : alias.productId)} · ${escapeHtml(client ? client.id : alias.clientId)}</span></div>`);
+    });
+    state.quantityAliases.forEach((alias) => {
+      rows.push(`<div><span>${escapeHtml(alias.alias)}</span><span>Cantidad ${formatNumber(alias.quantity)} - General</span></div>`);
+    });
+    state.clientQuantityAliases.forEach((alias) => {
+      rows.push(`<div><span>${escapeHtml(alias.alias)}</span><span>Cantidad ${formatNumber(alias.quantity)} - ${escapeHtml(alias.clientId)}</span></div>`);
+    });
+    return rows.join("") || `<div><span>Sin alias</span><span>-</span></div>`;
+  }
+
+  function buildClientPasswordMailto(client, password) {
+    const user = state.users.find((item) => item.role === "customer" && item.clientId === client.id);
+    const username = user ? user.username : "cliente" + client.id;
+    const subject = encodeURIComponent("Acceso a " + BUSINESS_NAME);
+    const body = encodeURIComponent("Hola " + client.name + ",\n\nTu usuario para " + BUSINESS_NAME + " es " + username + " y tu contrasena inicial es " + password + ".\n\nSaludos.");
+    return "mailto:" + encodeURIComponent(client.email || "") + "?subject=" + subject + "&body=" + body;
+  }
+
+  function activeEmployees() {
+    return state.users.filter((user) => user.isActive !== false && user.role === "employee").sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  function activeCashReceivers() {
+    return state.users
+      .filter((user) => user.isActive !== false && ["manager", "admin", "employee"].includes(user.role))
+      .sort((a, b) => roleLabel(a.role).localeCompare(roleLabel(b.role)) || a.name.localeCompare(b.name));
+  }
+
+  function activeAssignees() {
+    return [
+      ...activeProviders().map((provider) => ({ type: "provider", id: provider.id, value: "provider:" + provider.id, label: "Proveedor - " + provider.name, name: provider.name })),
+      ...activeEmployees().map((employee) => ({ type: "employee", id: employee.id, value: "employee:" + employee.id, label: "Empleado - " + employee.name, name: employee.name }))
+    ];
+  }
+
+  function setProductAssignee(product, value) {
+    if (!product) return;
+    const [type, id] = String(value || "").split(":");
+    product.assignedToType = type || "";
+    product.assignedToId = id || "";
+  }
+
+  function getProductAssigneeValue(productId) {
+    const product = getProduct(productId);
+    if (!product || !product.assignedToType || !product.assignedToId) return "";
+    return product.assignedToType + ":" + product.assignedToId;
+  }
+
+  function getEffectiveItemAssigneeValue(item) {
+    return getProductAssigneeValue(item.productId) || getItemAssigneeValue(item);
+  }
+
+  function getAssigneeByValue(value) {
+    if (!value) return null;
+    const [type, id] = String(value).split(":");
+    if (type === "provider") {
+      const provider = getProvider(id);
+      return provider ? { type, id, value, name: provider.name, label: "Proveedor - " + provider.name } : null;
+    }
+    if (type === "employee") {
+      const employee = getUser(id);
+      return employee ? { type, id, value, name: employee.name, label: "Empleado - " + employee.name } : null;
+    }
+    return null;
+  }
+
+  function setItemAssignee(item, value) {
+    if (!value) {
+      item.assignedProviderId = "";
+      item.assignedToType = "";
+      item.assignedToId = "";
+      return;
+    }
+    const [type, id] = value.split(":");
+    item.assignedToType = type;
+    item.assignedToId = id;
+    item.assignedProviderId = type === "provider" ? id : "";
+  }
+
+  function getItemAssigneeValue(item) {
+    if (item.assignedToType && item.assignedToId) return item.assignedToType + ":" + item.assignedToId;
+    if (item.assignedProviderId) return "provider:" + item.assignedProviderId;
+    return "";
+  }
+
+  function getItemAssignee(item) {
+    const value = getItemAssigneeValue(item);
+    return getAssigneeByValue(value);
+  }
+
+  function getUser(id) {
+    return state.users.find((user) => user.id === id);
+  }
+
+  function getEmployeeCajaTotal(userId) {
+    return getCajaBalance(getUserCashBoxId(userId));
+  }
+
+  function getEmployeeCashTotals() {
+    return activeCashReceivers().map((employee) => {
+      const payments = state.payments.filter((payment) => payment.method === "efectivo" && (payment.receivedByUserId === employee.id || (!payment.receivedByUserId && payment.recordedBy === employee.name)));
+      return {
+        id: employee.id,
+        name: employee.name,
+        count: payments.length,
+        total: getEmployeeCajaTotal(employee.id)
+      };
+    });
+  }
+
+  function getBankCajaTotal() {
+    return getCajaBalance("cash-banco");
+  }
+
+  function getCustomerVisibleClientIds(user) {
+    const account = user || currentUser;
+    if (!account || !isClientLikeRole(account.role)) return [];
+    return Array.from(new Set([account.clientId, ...(account.linkedClientIds || [])].filter(Boolean)));
+  }
+
+  function getCustomerOrdersForIds(ids) {
+    const allowed = new Set(ids || []);
+    const source = currentUser && currentUser.role === "example" ? (state.exampleOrders || []) : state.orders;
+    return source.filter((order) => allowed.has(order.clientId) && !["cancelado", "anulado"].includes(order.status));
+  }
+
+  function getPaymentClientIds(clientId) {
+    const linkedUsers = state.users.filter((user) => user.role === "customer" && user.clientId === clientId);
+    return Array.from(new Set([clientId, ...linkedUsers.flatMap((user) => user.linkedClientIds || [])].filter(Boolean)));
+  }
+
+  function getCustomerReportOrders(clientId, from, to) {
+    const ids = clientId === "all" ? getCustomerVisibleClientIds() : [clientId];
+    const start = from || todayISO();
+    const end = to || todayISO();
+    return getCustomerOrdersForIds(ids)
+      .filter((order) => order.date >= start && order.date <= end)
+      .sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+  }
+
+  function parseWhatsappOrder(text, clientId) {
+    const items = [];
+    const unmatched = [];
+    String(text || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean).forEach((line) => {
+      const parsed = parseOrderLine(line, clientId);
+      if (!parsed) {
+        unmatched.push(line);
+        return;
+      }
+      const product = findProductForParsedLine(parsed.name, parsed.unitType, clientId);
+      if (!product) {
+        unmatched.push(line);
+        return;
+      }
+      items.push({
+        product,
+        quantity: parsed.quantity,
+        unitType: normalizeUnitForProduct(parsed.unitType, product),
+        note: ""
+      });
+    });
+    return { items, unmatched };
+  }
+
+  function parseOrderLine(line, clientId) {
+    const clean = normalizeOrderLineText(applyQuantityAliases(line, clientId));
+    const tokens = clean.split(" ").filter(Boolean);
+    for (let index = 0; index < tokens.length; index += 1) {
+      if (!isQuantityToken(tokens[index])) continue;
+      let quantity = parseLooseQuantity(tokens[index]);
+      if (quantity <= 0) continue;
+      const remove = new Set([index]);
+      // Numeros mixtos tipo "1 1/2" = 1,5
+      if (/^\d+$/.test(tokens[index]) && (/^\d+\/\d+$/.test(tokens[index + 1] || "") || /^0[.,]\d+$/.test(tokens[index + 1] || ""))) {
+        quantity += parseLooseQuantity(tokens[index + 1]);
+        remove.add(index + 1);
+        index += 1;
+      }
+      let unitType = "";
+      const nextToken = tokens[index + 1] || "";
+      const prevToken = tokens[index - 1] || "";
+      const nextUnit = normalizeParsedUnit(nextToken);
+      const prevUnit = normalizeParsedUnit(prevToken);
+      if (nextUnit) {
+        unitType = nextUnit;
+        remove.add(index + 1);
+        if (normalizeText(nextToken).startsWith("gr")) quantity = quantity / 1000;
+      } else if (prevUnit) {
+        unitType = prevUnit;
+        remove.add(index - 1);
+        if (normalizeText(prevToken).startsWith("gr")) quantity = quantity / 1000;
+      }
+      const name = tokens.filter((_, tokenIndex) => !remove.has(tokenIndex)).join(" ").trim();
+      if (!name) continue;
+      return { name, quantity, unitType };
+    }
+    return null;
+  }
+
+  function isQuantityToken(value) {
+    return /^\d+(?:[,.]\d+)?(?:\/\d+(?:[,.]\d+)?)?$/.test(String(value || "").replace(/\s/g, "")) || /^\d+\/\d+$/.test(String(value || ""));
+  }
+
+  function applyQuantityAliases(line, clientId) {
+    let text = String(line || "");
+    const aliases = [
+      ...state.quantityAliases,
+      ...state.clientQuantityAliases.filter((alias) => alias.clientId === clientId)
+    ]
+      .filter((alias) => alias.alias && Number(alias.quantity || 0) > 0)
+      .sort((a, b) => String(b.alias).length - String(a.alias).length);
+    aliases.forEach((alias) => {
+      const value = String(Number(alias.quantity || 0)).replace(".", ",");
+      const pattern = new RegExp("(^|\\s)" + regexEscape(alias.alias) + "(?=\\s|$)", "gi");
+      text = text.replace(pattern, "$1" + value);
+    });
+    return text;
+  }
+
+  function normalizeOrderLineText(value) {
+    return String(value || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9\s,./]/g, " ")
+      .replace(/(\d)([a-z])/g, "$1 $2")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function parseLooseQuantity(value) {
+    const clean = String(value || "").replace(/\s/g, "").replace(",", ".");
+    if (clean.includes("/")) {
+      const [a, b] = clean.split("/").map(Number);
+      return b ? a / b : 0;
+    }
+    return Number(clean) || 0;
+  }
+
+  function normalizeParsedUnit(value) {
+    const clean = normalizeText(value);
+    if (clean === "dc") return "docena";
+    if (clean.startsWith("doc")) return "docena";
+    if (clean === "k" || clean === "klg") return "kg";
+    if (clean.startsWith("kg")) return "kg";
+    if (clean.startsWith("kil")) return "kg";
+    if (clean.startsWith("gr")) return "kg";
+    if (clean === "j" || clean === "jl" || clean.startsWith("jaul")) return "jaula";
+    if (clean === "cj" || clean === "cjn" || clean.startsWith("caj")) return "cajon";
+    if (clean === "b" || clean === "bl" || clean.startsWith("bol")) return "bolsa";
+    if (clean === "at" || clean === "ot" || clean.startsWith("atad")) return "unidad";
+    if (clean === "pl" || clean === "plta" || clean.startsWith("plant")) return "unidad";
+    if (clean === "u" || clean.startsWith("un")) return "unidad";
+    if (clean === "mp" || clean.startsWith("mapl")) return "maple";
+    if (clean.startsWith("band")) return "bandeja";
+    if (clean.startsWith("rist")) return "ristra";
+    if (clean.startsWith("cabez")) return "cabeza";
+    return "";
+  }
+
+  function findProductForParsedLine(name, unitType, clientId) {
+    const clean = normalizeText(name);
+    const clientAlias = state.clientProductAliases.find((alias) => alias.clientId === clientId && normalizeText(alias.alias) === clean);
+    if (clientAlias) return getProduct(clientAlias.productId);
+    const generalAlias = state.productAliases.find((alias) => normalizeText(alias.alias) === clean);
+    if (generalAlias) return getProduct(generalAlias.productId);
+    const searchable = clean.replace(/\bdc\b/g, "docena").replace(/\bk\b/g, "kg").replace(/\bl\b/g, "lechuga");
+    const candidates = activeProducts().map((product) => {
+      const productText = normalizeText(product.name);
+      const words = searchable.split(" ").filter(Boolean);
+      const productWords = productText.split(" ");
+      const wordScore = words.reduce((sum, word) => {
+        if (productText.includes(word)) return sum + 2;
+        if (productWords.some((pword) => pword.startsWith(word) || word.startsWith(pword))) return sum + 1;
+        if (word.length > 3 && productWords.some((pword) => Math.abs(pword.length - word.length) <= 2 && levenshtein(pword, word) <= (word.length <= 5 ? 1 : 2))) return sum + 1.5;
+        return sum - 1;
+      }, 0);
+      const firstWordBonus = words.length && productWords.length && (productWords[0] === words[0] || productWords[0].startsWith(words[0]) || (words[0].length > 3 && levenshtein(productWords[0], words[0]) <= 1)) ? 3 : 0;
+      const unitScore = unitType && product.unitType === unitType ? 4 : unitType ? -1 : 0;
+      const exactBonus = productText.includes(searchable) ? 3 : 0;
+      return { product, score: wordScore + unitScore + exactBonus + firstWordBonus };
+    }).sort((a, b) => b.score - a.score);
+    return candidates[0] && candidates[0].score > 0 ? candidates[0].product : null;
+  }
+
+  function normalizeUnitForProduct(unitType, product) {
+    return unitType || (product ? product.unitType : "unidad");
+  }
+
+  function normalizeText(value) {
+    return String(value || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+  }
+
+  function normalizeAliasKey(value) {
+    return String(value || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim();
+  }
+
+  function regexEscape(value) {
+    return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  function cssEscape(value) {
+    if (window.CSS && typeof window.CSS.escape === "function") return window.CSS.escape(value);
+    return String(value).replace(/"/g, '\\"');
+  }
+
+  function buildCustomerProductSummary(orders) {
+    const map = {};
+    orders.forEach((order) => {
+      order.items.forEach((item) => {
+        const key = item.productId + "|" + item.unitType;
+        if (!map[key]) {
+          map[key] = { productId: item.productId, name: item.productName, unitType: item.unitType, quantity: 0, amount: 0 };
+        }
+        map[key].quantity += Number(item.quantity || 0);
+        map[key].amount += Number(item.totalWithIva || item.subtotal || 0);
+      });
+    });
+    return Object.values(map).sort((a, b) => b.amount - a.amount);
+  }
+
+  function getProductOrderDates(orders, productId, unitType) {
+    return orders.flatMap((order) => order.items
+      .filter((item) => item.productId === productId && item.unitType === unitType)
+      .map((item) => ({
+        date: order.date,
+        orderId: order.id,
+        quantity: item.quantity,
+        unitType: item.unitType,
+        amount: item.totalWithIva || item.subtotal
+      })));
+  }
+
+  function renderPieChart(summary) {
+    const total = summary.reduce((sum, item) => sum + item.amount, 0);
+    if (!summary.length || total <= 0) {
+      return `<h2 class="page-title" style="font-size:18px">Distribucion por precio</h2><div class="empty">Sin datos para graficar.</div>`;
+    }
+    let cursor = 0;
+    const stops = summary.slice(0, 8).map((item, index) => {
+      const start = cursor;
+      cursor += (item.amount / total) * 360;
+      return `${chartColor(index)} ${start}deg ${cursor}deg`;
+    }).join(", ");
+    return `
+      <h2 class="page-title" style="font-size:18px">Distribucion por precio</h2>
+      <div class="chart-layout">
+        <div class="pie-chart" style="background:conic-gradient(${stops})"></div>
+        <div class="chart-legend">
+          ${summary.slice(0, 8).map((item, index) => `<div><span style="background:${chartColor(index)}"></span>${escapeHtml(item.name)} ${formatMoney(item.amount)}</div>`).join("")}
+        </div>
+      </div>
+    `;
+  }
+
+  function renderBarChart(summary) {
+    const max = Math.max(0, ...summary.map((item) => item.quantity));
+    return `
+      <h2 class="page-title" style="font-size:18px">Cantidades totales</h2>
+      <div class="bar-chart">
+        ${summary.slice(0, 10).map((item, index) => `<div class="bar-row"><span>${escapeHtml(item.name)}</span><div><i style="width:${max ? (item.quantity / max) * 100 : 0}%;background:${chartColor(index)}"></i></div><strong>${formatNumber(item.quantity)} ${escapeHtml(item.unitType)}</strong></div>`).join("") || `<div class="empty">Sin datos para graficar.</div>`}
+      </div>
+    `;
+  }
+
+  function chartColor(index) {
+    return ["#0f7a5d", "#2457a6", "#a36300", "#087a83", "#b42318", "#475569", "#7c3aed", "#be123c", "#0e7490", "#15803d"][index % 10];
+  }
+
+  function getWeekBounds(value) {
+    const date = parseISODate(value || todayISO());
+    const day = date.getDay();
+    const diff = day === 0 ? -6 : 1 - day;
+    const startDate = new Date(date);
+    startDate.setDate(date.getDate() + diff);
+    const endDate = new Date(startDate);
+    endDate.setDate(startDate.getDate() + 5);
+    return { start: dateToISO(startDate), end: dateToISO(endDate) };
+  }
+
+  function getMonthBounds(value) {
+    const date = parseISODate(value || todayISO());
+    const startDate = new Date(date.getFullYear(), date.getMonth(), 1);
+    const endDate = new Date(date.getFullYear(), date.getMonth() + 1, 0);
+    return { start: dateToISO(startDate), end: dateToISO(endDate) };
+  }
+
+  function isDateInRange(value, start, end) {
+    const date = String(value || "").slice(0, 10);
+    return date && date >= start && date <= end;
+  }
+
+  function buildDateRange(from, to) {
+    const start = parseISODate(from || todayISO());
+    const end = parseISODate(to || from || todayISO());
+    const finalDate = end < start ? start : end;
+    const dates = [];
+    const cursor = new Date(start);
+    while (cursor <= finalDate) {
+      dates.push(dateToISO(cursor));
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    return dates;
+  }
+
+  function parseISODate(value) {
+    const [year, month, day] = String(value || todayISO()).slice(0, 10).split("-").map(Number);
+    return new Date(year, (month || 1) - 1, day || 1);
+  }
+
+  function dateToISO(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  function currentTimeHHMM() {
+    const now = new Date();
+    return String(now.getHours()).padStart(2, "0") + ":" + String(now.getMinutes()).padStart(2, "0");
+  }
+
+  function getCustomerMinOrderDate() {
+    return currentTimeHHMM() >= "05:30" ? addDaysISO(todayISO(), 1) : todayISO();
+  }
+
+  function addDaysISO(value, days) {
+    const date = parseISODate(value || todayISO());
+    date.setDate(date.getDate() + Number(days || 0));
+    return dateToISO(date);
+  }
+
+  function isTimeBetween(start, end) {
+    const now = currentTimeHHMM();
+    return now >= start && now < end;
+  }
+
+  function getAttendanceEntry(userId, date) {
+    return state.attendance.find((entry) => entry.userId === userId && entry.date === date);
+  }
+
+  function upsertAttendance(payload) {
+    let entry = getAttendanceEntry(payload.userId, payload.date);
+    if (!entry) {
+      entry = {
+        id: nextDatedId("ATT", state.attendance),
+        userId: payload.userId,
+        date: payload.date,
+        createdAt: new Date().toISOString()
+      };
+      state.attendance.push(entry);
+    }
+    Object.assign(entry, payload, {
+      updatedAt: new Date().toISOString(),
+      recordedBy: currentUser ? currentUser.name : "Sistema"
+    });
+    return entry;
+  }
+
+  function getAttendanceHours(entry) {
+    if (!entry || !entry.present || !entry.startTime || !entry.endTime) return 0;
+    const start = timeToMinutes(entry.startTime);
+    const end = timeToMinutes(entry.endTime);
+    return Math.max(0, (end - start) / 60);
+  }
+
+  function getAttendancePay(entry, user) {
+    if (!entry || !entry.present) return { normalHours: 0, overtimeHours: 0, amount: 0 };
+    const employee = user || getUser(entry.userId) || {};
+    const shiftStart = timeToMinutes(employee.shiftStart || "05:45");
+    const shiftEnd = timeToMinutes(employee.shiftEnd || "13:45");
+    const overtimeStart = timeToMinutes(employee.overtimeStart || "14:00");
+    const start = entry.startTime ? timeToMinutes(entry.startTime) : shiftStart;
+    let end = entry.endTime ? timeToMinutes(entry.endTime) : shiftEnd;
+    if (end < shiftEnd) end = shiftEnd;
+    const normalEnd = Math.min(end, overtimeStart);
+    const normalStart = Math.min(start, shiftStart);
+    const normalHours = Math.max(0, (normalEnd - normalStart) / 60);
+    const overtimeHours = Math.max(0, (end - Math.max(overtimeStart, start)) / 60);
+    return {
+      normalHours,
+      overtimeHours,
+      amount: normalHours * Number(employee.hourlyRate || 0) + overtimeHours * Number(employee.overtimeRate || employee.hourlyRate || 0)
+    };
+  }
+
+  function timeToMinutes(value) {
+    const [hours, minutes] = String(value || "00:00").split(":").map(Number);
+    return (hours || 0) * 60 + (minutes || 0);
+  }
+
+  function getWeeklyAttendanceSummary(userId, refDate) {
+    const week = getWeekBounds(refDate || todayISO());
+    const user = getUser(userId);
+    const entries = state.attendance.filter((entry) => entry.userId === userId && entry.date >= week.start && entry.date <= week.end);
+    const hours = entries.reduce((sum, entry) => sum + getAttendanceHours(entry), 0);
+    const paidHours = entries.reduce((sum, entry) => sum + getAttendancePay(entry, user).normalHours + getAttendancePay(entry, user).overtimeHours, 0);
+    const gross = entries.reduce((sum, entry) => sum + getAttendancePay(entry, user).amount, 0);
+    const reimbursements = (state.employeeReimbursements || [])
+      .filter((item) => item.userId === userId && item.weekStart === week.start)
+      .reduce((sum, item) => sum + Number(item.amount || 0), 0);
+    const paid = state.employeePayments
+      .filter((payment) => payment.userId === userId && payment.weekStart === week.start)
+      .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+    return {
+      weekStart: week.start,
+      weekEnd: week.end,
+      hours,
+      hoursText: formatNumber(paidHours || hours) + " hs",
+      gross,
+      reimbursements,
+      paid,
+      due: Math.max(0, gross + reimbursements - paid)
+    };
+  }
+
+  function getWeeklyPayDue(userId, refDate) {
+    return getWeeklyAttendanceSummary(userId, refDate).due;
+  }
+
+  function registerEmployeeReimbursement(data) {
+    const user = getUser(data.userId);
+    const amount = Number(data.amount || 0);
+    if (!user) return alert("Seleccione un empleado.");
+    if (amount <= 0) return alert("Ingrese un monto mayor a cero.");
+    const week = getWeekBounds(data.date || todayISO());
+    const entry = {
+      id: nextDatedId("REIN", state.employeeReimbursements || []),
+      userId: user.id,
+      weekStart: week.start,
+      weekEnd: week.end,
+      date: data.date || todayISO(),
+      amount,
+      description: data.description || "Gasto para reintegro",
+      recordedBy: currentUser.name
+    };
+    state.employeeReimbursements = state.employeeReimbursements || [];
+    state.employeeReimbursements.push(entry);
+    addCajaEntry({
+      date: entry.date,
+      type: "employee_reimbursement",
+      concept: "Gasto para reintegro - " + user.name,
+      relatedEntityId: entry.id,
+      relatedEntityType: "employee_reimbursement",
+      amountIngreso: 0,
+      amountEgreso: amount,
+      cashBoxId: getUserCashBoxId(user.id),
+      notes: entry.description
+    });
+    return entry;
+  }
+
+  function registerEmployeeSalaryPayment(data) {
+    const user = getUser(data.userId);
+    const amount = Number(data.amount || 0);
+    if (!user) return alert("Seleccione un empleado.");
+    if (amount <= 0) return alert("Ingrese un monto mayor a cero.");
+    const week = getWeekBounds(data.date || todayISO());
+    const payment = {
+      id: nextDatedId("EPAY", state.employeePayments),
+      userId: user.id,
+      weekStart: week.start,
+      weekEnd: week.end,
+      date: data.date || todayISO(),
+      amount,
+      method: data.method || "efectivo",
+      cashBoxId: data.cashBoxId || "cash-general",
+      notes: data.notes || "",
+      recordedBy: currentUser.name
+    };
+    state.employeePayments.push(payment);
+    addCajaEntry({
+      date: payment.date,
+      type: "employee_payment",
+      concept: "Pago empleado - " + user.name,
+      relatedEntityId: payment.id,
+      relatedEntityType: "employee_payment",
+      amountIngreso: 0,
+      amountEgreso: amount,
+      paymentMethod: payment.method,
+      cashBoxId: payment.cashBoxId,
+      notes: payment.notes
+    });
+    return payment;
+  }
+
+  function getIvaRate(value) {
+    const item = IVA_OPTIONS.find((option) => option.value === String(value || "10.5"));
+    return item ? item.rate : 10.5;
+  }
+
+  function ivaLabel(value) {
+    const item = IVA_OPTIONS.find((option) => option.value === String(value || "10.5"));
+    return item ? item.label : "10,5%";
+  }
+
+  function shouldApplyInvoiceVat(client) {
+    return !!client && (client.priceTier === "con_factura" || client.needsInvoice);
+  }
+
+  function getAdjustedProductPrice(product, client) {
+    const listPrice = getProductPrice(product.id);
+    const adjustment = client ? Number(client.priceAdjustmentPct || 0) : 0;
+    return Math.max(0, listPrice * (1 + adjustment / 100));
+  }
+
+  function priceTierLabel(value) {
+    return {
+      general: "General",
+      preferencial: "Preferencial",
+      con_factura: "Con Factura"
+    }[value] || value || "General";
+  }
+
+  function paymentTypeLabel(value) {
+    return {
+      contado: "Contado",
+      cuenta_corriente: "Cuenta corriente",
+      semanal: "Semanal",
+      contra_factura: "Contra Factura"
+    }[value] || value || "Cuenta corriente";
+  }
+
+  function productThumb(product) {
+    if (product && product.imageData) return product.imageData;
+    if (product && product.imageUrl) return product.imageUrl;
+    const colors = {
+      FRUTAS: ["#ffefd2", "#ba5c00"],
+      VERDURAS: ["#e6f4ef", "#0f7a5d"],
+      HUEVOS: ["#fff2d8", "#a36300"],
+      OTROS: ["#e9f0fb", "#2457a6"]
+    }[product.category] || ["#edf0f4", "#475569"];
+    const label = String(product.name || "?").slice(0, 2).toUpperCase();
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 44 44"><rect width="44" height="44" rx="8" fill="${colors[0]}"/><text x="22" y="27" text-anchor="middle" font-family="Arial" font-size="13" font-weight="700" fill="${colors[1]}">${escapeHtml(label)}</text></svg>`;
+    return "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg);
+  }
+
+  function expenseTypeLabel(type) {
+    return {
+      purchase: "Compra",
+      product_expense: "Gasto producto",
+      other_expense: "Otro gasto",
+      provider_payment: "Pago a proveedor",
+      prepared: "Preparado",
+      market_price: "Actualizar precio mercado",
+      cash_movement: "Movimiento de Caja"
+    }[type] || type;
+  }
+
+  function purchaseStatusLabel(status) {
+    return {
+      paid: "Pagado",
+      account_current: "Cuenta Corriente"
+    }[status] || status;
+  }
+
+  function buildExpenseConcept(purchase) {
+    if (purchase.expenseType === "cash_movement") {
+      return "Movimiento de caja - " + (purchase.targetUserName || purchase.description || purchase.id);
+    }
+    if (purchase.expenseType === "other_expense") {
+      return "Gasto - " + (purchase.description || purchase.notes || purchase.id);
+    }
+    if (purchase.expenseType === "product_expense") {
+      return "Gasto producto - " + (purchase.productName || purchase.productId);
+    }
+    if (purchase.expenseType === "provider_payment") {
+      return "Pago proveedor - " + (purchase.providerName || "Proveedor");
+    }
+    if (purchase.expenseType === "market_price") {
+      return "Precio mercado actualizado";
+    }
+    return "Compra - " + (purchase.providerName || "Proveedor") + " - " + (purchase.productName || "Producto");
+  }
+
+  function getPurchaseCashBoxId(purchase) {
+    if (purchase.cashBoxId && !isDeprecatedCashBox({ id: purchase.cashBoxId })) return purchase.cashBoxId;
+    if (purchase.assignedEmployeeId) return getUserCashBoxId(purchase.assignedEmployeeId);
+    const recorder = state.users.find((user) => user.name === purchase.recordedBy);
+    if (recorder) return getUserCashBoxId(recorder.id);
+    const inferred = inferCashBoxId(purchase);
+    return isDeprecatedCashBox({ id: inferred }) ? "cash-general" : inferred;
+  }
+
+  function purchaseItemsSummary(purchase) {
+    if (Array.isArray(purchase.items) && purchase.items.length) {
+      return purchase.items.map((item) => `${escapeHtml(item.productName)}: ${formatNumber(item.quantity)} x ${formatMoney(item.unitCost)} = ${formatMoney(item.totalCost)}`).join("<br>");
+    }
+    if (purchase.expenseType === "cash_movement") return escapeHtml(purchase.description || "Movimiento de caja");
+    if (purchase.expenseType === "provider_payment") return escapeHtml(purchase.description || "Pago a proveedor");
+    if (purchase.expenseType === "market_price") return escapeHtml((purchase.items || []).map((item) => item.productName + ": mercado " + formatMoney(item.marketPrice)).join(", "));
+    if (purchase.expenseType === "other_expense") return escapeHtml(purchase.description || "Otro gasto");
+    return escapeHtml(purchase.productName || purchase.category || "");
+  }
+
+  function isProductPurchaseExpense(purchase) {
+    return ["purchase", "product_expense"].includes(purchase.expenseType || "purchase");
+  }
+
+  function isPerformanceExpense(purchase) {
+    return !["market_price", "prepared", "cash_movement"].includes(purchase.expenseType || "purchase");
+  }
+
+  function flattenPurchaseItems(purchase) {
+    if (Array.isArray(purchase.items) && purchase.items.length) {
+      return purchase.items.map((item) => {
+        const quantity = Number(item.quantity || 0);
+        const unitCost = Number(item.unitCost || 0);
+        return {
+          productId: item.productId || purchase.productId || "",
+          productName: item.productName || purchase.productName || "",
+          unitType: item.unitType || "",
+          quantity,
+          unitCost,
+          totalCost: Number(item.totalCost || quantity * unitCost)
+        };
+      }).filter((item) => item.productName || item.productId);
+    }
+    if (!purchase.productId && !purchase.productName) return [];
+    const quantity = Number(purchase.quantity || 0);
+    const unitCost = Number(purchase.unitCost || 0);
+    return [{
+      productId: purchase.productId || "",
+      productName: purchase.productName || purchase.productId || "",
+      unitType: getProduct(purchase.productId) ? getProduct(purchase.productId).unitType : "",
+      quantity,
+      unitCost,
+      totalCost: Number(purchase.totalCost || quantity * unitCost)
+    }];
+  }
+
+  function getPerformanceSummary(start, end) {
+    const purchaseExpenses = state.purchases.filter((purchase) => isPerformanceExpense(purchase) && isDateInRange(purchase.date, start, end));
+    const adjustments = state.performanceAdjustments.filter((entry) => isDateInRange(entry.date, start, end));
+    const paidPurchases = purchaseExpenses
+      .filter((purchase) => (purchase.paymentStatus || "paid") !== "account_current")
+      .reduce((sum, purchase) => sum + Number(purchase.totalCost || 0), 0);
+    const accountExpenses = purchaseExpenses
+      .filter((purchase) => (purchase.paymentStatus || "paid") === "account_current")
+      .reduce((sum, purchase) => sum + Number(purchase.totalCost || 0), 0);
+    const adjustmentTotal = adjustments.reduce((sum, entry) => sum + Number(entry.amount || 0), 0);
+    const paidExpenses = paidPurchases + adjustmentTotal;
+    const collectedSales = state.payments
+      .filter((payment) => isDateInRange(payment.date, start, end))
+      .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+    const orders = state.orders.filter((order) => !["cancelado", "anulado"].includes(order.status) && isDateInRange(order.date, start, end));
+    const totalSales = orders.reduce((sum, order) => sum + getOrderTotal(order), 0);
+    const receivableSales = orders.reduce((sum, order) => sum + Math.max(0, getOrderTotal(order) - Number(order.paymentReceived || 0)), 0);
+    return {
+      paidExpenses,
+      accountExpenses,
+      collectedSales,
+      receivableSales,
+      totalSales,
+      cashProfit: collectedSales - paidExpenses,
+      companyProfit: totalSales - paidExpenses - accountExpenses
+    };
+  }
+
+  function getPerformanceExpenseRows(start, end) {
+    const purchaseRows = state.purchases
+      .filter((purchase) => isPerformanceExpense(purchase) && isDateInRange(purchase.date, start, end))
+      .map((purchase) => ({
+        date: purchase.date,
+        type: expenseTypeLabel(purchase.expenseType || "purchase"),
+        description: buildExpenseConcept(purchase),
+        status: purchaseStatusLabel(purchase.paymentStatus || "paid"),
+        amount: Number(purchase.totalCost || 0)
+      }));
+    const adjustmentRows = state.performanceAdjustments
+      .filter((entry) => isDateInRange(entry.date, start, end))
+      .map((entry) => ({
+        date: entry.date,
+        type: performanceAdjustmentTypeLabel(entry.type),
+        description: entry.description || "",
+        status: "Pagado",
+        amount: Number(entry.amount || 0)
+      }));
+    return [...purchaseRows, ...adjustmentRows].sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(a.type).localeCompare(String(b.type)));
+  }
+
+  function performanceAdjustmentTypeLabel(type) {
+    return type === "tax" ? "Impuesto" : "Otro gasto";
+  }
+
+  function getOrderItemSubtotal(item) {
+    const quantity = Number(item.quantity || 0);
+    const unitPrice = Number(item.unitPrice || 0);
+    return Number(item.subtotal || quantity * unitPrice);
+  }
+
+  function getOrderItemIva(item, order) {
+    if (Number.isFinite(Number(item.ivaAmount)) && Number(item.ivaAmount) > 0) return Number(item.ivaAmount);
+    const subtotal = getOrderItemSubtotal(item);
+    if (Number(item.ivaRate || 0) > 0) return subtotal * (Number(item.ivaRate || 0) / 100);
+    if (order && shouldApplyInvoiceVat(getClient(order.clientId))) {
+      const product = getProduct(item.productId);
+      return subtotal * (getIvaRate(product && product.ivaType) / 100);
+    }
+    return 0;
+  }
+
+  function getOrderSubtotal(order) {
+    return (order.items || []).reduce((sum, item) => sum + getOrderItemSubtotal(item), 0);
+  }
+
+  function getOrderIva(order) {
+    return (order.items || []).reduce((sum, item) => sum + getOrderItemIva(item, order), 0);
+  }
+
+  function getOrderTotal(order) {
+    return getOrderSubtotal(order) + getOrderIva(order);
+  }
+
+  function findProviderByInput(value) {
+    const clean = String(value || "").trim().toLowerCase();
+    if (!clean) return null;
+    return state.providers.find((provider) => provider.id.toLowerCase() === clean || provider.name.toLowerCase() === clean) || null;
+  }
+
+  function findClientByInput(value) {
+    const clean = String(value || "").trim().toLowerCase();
+    if (!clean) return null;
+    return activeClients().find((client) => {
+      const id = String(client.id || "").toLowerCase();
+      const name = String(client.name || "").toLowerCase();
+      const label = `${id} - ${name}`;
+      return id === clean || name === clean || label === clean || clean.startsWith(id + " - ") || name.includes(clean);
+    }) || null;
+  }
+
+  function findProductByInput(value) {
+    const clean = String(value || "").trim().toLowerCase();
+    if (!clean) return null;
+    return state.products.find((product) => product.id.toLowerCase() === clean || product.name.toLowerCase() === clean) || null;
+  }
+
+  function getProviderFavoriteProducts(providerId) {
+    const provider = getProvider(providerId);
+    const ids = new Set(provider && Array.isArray(provider.productsSupplied) ? provider.productsSupplied : []);
+    state.purchases.forEach((purchase) => {
+      if (purchase.providerId !== providerId) return;
+      if (Array.isArray(purchase.items)) {
+        purchase.items.forEach((item) => ids.add(item.productId));
+      } else if (purchase.productId) {
+        ids.add(purchase.productId);
+      }
+    });
+    return Array.from(ids)
+      .map((id) => getProduct(id))
+      .filter((product) => product && product.isActive)
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .slice(0, 18);
+  }
+
+  function getVendorFavoriteProducts(vendorName) {
+    const clean = String(vendorName || "").trim().toLowerCase();
+    if (!clean) return [];
+    const ids = new Set();
+    state.vendorLedger.forEach((entry) => {
+      if (String(entry.vendorName || "").trim().toLowerCase() === clean && entry.productId) ids.add(entry.productId);
+    });
+    state.purchases.forEach((purchase) => {
+      if (String(purchase.vendorName || "").trim().toLowerCase() !== clean) return;
+      (purchase.items || []).forEach((item) => ids.add(item.productId));
+    });
+    return Array.from(ids).map((id) => getProduct(id)).filter((product) => product && product.isActive).sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  function rememberProviderProducts(providerId, items) {
+    const provider = getProvider(providerId);
+    if (!provider) return;
+    const ids = new Set(Array.isArray(provider.productsSupplied) ? provider.productsSupplied : []);
+    items.forEach((item) => ids.add(item.productId));
+    provider.productsSupplied = Array.from(ids);
+  }
+
+  function getProviderBalance(providerId) {
+    if (providerId === "all") {
+      return activeProviders().reduce((sum, provider) => sum + Math.max(0, getProviderBalance(provider.id)), 0);
+    }
+    return state.providerLedger
+      .filter((entry) => entry.providerId === providerId)
+      .reduce((sum, entry) => sum + Number(entry.amount || 0), 0);
+  }
+
+  function getProviderBalances() {
+    return activeProviders().map((provider) => {
+      const movements = state.providerLedger.filter((entry) => entry.providerId === provider.id);
+      const last = movements.slice().sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
+      return {
+        providerId: provider.id,
+        providerName: provider.name,
+        balance: getProviderBalance(provider.id),
+        lastDate: last ? last.date : ""
+      };
+    }).sort((a, b) => b.balance - a.balance);
+  }
+
+  function getProviderMovements(providerId, from, to) {
+    const start = from || "0000-01-01";
+    const end = to || "9999-12-31";
+    const ids = Array.isArray(providerId) ? providerId : providerId === "all" ? activeProviders().map((provider) => provider.id) : [providerId];
+    return state.providerLedger
+      .filter((entry) => ids.includes(entry.providerId) && entry.date >= start && entry.date <= end)
+      .map((entry) => ({ ...entry, providerName: getProvider(entry.providerId) ? getProvider(entry.providerId).name : entry.providerId }))
+      .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.id).localeCompare(String(b.id)));
+  }
+
+  function addProviderLedgerEntry(entry) {
+    const balance = getProviderBalance(entry.providerId) + Number(entry.amount || 0);
+    state.providerLedger.push({
+      id: nextDatedId("PLED", state.providerLedger),
+      date: entry.date || todayISO(),
+      timestamp: new Date().toISOString(),
+      providerId: entry.providerId,
+      type: entry.type,
+      description: entry.description,
+      amount: Number(entry.amount || 0),
+      balance,
+      relatedEntityId: entry.relatedEntityId || "",
+      relatedEntityType: entry.relatedEntityType || "",
+      paymentMethod: entry.paymentMethod || "",
+      notes: entry.notes || "",
+      recordedBy: currentUser ? currentUser.name : "Sistema",
+      userRole: currentUser ? currentUser.role : "admin"
+    });
+  }
+
+  function processProviderPayment(options) {
+    const provider = options.provider;
+    const balance = getProviderBalance(provider.id);
+    const fullPayment = options.mode === "full";
+    const amount = fullPayment ? balance : Number(options.amount || 0);
+    if (balance <= 0) return alert("Este proveedor no tiene saldo pendiente.");
+    if (amount <= 0) return alert("Ingrese un monto mayor a cero.");
+    if (amount > balance) return alert("El pago no puede superar el saldo del proveedor.");
+    const payment = {
+      id: nextDatedId("PPAY", state.providerPayments),
+      date: options.date || todayISO(),
+      timestamp: new Date().toISOString(),
+      providerId: provider.id,
+      amount,
+      fullPayment,
+      method: options.method || "efectivo",
+      cashBoxId: options.cashBoxId || getDefaultOutgoingCashBoxId(),
+      notes: options.notes || "",
+      recordedBy: currentUser.name,
+      userRole: currentUser.role
+    };
+    state.providerPayments.push(payment);
+    state.purchases.push({
+      id: nextDatedId("CMP", state.purchases),
+      date: payment.date,
+      expenseType: "provider_payment",
+      providerId: provider.id,
+      providerName: provider.name,
+      productId: "",
+      productName: "",
+      description: "Pago proveedor - " + provider.name,
+      quantity: 1,
+      unitCost: amount,
+      items: [],
+      paymentStatus: "paid",
+      totalCost: amount,
+      notes: payment.notes,
+      assignedEmployeeId: options.assignedEmployeeId || "",
+      cashBoxId: payment.cashBoxId,
+      vendorName: "",
+      recordedBy: currentUser.name,
+      userRole: currentUser.role,
+      providerPaymentId: payment.id
+    });
+    addProviderLedgerEntry({
+      providerId: provider.id,
+      date: payment.date,
+      type: "pago",
+      description: (fullPayment ? "Pago completo" : "Pago parcial") + " - " + provider.name,
+      amount: -amount,
+      relatedEntityId: payment.id,
+      relatedEntityType: "provider_payment",
+      paymentMethod: payment.method,
+      notes: payment.notes
+    });
+    addCajaEntry({
+      date: payment.date,
+      type: "provider_payment",
+      concept: "Pago proveedor - " + provider.name,
+      relatedEntityId: payment.id,
+      relatedEntityType: "provider_payment",
+      amountIngreso: 0,
+      amountEgreso: amount,
+      paymentMethod: payment.method,
+      cashBoxId: payment.cashBoxId,
+      notes: payment.notes
+    });
+    return payment;
+  }
+
+  function openProviderQuickPayment(providerId) {
+    let provider = providerId ? getProvider(providerId) : null;
+    if (!provider) provider = activeProviders()[0];
+    if (!provider) return alert("No hay proveedores activos.");
+    const balance = Math.max(0, getProviderBalance(provider.id));
+    const employeeMode = currentUser.role === "employee";
+    showModal(
+      "Pagar proveedor",
+      `
+      <form id="provider-quick-payment-form" class="form-grid">
+        <div class="field span-2"><label>Proveedor</label><select id="quick-provider-payment-provider">${activeProviders().map((item) => `<option value="${item.id}" ${item.id === provider.id ? "selected" : ""}>${escapeHtml(item.name)}</option>`).join("")}</select></div>
+        <div class="field"><label>Saldo</label><input id="quick-provider-payment-balance" value="${formatMoney(balance)}" disabled /></div>
+        <div class="field"><label>Pago</label><select id="quick-provider-payment-mode"><option value="full">Pago total</option><option value="partial">Pago parcial</option></select></div>
+        <div class="field"><label>Monto</label><input id="quick-provider-payment-amount" inputmode="decimal" value="${formatAmountInput(balance)}" /></div>
+        <div class="field"><label>Metodo</label><select id="quick-provider-payment-method">${(employeeMode ? ["efectivo"] : Object.keys(PAYMENT_METHODS)).map((method) => `<option value="${method}">${escapeHtml(PAYMENT_METHODS[method])}</option>`).join("")}</select></div>
+        <div class="field"><label>Caja</label>${employeeMode ? `<input value="${escapeAttr(getCashBoxName(getDefaultOutgoingCashBoxId()))}" disabled /><input type="hidden" id="quick-provider-payment-cash-box" value="${escapeAttr(getDefaultOutgoingCashBoxId())}" />` : `<select id="quick-provider-payment-cash-box">${renderCashBoxOptions(getDefaultOutgoingCashBoxId())}</select>`}</div>
+        <div class="field span-4"><label>Notas</label><input id="quick-provider-payment-notes" placeholder="Pago a proveedor" /></div>
+      </form>
+      `,
+      () => {
+        const mode = document.getElementById("quick-provider-payment-mode");
+        const amountInput = document.getElementById("quick-provider-payment-amount");
+        const providerSelect = document.getElementById("quick-provider-payment-provider");
+        const balanceInput = document.getElementById("quick-provider-payment-balance");
+        const currentBalance = () => {
+          const selected = providerSelect ? getProvider(providerSelect.value) : provider;
+          return Math.max(0, selected ? getProviderBalance(selected.id) : 0);
+        };
+        const refreshBalance = () => {
+          if (balanceInput) balanceInput.value = formatMoney(currentBalance());
+          if (mode.value === "full") amountInput.value = formatAmountInput(currentBalance());
+        };
+        if (providerSelect) providerSelect.addEventListener("change", refreshBalance);
+        mode.addEventListener("change", refreshBalance);
+        const methodSelect = document.getElementById("quick-provider-payment-method");
+        const cashBoxSelect = document.getElementById("quick-provider-payment-cash-box");
+        if (methodSelect && cashBoxSelect && cashBoxSelect.tagName === "SELECT") {
+          methodSelect.addEventListener("change", () => {
+            if (["transferencia", "cheque"].includes(methodSelect.value)) {
+              const hasBank = Array.from(cashBoxSelect.options).some((option) => option.value === "cash-banco");
+              if (hasBank) cashBoxSelect.value = "cash-banco";
+            }
+          });
+        }
+        document.getElementById("modal-save").addEventListener("click", () => {
+          const selectedProvider = providerSelect ? getProvider(providerSelect.value) : provider;
+          if (!selectedProvider) return alert("Seleccione un proveedor.");
+          const payment = processProviderPayment({
+            provider: selectedProvider,
+            mode: mode.value,
+            amount: parseAmount(amountInput.value),
+            method: document.getElementById("quick-provider-payment-method").value,
+            cashBoxId: document.getElementById("quick-provider-payment-cash-box").value,
+            assignedEmployeeId: employeeMode ? currentUser.id : "",
+            notes: document.getElementById("quick-provider-payment-notes").value.trim()
+          });
+          if (!payment) return;
+          saveState();
+          closeModal();
+          render();
+        });
+      }
+    );
+  }
+
+  function getProviderProductHistory(productId) {
+    const latest = new Map();
+    state.purchases.forEach((purchase) => {
+      if (!purchase.providerId || purchase.expenseType !== "purchase") return;
+      (purchase.items || []).forEach((item) => {
+        if (item.productId !== productId) return;
+        const previous = latest.get(purchase.providerId);
+        const stamp = String(purchase.date || "") + String(purchase.id || "");
+        const previousStamp = previous ? String(previous.date || "") + String(previous.purchaseId || "") : "";
+        if (!previous || stamp >= previousStamp) {
+          const provider = getProvider(purchase.providerId);
+          latest.set(purchase.providerId, {
+            providerId: purchase.providerId,
+            providerName: provider ? provider.name : purchase.providerName || purchase.providerId,
+            date: purchase.date,
+            purchaseId: purchase.id,
+            unitCost: Number(item.unitCost || 0),
+            quantity: Number(item.quantity || 0),
+            unitType: item.unitType || (getProduct(productId) ? getProduct(productId).unitType : "")
+          });
+        }
+      });
+    });
+    activeProviders().forEach((provider) => {
+      if (latest.has(provider.id)) return;
+      if (!(Array.isArray(provider.productsSupplied) && provider.productsSupplied.includes(productId))) return;
+      latest.set(provider.id, {
+        providerId: provider.id,
+        providerName: provider.name,
+        date: "",
+        purchaseId: "",
+        unitCost: null,
+        quantity: null,
+        unitType: "",
+        linkedOnly: true
+      });
+    });
+    return Array.from(latest.values()).sort((a, b) => a.providerName.localeCompare(b.providerName));
+  }
+
+  function getKnownVendors() {
+    return Array.from(new Set(state.vendorLedger.map((entry) => entry.vendorName).concat(state.purchases.map((purchase) => purchase.vendorName)).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+  }
+
+  function rememberVendorProducts(vendorName, items, date) {
+    items.forEach((item) => {
+      state.vendorLedger.push({
+        id: nextDatedId("VEND", state.vendorLedger),
+        date: date || todayISO(),
+        vendorName,
+        productId: item.productId,
+        productName: item.productName,
+        quantity: item.quantity,
+        unitCost: item.unitCost,
+        totalCost: item.totalCost,
+        recordedBy: currentUser.name
+      });
+    });
+  }
+
+  function updateProductCostsFromPurchase(items, provider) {
+    items.forEach((item) => {
+      const product = getProduct(item.productId);
+      if (!product || item.unitCost <= 0) return;
+      updateRelationDivisorFromItem(item);
+      const rec = state.prices[item.productId] || { productId: item.productId, cost: product.baseCost || 0, price: product.salePrice || 0, marginPct: provider ? provider.defaultMargin : 25 };
+      const margin = Number.isFinite(Number(rec.marginPct)) ? Number(rec.marginPct) : (provider ? Number(provider.defaultMargin || 25) : calcMargin(rec.cost, rec.price));
+      rec.cost = item.unitCost;
+      rec.marketPrice = item.marketPrice || rec.marketPrice || 0;
+      rec.marginPct = margin;
+      rec.marginPct = roundOne(rec.marginPct);
+      rec.price = Math.ceil(item.unitCost * (1 + margin / 100));
+      rec.date = todayISO();
+      state.prices[item.productId] = rec;
+      product.baseCost = rec.cost;
+      product.salePrice = rec.price;
+      applyCostRelations(item, margin);
+    });
+  }
+
+  function updateMarketPrices(items) {
+    items.forEach((item) => {
+      const product = getProduct(item.productId);
+      if (!product || item.marketPrice <= 0) return;
+      const rec = state.prices[item.productId] || { productId: item.productId, cost: product.baseCost || 0, price: product.salePrice || 0, marginPct: calcMargin(product.baseCost, product.salePrice) };
+      rec.marketPrice = item.marketPrice;
+      rec.date = todayISO();
+      state.prices[item.productId] = rec;
+    });
+  }
+
+  function updateRelationDivisorFromItem(item) {
+    if (!item || Number(item.relationUnits || 0) <= 0) return;
+    state.costRelations
+      .filter((relation) => relation.sourceProductId === item.productId)
+      .forEach((relation) => {
+        relation.divisor = Number(item.relationUnits || relation.divisor || 1);
+      });
+  }
+
+  function applyCostRelations(sourceItem, fallbackMargin) {
+    state.costRelations
+      .filter((relation) => relation.sourceProductId === sourceItem.productId)
+      .forEach((relation) => {
+        const target = getProduct(relation.targetProductId);
+        if (!target) return;
+        const divisor = Number(sourceItem.relationUnits || relation.divisor || 1) || 1;
+        const multiplier = Number(relation.multiplier || 1) || 1;
+        const cost = (Number(sourceItem.unitCost || 0) / divisor) * multiplier;
+        const rec = state.prices[target.id] || { productId: target.id, cost: target.baseCost || 0, price: target.salePrice || 0 };
+        const margin = relation.marginPct === null || relation.marginPct === "" || relation.marginPct === undefined
+          ? (Number.isFinite(Number(rec.marginPct)) ? Number(rec.marginPct) : fallbackMargin)
+          : Number(relation.marginPct);
+        rec.cost = cost;
+        rec.marginPct = margin;
+        rec.marginPct = roundOne(margin);
+        rec.price = Math.ceil(cost * (1 + margin / 100));
+        rec.date = todayISO();
+        state.prices[target.id] = rec;
+        target.baseCost = cost;
+        target.salePrice = rec.price;
+      });
+  }
+
+  function activeClients() {
+    return state.clients.filter((client) => client.isActive).sort(compareClientIds);
+  }
+
+  function compareClientIds(a, b) {
+    const an = Number(a.id);
+    const bn = Number(b.id);
+    if (Number.isFinite(an) && Number.isFinite(bn) && an !== bn) return an - bn;
+    return String(a.id).localeCompare(String(b.id));
+  }
+
+  function activeProducts() {
+    return state.products.filter((product) => product.isActive);
+  }
+
+  function activeVehicles() {
+    return state.vehicles.filter((vehicle) => vehicle.isActive);
+  }
+
+  function activeProviders() {
+    return state.providers.filter((provider) => provider.isActive).sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  function normalizeProductCategories(categories) {
+    const seen = new Set();
+    return (Array.isArray(categories) ? categories : [])
+      .map((category) => String(category || "").trim())
+      .filter(Boolean)
+      .map((category) => category.toUpperCase())
+      .filter((category) => {
+        if (seen.has(category)) return false;
+        seen.add(category);
+        return true;
+      });
+  }
+
+  function getProductCategories() {
+    const configured = state.appSettings && Array.isArray(state.appSettings.productCategories) ? state.appSettings.productCategories : [];
+    const base = configured.length ? configured : CATEGORIES;
+    return normalizeProductCategories([...base, ...state.products.map((product) => product.category || "OTROS")]);
+  }
+
+  function activeCashBoxesForRole(role) {
+    const baseBoxes = (state.cashBoxes || defaultCashBoxes())
+      .filter((box) => !isDeprecatedCashBox(box))
+      .filter((box) => box.isActive !== false)
+      .filter((box) => role === "manager" ? true : box.visibleToAdmin !== false);
+    const userBoxes = activeCashReceivers()
+      .filter((user) => role === "employee" ? currentUser && user.id === currentUser.id : true)
+      .map((user) => getUserCashBox(user));
+    return uniqueCashBoxes([...baseBoxes, ...userBoxes]).sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  function renderCashBoxOptions(selectedId) {
+    const boxes = activeCashBoxesForRole(currentUser ? currentUser.role : "admin");
+    return boxes.map((box) => `<option value="${box.id}" ${selectedId === box.id ? "selected" : ""}>${escapeHtml(box.name)}</option>`).join("");
+  }
+
+  function renderPurchaseCashBoxOptions(selectedId) {
+    if (currentUser && currentUser.role === "employee") {
+      const ownBox = getUserCashBox(currentUser);
+      return `<option value="${ownBox.id}" selected>${escapeHtml(ownBox.name)}</option>`;
+    }
+    return renderCashBoxOptions(selectedId);
+  }
+
+  function renderCashMovementTargetOptions() {
+    return activeCashReceivers()
+      .filter((user) => !currentUser || user.id !== currentUser.id)
+      .map((user) => `<option value="${user.id}">${escapeHtml(user.name)} - ${escapeHtml(roleLabel(user.role))}</option>`)
+      .join("");
+  }
+
+  function uniqueCashBoxes(boxes) {
+    const seen = new Set();
+    return boxes.filter((box) => {
+      if (!box || seen.has(box.id)) return false;
+      seen.add(box.id);
+      return true;
+    });
+  }
+
+  function getUserCashBoxId(userId) {
+    return "cash-user-" + String(userId || "").replace(/[^a-zA-Z0-9_-]/g, "");
+  }
+
+  function isUserCashBoxId(id) {
+    return String(id || "").startsWith("cash-user-");
+  }
+
+  function getUserCashBox(user) {
+    const account = user || currentUser || {};
+    return {
+      id: getUserCashBoxId(account.id || ""),
+      name: "Efectivo - " + (account.name || "Usuario"),
+      isActive: account.isActive !== false,
+      visibleToAdmin: true,
+      userId: account.id || "",
+      notes: "Caja efectivo del usuario"
+    };
+  }
+
+  function getDefaultOutgoingCashBoxId() {
+    return currentUser ? getUserCashBoxId(currentUser.id) : "cash-general";
+  }
+
+  function getPaymentCashBoxId(payment, receiver) {
+    const method = String(payment && payment.method || "");
+    if (method === "transferencia" || method === "cheque") return "cash-banco";
+    const userId = receiver && receiver.id ? receiver.id : payment && payment.receivedByUserId ? payment.receivedByUserId : currentUser ? currentUser.id : "";
+    return userId ? getUserCashBoxId(userId) : "cash-general";
+  }
+
+  function getCashBox(id) {
+    if (isUserCashBoxId(id)) {
+      const userId = String(id).replace("cash-user-", "");
+      const user = getUser(userId);
+      return user ? getUserCashBox(user) : { id, name: "Efectivo - Usuario", isActive: true, visibleToAdmin: true, notes: "" };
+    }
+    return (state.cashBoxes || []).filter((box) => !isDeprecatedCashBox(box)).find((box) => box.id === id);
+  }
+
+  function getCashBoxName(id) {
+    const box = getCashBox(id);
+    return box ? box.name : id || "General";
+  }
+
+  function resolveCajaEntryCashBoxId(entry) {
+    if (!entry) return "cash-general";
+    const payment = entry.relatedEntityType === "payment" ? state.payments.find((item) => item.id === entry.relatedEntityId) : null;
+    if (payment) return getPaymentCashBoxId(payment, getUser(payment.receivedByUserId));
+    let cashBoxId = entry.cashBoxId || inferCashBoxId(entry);
+    if (isDeprecatedCashBox({ id: cashBoxId })) {
+      if (entry.relatedEntityType === "purchase") {
+        const purchase = state.purchases.find((item) => item.id === entry.relatedEntityId);
+        if (purchase && purchase.assignedEmployeeId) return getUserCashBoxId(purchase.assignedEmployeeId);
+        const recorder = purchase ? state.users.find((user) => user.name === purchase.recordedBy) : null;
+        if (recorder) return getUserCashBoxId(recorder.id);
+      }
+      const recorder = state.users.find((user) => user.name === entry.recordedBy);
+      if (recorder) return getUserCashBoxId(recorder.id);
+      return "cash-general";
+    }
+    return cashBoxId;
+  }
+
+  function inferCashBoxId(entry) {
+    const type = String(entry && entry.type || "");
+    const paymentMethod = String(entry && (entry.paymentMethod || entry.method) || "");
+    if (paymentMethod === "transferencia" || paymentMethod === "cheque" || type.includes("transferencia") || type.includes("cheque")) return "cash-banco";
+    if (type.includes("efectivo") || paymentMethod === "efectivo") return "cash-efectivo";
+    if (type.includes("provider") || type.includes("purchase")) return "cash-general";
+    if (type.includes("employee")) return "cash-empleados";
+    return "cash-general";
+  }
+
+  function getCajaEntriesForSelection(cashBoxId) {
+    const allowed = new Set(activeCashBoxesForRole(currentUser ? currentUser.role : "admin").map((box) => box.id));
+    return state.caja
+      .map((entry) => ({ ...entry, cashBoxId: resolveCajaEntryCashBoxId(entry) }))
+      .filter((entry) => cashBoxId && cashBoxId !== "all" ? entry.cashBoxId === cashBoxId : allowed.has(entry.cashBoxId));
+  }
+
+  function getClient(id) {
+    if (id === "DEMO") return demoClient();
+    return state.clients.find((client) => client.id === id);
+  }
+
+  function getProduct(id) {
+    return state.products.find((product) => product.id === id);
+  }
+
+  function getVehicle(id) {
+    return state.vehicles.find((vehicle) => vehicle.id === id);
+  }
+
+  function getProvider(id) {
+    return state.providers.find((provider) => provider.id === id);
+  }
+
+  function getOrder(id) {
+    return state.orders.find((order) => order.id === id) || (state.exampleOrders || []).find((order) => order.id === id);
+  }
+
+  function ordersByDate(date) {
+    return state.orders.filter((order) => order.date === date && !["cancelado", "anulado"].includes(order.status));
+  }
+
+  function getProductPrice(productId) {
+    const product = getProduct(productId);
+    const record = state.prices[productId];
+    return record ? Number(record.price || 0) : product ? Number(product.salePrice || 0) : 0;
+  }
+
+  function sortProductsForClient(clientId) {
+    const prefs = new Map(state.preferences.filter((pref) => pref.clientId === clientId).map((pref) => [pref.productId, pref]));
+    return activeProducts().slice().sort((a, b) => {
+      const pa = prefs.get(a.id);
+      const pb = prefs.get(b.id);
+      if (pa && !pb) return -1;
+      if (!pa && pb) return 1;
+      if (pa && pb) return new Date(pb.lastOrderedAt) - new Date(pa.lastOrderedAt);
+      if (a.category !== b.category) return getProductCategories().indexOf(a.category) - getProductCategories().indexOf(b.category);
+      return a.sortOrder - b.sortOrder;
+    });
+  }
+
+  function getPreference(clientId, productId) {
+    return state.preferences.find((pref) => pref.clientId === clientId && pref.productId === productId);
+  }
+
+  function upsertPreference(clientId, productId, preferredUnitType, lastQuantity) {
+    let pref = getPreference(clientId, productId);
+    if (!pref) {
+      pref = { clientId, productId, preferredUnitType, lastQuantity: 0, lastOrderedAt: new Date().toISOString() };
+      state.preferences.push(pref);
+    }
+    pref.preferredUnitType = preferredUnitType;
+    pref.lastQuantity = lastQuantity;
+    pref.lastOrderedAt = new Date().toISOString();
+  }
+
+  function getVehicleTotals(vehicleId, date) {
+    const orders = ordersByDate(date).filter((order) => order.deliveryVehicleId === vehicleId);
+    const products = {};
+    let itemCount = 0;
+    let totalValue = 0;
+    orders.forEach((order) => {
+      totalValue += order.totalAmount || 0;
+      order.items.forEach((item) => {
+        itemCount += 1;
+        const product = getProduct(item.productId);
+        if (product && product.showInVehicleTotals === false) return;
+        const key = item.productId + "|" + item.unitType;
+        if (!products[key]) {
+          products[key] = {
+            productId: item.productId,
+            productName: item.productName,
+            unitType: item.unitType,
+            quantity: 0
+          };
+        }
+        products[key].quantity += Number(item.quantity || 0);
+      });
+    });
+    return { orders, products, itemCount, totalValue };
+  }
+
+  function getClientBalance(clientId) {
+    if (clientId === "DEMO") return (state.exampleOrders || []).reduce((sum, order) => sum + Number(order.totalAmount || getOrderTotal(order) || 0), 0);
+    return state.saldos.filter((entry) => entry.clientId === clientId).reduce((sum, entry) => sum + Number(entry.amount || 0), 0);
+  }
+
+  function recalcOrderTotals(order) {
+    order.subtotalAmount = order.items.reduce((sum, item) => sum + Number(item.subtotal || 0), 0);
+    order.ivaAmount = order.items.reduce((sum, item) => sum + Number(item.ivaAmount || 0), 0);
+    order.totalAmount = order.subtotalAmount + order.ivaAmount;
+  }
+
+  function updateOrderAccounting(order) {
+    let entry = state.saldos.find((item) => item.relatedEntityId === order.id && item.relatedEntityType === "order" && item.type === "pedido");
+    if (!entry) {
+      addSaldoEntry({
+        clientId: order.clientId,
+        date: order.date,
+        type: "pedido",
+        description: "Pedido " + order.id,
+        amount: order.totalAmount,
+        relatedEntityId: order.id,
+        relatedEntityType: "order",
+        notes: "Deuda generada por pedido."
+      });
+    } else {
+      entry.date = order.date;
+      entry.amount = Number(order.totalAmount || 0);
+      entry.description = "Pedido " + order.id;
+    }
+    const cajaEntry = state.caja.find((item) => item.relatedEntityId === order.id && item.relatedEntityType === "order");
+    if (cajaEntry) cajaEntry.expectedAmount = Number(order.totalAmount || 0);
+    recomputeClientSaldoBalances(order.clientId);
+  }
+
+  function annulOrder(order) {
+    order.status = "anulado";
+    order.annulledAt = new Date().toISOString();
+    order.annulledBy = currentUser ? currentUser.name : "";
+    addSaldoEntry({
+      clientId: order.clientId,
+      type: "anulacion",
+      description: "Anulacion pedido " + order.id,
+      amount: -Number(order.totalAmount || 0),
+      relatedEntityId: order.id,
+      relatedEntityType: "order_annul",
+      notes: "Pedido anulado: se descuenta del saldo."
+    });
+    recomputeClientSaldoBalances(order.clientId);
+  }
+
+  function restoreOrder(order) {
+    order.status = "pendiente";
+    delete order.annulledAt;
+    delete order.annulledBy;
+    state.saldos = state.saldos.filter((entry) => !(entry.relatedEntityType === "order_annul" && entry.relatedEntityId === order.id));
+    recomputeClientSaldoBalances(order.clientId);
+  }
+
+  function deleteOrder(orderId) {
+    const order = getOrder(orderId);
+    if (!order || order.exampleOnly) return;
+    const relatedPaymentIds = state.payments
+      .filter((payment) => payment.orderId === orderId || (Array.isArray(payment.orderIds) && payment.orderIds.includes(orderId)))
+      .map((payment) => payment.id);
+    state.orders = state.orders.filter((item) => item.id !== orderId);
+    state.remitos = state.remitos.filter((item) => item.orderId !== orderId);
+    state.payments = state.payments.filter((payment) => !relatedPaymentIds.includes(payment.id));
+    state.saldos = state.saldos.filter((entry) => {
+      if (entry.relatedEntityType === "order" && entry.relatedEntityId === orderId) return false;
+      if (entry.relatedEntityType === "payment" && relatedPaymentIds.includes(entry.relatedEntityId)) return false;
+      return true;
+    });
+    state.caja = state.caja.filter((entry) => {
+      if (entry.relatedEntityType === "order" && entry.relatedEntityId === orderId) return false;
+      if (entry.relatedEntityType === "payment" && relatedPaymentIds.includes(entry.relatedEntityId)) return false;
+      return true;
+    });
+    recomputeClientSaldoBalances(order.clientId);
+  }
+
+  function recomputeClientSaldoBalances(clientId) {
+    let balance = 0;
+    state.saldos
+      .filter((entry) => entry.clientId === clientId)
+      .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.id).localeCompare(String(b.id)))
+      .forEach((entry) => {
+        balance += Number(entry.amount || 0);
+        entry.balance = balance;
+      });
+  }
+
+  function getSaldoMovements(clientId, from, to) {
+    const start = from || "0000-01-01";
+    const end = to || "9999-12-31";
+    if (clientId === "DEMO") {
+      let balance = 0;
+      return (state.exampleOrders || [])
+        .filter((order) => order.date >= start && order.date <= end && !["cancelado", "anulado"].includes(order.status))
+        .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.id).localeCompare(String(b.id)))
+        .map((order) => {
+          balance += Number(order.totalAmount || getOrderTotal(order) || 0);
+          return {
+            id: "SAL-" + order.id,
+            date: order.date,
+            clientId: "DEMO",
+            type: "pedido",
+            description: "Pedido ejemplo " + order.id,
+            amount: Number(order.totalAmount || getOrderTotal(order) || 0),
+            balance,
+            notes: "Movimiento ficticio"
+          };
+        });
+    }
+    return state.saldos
+      .filter((entry) => entry.clientId === clientId && entry.date >= start && entry.date <= end)
+      .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.id).localeCompare(String(b.id)));
+  }
+
+  function getClientAccumulatedIva(clientId) {
+    return state.orders
+      .filter((order) => order.clientId === clientId && !["cancelado", "anulado"].includes(order.status))
+      .reduce((sum, order) => sum + Number(order.ivaAmount || 0), 0);
+  }
+
+  function getClientBalances() {
+    const rows = state.clients.map((client) => ({
+      clientId: client.id,
+      balance: getClientBalance(client.id)
+    }));
+    if (currentUser && currentUser.role === "example") rows.push({ clientId: "DEMO", balance: getClientBalance("DEMO") });
+    return rows.sort((a, b) => b.balance - a.balance);
+  }
+
+  function getCajaBalance(cashBoxId) {
+    const entries = cashBoxId && cashBoxId !== "all"
+      ? state.caja.filter((entry) => resolveCajaEntryCashBoxId(entry) === cashBoxId)
+      : state.caja;
+    return entries.reduce((sum, entry) => sum + Number(entry.amountIngreso || 0) - Number(entry.amountEgreso || 0), 0);
+  }
+
+  function addSaldoEntry(entry) {
+    const balance = getClientBalance(entry.clientId) + Number(entry.amount || 0);
+    state.saldos.push({
+      id: nextDatedId("SAL", state.saldos),
+      date: entry.date || todayISO(),
+      clientId: entry.clientId,
+      type: entry.type,
+      description: entry.description,
+      amount: Number(entry.amount || 0),
+      balance,
+      relatedEntityId: entry.relatedEntityId || "",
+      relatedEntityType: entry.relatedEntityType || "",
+      paymentMethod: entry.paymentMethod || "",
+      notes: entry.notes || ""
+    });
+  }
+
+  function addCajaEntry(entry) {
+    const cashBoxId = entry.cashBoxId && !isDeprecatedCashBox({ id: entry.cashBoxId }) ? entry.cashBoxId : inferCashBoxId(entry);
+    const balance = getCajaBalance(cashBoxId) + Number(entry.amountIngreso || 0) - Number(entry.amountEgreso || 0);
+    state.caja.push({
+      id: nextDatedId("TRX", state.caja),
+      date: entry.date || todayISO(),
+      timestamp: new Date().toISOString(),
+      type: entry.type,
+      concept: entry.concept,
+      relatedEntityId: entry.relatedEntityId || "",
+      relatedEntityType: entry.relatedEntityType || "",
+      expectedAmount: Number(entry.expectedAmount || 0),
+      amountIngreso: Number(entry.amountIngreso || 0),
+      amountEgreso: Number(entry.amountEgreso || 0),
+      balance,
+      cashBoxId,
+      cashBoxName: getCashBoxName(cashBoxId),
+      paymentMethod: entry.paymentMethod || "",
+      paymentStatus: entry.paymentStatus || "",
+      recordedBy: currentUser ? currentUser.name : "Sistema",
+      userRole: currentUser ? currentUser.role : "admin",
+      transferProofFile: entry.transferProofFile || "",
+      notes: entry.notes || ""
+    });
+  }
+
+  function recordPayment(payment) {
+    const client = getClient(payment.clientId);
+    const orderIds = Array.isArray(payment.orderIds) ? payment.orderIds : [payment.orderId].filter(Boolean);
+    const orders = orderIds.map((id) => getOrder(id)).filter(Boolean);
+    const amount = Number(payment.amount || 0);
+    const receiver = getUser(payment.receivedByUserId) || (currentUser && ["manager", "admin", "employee"].includes(currentUser.role) ? currentUser : activeEmployees()[0]);
+    const cashBoxId = getPaymentCashBoxId(payment, receiver);
+    const selectedPendingTotal = orders.reduce((sum, order) => sum + Math.max(0, Number(order.totalAmount || 0) - Number(order.paymentReceived || 0)), 0);
+    const paymentRecord = {
+      id: nextDatedId("PAY", state.payments),
+      date: todayISO(),
+      timestamp: new Date().toISOString(),
+      clientId: payment.clientId,
+      orderId: orderIds[0] || "",
+      orderIds,
+      amount,
+      pendingDifference: Math.max(0, selectedPendingTotal - amount),
+      method: payment.method,
+      notes: payment.notes || "",
+      transferProofFile: payment.transferProofFile || "",
+      cashBoxId,
+      receivedByUserId: receiver ? receiver.id : "",
+      receivedByName: receiver ? receiver.name : "",
+      recordedBy: currentUser ? currentUser.name : "Sistema",
+      userRole: currentUser ? currentUser.role : "admin"
+    };
+    state.payments.push(paymentRecord);
+    const allocations = [];
+    let remaining = amount;
+    orders.forEach((order) => {
+      if (remaining <= 0) return;
+      const pending = Math.max(0, Number(order.totalAmount || 0) - Number(order.paymentReceived || 0));
+      const applied = Math.min(remaining, pending || remaining);
+      allocations.push({ clientId: order.clientId, order, amount: applied });
+      remaining -= applied;
+    });
+    if (!allocations.length) allocations.push({ clientId: payment.clientId, order: null, amount });
+    const byClient = {};
+    allocations.forEach((allocation) => {
+      byClient[allocation.clientId] = (byClient[allocation.clientId] || 0) + allocation.amount;
+    });
+    Object.keys(byClient).forEach((clientId) => {
+      const allocationClient = getClient(clientId);
+      addSaldoEntry({
+        clientId,
+        type: "pago",
+        description: "Pago recibido - " + (allocationClient ? allocationClient.name : clientId) + " - " + (PAYMENT_METHODS[payment.method] || payment.method),
+        amount: -byClient[clientId],
+        relatedEntityId: paymentRecord.id,
+        relatedEntityType: "payment",
+        paymentMethod: payment.method,
+        notes: payment.notes || ""
+      });
+    });
+    addCajaEntry({
+      type: "payment_" + payment.method,
+      concept: "Pago recibido - " + (client ? client.name : payment.clientId) + " - " + (PAYMENT_METHODS[payment.method] || payment.method),
+      relatedEntityId: paymentRecord.id,
+      relatedEntityType: "payment",
+      amountIngreso: amount,
+      amountEgreso: 0,
+      paymentMethod: payment.method,
+      cashBoxId,
+      transferProofFile: payment.transferProofFile || "",
+      notes: payment.notes || ""
+    });
+    allocations.forEach((allocation) => {
+      const order = allocation.order;
+      if (!order) return;
+      const applied = allocation.amount;
+      order.paymentReceived = Number(order.paymentReceived || 0) + applied;
+      order.paymentStatus = order.paymentReceived >= order.totalAmount ? "paid" : "partial";
+    });
+    return paymentRecord;
+  }
+
+  function generateRemito(orderId) {
+    let existing = state.remitos.find((remito) => remito.orderId === orderId);
+    if (existing) return existing;
+    const order = getOrder(orderId);
+    if (!order) throw new Error("Pedido no encontrado");
+    const client = getClient(order.clientId);
+    state.appSettings.remitoCounter = Number(state.appSettings.remitoCounter || 0) + 1;
+    const remito = {
+      id: nextDatedId("REM", state.remitos),
+      number: "R-0001-" + String(state.appSettings.remitoCounter).padStart(8, "0"),
+      orderId: order.id,
+      date: order.date,
+      clientId: order.clientId,
+      clientName: client ? client.name : order.clientId,
+      clientAddress: client ? client.address : "",
+      vehicleId: order.deliveryVehicleId,
+      size: getRemitoSize(order.items.length),
+      printed: false,
+      printCount: 0,
+      createdAt: new Date().toISOString()
+    };
+    state.remitos.push(remito);
+    order.remitoPrinted = true;
+    return remito;
+  }
+
+  function getRemitoSize(itemCount) {
+    if (itemCount <= 5) return "chico";
+    if (itemCount <= 15) return "mediano";
+    return "largo";
+  }
+
+  function nextDatedId(prefix, collection) {
+    const date = todayISO().replaceAll("-", "");
+    const samePrefix = collection.filter((item) => String(item.id || "").startsWith(prefix + "-" + date)).length + 1;
+    return prefix + "-" + date + "-" + String(samePrefix).padStart(3, "0");
+  }
+
+  function nextProviderId() {
+    let index = state.providers.length + 1;
+    let id = "PROV-" + String(index).padStart(3, "0");
+    while (state.providers.some((provider) => provider.id === id)) {
+      index += 1;
+      id = "PROV-" + String(index).padStart(3, "0");
+    }
+    return id;
+  }
+
+  function nextProductId() {
+    let index = state.products.length + 1;
+    let id = "PROD-" + String(index).padStart(3, "0");
+    while (state.products.some((product) => product.id === id)) {
+      index += 1;
+      id = "PROD-" + String(index).padStart(3, "0");
+    }
+    return id;
+  }
+
+  function nextItemId() {
+    return "ITEM-" + Math.random().toString(36).slice(2, 9).toUpperCase();
+  }
+
+  function suggestClientId() {
+    const nums = state.clients.map((client) => Number(client.id)).filter((num) => Number.isFinite(num));
+    return String((Math.max(0, ...nums) + 1)).padStart(3, "0");
+  }
+
+  function unitOptions(selected) {
+    return UNIT_TYPES.map((unit) => `<option value="${unit}" ${unit === selected ? "selected" : ""}>${unit}</option>`).join("");
+  }
+
+  function statusLabel(status) {
+    return {
+      pendiente: "Pendiente",
+      preparando: "Preparando",
+      listo: "Listo",
+      entregado: "Entregado",
+      cancelado: "Cancelado",
+      anulado: "Anulado"
+    }[status] || status;
+  }
+
+  function statusClass(status) {
+    if (status === "listo") return "ready";
+    if (status === "entregado") return "delivered";
+    if (status === "cancelado" || status === "anulado") return "cancelled";
+    return "pending";
+  }
+
+  function calcMargin(cost, price) {
+    cost = Number(cost || 0);
+    price = Number(price || 0);
+    if (!cost) return 0;
+    return ((price - cost) / cost) * 100;
+  }
+
+  function roundOne(value) {
+    return Math.round(Number(value || 0) * 10) / 10;
+  }
+
+  function todayISO() {
+    const date = new Date();
+    const offset = date.getTimezoneOffset();
+    const local = new Date(date.getTime() - offset * 60000);
+    return local.toISOString().slice(0, 10);
+  }
+
+  function formatDate(value) {
+    if (!value) return "";
+    const [year, month, day] = String(value).slice(0, 10).split("-");
+    return `${day}/${month}/${year}`;
+  }
+
+  function fileDate(value) {
+    const [year, month, day] = String(value || todayISO()).slice(0, 10).split("-");
+    return `${day}-${month}-${year}`;
+  }
+
+  function formatTimestampShort(value) {
+    if (!value) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    const pad = (num) => String(num).padStart(2, "0");
+    return pad(date.getDate()) + "/" + pad(date.getMonth() + 1) + " " + pad(date.getHours()) + ":" + pad(date.getMinutes());
+  }
+
+  function formatDateShort(value) {
+    if (!value) return "";
+    const [, month, day] = String(value).slice(0, 10).split("-");
+    return `${day}/${month}`;
+  }
+
+  function formatMoney(value) {
+    return new Intl.NumberFormat("es-AR", {
+      style: "currency",
+      currency: "ARS",
+      minimumFractionDigits: 1,
+      maximumFractionDigits: 1
+    }).format(Number(value || 0));
+  }
+
+  function formatNumber(value) {
+    return new Intl.NumberFormat("es-AR", {
+      minimumFractionDigits: 1,
+      maximumFractionDigits: 1
+    }).format(Number(value || 0));
+  }
+
+  function formatAmountInput(value) {
+    const num = Number(value || 0);
+    if (!num) return "";
+    return new Intl.NumberFormat("es-AR", {
+      minimumFractionDigits: 1,
+      maximumFractionDigits: 1
+    }).format(roundOne(num));
+  }
+
+  function parseAmount(value) {
+    if (typeof value === "number") return value;
+    const normalized = String(value || "")
+      .replace(/\$/g, "")
+      .replace(/%/g, "")
+      .replace(/\s/g, "")
+      .replace(/\./g, "")
+      .replace(",", ".");
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  function emptyRow(colspan, message) {
+    return `<tr><td colspan="${colspan}" class="empty">${escapeHtml(message)}</td></tr>`;
+  }
+
+  function escapeHtml(value) {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
+  function escapeAttr(value) {
+    return escapeHtml(value).replace(/`/g, "&#096;");
+  }
+
+  function compressImageFile(file, maxDim = 900, quality = 0.72) {
+    return new Promise((resolve, reject) => {
+      if (!/^image\//.test(String(file.type || ""))) {
+        fileToDataUrl(file).then(resolve, reject);
+        return;
+      }
+      const reader = new FileReader();
+      reader.onerror = () => reject(reader.error);
+      reader.onload = () => {
+        const image = new Image();
+        image.onerror = () => reject(new Error("No se pudo leer la imagen."));
+        image.onload = () => {
+          const scale = Math.min(1, maxDim / Math.max(image.width, image.height));
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.max(1, Math.round(image.width * scale));
+          canvas.height = Math.max(1, Math.round(image.height * scale));
+          const ctx = canvas.getContext("2d");
+          ctx.fillStyle = "#fff";
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+          resolve(canvas.toDataURL("image/jpeg", quality));
+        };
+        image.src = String(reader.result || "");
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function fileToDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function recognizeOrderImage(file, statusNode) {
+    await loadTesseract();
+    if (!window.Tesseract) throw new Error("OCR no disponible.");
+    const variants = await prepareOcrImageVariants(file);
+    const scriptConfigs = [
+      {
+        workerPath: "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js",
+        corePath: "https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core.wasm.js"
+      },
+      {
+        workerPath: "https://unpkg.com/tesseract.js@5.1.1/dist/worker.min.js",
+        corePath: "https://unpkg.com/tesseract.js-core@5.1.1/tesseract-core.wasm.js"
+      }
+    ];
+    const languages = ["spa"];
+    const ocrParameters = {
+      tessedit_pageseg_mode: "6",
+      preserve_interword_spaces: "1",
+      tessedit_char_whitelist: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ./,()-"
+    };
+    const makeLogger = (label) => (message) => {
+      if (!statusNode || !message) return;
+      if (message.status === "loading language traineddata") statusNode.textContent = "Cargando idioma " + label + "...";
+      if (message.status === "recognizing text") {
+        const pct = Math.round((message.progress || 0) * 100);
+        statusNode.textContent = "Reconociendo texto (" + label + ") " + pct + "%";
+      }
+    };
+    let best = { text: "", confidence: -1 };
+    let lastError = null;
+    for (const config of scriptConfigs) {
+      for (const language of languages) {
+        try {
+          if (typeof window.Tesseract.createWorker === "function") {
+            const worker = await window.Tesseract.createWorker(language, 1, {
+              ...config,
+              langPath: "https://tessdata.projectnaptha.com/4.0.0",
+              logger: makeLogger(language)
+            });
+            try {
+              await worker.setParameters(ocrParameters);
+              for (const image of variants) {
+                const result = await worker.recognize(image);
+                const data = result && result.data ? result.data : {};
+                const confidence = Number(data.confidence || 0);
+                if (String(data.text || "").trim() && confidence > best.confidence) {
+                  best = { text: String(data.text || ""), confidence };
+                }
+                if (best.confidence >= 75) break;
+              }
+            } finally {
+              await worker.terminate();
+            }
+          } else if (typeof window.Tesseract.recognize === "function") {
+            const result = await window.Tesseract.recognize(variants[0], language, {
+              ...config,
+              langPath: "https://tessdata.projectnaptha.com/4.0.0",
+              logger: makeLogger(language)
+            });
+            const data = result && result.data ? result.data : {};
+            const confidence = Number(data.confidence || 0);
+            if (String(data.text || "").trim() && confidence > best.confidence) {
+              best = { text: String(data.text || ""), confidence };
+            }
+          }
+        } catch (error) {
+          lastError = error;
+        }
+        if (best.confidence >= 75) break;
+      }
+      if (best.confidence >= 0 && best.text) break;
+    }
+    if (!best.text) {
+      throw new Error("No se pudo completar el OCR. Revise la conexion a internet o pruebe una foto mas clara y de frente. Detalle: " + (lastError ? lastError.message : "sin detalle"));
+    }
+    return best.text;
+  }
+
+  function prepareOcrImageVariants(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(reader.error);
+      reader.onload = () => {
+        const image = new Image();
+        image.onerror = () => reject(new Error("No se pudo leer la imagen."));
+        image.onload = () => {
+          const scale = Math.min(3, Math.max(1.6, 2200 / Math.max(image.width, image.height)));
+          const canvas = document.createElement("canvas");
+          const width = Math.round(image.width * scale);
+          const height = Math.round(image.height * scale);
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+          ctx.fillStyle = "#fff";
+          ctx.fillRect(0, 0, width, height);
+          ctx.drawImage(image, 0, 0, width, height);
+          const imageData = ctx.getImageData(0, 0, width, height);
+          const data = imageData.data;
+          const gray = new Uint8ClampedArray(width * height);
+          for (let i = 0, p = 0; i < data.length; i += 4, p += 1) {
+            gray[p] = (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114) | 0;
+          }
+          const integral = new Float64Array((width + 1) * (height + 1));
+          for (let y = 0; y < height; y += 1) {
+            let rowSum = 0;
+            for (let x = 0; x < width; x += 1) {
+              rowSum += gray[y * width + x];
+              integral[(y + 1) * (width + 1) + (x + 1)] = integral[y * (width + 1) + (x + 1)] + rowSum;
+            }
+          }
+          // Variante 1: escala de grises con contraste estirado (sin binarizar).
+          let minGray = 255;
+          let maxGray = 0;
+          for (let p = 0; p < gray.length; p += 1) {
+            if (gray[p] < minGray) minGray = gray[p];
+            if (gray[p] > maxGray) maxGray = gray[p];
+          }
+          const grayRange = Math.max(1, maxGray - minGray);
+          for (let p = 0, i = 0; p < gray.length; p += 1, i += 4) {
+            const stretched = Math.round(((gray[p] - minGray) / grayRange) * 255);
+            data[i] = stretched;
+            data[i + 1] = stretched;
+            data[i + 2] = stretched;
+          }
+          ctx.putImageData(imageData, 0, 0);
+          const grayscaleVariant = canvas.toDataURL("image/png");
+          // Variante 2: binarizada con umbral adaptativo (media local).
+          const windowSize = Math.max(15, Math.round(Math.min(width, height) / 22)) | 1;
+          const half = windowSize >> 1;
+          const bias = 0.9;
+          for (let y = 0; y < height; y += 1) {
+            const y1 = Math.max(0, y - half);
+            const y2 = Math.min(height - 1, y + half);
+            for (let x = 0; x < width; x += 1) {
+              const x1 = Math.max(0, x - half);
+              const x2 = Math.min(width - 1, x + half);
+              const area = (x2 - x1 + 1) * (y2 - y1 + 1);
+              const sum = integral[(y2 + 1) * (width + 1) + (x2 + 1)]
+                - integral[y1 * (width + 1) + (x2 + 1)]
+                - integral[(y2 + 1) * (width + 1) + x1]
+                + integral[y1 * (width + 1) + x1];
+              const mean = sum / area;
+              const value = gray[y * width + x] < mean * bias ? 0 : 255;
+              const p = (y * width + x) * 4;
+              data[p] = value;
+              data[p + 1] = value;
+              data[p + 2] = value;
+            }
+          }
+          ctx.putImageData(imageData, 0, 0);
+          const binarizedVariant = canvas.toDataURL("image/png");
+          resolve([binarizedVariant, grayscaleVariant]);
+        };
+        image.src = String(reader.result || "");
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function levenshtein(a, b) {
+    const s = String(a || "");
+    const t = String(b || "");
+    if (s === t) return 0;
+    if (!s.length) return t.length;
+    if (!t.length) return s.length;
+    let previous = new Array(t.length + 1);
+    let current = new Array(t.length + 1);
+    for (let j = 0; j <= t.length; j += 1) previous[j] = j;
+    for (let i = 1; i <= s.length; i += 1) {
+      current[0] = i;
+      for (let j = 1; j <= t.length; j += 1) {
+        const cost = s[i - 1] === t[j - 1] ? 0 : 1;
+        current[j] = Math.min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + cost);
+      }
+      const swap = previous;
+      previous = current;
+      current = swap;
+    }
+    return previous[t.length];
+  }
+
+  function buildOcrVocabulary(clientId) {
+    const words = new Set();
+    activeProducts().forEach((product) => {
+      normalizeText(product.name).split(" ").forEach((word) => {
+        if (word.length > 2) words.add(word);
+      });
+    });
+    state.productAliases.forEach((alias) => normalizeText(alias.alias).split(" ").forEach((word) => {
+      if (word.length > 2) words.add(word);
+    }));
+    state.clientProductAliases
+      .filter((alias) => !clientId || alias.clientId === clientId)
+      .forEach((alias) => normalizeText(alias.alias).split(" ").forEach((word) => {
+        if (word.length > 2) words.add(word);
+      }));
+    ["grande", "grandes", "chica", "chicas", "media", "medio", "rosada", "amarillo", "blanca", "negra", "madura"].forEach((word) => words.add(word));
+    return Array.from(words);
+  }
+
+  function correctOcrWord(word, vocabulary) {
+    const clean = String(word || "");
+    if (clean.length <= 2 || /\d/.test(clean)) return clean;
+    if (vocabulary.includes(clean)) return clean;
+    let best = "";
+    let bestDistance = Infinity;
+    vocabulary.forEach((candidate) => {
+      if (Math.abs(candidate.length - clean.length) > 3) return;
+      const distance = levenshtein(clean, candidate);
+      if (distance < bestDistance || (distance === bestDistance && candidate.length > best.length)) {
+        bestDistance = distance;
+        best = candidate;
+      }
+    });
+    const maxDistance = clean.length <= 4 ? 1 : clean.length <= 7 ? 2 : 3;
+    return best && bestDistance <= maxDistance ? best : clean;
+  }
+
+  function normalizeOcrUnitToken(token) {
+    const clean = normalizeText(token);
+    if (!clean) return "";
+    if (["cj", "cjn", "ej", "caj", "cajon", "cajones"].includes(clean) || clean.startsWith("caj")) return "cajon";
+    if (["j", "jl", "jaula", "jaulas"].includes(clean) || clean.startsWith("jaul")) return "jaula";
+    if (["b", "bl", "bol", "bolsa", "bolsas"].includes(clean) || clean.startsWith("bols")) return "bolsa";
+    if (["kg", "kgs", "k", "klg", "kilo", "kilos"].includes(clean) || clean.startsWith("kil")) return "kg";
+    if (["gr", "grs", "gramos"].includes(clean)) return "gr";
+    if (["doc", "dc", "docena", "docenas"].includes(clean) || clean.startsWith("doc")) return "docena";
+    if (["un", "u", "und", "uni", "unidad", "unidades"].includes(clean) || clean.startsWith("unid")) return "unidad";
+    if (["pl", "pls", "plta", "planta", "plantas"].includes(clean) || clean.startsWith("plant")) return "unidad";
+    if (["at", "ot", "ata", "atado", "atados"].includes(clean) || clean.startsWith("atad")) return "unidad";
+    if (["mp", "maple", "maples"].includes(clean) || clean.startsWith("mapl")) return "maple";
+    if (clean.startsWith("band")) return "bandeja";
+    if (clean.startsWith("rist")) return "ristra";
+    if (clean.startsWith("cabez")) return "cabeza";
+    return "";
+  }
+
+  function cleanupOcrOrderText(rawText, clientId) {
+    const vocabulary = buildOcrVocabulary(clientId);
+    const lines = String(rawText || "").split(/\r?\n/);
+    const output = [];
+    lines.forEach((line) => {
+      let clean = String(line || "")
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[_\u00ac~"'`\u00b4\u00a8^*=+|<>(){}\[\]]+/g, " ")
+        .replace(/[\u2014\u2013\u00b7\u2022\u2026\u201c\u201d\u2018\u2019]+/g, " ")
+        .replace(/-{2,}/g, " ")
+        .replace(/(\d)([a-z])/g, "$1 $2")
+        .replace(/([a-z])(\d)/g, "$1 $2")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (!clean) return;
+      if (!/[a-z]{2,}/.test(clean)) return;
+      const quantityMatch = clean.match(/(\d+\s+\d\s*\/\s*\d|\d\s*\/\s*\d|\d+(?:[.,]\d+)?)\s*([a-z]{1,10})?\.?\s*$/);
+      let namePart = clean;
+      let quantityText = "";
+      let unit = "";
+      if (quantityMatch) {
+        namePart = clean.slice(0, quantityMatch.index).trim();
+        quantityText = quantityMatch[1].replace(/\s*\/\s*/g, "/");
+        const mixed = quantityText.match(/^(\d+)\s+(\d)\/(\d)$/);
+        if (mixed) {
+          const whole = Number(mixed[1]);
+          const fraction = Number(mixed[3]) ? Number(mixed[2]) / Number(mixed[3]) : 0;
+          quantityText = String(whole + fraction).replace(".", ",");
+        }
+        unit = normalizeOcrUnitToken(quantityMatch[2] || "");
+        if (!unit && quantityMatch[2]) namePart = (namePart + " " + quantityMatch[2]).trim();
+      }
+      namePart = namePart.replace(/[.,;:]+/g, " ").replace(/\s+/g, " ").trim();
+      if (!namePart) return;
+      const correctedName = namePart
+        .split(" ")
+        .filter(Boolean)
+        .map((word) => correctOcrWord(word, vocabulary))
+        .join(" ");
+      // Rescate: si el nombre corregido coincide con un producto del catalogo,
+      // usar el nombre real del producto. Lineas sin cantidad y sin producto se descartan.
+      const matchedProduct = findProductForParsedLine(correctedName, unit === "gr" ? "kg" : unit, clientId);
+      let finalName = correctedName;
+      if (matchedProduct) {
+        finalName = matchedProduct.name;
+      } else if (!quantityText) {
+        return;
+      } else if (/(pedido|verdura|fecha|total)/.test(correctedName)) {
+        return;
+      }
+      const parts = [finalName];
+      if (quantityText) parts.push(quantityText);
+      if (unit) parts.push(unit);
+      output.push(parts.join(" "));
+    });
+    return output.join("\n");
+  }
+
+  function loadTesseract() {
+    if (window.Tesseract) return Promise.resolve();
+    if (window.__pareCarritoTesseractLoading) return window.__pareCarritoTesseractLoading;
+    const sources = [
+      "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js",
+      "https://unpkg.com/tesseract.js@5.1.1/dist/tesseract.min.js"
+    ];
+    window.__pareCarritoTesseractLoading = loadScriptSequence(sources, "tesseract")
+      .finally(() => {
+        window.__pareCarritoTesseractLoading = null;
+      });
+    return window.__pareCarritoTesseractLoading;
+  }
+
+  function loadScriptSequence(sources, name) {
+    return new Promise((resolve, reject) => {
+      const existing = document.querySelector("script[data-tesseract]");
+      if (existing) {
+        existing.addEventListener("load", resolve, { once: true });
+        existing.addEventListener("error", () => reject(new Error("No se pudo cargar la libreria OCR.")), { once: true });
+        return;
+      }
+      let index = 0;
+      const tryNext = () => {
+        if (index >= sources.length) {
+          reject(new Error("No se pudo cargar la libreria " + name + ". Revise la conexion a internet."));
+          return;
+        }
+        const script = document.createElement("script");
+        script.src = sources[index];
+        script.async = true;
+        script.dataset.tesseract = "true";
+        index += 1;
+        script.onload = resolve;
+        script.onerror = () => {
+          script.remove();
+          tryNext();
+        };
+        document.head.appendChild(script);
+      };
+      tryNext();
+    });
+  }
+
+  function printHtmlDocument(title, body) {
+    const previousTitle = document.title;
+    document.title = title;
+    const frame = document.createElement("iframe");
+    frame.style.position = "fixed";
+    frame.style.right = "0";
+    frame.style.bottom = "0";
+    frame.style.width = "0";
+    frame.style.height = "0";
+    frame.style.border = "0";
+    frame.setAttribute("aria-hidden", "true");
+    document.body.appendChild(frame);
+    const doc = frame.contentWindow.document;
+    doc.open();
+    const baseHref = location.origin + location.pathname.replace(/[^/]*$/, "");
+    doc.write(`<!doctype html><html><head><base href="${escapeAttr(baseHref)}"><title>${escapeHtml(title)}</title><style>${printDocumentStyles()}</style></head><body>${body}</body></html>`);
+    doc.close();
+    const cleanup = () => {
+      setTimeout(() => {
+        if (frame.parentNode) frame.parentNode.removeChild(frame);
+        document.title = previousTitle;
+      }, 500);
+    };
+    let printed = false;
+    const runPrint = () => {
+      if (printed || !frame.parentNode) return;
+      printed = true;
+      frame.contentWindow.focus();
+      frame.contentWindow.print();
+      cleanup();
+    };
+    frame.onload = runPrint;
+    setTimeout(runPrint, 300);
+  }
+
+  function printDocumentStyles() {
+    return `
+      @page{size:A4;margin:8mm}
+      *{box-sizing:border-box}
+      body{font-family:Arial,sans-serif;margin:0;color:#111;background:#fff}
+      table{width:100%;border-collapse:collapse}
+      th,td{padding:4px 6px;text-align:left}
+      .num{text-align:right}
+      .assigned-group{break-inside:avoid;page-break-inside:avoid;border:0;padding:2px 0;margin:0 0 4px}
+      .assigned-group span{color:#475467}
+      .divide-client-spacer{height:8px}
+      .print-sheet{break-inside:avoid;page-break-inside:avoid;margin:0 0 12mm}
+      .print-sheet:last-child{margin-bottom:0}
+      .print-compact{font-size:10px}
+      .print-compact .print-table{font-size:10px}
+      .print-compact .print-title h1{font-size:16px}
+      .borderless-table th,.borderless-table td{border:0 !important;border-bottom:1px solid #ececec !important;padding:2px 5px;font-size:10px}
+      .borderless-table th{background:transparent;border-bottom:1px solid #999 !important;text-transform:uppercase;font-size:9px;color:#333}
+      .divide-two-col{display:grid;grid-template-columns:1fr 1fr;gap:2px 18px;align-items:start}
+      .divide-two-col .assigned-group{break-inside:avoid;page-break-inside:avoid}
+      .product-sum-grid{column-count:2;column-gap:22px;font-size:10px}
+      .product-sum-line{display:flex;justify-content:flex-start;gap:6px;break-inside:avoid;padding:1px 0}
+      .product-sum-line strong{white-space:nowrap}
+      .print-title{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111;padding-bottom:6px;margin-bottom:8px}
+      .print-title h1{margin:0;font-size:18px}
+      .remito-print-page{display:block}
+      .print-sheet{break-inside:avoid;page-break-inside:avoid}
+      .remito-sheet{border-top:5px solid #1e2a8a;padding:8px 10px 10px;margin:0 0 7mm}
+      .remito-header{display:grid;grid-template-columns:1fr 1fr 1fr;align-items:start;gap:10px}
+      .remito-number{font-size:12px;font-weight:700;margin:6px 0 10px}
+      .remito-left{font-size:10px;line-height:1.45}
+      .remito-title{text-align:center;color:#17228a}
+      .remito-title h1{margin:14px 0 2px;font-size:26px;line-height:1}
+      .remito-title small{color:#f02b8a;font-weight:700}
+      .remito-brand{text-align:right;font-size:10px;line-height:1.45}
+      .remito-logo{width:78px;height:78px;display:block;margin:0 6px 6px auto}
+      .remito-client{font-size:17px;font-weight:800;margin:12px 0 8px}
+      .remito-table{font-size:10.5px}
+      .remito-table thead th{border-top:1px solid #b8b8b8;border-bottom:1px solid #b8b8b8;color:#17228a;font-weight:800}
+      .remito-table tbody tr:nth-child(odd){background:#ededed}
+      .remito-table td{height:12px;line-height:1.1;border:0}
+      .remito-table .blank-row td{color:transparent}
+      .remito-footer{display:grid;grid-template-columns:1fr 230px;gap:10px;align-items:end;border-top:1px solid #c7c7c7;margin-top:6px;padding-top:6px;font-size:10px}
+      .remito-footer .received{color:#3043cf;margin-top:18px}
+      .remito-summary{display:grid;gap:3px}
+      .remito-summary>div{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:baseline}
+      .remito-summary strong{text-align:right}
+      .remito-total{font-size:18px;color:#e6007e;font-weight:900}
+      .remito-total-style-line .remito-total-line{border-bottom:2px solid #e6007e;min-width:92px;padding-bottom:1px}
+      .remito-total-style-box .remito-total-line{border:2px solid #e6007e;border-radius:3px;padding:2px 8px;min-width:104px}
+      .remito-total-style-none .remito-total-line{border:0;padding:0}
+    `;
+  }
+})();

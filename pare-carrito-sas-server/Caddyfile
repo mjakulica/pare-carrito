@@ -1,0 +1,22 @@
+# Caddy sirve el frontend y la API con HTTPS automatico (Let's Encrypt).
+# Los dominios se toman del archivo .env via docker-compose.
+# El frontend habla con la API en /api del MISMO dominio: los dispositivos
+# no necesitan configurar ninguna URL.
+
+{$SITE_DOMAIN} {
+	encode gzip
+
+	handle_path /api/* {
+		reverse_proxy api:3000
+	}
+
+	handle {
+		root * /srv/frontend
+		file_server
+	}
+}
+
+# Acceso directo a la API (opcional, util para integraciones externas)
+{$API_DOMAIN} {
+	reverse_proxy api:3000
+}
