@@ -1533,12 +1533,7 @@
   }
 
   function renderToolbar() {
-    return `
-      <div class="toolbar no-print">
-        <button class="btn ghost" data-back>&lt; Volver</button>
-        <button class="btn ghost" data-route="${roleHome()}">Inicio</button>
-      </div>
-    `;
+    return "";
   }
 
   function renderDashboard() {
