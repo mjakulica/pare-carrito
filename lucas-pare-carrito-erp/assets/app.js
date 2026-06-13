@@ -1455,12 +1455,12 @@
     return `
       <header class="topbar">
         <div class="topbar-start">
-          <button class="mobile-menu-toggle" type="button" aria-label="Abrir menu" aria-expanded="false" data-mobile-menu-toggle>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
-          </button>
           <button class="btn ghost small topbar-back" type="button" data-back aria-label="Volver">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
             <span>Volver</span>
+          </button>
+          <button class="mobile-menu-toggle" type="button" aria-label="Abrir menu" aria-expanded="false" data-mobile-menu-toggle>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
           </button>
           <div class="topbar-date">
             <strong>${formatDate(todayISO())}</strong>
@@ -7036,17 +7036,24 @@
       return `<div class="linked-account"><span>${escapeHtml(client ? client.name : id)}</span>${id !== currentUser.clientId ? `<button class="btn small ghost" data-unlink-client="${id}">Quitar</button>` : `<span class="pill gray">Principal</span>`}</div>`;
     }).join("") : "";
     const canEditSystemSettings = ["manager", "admin"].includes(currentUser.role);
+    const canEditRemitoSettings = currentUser.role === "manager";
+    const canEditSidebarOrder = currentUser.role === "manager";
+    const canManageProductCategories = ["manager", "admin"].includes(currentUser.role);
+    const canRemoveProductCategories = currentUser.role === "manager";
     const remitoStyle = getRemitoTotalStyle();
-    const categoryRows = canEditSystemSettings ? getProductCategories().map((category) => {
+    const categoryRows = canManageProductCategories ? getProductCategories().map((category) => {
       const inUse = state.products.some((product) => product.category === category);
+      const removeButton = canRemoveProductCategories
+        ? `<button class="btn small ${inUse ? "ghost" : "danger"}" type="button" data-remove-product-category="${escapeAttr(category)}" ${inUse ? "disabled" : ""}>Quitar</button>`
+        : "";
       return `
         <div class="sidebar-order-row">
           <span>${escapeHtml(category)}${inUse ? ` <small class="muted">en uso</small>` : ""}</span>
-          <button class="btn small ${inUse ? "ghost" : "danger"}" type="button" data-remove-product-category="${escapeAttr(category)}" ${inUse ? "disabled" : ""}>Quitar</button>
+          ${removeButton}
         </div>
       `;
     }).join("") : "";
-    const sidebarRows = canEditSystemSettings ? getOrderedMenuItems().map((item, index) => `
+    const sidebarRows = canEditSidebarOrder ? getOrderedMenuItems().map((item, index) => `
       <div class="sidebar-order-row">
         <span>${escapeHtml(menuLabel(item))}</span>
         <div class="page-actions">
@@ -7088,9 +7095,9 @@
           <p class="muted">Gerente administra todos los usuarios. Admin gestiona la operacion completa. Empleado opera rutas, division, gastos, caja propia y cobros. Cliente consulta sus cuentas.</p>
         </div>` : ""}
       </div>
-      ${canEditSystemSettings ? `
+      ${(canEditRemitoSettings || canEditSidebarOrder || canManageProductCategories) ? `
       <div class="grid two" style="margin-top:14px">
-        <form id="remito-settings-form" class="panel">
+        ${canEditRemitoSettings ? `<form id="remito-settings-form" class="panel">
           <h2 class="page-title" style="font-size:18px">Formato del remito</h2>
           <div class="form-grid" style="margin-top:10px">
             <div class="field span-2">
@@ -7103,20 +7110,20 @@
             </div>
           </div>
           <div class="page-actions" style="margin-top:12px"><button class="btn primary" type="submit">Guardar formato</button></div>
-        </form>
-        <div class="panel">
+        </form>` : ""}
+        ${canEditSidebarOrder ? `<div class="panel">
           <h2 class="page-title" style="font-size:18px">Orden del sidebar</h2>
           <div class="sidebar-order-list" style="margin-top:10px">${sidebarRows}</div>
           <div class="page-actions" style="margin-top:12px"><button class="btn ghost" type="button" id="reset-sidebar-order">Restablecer orden</button></div>
-        </div>
-        <div class="panel">
+        </div>` : ""}
+        ${canManageProductCategories ? `<div class="panel">
           <h2 class="page-title" style="font-size:18px">Categorias de productos</h2>
           <div class="sidebar-order-list" style="margin-top:10px">${categoryRows}</div>
           <div class="form-grid" style="margin-top:12px">
             <div class="field"><label>Nueva categoria</label><input id="new-product-category" placeholder="Ej: LACTEOS" /></div>
             <div class="field"><label>&nbsp;</label><button class="btn primary" type="button" id="add-product-category">Agregar categoria</button></div>
           </div>
-        </div>
+        </div>` : ""}
       </div>` : ""}
       ${currentUser.role === "manager" ? `
       <div class="panel" style="margin-top:14px">
@@ -7127,6 +7134,8 @@
             <option value="sales">Historiales de venta</option>
             <option value="orders">Pedidos</option>
             <option value="payments">Pagos</option>
+            <option value="products">Productos</option>
+            <option value="customers">Clientes</option>
           </select></div>
           <div class="field span-2"><label>Archivo CSV</label><input type="file" id="mass-import-file" accept=".csv,text/csv" /></div>
         </div>
@@ -7135,6 +7144,8 @@
           <button class="btn ghost" type="button" data-download-template="sales">Plantilla ventas</button>
           <button class="btn ghost" type="button" data-download-template="orders">Plantilla pedidos</button>
           <button class="btn ghost" type="button" data-download-template="payments">Plantilla pagos</button>
+          <button class="btn ghost" type="button" data-download-template="products">Plantilla productos</button>
+          <button class="btn ghost" type="button" data-download-template="customers">Plantilla clientes</button>
           <button class="btn primary" type="button" id="run-mass-import">Importar archivo</button>
         </div>
       </div>` : ""}
@@ -7374,7 +7385,9 @@
       purchases: "date,providerName,productName,quantity,unitCost,paymentStatus,notes\n" + todayISO() + ",Mercado Central,Bananas Kg,10,2500,paid,Ejemplo\n",
       sales: "date,clientId,productName,quantity,unitPrice,notes\n" + todayISO() + ",021,Bananas Kg,2,3500,Venta ejemplo\n",
       orders: "date,clientId,productName,quantity,unitPrice,status,notes\n" + todayISO() + ",021,Bananas Kg,2,3500,pendiente,Pedido ejemplo\n",
-      payments: "date,clientId,amount,method,receivedByUsername,notes\n" + todayISO() + ",021,7000,efectivo,admin,Pago ejemplo\n"
+      payments: "date,clientId,amount,method,receivedByUsername,notes\n" + todayISO() + ",021,7000,efectivo,admin,Pago ejemplo\n",
+      products: "id,name,category,unitType,ivaType,baseCost,salePrice,allowUnitWeight,showInVehicleTotals,notes\nP001,Bananas Kg,FRUTAS,kg,10.5,2500,3500,true,true,Ejemplo\n",
+      customers: "id,name,address,zone,phone,email,paymentType,priceTier,priceAdjustmentPct,vehicleId,needsInvoice,cuit,legalName,invoiceType,invoiceFrequency,notes\n021,Verduleria Lopez,Calle 123,Sur,1122334455,cliente@mail.com,cuenta_corriente,general,0,,false,30112223334,Lopez SRL,Sin Factura,semanal,Ejemplo\n"
     };
     downloadTextFile("plantilla-" + type + ".csv", templates[type] || templates.purchases, "text/csv");
   }
@@ -7387,6 +7400,8 @@
       if (type === "sales" && importOrderRow(row, "VENTA")) count += 1;
       if (type === "orders" && importOrderRow(row, "IMP")) count += 1;
       if (type === "payments" && importPaymentRow(row)) count += 1;
+      if (type === "products" && importProductRow(row)) count += 1;
+      if (type === "customers" && importCustomerRow(row)) count += 1;
     });
     return count;
   }
@@ -7470,6 +7485,94 @@
       state.saldos.filter((entry) => entry.relatedEntityId === payment.id).forEach((entry) => entry.date = row.date);
       state.caja.filter((entry) => entry.relatedEntityId === payment.id).forEach((entry) => entry.date = row.date);
     }
+    return true;
+  }
+
+  function importProductRow(row) {
+    const name = String(row.name || "").trim();
+    if (!name) return false;
+    let product = null;
+    if (row.id) product = getProduct(String(row.id).trim());
+    if (!product) product = findProductByInput(name);
+    const isNew = !product;
+    if (isNew) {
+      product = {
+        id: nextProductId(),
+        name,
+        isActive: true,
+        sortOrder: state.products.length,
+        assignedToType: "",
+        assignedToId: ""
+      };
+      state.products.push(product);
+    } else {
+      product.name = name;
+    }
+    const category = String(row.category || product.category || "").trim().toUpperCase();
+    if (category) {
+      product.category = category;
+      const categories = getProductCategories();
+      if (!categories.includes(category)) {
+        state.appSettings.productCategories = normalizeProductCategories([...categories, category]);
+      }
+    }
+    const unitType = String(row.unitType || product.unitType || "kg").trim();
+    if (unitType) product.unitType = unitType;
+    const ivaType = String(row.ivaType || product.ivaType || "10.5").trim();
+    product.ivaType = ivaType;
+    product.allowUnitWeight = String(row.allowUnitWeight || "").toLowerCase() === "true" || row.allowUnitWeight === "1" || product.allowUnitWeight || false;
+    product.showInVehicleTotals = String(row.showInVehicleTotals || "").toLowerCase() === "false" || row.showInVehicleTotals === "0" ? false : (String(row.showInVehicleTotals || "").toLowerCase() === "true" || row.showInVehicleTotals === "1" || product.showInVehicleTotals !== false);
+    product.baseCost = parseAmount(row.baseCost) || product.baseCost || 0;
+    const salePriceInput = parseAmount(row.salePrice);
+    const salePrice = Number.isFinite(salePriceInput) && salePriceInput > 0 ? Math.ceil(salePriceInput) : (product.salePrice || 0);
+    product.salePrice = salePrice;
+    product.notes = String(row.notes || product.notes || "").trim();
+    state.prices[product.id] = {
+      productId: product.id,
+      date: todayISO(),
+      cost: product.baseCost,
+      price: product.salePrice,
+      marginPct: calcMargin(product.baseCost, product.salePrice)
+    };
+    applyCostRelations({ productId: product.id, unitCost: product.baseCost, relationUnits: 0 }, calcMargin(product.baseCost, product.salePrice));
+    return true;
+  }
+
+  function importCustomerRow(row) {
+    const id = String(row.id || "").trim();
+    const name = String(row.name || "").trim();
+    if (!id || !name) return false;
+    let client = getClient(id);
+    const isNew = !client;
+    if (isNew) {
+      client = { id, isActive: true };
+      state.clients.push(client);
+    }
+    client.name = name;
+    client.address = String(row.address || client.address || "").trim();
+    client.zone = String(row.zone || client.zone || "").trim();
+    client.phone = String(row.phone || client.phone || "").trim();
+    client.email = String(row.email || client.email || "").trim();
+    client.billingEmail = String(row.billingEmail || client.billingEmail || "").trim();
+    client.contactName = "";
+    const paymentType = String(row.paymentType || client.paymentType || "cuenta_corriente").trim();
+    if (["cuenta_corriente", "contado", "semanal", "contra_factura"].includes(paymentType)) client.paymentType = paymentType;
+    const priceTier = String(row.priceTier || client.priceTier || "general").trim();
+    if (["general", "preferencial", "con_factura"].includes(priceTier)) client.priceTier = priceTier;
+    client.priceAdjustmentPct = parseAmount(row.priceAdjustmentPct) || client.priceAdjustmentPct || 0;
+    const vehicleId = String(row.vehicleId || client.vehicleId || "").trim();
+    if (vehicleId && getVehicle(vehicleId)) client.vehicleId = vehicleId;
+    const needsInvoiceValue = String(row.needsInvoice || "").toLowerCase();
+    client.needsInvoice = needsInvoiceValue === "true" || needsInvoiceValue === "1" || (needsInvoiceValue === "" ? (client.needsInvoice || false) : false);
+    client.cuit = String(row.cuit || client.cuit || "").trim();
+    client.legalName = String(row.legalName || client.legalName || "").trim();
+    const invoiceType = String(row.invoiceType || client.invoiceType || "Sin Factura").trim();
+    if (["Sin Factura", "Factura A", "Factura B", "Factura C"].includes(invoiceType)) client.invoiceType = invoiceType;
+    const invoiceFrequency = String(row.invoiceFrequency || client.invoiceFrequency || "semanal").trim();
+    if (["diaria", "semanal", "quincenal", "mensual"].includes(invoiceFrequency)) client.invoiceFrequency = invoiceFrequency;
+    client.notes = String(row.notes || client.notes || "").trim();
+    if (isNew) createCustomerUserForClient(client);
+    else syncCustomerUserForClient(client);
     return true;
   }
 
