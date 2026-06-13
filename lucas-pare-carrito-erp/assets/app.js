@@ -9,7 +9,18 @@
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
-  const UNIT_TYPES = ["kg", "docena", "jaula", "cajon", "bolsa", "unidad", "maple", "ristra", "cabeza", "bandeja"];
+  const DEFAULT_UNIT_TYPES = [
+    { name: "kg", wholesale: false },
+    { name: "docena", wholesale: false },
+    { name: "jaula", wholesale: true },
+    { name: "cajon", wholesale: true },
+    { name: "bolsa", wholesale: true },
+    { name: "unidad", wholesale: false },
+    { name: "maple", wholesale: false },
+    { name: "ristra", wholesale: false },
+    { name: "cabeza", wholesale: false },
+    { name: "bandeja", wholesale: false }
+  ];
   const CATEGORIES = ["FRUTAS", "VERDURAS", "HUEVOS", "OTROS"];
   const PAYMENT_METHODS = {
     efectivo: "Efectivo",
@@ -547,6 +558,10 @@
       ...(loaded.appSettings.productCategories || []),
       ...products.map((product) => product.category || "OTROS")
     ]);
+    loaded.appSettings.unitTypes = normalizeUnitTypes([
+      ...(loaded.appSettings.unitTypes || []),
+      ...products.map((product) => ({ name: product.unitType || "", wholesale: false }))
+    ]);
     const providers = Array.isArray(loaded.providers) ? loaded.providers.slice() : [];
     seeded.providers.forEach((defaultProvider) => {
       const existing = providers.find((provider) => provider.id === defaultProvider.id || provider.name === defaultProvider.name);
@@ -571,6 +586,7 @@
       remitoTotalStyle: "box",
       sidebarOrder: [],
       productCategories: CATEGORIES.slice(),
+      unitTypes: DEFAULT_UNIT_TYPES.slice(),
       operationalResetVersion: OPERATIONAL_RESET_VERSION
     };
   }
@@ -2935,8 +2951,8 @@
 
   function renderProductRelationsPanel() {
     const relations = state.productRelations || [];
-    const retailUnits = ["kg", "docena", "bandeja", "unidad", "maple", "cabeza", "ristra"];
-    const wholesaleUnits = ["cajon", "jaula", "bolsa"];
+    const retailUnits = getRetailUnitNames();
+    const wholesaleUnits = getWholesaleUnitNames();
     const retailProducts = activeProducts().filter((product) => retailUnits.includes(product.unitType));
     const wholesaleProducts = activeProducts().filter((product) => wholesaleUnits.includes(product.unitType));
     const rows = relations.map((relation, index) => {
@@ -7142,6 +7158,7 @@
     const canEditSidebarOrder = currentUser.role === "manager";
     const canManageProductCategories = ["manager", "admin"].includes(currentUser.role);
     const canRemoveProductCategories = currentUser.role === "manager";
+    const canManageUnitTypes = currentUser.role === "manager";
     const remitoStyle = getRemitoTotalStyle();
     const categoryRows = canManageProductCategories ? getProductCategories().map((category) => {
       const inUse = state.products.some((product) => product.category === category);
@@ -7152,6 +7169,18 @@
         <div class="sidebar-order-row">
           <span>${escapeHtml(category)}${inUse ? ` <small class="muted">en uso</small>` : ""}</span>
           ${removeButton}
+        </div>
+      `;
+    }).join("") : "";
+    const unitTypeRows = canManageUnitTypes ? getUnitTypes().map((unit) => {
+      const inUse = state.products.some((product) => product.unitType === unit.name);
+      return `
+        <div class="sidebar-order-row">
+          <span>${escapeHtml(unit.name)}${unit.wholesale ? ` <small class="muted">mayorista</small>` : ` <small class="muted">minorista</small>`}${inUse ? ` <small class="muted">en uso</small>` : ""}</span>
+          <div class="page-actions">
+            <button class="btn small ghost" type="button" data-edit-unit-type="${escapeAttr(unit.name)}">Editar</button>
+            <button class="btn small ${inUse ? "ghost" : "danger"}" type="button" data-remove-unit-type="${escapeAttr(unit.name)}" ${inUse ? "disabled" : ""}>Quitar</button>
+          </div>
         </div>
       `;
     }).join("") : "";
@@ -7226,6 +7255,18 @@
             <div class="field"><label>&nbsp;</label><button class="btn primary" type="button" id="add-product-category">Agregar categoria</button></div>
           </div>
         </div>` : ""}
+        ${canManageUnitTypes ? `<div class="panel">
+          <h2 class="page-title" style="font-size:18px">Tipo de unidades</h2>
+          <div class="sidebar-order-list" style="margin-top:10px">${unitTypeRows}</div>
+          <div class="form-grid" style="margin-top:12px">
+            <div class="field"><label>Nueva unidad</label><input id="new-unit-type-name" placeholder="Ej: balde" /></div>
+            <label class="field" style="display:flex;align-items:center;gap:8px;grid-template-columns:auto 1fr">
+              <input type="checkbox" id="new-unit-type-wholesale" style="width:auto;min-height:auto" />
+              <span>Producto mayorista</span>
+            </label>
+            <div class="field"><label>&nbsp;</label><button class="btn primary" type="button" id="add-unit-type">Agregar unidad</button></div>
+          </div>
+        </div>` : ""}
       </div>` : ""}
       ${currentUser.role === "manager" ? `
       <div class="panel" style="margin-top:14px">
@@ -7274,7 +7315,7 @@
             <option value="pagos">Pagos</option>
             <option value="clientes">Clientes</option>
           </select></div>
-          <div class="field span-2"><label>Archivo exportado (.json)</label><input type="file" id="update-import-file" accept="application/json" /></div>
+          <div class="field span-2"><label>Archivo exportado (.csv)</label><input type="file" id="update-import-file" accept=".csv,text/csv" /></div>
         </div>
         <div class="page-actions" style="margin-top:12px">
           <button class="btn warn" type="button" id="run-update-import">Actualizar base de datos</button>
@@ -7547,6 +7588,41 @@
       saveState();
       render();
     }));
+    const addUnitType = document.getElementById("add-unit-type");
+    if (addUnitType) addUnitType.addEventListener("click", () => {
+      const nameInput = document.getElementById("new-unit-type-name");
+      const wholesaleInput = document.getElementById("new-unit-type-wholesale");
+      const name = String(nameInput.value || "").trim().toLowerCase();
+      if (!name) return alert("Ingrese un nombre de unidad.");
+      const types = getUnitTypes();
+      if (types.some((unit) => unit.name === name)) return alert("Esa unidad ya existe.");
+      state.appSettings.unitTypes = normalizeUnitTypes([...types, { name, wholesale: wholesaleInput.checked }]);
+      saveState();
+      render();
+    });
+    document.querySelectorAll("[data-remove-unit-type]").forEach((button) => button.addEventListener("click", () => {
+      const name = button.dataset.removeUnitType;
+      if (state.products.some((product) => product.unitType === name)) return alert("No se puede quitar una unidad con productos asignados.");
+      state.appSettings.unitTypes = getUnitTypes().filter((unit) => unit.name !== name);
+      saveState();
+      render();
+    }));
+    document.querySelectorAll("[data-edit-unit-type]").forEach((button) => button.addEventListener("click", () => {
+      const name = button.dataset.editUnitType;
+      const unit = getUnitTypes().find((u) => u.name === name);
+      if (!unit) return;
+      const newName = prompt("Editar nombre de unidad:", unit.name);
+      if (newName === null) return;
+      const normalized = String(newName).trim().toLowerCase();
+      if (!normalized) return alert("Ingrese un nombre de unidad.");
+      const types = getUnitTypes();
+      if (normalized !== name && types.some((u) => u.name === normalized)) return alert("Esa unidad ya existe.");
+      const wholesale = confirm("Marcar como producto mayorista?");
+      state.appSettings.unitTypes = types.map((u) => u.name === name ? { name: normalized, wholesale } : u);
+      state.products.filter((product) => product.unitType === name).forEach((product) => { product.unitType = normalized; });
+      saveState();
+      render();
+    }));
     document.querySelectorAll("[data-download-template]").forEach((button) => button.addEventListener("click", () => downloadMassImportTemplate(button.dataset.downloadTemplate)));
     const runImport = document.getElementById("run-mass-import");
     if (runImport) runImport.addEventListener("click", async () => {
@@ -7793,6 +7869,67 @@
     });
     result.push(current.trim());
     return result;
+  }
+
+  function escapeCsvValue(value) {
+    const str = String(value === null || value === undefined ? "" : value);
+    if (str.includes(",") || str.includes('"') || str.includes("\n") || str.includes("\r")) {
+      return '"' + str.replace(/"/g, '""') + '"';
+    }
+    return str;
+  }
+
+  function objectsToCsv(rows) {
+    if (!Array.isArray(rows) || !rows.length) return "";
+    const keys = Array.from(new Set(rows.flatMap((row) => Object.keys(row))));
+    const ordered = [];
+    if (keys.includes("__key")) ordered.push("__key");
+    if (keys.includes("id")) ordered.push("id");
+    keys.forEach((key) => { if (!ordered.includes(key)) ordered.push(key); });
+    const header = ordered.map(escapeCsvValue).join(",");
+    const lines = rows.map((row) => ordered.map((key) => escapeCsvValue(row[key])).join(","));
+    return [header, ...lines].join("\n");
+  }
+
+  function flattenObjectForCsv(obj) {
+    const flat = {};
+    Object.keys(obj || {}).forEach((key) => {
+      const value = obj[key];
+      if (value === null || value === undefined) {
+        flat[key] = "";
+      } else if (typeof value === "object") {
+        flat[key] = JSON.stringify(value);
+      } else {
+        flat[key] = String(value);
+      }
+    });
+    return flat;
+  }
+
+  function unflattenCsvRow(row) {
+    const obj = {};
+    Object.keys(row || {}).forEach((key) => {
+      if (key === "__key") return;
+      const value = row[key];
+      if (value === "" || value === undefined) {
+        obj[key] = "";
+        return;
+      }
+      if (typeof value === "string" && (value.startsWith("[") || value.startsWith("{"))) {
+        try {
+          obj[key] = JSON.parse(value);
+          return;
+        } catch (e) {}
+      }
+      if (value === "true") { obj[key] = true; return; }
+      if (value === "false") { obj[key] = false; return; }
+      if (/^-?\d+(\.\d+)?$/.test(value) && String(value).length < 20) {
+        obj[key] = value.includes(".") ? parseFloat(value) : parseInt(value, 10);
+        return;
+      }
+      obj[key] = value;
+    });
+    return obj;
   }
 
   function downloadTextFile(filename, text, type) {
@@ -8078,22 +8215,17 @@
   function exportUpdateTable(key) {
     const table = UPDATE_TABLES[key];
     if (!table) return;
-    const data = {};
+    const rows = [];
     table.keys.forEach((stateKey) => {
-      data[stateKey] = state[stateKey];
+      const list = Array.isArray(state[stateKey]) ? state[stateKey] : [];
+      list.forEach((item) => {
+        const flat = flattenObjectForCsv(item);
+        flat.__key = stateKey;
+        rows.push(flat);
+      });
     });
-    const payload = { type: key, label: table.label, exportedAt: new Date().toISOString(), appVersion: APP_VERSION, data };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = fileDate(todayISO()) + " " + table.label + ".json";
-    document.body.appendChild(link);
-    link.click();
-    setTimeout(() => {
-      URL.revokeObjectURL(url);
-      link.remove();
-    }, 1000);
+    const csv = objectsToCsv(rows);
+    downloadTextFile(fileDate(todayISO()) + " " + table.label + ".csv", csv, "text/csv");
   }
 
   async function importUpdateTable() {
@@ -8102,15 +8234,24 @@
     const table = UPDATE_TABLES[typeSelect.value];
     if (!table) return;
     const file = fileInput.files && fileInput.files[0];
-    if (!file) return alert("Seleccione el archivo JSON exportado.");
+    if (!file) return alert("Seleccione el archivo CSV exportado.");
     try {
-      const parsed = JSON.parse(await file.text());
-      if (!parsed || parsed.type !== typeSelect.value || !parsed.data) {
-        return alert("El archivo no corresponde a la tabla seleccionada (" + table.label + "). Fue exportado como: " + (parsed && parsed.label ? parsed.label : "desconocido") + ".");
+      const rows = parseCsvRows(await file.text());
+      if (!rows.length) return alert("El archivo CSV esta vacio.");
+      const grouped = {};
+      rows.forEach((row) => {
+        const key = row.__key;
+        if (!key) return;
+        if (!grouped[key]) grouped[key] = [];
+        grouped[key].push(unflattenCsvRow(row));
+      });
+      const foundKeys = Object.keys(grouped).filter((key) => table.keys.includes(key));
+      if (!foundKeys.length) {
+        return alert("El archivo no corresponde a la tabla seleccionada (" + table.label + "). No se encontro ninguna columna __key valida.");
       }
       if (!confirm("Esto REEMPLAZA todos los datos de " + table.label + " con el contenido del archivo. Continuar?")) return;
-      table.keys.forEach((stateKey) => {
-        if (parsed.data[stateKey] !== undefined) state[stateKey] = parsed.data[stateKey];
+      foundKeys.forEach((key) => {
+        state[key] = grouped[key];
       });
       state = normalizeLoadedState({ ...seedState(), ...state }, seedState());
       saveState();
@@ -10640,6 +10781,34 @@
     return normalizeProductCategories([...base, ...state.products.map((product) => product.category || "OTROS")]);
   }
 
+  function normalizeUnitTypes(unitTypes) {
+    const seen = new Set();
+    return (Array.isArray(unitTypes) ? unitTypes : [])
+      .map((unit) => (typeof unit === "string" ? { name: unit, wholesale: false } : { ...unit }))
+      .map((unit) => ({ name: String(unit.name || "").trim().toLowerCase(), wholesale: !!unit.wholesale }))
+      .filter((unit) => unit.name)
+      .filter((unit) => {
+        if (seen.has(unit.name)) return false;
+        seen.add(unit.name);
+        return true;
+      });
+  }
+
+  function getUnitTypes() {
+    const configured = state.appSettings && Array.isArray(state.appSettings.unitTypes) ? state.appSettings.unitTypes : [];
+    const base = configured.length ? configured : DEFAULT_UNIT_TYPES;
+    const fromProducts = state.products.map((product) => ({ name: product.unitType || "", wholesale: false }));
+    return normalizeUnitTypes([...base, ...fromProducts]);
+  }
+
+  function getWholesaleUnitNames() {
+    return getUnitTypes().filter((unit) => unit.wholesale).map((unit) => unit.name);
+  }
+
+  function getRetailUnitNames() {
+    return getUnitTypes().filter((unit) => !unit.wholesale).map((unit) => unit.name);
+  }
+
   function activeCashBoxesForRole(role) {
     const baseBoxes = (state.cashBoxes || defaultCashBoxes())
       .filter((box) => !isDeprecatedCashBox(box))
@@ -11173,7 +11342,7 @@
   }
 
   function unitOptions(selected) {
-    return UNIT_TYPES.map((unit) => `<option value="${unit}" ${unit === selected ? "selected" : ""}>${unit}</option>`).join("");
+    return getUnitTypes().map((unit) => `<option value="${unit.name}" ${unit.name === selected ? "selected" : ""}>${unit.name}</option>`).join("");
   }
 
   function statusLabel(status) {
