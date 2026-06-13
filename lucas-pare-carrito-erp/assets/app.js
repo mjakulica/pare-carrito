@@ -1458,7 +1458,11 @@
           <button class="mobile-menu-toggle" type="button" aria-label="Abrir menu" aria-expanded="false" data-mobile-menu-toggle>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
           </button>
-          <div>
+          <button class="btn ghost small topbar-back" type="button" data-back aria-label="Volver">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+            <span>Volver</span>
+          </button>
+          <div class="topbar-date">
             <strong>${formatDate(todayISO())}</strong>
             <div class="muted">Operacion diaria</div>
           </div>
@@ -2724,14 +2728,14 @@
       const canViewRemito = canCustomerViewOrder(order);
       return `
         <tr>
-          <td data-label="Fecha">${formatDate(order.date)}<br><span class="muted">${escapeHtml(client ? client.name : order.clientId)}</span></td>
-          <td data-label="Pedido">${escapeHtml(order.id)}</td>
-          ${hideMoney ? `<td data-label="Total" class="muted">Disponible 8:00</td><td data-label="IVA" class="num">-</td>` : `<td data-label="Total" class="num">${formatMoney(getOrderTotal(order))}</td>
-          <td data-label="IVA" class="num">${showIva ? formatMoney(getOrderIva(order)) : "-"}</td>`}
-          <td data-label="Productos">
+          <td>${formatDate(order.date)}<br><span class="muted">${escapeHtml(client ? client.name : order.clientId)}</span></td>
+          <td>${escapeHtml(order.id)}</td>
+          ${hideMoney ? `<td class="muted">Disponible 8:00</td><td class="num">-</td>` : `<td class="num">${formatMoney(getOrderTotal(order))}</td>
+          <td class="num">${showIva ? formatMoney(getOrderIva(order)) : "-"}</td>`}
+          <td>
             ${renderOrderInlineDetails(order, { hideMoney, summary: "Detalle" })}
           </td>
-          <td data-label="Acciones" class="page-actions">
+          <td class="page-actions">
             ${canViewRemito ? `<button class="btn small ghost" data-view-customer-remito="${order.id}">Remito</button>` : `<span class="muted">Remito disponible 8:00</span>`}
             ${canEdit ? `<button class="btn small ghost" data-edit-order="${order.id}">Editar</button>` : `<span class="muted">Cerrado</span>`}
           </td>
