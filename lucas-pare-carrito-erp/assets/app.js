@@ -3725,7 +3725,7 @@
     const providerPaymentMethods = currentUser.role === "employee" ? ["efectivo"] : Object.keys(PAYMENT_METHODS);
     return `
       <form id="purchase-form" class="panel">
-          <div class="form-grid">
+          <div class="form-grid purchase-form-grid">
             <div class="field">
               <label>Fecha</label>
               <input type="date" id="purchase-date" value="${todayISO()}" />
@@ -3807,26 +3807,26 @@
               <input id="purchase-notes" placeholder="Detalle de compra, gasto, cancelacion, etc." />
             </div>
           </div>
+          ${canPurchaseProviders ? `<div id="provider-favorites-wrap" class="panel" style="box-shadow:none;margin-top:12px"><strong>Favoritos del proveedor</strong><div id="provider-favorites" class="favorite-row"></div></div>` : ""}
+          <div id="purchase-items-wrap" class="grid" style="margin-top:12px">
+            <div class="page-actions">
+              <strong>Productos</strong>
+            </div>
+            <div id="required-purchase-grid">${renderRequiredPurchaseGrid()}</div>
+            <div id="purchase-items" class="grid">
+              ${renderPurchaseItemRow()}
+            </div>
+          </div>
+          <div class="page-actions purchase-form-actions" style="margin-top:12px">
+            <button class="btn small yellow" type="button" data-add-purchase-item>Agregar producto</button>
+            <button class="btn small primary" type="submit">Guardar egreso</button>
+          </div>
           <div id="vendor-favorites-wrap" class="panel" style="box-shadow:none;margin-top:12px">
             <div class="page-actions" style="justify-content:space-between">
               <strong>Favoritos del vendedor</strong>
               <select id="purchase-product-view" style="max-width:160px"><option value="list" ${ui.purchaseProductView === "list" ? "selected" : ""}>Lista</option><option value="grid" ${ui.purchaseProductView === "grid" ? "selected" : ""}>Cuadricula</option></select>
             </div>
             <div id="vendor-favorites" class="favorite-row ${ui.purchaseProductView === "grid" ? "favorite-grid" : ""}"></div>
-          </div>
-          <div id="purchase-items-wrap" class="grid" style="margin-top:12px">
-            <div class="page-actions">
-              <strong>Productos</strong>
-            </div>
-            <div id="required-purchase-grid">${renderRequiredPurchaseGrid()}</div>
-            ${canPurchaseProviders ? `<div id="provider-favorites-wrap" class="panel" style="box-shadow:none"><strong>Favoritos del proveedor</strong><div id="provider-favorites" class="favorite-row"></div></div>` : ""}
-            <div id="purchase-items" class="grid">
-              ${renderPurchaseItemRow()}
-            </div>
-          </div>
-          <div class="page-actions" style="margin-top:12px">
-            <button class="btn yellow" type="button" data-add-purchase-item>Agregar producto</button>
-            <button class="btn primary" type="submit">Guardar egreso</button>
           </div>
         </form>
     `;
