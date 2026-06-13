@@ -2724,14 +2724,14 @@
       const canViewRemito = canCustomerViewOrder(order);
       return `
         <tr>
-          <td>${formatDate(order.date)}<br><span class="muted">${escapeHtml(client ? client.name : order.clientId)}</span></td>
-          <td>${escapeHtml(order.id)}</td>
-          ${hideMoney ? `<td class="muted">Disponible 8:00</td><td class="num">-</td>` : `<td class="num">${formatMoney(getOrderTotal(order))}</td>
-          <td class="num">${showIva ? formatMoney(getOrderIva(order)) : "-"}</td>`}
-          <td>
+          <td data-label="Fecha">${formatDate(order.date)}<br><span class="muted">${escapeHtml(client ? client.name : order.clientId)}</span></td>
+          <td data-label="Pedido">${escapeHtml(order.id)}</td>
+          ${hideMoney ? `<td data-label="Total" class="muted">Disponible 8:00</td><td data-label="IVA" class="num">-</td>` : `<td data-label="Total" class="num">${formatMoney(getOrderTotal(order))}</td>
+          <td data-label="IVA" class="num">${showIva ? formatMoney(getOrderIva(order)) : "-"}</td>`}
+          <td data-label="Productos">
             ${renderOrderInlineDetails(order, { hideMoney, summary: "Detalle" })}
           </td>
-          <td class="page-actions">
+          <td data-label="Acciones" class="page-actions">
             ${canViewRemito ? `<button class="btn small ghost" data-view-customer-remito="${order.id}">Remito</button>` : `<span class="muted">Remito disponible 8:00</span>`}
             ${canEdit ? `<button class="btn small ghost" data-edit-order="${order.id}">Editar</button>` : `<span class="muted">Cerrado</span>`}
           </td>

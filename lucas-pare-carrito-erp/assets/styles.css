@@ -2197,6 +2197,136 @@ tr:last-child td {
   .pie-chart {
     width: min(180px, 100%);
   }
+
+  /* Mobile card tables: turn compact tables into stacked cards */
+  .compact-table table,
+  .compact-table thead,
+  .compact-table tbody,
+  .compact-table th,
+  .compact-table td,
+  .compact-table tr {
+    display: block;
+  }
+
+  .compact-table table {
+    min-width: 0;
+  }
+
+  .compact-table thead tr {
+    position: absolute;
+    left: -9999px;
+  }
+
+  .compact-table tr {
+    margin-bottom: 14px;
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 12px;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .compact-table td {
+    display: block;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .compact-table td:last-child {
+    border-bottom: 0;
+  }
+
+  .compact-table td::before {
+    content: attr(data-label);
+    display: inline-block;
+    min-width: 78px;
+    font-weight: 700;
+    color: var(--muted);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    margin-right: 12px;
+    vertical-align: top;
+  }
+
+  .compact-table td > * {
+    display: inline;
+    vertical-align: top;
+  }
+
+  .compact-table td .muted {
+    font-size: 13px;
+  }
+
+  .compact-table .num {
+    text-align: left;
+  }
+
+  .compact-table td[data-label="Acciones"] {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .compact-table td[data-label="Acciones"]::before {
+    flex: 0 0 auto;
+    margin-top: 8px;
+  }
+
+  .compact-table .page-actions {
+    display: flex;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 8px;
+    flex: 1 1 auto;
+  }
+
+  .compact-table details {
+    display: inline-block;
+    width: auto;
+    max-width: calc(100% - 90px);
+    vertical-align: top;
+  }
+
+  .compact-table .mini-table {
+    display: block;
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .compact-table .mini-table div {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    border-bottom: 1px dashed #d7dee7;
+    padding-bottom: 4px;
+    margin-bottom: 6px;
+  }
+
+  .compact-table .mini-table div:last-child {
+    border-bottom: 0;
+    margin-bottom: 0;
+  }
+
+  .compact-table .mini-table span {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    white-space: normal;
+  }
+
+  .compact-table .mini-table span + span {
+    color: var(--muted);
+    font-size: 13px;
+    margin-top: 2px;
+  }
 }
 
 @media print {
