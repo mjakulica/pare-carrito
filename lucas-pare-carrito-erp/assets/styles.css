@@ -456,6 +456,25 @@ a {
   gap: 12px;
 }
 
+.balance-date-grid .balance-range-buttons .page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.balance-date-grid .balance-range-buttons .btn {
+  flex: 1 1 auto;
+  min-width: 120px;
+}
+
+.attendance-form-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.attendance-present-field .check-item {
+  min-height: 38px;
+}
+
 .field {
   display: grid;
   gap: 5px;
@@ -868,6 +887,26 @@ tr:last-child td {
   flex-wrap: wrap;
   gap: 7px;
   margin-top: 8px;
+}
+
+.divide-assignee-checklist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  margin-top: 6px;
+}
+
+.divide-assignee-checklist .check-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.divide-assignee-checklist .check-item input {
+  width: auto;
+  min-height: auto;
 }
 
 .favorite-grid {
@@ -2252,9 +2291,43 @@ tr:last-child td {
     grid-template-columns: 1fr;
   }
 
-  .order-form-grid,
-  .payment-form-grid {
+  .order-form-grid {
     grid-template-columns: 1fr;
+  }
+
+  .payment-form-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .payment-form-grid .field.payment-client-field,
+  .payment-form-grid .field.payment-orders-field,
+  .payment-form-grid .field.payment-notes-field,
+  .payment-form-grid #transfer-upload-wrap {
+    grid-column: span 2;
+  }
+
+  .payment-form-grid label {
+    font-size: 12px;
+  }
+
+  .payment-form-grid input,
+  .payment-form-grid select {
+    min-height: 36px;
+    padding: 6px 8px;
+    font-size: 13px;
+  }
+
+  .payment-form-grid .page-actions .btn {
+    min-height: 34px;
+    padding: 0 10px;
+    font-size: 12px;
+  }
+
+  .payment-order-line .btn.small.ghost {
+    min-height: 32px;
+    padding: 0 6px;
+    font-size: 12px;
   }
 
   .payment-amount-field,
@@ -2267,6 +2340,25 @@ tr:last-child td {
   .field.span-3,
   .field.span-4 {
     grid-column: span 1;
+  }
+
+  .balance-date-grid .balance-range-buttons .btn {
+    width: 100%;
+    min-height: 40px;
+  }
+
+  .attendance-form-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .attendance-form-grid .field.span-4 {
+    grid-column: span 2;
+  }
+
+  .attendance-form-actions .btn {
+    width: 100%;
+    min-height: 44px;
   }
 
   .order-row {

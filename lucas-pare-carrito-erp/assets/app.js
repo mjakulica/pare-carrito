@@ -54,7 +54,7 @@
     balanceFrom: todayISO(),
     balanceTo: todayISO(),
     balanceAccounts: null,
-    divideAssignee: "all",
+    divideAssignees: null,
     customerDashboardClient: "all",
     customerDashboardClients: null,
     loginView: "login",
@@ -1956,6 +1956,7 @@
 
   function renderNewOrder() {
     const isCustomerOrder = isClientLikeRole(currentUser.role);
+    const hideOrderPrices = isCustomerOrder || currentUser.role === "employee";
     const clients = (isCustomerOrder
       ? getCustomerVisibleClientIds().map((id) => getClient(id)).filter((client) => client && client.isActive !== false)
       : activeClients())
@@ -2013,7 +2014,7 @@
             <label>Nota</label>
             <input data-note placeholder="comentarios?" />
           </div>
-          ${isCustomerOrder ? `<input type="hidden" data-price value="${formatAmountInput(price)}" />` : `<div class="field order-price-field">
+          ${hideOrderPrices ? `<input type="hidden" data-price value="${formatAmountInput(price)}" />` : `<div class="field order-price-field">
             <label>Precio unitario</label>
             <input data-price value="${formatAmountInput(price)}" inputmode="decimal" />
           </div>`}
@@ -2097,7 +2098,7 @@
           <aside class="panel order-cart-panel">
             <h2 class="page-title" style="font-size:18px">Carrito</h2>
             <div id="order-cart" class="cart-list"><div class="empty compact">Sin productos agregados.</div></div>
-            ${isCustomerOrder ? "" : `<h2 class="page-title" style="font-size:18px">Total</h2>
+            ${hideOrderPrices ? "" : `<h2 class="page-title" style="font-size:18px">Total</h2>
             <div class="metric-note" id="order-net-total">Subtotal $0</div>
             <div class="metric-note" id="order-vat-total">IVA $0</div>
             <div class="metric-value" id="order-total">$0</div>`}
@@ -2121,12 +2122,13 @@
     const pasteInput = document.getElementById("order-whatsapp-paste");
     const warningBox = document.getElementById("order-parse-warning");
     const isCustomerOrder = isClientLikeRole(currentUser.role);
+    const hideOrderPrices = isCustomerOrder || currentUser.role === "employee";
     const recalc = () => {
       const client = getClient(clientSelect.value);
       const items = collectOrderDraftItems(client, false);
       const subtotalTotal = items.reduce((sum, item) => sum + item.subtotal, 0);
       const vatTotal = items.reduce((sum, item) => sum + item.ivaAmount, 0);
-      document.getElementById("order-cart").innerHTML = renderOrderCart(items, { showPrices: !isCustomerOrder });
+      document.getElementById("order-cart").innerHTML = renderOrderCart(items, { showPrices: !hideOrderPrices });
       const netTotal = document.getElementById("order-net-total");
       const vatTotalNode = document.getElementById("order-vat-total");
       const orderTotal = document.getElementById("order-total");
@@ -3809,17 +3811,17 @@
           </div>
           ${canPurchaseProviders ? `<div id="provider-favorites-wrap" class="panel" style="box-shadow:none;margin-top:12px"><strong>Favoritos del proveedor</strong><div id="provider-favorites" class="favorite-row"></div></div>` : ""}
           <div id="purchase-items-wrap" class="grid" style="margin-top:12px">
-            <div class="page-actions">
-              <strong>Productos</strong>
-            </div>
-            <div id="required-purchase-grid">${renderRequiredPurchaseGrid()}</div>
             <div id="purchase-items" class="grid">
               ${renderPurchaseItemRow()}
             </div>
-          </div>
-          <div class="page-actions purchase-form-actions" style="margin-top:12px">
-            <button class="btn small yellow" type="button" data-add-purchase-item>Agregar producto</button>
-            <button class="btn small primary" type="submit">Guardar egreso</button>
+            <div class="page-actions purchase-form-actions" style="margin-top:12px">
+              <button class="btn small yellow" type="button" data-add-purchase-item>Agregar producto</button>
+              <button class="btn small primary" type="submit">Guardar egreso</button>
+            </div>
+            <div class="page-actions" style="margin-top:12px">
+              <strong>Productos</strong>
+            </div>
+            <div id="required-purchase-grid">${renderRequiredPurchaseGrid()}</div>
           </div>
           <div id="vendor-favorites-wrap" class="panel" style="box-shadow:none;margin-top:12px">
             <div class="page-actions" style="justify-content:space-between">
@@ -4107,7 +4109,16 @@
       favorites.addEventListener("click", (event) => {
         const button = event.target.closest("[data-favorite-product]");
         if (!button) return;
-        addProductLineFromFavorite(button.dataset.favoriteProduct);
+        const productId = button.dataset.favoriteProduct;
+        addProductLineFromFavorite(productId);
+        const rows = Array.from(document.querySelectorAll("[data-purchase-item-row]"));
+        const row = rows.find((entry) => entry.querySelector("[data-product-select]").value === productId);
+        if (row) {
+          const shortages = getProductPurchaseShortages(todayISO());
+          const shortage = shortages.find((entry) => entry.productId === productId);
+          const qty = shortage ? (shortage.shortageQuantity || shortage.quantity || 0) : 0;
+          if (qty > 0) row.querySelector("[data-item-qty]").value = formatAmountInput(qty);
+        }
         recalc();
       });
     }
@@ -4570,6 +4581,12 @@
 
   function renderDividePurchases() {
     const assignees = activeAssignees();
+    const allValues = assignees.map((entry) => entry.value);
+    let selected = Array.isArray(ui.divideAssignees) ? ui.divideAssignees : (ui.divideAssignee && ui.divideAssignee !== "all" ? [ui.divideAssignee] : allValues.slice());
+    if (selected.length === 0) selected = allValues.slice();
+    ui.divideAssignees = selected;
+    delete ui.divideAssignee;
+    const isAllSelected = selected.length >= allValues.length;
     const assignables = getDivideAssignables();
     const rows = assignables.map(({ order, item }) => {
         const client = getClient(order.clientId);
@@ -4603,17 +4620,28 @@
           render();
         });
       });
-      const assigneeView = document.getElementById("divide-assignee-view");
-      if (assigneeView) assigneeView.addEventListener("change", () => {
-        ui.divideAssignee = assigneeView.value;
+      const toggleAll = document.getElementById("divide-assignee-toggle-all");
+      if (toggleAll) toggleAll.addEventListener("change", () => {
+        const checkboxes = document.querySelectorAll("[data-divide-assignee]");
+        const nextValues = toggleAll.checked ? allValues.slice() : [];
+        checkboxes.forEach((cb) => cb.checked = toggleAll.checked);
+        ui.divideAssignees = nextValues;
         render();
+      });
+      document.querySelectorAll("[data-divide-assignee]").forEach((checkbox) => {
+        checkbox.addEventListener("change", () => {
+          const checked = Array.from(document.querySelectorAll("[data-divide-assignee]:checked")).map((cb) => cb.dataset.divideAssignee);
+          ui.divideAssignees = checked.length ? checked : allValues.slice();
+          render();
+        });
       });
       document.querySelectorAll("[data-log-item-expense]").forEach((button) => {
         button.addEventListener("click", () => openItemExpenseForm(button.dataset.logItemExpense));
       });
       document.querySelectorAll("[data-copy-divide]").forEach((button) => {
         button.addEventListener("click", async () => {
-          const text = buildDivideClipboardText(button.dataset.copyDivide || ui.divideAssignee || "all");
+          const values = button.dataset.copyDivide ? button.dataset.copyDivide.split(",") : selected;
+          const text = buildDivideClipboardText(values);
           try {
             await navigator.clipboard.writeText(text);
             alert("Texto copiado para WhatsApp.");
@@ -4623,36 +4651,43 @@
         });
       });
       document.querySelectorAll("[data-print-divide]").forEach((button) => {
-        button.addEventListener("click", () => printDivideDocument(button.dataset.printDivide || "all"));
+        button.addEventListener("click", () => {
+          const values = button.dataset.printDivide ? button.dataset.printDivide.split(",") : selected;
+          printDivideDocument(values);
+        });
       });
     });
+    const selectedLabel = isAllSelected ? "Todos" : selected.map((value) => {
+      const entry = assignees.find((a) => a.value === value);
+      return entry ? entry.label : value;
+    }).join(", ");
     return pageShell(
       "Dividir Compras",
       "Agrupacion diaria por producto y por cliente segun la asignacion cargada en Productos.",
       `<button class="btn primary" data-add-provider>Agregar proveedor</button>
        <button class="btn ghost" data-print-divide="all">PDF todos</button>
-       <button class="btn ghost" data-print-divide="${escapeAttr(ui.divideAssignee || "all")}">PDF seleccionado</button>
-       <button class="btn ghost" data-copy-divide="${escapeAttr(ui.divideAssignee || "all")}">Copiar WhatsApp</button>`,
+       <button class="btn ghost" data-print-divide="${escapeAttr(selected.join(","))}">PDF seleccionado</button>
+       <button class="btn ghost" data-copy-divide="${escapeAttr(selected.join(","))}">Copiar WhatsApp</button>`,
       `
       <div class="panel" style="margin-bottom:14px">
         <div class="form-grid">
           <div class="field span-2">
             <label>Empleado o proveedor</label>
-            <select id="divide-assignee-view">
-              <option value="all" ${ui.divideAssignee === "all" ? "selected" : ""}>Todos</option>
-              ${assignees.map((entry) => `<option value="${entry.value}" ${ui.divideAssignee === entry.value ? "selected" : ""}>${escapeHtml(entry.label)}</option>`).join("")}
-            </select>
+            <div class="divide-assignee-checklist">
+              <label class="check-item"><input type="checkbox" id="divide-assignee-toggle-all" value="all" ${isAllSelected ? "checked" : ""} /><span>Todos</span></label>
+              ${assignees.map((entry) => `<label class="check-item"><input type="checkbox" data-divide-assignee="${entry.value}" value="${entry.value}" ${selected.includes(entry.value) ? "checked" : ""} /><span>${escapeHtml(entry.label)}</span></label>`).join("")}
+            </div>
           </div>
         </div>
       </div>
       <div class="grid two">
         <div class="panel">
           <h2 class="page-title" style="font-size:18px">Agrupado por producto</h2>
-          <div class="assigned-group-list">${renderDivideProductGroups(assignables, ui.divideAssignee || "all")}</div>
+          <div class="assigned-group-list">${renderDivideProductGroups(assignables, selected)}</div>
         </div>
         <div class="panel">
           <h2 class="page-title" style="font-size:18px">Agrupado por cliente</h2>
-          <div class="assigned-group-list">${renderDivideClientGroups(assignables, ui.divideAssignee || "all")}</div>
+          <div class="assigned-group-list">${renderDivideClientGroups(assignables, selected)}</div>
         </div>
       </div>
       <div class="panel" style="margin-top:14px">
@@ -4674,14 +4709,24 @@
       .flatMap((order) => order.items.map((item) => ({ order, item })));
   }
 
-  function filterDivideAssignables(assignables, assigneeValue) {
-    if (!assigneeValue || assigneeValue === "all") return assignables;
-    return assignables.filter(({ item }) => getEffectiveItemAssigneeValue(item) === assigneeValue);
+  function filterDivideAssignables(assignables, assigneeValues) {
+    if (!Array.isArray(assigneeValues) || assigneeValues.length === 0 || assigneeValues.includes("all")) return assignables;
+    return assignables.filter(({ item }) => assigneeValues.includes(getEffectiveItemAssigneeValue(item)));
   }
 
-  function renderDivideProductGroups(assignables, assigneeValue) {
-    const filtered = filterDivideAssignables(assignables, assigneeValue);
+  function sortDivideGroupsByAssignee(groups) {
+    return groups.slice().sort((a, b) => {
+      const an = a.assigneeName || "";
+      const bn = b.assigneeName || "";
+      if (an !== bn) return an.localeCompare(bn);
+      return (a.productName || "").localeCompare(b.productName || "");
+    });
+  }
+
+  function renderDivideProductGroups(assignables, assigneeValues) {
+    const filtered = filterDivideAssignables(assignables, assigneeValues);
     if (!filtered.length) return `<div class="empty compact">Sin productos asignados para esta vista.</div>`;
+    const isAll = !Array.isArray(assigneeValues) || assigneeValues.length === 0 || assigneeValues.includes("all");
     const groups = {};
     filtered.forEach(({ order, item }) => {
       const assigned = getAssigneeByValue(getEffectiveItemAssigneeValue(item));
@@ -4691,17 +4736,19 @@
       }
       groups[key].clients[order.clientId] = (groups[key].clients[order.clientId] || 0) + Number(item.quantity || 0);
     });
-    return Object.values(groups).map((group) => `
+    const sorted = sortDivideGroupsByAssignee(Object.values(groups));
+    return sorted.map((group) => `
       <div class="assigned-group">
-        <strong>${escapeHtml(group.productName)}${assigneeValue === "all" ? " - " + escapeHtml(group.assigneeName) : ""}</strong>
-        <span>${Object.keys(group.clients).sort(compareClientIdStrings).map((clientId) => `${escapeHtml(clientId)}) ${formatNumber(group.clients[clientId])}`).join(", ")}</span>
+        <strong>${escapeHtml(group.productName)}${isAll ? " - " + escapeHtml(group.assigneeName) : ""}</strong>
+        <span>${Object.keys(group.clients).sort(compareClientIdStrings).map((clientId) => `${escapeHtml(clientId)}) ${formatNumber(group.clients[clientId])}`).join(" / ")}</span>
       </div>
     `).join("");
   }
 
-  function renderDivideClientGroups(assignables, assigneeValue) {
-    const filtered = filterDivideAssignables(assignables, assigneeValue);
+  function renderDivideClientGroups(assignables, assigneeValues) {
+    const filtered = filterDivideAssignables(assignables, assigneeValues);
     if (!filtered.length) return `<div class="empty compact">Sin productos asignados para esta vista.</div>`;
+    const isAll = !Array.isArray(assigneeValues) || assigneeValues.length === 0 || assigneeValues.includes("all");
     const groups = {};
     filtered.forEach(({ order, item }) => {
       const client = getClient(order.clientId);
@@ -4715,17 +4762,21 @@
         <div class="assigned-group">
           <strong>Pedido del cliente ${escapeHtml(clientId)})</strong>
           <span>${escapeHtml(group.clientName)}</span>
-          <div>${group.items.map((item) => `${formatNumber(item.quantity)} ${escapeHtml(item.unitType)} ${escapeHtml(item.productName)}${assigneeValue === "all" ? " - " + escapeHtml(item.assigneeName) : ""}${item.note ? " (" + escapeHtml(item.note) + ")" : ""}`).join("<br>")}</div>
+          <div>${group.items.map((item) => `${formatNumber(item.quantity)} ${escapeHtml(item.unitType)} ${escapeHtml(item.productName)}${isAll ? " - " + escapeHtml(item.assigneeName) : ""}${item.note ? " (" + escapeHtml(item.note) + ")" : ""}`).join("<br>")}</div>
           <div class="divide-client-spacer" aria-hidden="true">&nbsp;</div>
         </div>
       `;
     }).join("");
   }
 
-  function buildDivideClipboardText(assigneeValue) {
-    const assignables = filterDivideAssignables(getDivideAssignables(), assigneeValue || "all");
-    const assignee = getAssigneeByValue(assigneeValue);
-    const title = "Dividir compras - " + (assignee ? assignee.label : "Todos") + " - " + formatDate(todayISO());
+  function buildDivideClipboardText(assigneeValues) {
+    const assignables = filterDivideAssignables(getDivideAssignables(), assigneeValues);
+    const isAll = !Array.isArray(assigneeValues) || assigneeValues.length === 0 || assigneeValues.includes("all");
+    const labels = isAll ? "Todos" : assigneeValues.map((value) => {
+      const entry = activeAssignees().find((a) => a.value === value);
+      return entry ? entry.label : value;
+    }).join(", ");
+    const title = "Dividir compras - " + labels + " - " + formatDate(todayISO());
     const byProduct = {};
     const byClient = {};
     assignables.forEach(({ order, item }) => {
@@ -4734,33 +4785,39 @@
       if (!byProduct[productKey]) byProduct[productKey] = { name: item.productName, assigneeName: assigned ? assigned.name : "Sin asignar", clients: {} };
       byProduct[productKey].clients[order.clientId] = (byProduct[productKey].clients[order.clientId] || 0) + Number(item.quantity || 0);
       if (!byClient[order.clientId]) byClient[order.clientId] = [];
-      byClient[order.clientId].push(`${formatNumber(item.quantity)} ${item.unitType} ${item.productName}${assigneeValue === "all" ? " - " + (assigned ? assigned.name : "Sin asignar") : ""}`);
+      byClient[order.clientId].push(`${formatNumber(item.quantity)} ${item.unitType} ${item.productName}${isAll ? " - " + (assigned ? assigned.name : "Sin asignar") : ""}`);
     });
-    const productText = Object.values(byProduct).map((group) => {
-      const clients = Object.keys(group.clients).sort(compareClientIdStrings).map((clientId) => `${clientId}) ${formatNumber(group.clients[clientId])}`).join(", ");
-      return `${group.name}${assigneeValue === "all" ? " - " + group.assigneeName : ""}: ${clients}`;
+    const productGroups = Object.values(byProduct);
+    sortDivideGroupsByAssignee(productGroups);
+    const productText = productGroups.map((group) => {
+      const clients = Object.keys(group.clients).sort(compareClientIdStrings).map((clientId) => `${clientId}) ${formatNumber(group.clients[clientId])}`).join(" / ");
+      return `${group.name}${isAll ? " - " + group.assigneeName : ""}: ${clients}`;
     }).join("\n");
     const clientText = Object.keys(byClient).sort(compareClientIdStrings).map((clientId) => `${clientId})\n${byClient[clientId].join("\n")}`).join("\n\n");
     return `${title}\n\nAgrupado por producto\n${productText || "Sin productos"}\n\nAgrupado por cliente\n${clientText || "Sin productos"}`;
   }
 
-  function printDivideDocument(id) {
+  function printDivideDocument(assigneeValues) {
     const assignables = getDivideAssignables();
-    const assignee = getAssigneeByValue(id);
+    const isAll = !Array.isArray(assigneeValues) || assigneeValues.length === 0 || assigneeValues.includes("all");
+    const labels = isAll ? "Todos" : assigneeValues.map((value) => {
+      const entry = activeAssignees().find((a) => a.value === value);
+      return entry ? entry.label : value;
+    }).join(", ");
     const body = `
       <div class="print-compact">
         <h1 style="margin:0 0 2px;font-size:18px">${BUSINESS_NAME}</h1>
-        <h2 style="margin:0 0 2px;font-size:14px">${escapeHtml(tplGet("dividir", "titulo", "Dividir compras"))} - ${escapeHtml(assignee ? assignee.label : "Todos")}</h2>
+        <h2 style="margin:0 0 2px;font-size:14px">${escapeHtml(tplGet("dividir", "titulo", "Dividir compras"))} - ${escapeHtml(labels)}</h2>
         <p style="margin:0 0 8px;font-size:11px">Fecha: ${formatDate(todayISO())}</p>
         <h3 style="margin:6px 0 4px;font-size:12px">Agrupado por producto</h3>
-        ${renderDivideProductGroups(assignables, id || "all")}
+        ${renderDivideProductGroups(assignables, isAll ? "all" : assigneeValues)}
         <h3 style="margin:10px 0 4px;font-size:12px">Agrupado por cliente</h3>
-        <div class="divide-two-col">${renderDivideClientGroups(assignables, id || "all")}</div>
+        <div class="divide-two-col">${renderDivideClientGroups(assignables, isAll ? "all" : assigneeValues)}</div>
       </div>
     `;
-    const title = !id || id === "all"
+    const title = isAll
       ? fileDate(todayISO()) + " Compras"
-      : fileDate(todayISO()) + " Compras " + (assignee ? assignee.label : id);
+      : fileDate(todayISO()) + " Compras " + labels;
     printHtmlDocument(title, body);
   }
 
@@ -5707,6 +5764,25 @@
       if (toInput) toInput.addEventListener("change", () => {
         ui.balanceTo = toInput.value || todayISO();
       });
+      document.querySelectorAll("[data-balance-range]").forEach((button) => button.addEventListener("click", () => {
+        const today = todayISO();
+        const range = button.dataset.balanceRange;
+        if (range === "this-week") {
+          ui.balanceFrom = getWeekMondayISO(today);
+          ui.balanceTo = today;
+        } else if (range === "last-week") {
+          const monday = getWeekMondayISO(today);
+          ui.balanceFrom = addDaysISO(monday, -7);
+          ui.balanceTo = addDaysISO(monday, -1);
+        } else if (range === "30-days") {
+          ui.balanceFrom = addDaysISO(today, -29);
+          ui.balanceTo = today;
+        } else if (range === "this-month") {
+          ui.balanceFrom = getMonthStartISO(today);
+          ui.balanceTo = today;
+        }
+        render();
+      }));
       document.querySelectorAll("[data-show-balance]").forEach((button) => button.addEventListener("click", () => openBalanceHistory(button.dataset.showBalance)));
     });
     return pageShell(
@@ -5715,10 +5791,19 @@
       isClientLikeRole(currentUser.role) ? `<button class="btn blue" data-route="registrar-transferencia">Registrar transferencia</button>` : `<button class="btn blue" data-route="pagos">Registrar pago</button>`,
       `
       <div class="panel" style="margin-bottom:14px">
-        <div class="form-grid">
-          <div class="field"><label>Desde movimientos</label><input type="date" id="balance-from" value="${ui.balanceFrom}" /></div>
-          <div class="field"><label>Hasta movimientos</label><input type="date" id="balance-to" value="${ui.balanceTo}" /></div>
-          <div class="field span-2"><label>&nbsp;</label><span class="muted">El rango se usa al abrir Ver movimientos y al imprimir/exportar.</span></div>
+        <div class="form-grid balance-date-grid">
+          <div class="field balance-date-field"><label>Desde movimientos</label><input type="date" id="balance-from" value="${ui.balanceFrom}" /></div>
+          <div class="field balance-date-field"><label>Hasta movimientos</label><input type="date" id="balance-to" value="${ui.balanceTo}" /></div>
+          <div class="field span-4 balance-range-buttons">
+            <label>&nbsp;</label>
+            <div class="page-actions">
+              <button class="btn ghost" type="button" data-balance-range="this-week">Esta semana</button>
+              <button class="btn ghost" type="button" data-balance-range="last-week">Semana pasada</button>
+              <button class="btn ghost" type="button" data-balance-range="30-days">30 días</button>
+              <button class="btn ghost" type="button" data-balance-range="this-month">Este mes</button>
+            </div>
+          </div>
+          <div class="field span-4"><label>&nbsp;</label><span class="muted">El rango se usa al abrir Ver movimientos y al imprimir/exportar.</span></div>
         </div>
       </div>
       <div class="panel">
@@ -5783,13 +5868,21 @@
         render();
       });
       document.querySelectorAll("[data-balance-range]").forEach((button) => button.addEventListener("click", () => {
+        const today = todayISO();
         const range = button.dataset.balanceRange;
-        if (range === "today") {
-          ui.balanceTo = todayISO();
-        } else {
-          const days = Number(range);
-          ui.balanceTo = todayISO();
-          ui.balanceFrom = addDaysISO(todayISO(), -days);
+        if (range === "this-week") {
+          ui.balanceFrom = getWeekMondayISO(today);
+          ui.balanceTo = today;
+        } else if (range === "last-week") {
+          const monday = getWeekMondayISO(today);
+          ui.balanceFrom = addDaysISO(monday, -7);
+          ui.balanceTo = addDaysISO(monday, -1);
+        } else if (range === "30-days") {
+          ui.balanceFrom = addDaysISO(today, -29);
+          ui.balanceTo = today;
+        } else if (range === "this-month") {
+          ui.balanceFrom = getMonthStartISO(today);
+          ui.balanceTo = today;
         }
         render();
       }));
@@ -5847,12 +5940,18 @@
         </div>
       </div>
       <div class="panel" style="margin-bottom:14px">
-        <div class="form-grid">
-          <div class="field"><label>Desde movimientos</label><input type="date" id="balance-from" value="${ui.balanceFrom}" /></div>
-          <div class="field"><label>Hasta movimientos</label><input type="date" id="balance-to" value="${ui.balanceTo}" /></div>
-          <div class="field"><label>&nbsp;</label><button class="btn ghost" type="button" data-balance-range="today">Hasta hoy</button></div>
-          <div class="field"><label>&nbsp;</label><button class="btn ghost" type="button" data-balance-range="7">Ultimos 7 dias</button></div>
-          <div class="field"><label>&nbsp;</label><button class="btn ghost" type="button" data-balance-range="30">Ultimos 30 dias</button></div>
+        <div class="form-grid balance-date-grid">
+          <div class="field balance-date-field"><label>Desde movimientos</label><input type="date" id="balance-from" value="${ui.balanceFrom}" /></div>
+          <div class="field balance-date-field"><label>Hasta movimientos</label><input type="date" id="balance-to" value="${ui.balanceTo}" /></div>
+          <div class="field span-4 balance-range-buttons">
+            <label>&nbsp;</label>
+            <div class="page-actions">
+              <button class="btn ghost" type="button" data-balance-range="this-week">Esta semana</button>
+              <button class="btn ghost" type="button" data-balance-range="last-week">Semana pasada</button>
+              <button class="btn ghost" type="button" data-balance-range="30-days">30 días</button>
+              <button class="btn ghost" type="button" data-balance-range="this-month">Este mes</button>
+            </div>
+          </div>
           ${accountButtons}
         </div>
       </div>
@@ -6585,17 +6684,20 @@
         ${metricCard("Mi caja", formatMoney(getEmployeeCajaTotal(currentUser.id)), "Cobros registrados a mi nombre")}
       </div>
       <form id="attendance-form" class="panel" style="margin-top:14px">
-        <div class="form-grid">
+        <div class="form-grid attendance-form-grid">
           <div class="field"><label>Fecha</label><input type="date" id="attendance-date" value="${todayEntry ? todayEntry.date : todayISO()}" /></div>
-          <label class="field" style="display:flex;align-items:center;gap:8px;grid-template-columns:auto 1fr">
-            <input type="checkbox" id="attendance-present" style="width:auto;min-height:auto" ${!todayEntry || todayEntry.present ? "checked" : ""} />
-            <span>Presente</span>
-          </label>
+          <div class="field attendance-present-field">
+            <label>Presente</label>
+            <label class="check-item">
+              <input type="checkbox" id="attendance-present" ${!todayEntry || todayEntry.present ? "checked" : ""} />
+              <span>Presente</span>
+            </label>
+          </div>
           <div class="field"><label>Inicio</label><input type="time" id="attendance-start" value="${escapeAttr(todayEntry ? todayEntry.startTime || "05:45" : "05:45")}" /></div>
           <div class="field"><label>Fin del dia</label><input type="time" id="attendance-end" value="${escapeAttr(todayEntry ? todayEntry.endTime || currentTimeHHMM() : currentTimeHHMM())}" /></div>
           <div class="field span-4"><label>Notas</label><input id="attendance-notes" value="${escapeAttr(todayEntry ? todayEntry.notes || "" : "")}" placeholder="Retiro temprano, franco, reemplazo, etc." /></div>
         </div>
-        <div class="page-actions" style="margin-top:12px"><button class="btn primary" type="submit">Guardar horario</button></div>
+        <div class="page-actions attendance-form-actions" style="margin-top:12px"><button class="btn primary" type="submit">Guardar horario</button></div>
       </form>
       <div class="grid two" style="margin-top:14px">
         <form id="employee-reimbursement-form" class="panel">
@@ -9723,6 +9825,20 @@
   function addDaysISO(value, days) {
     const date = parseISODate(value || todayISO());
     date.setDate(date.getDate() + Number(days || 0));
+    return dateToISO(date);
+  }
+
+  function getWeekMondayISO(value) {
+    const date = parseISODate(value || todayISO());
+    const day = date.getDay();
+    const diff = (day === 0 ? -6 : 1) - day;
+    date.setDate(date.getDate() + diff);
+    return dateToISO(date);
+  }
+
+  function getMonthStartISO(value) {
+    const date = parseISODate(value || todayISO());
+    date.setDate(1);
     return dateToISO(date);
   }
 
