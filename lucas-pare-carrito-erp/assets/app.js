@@ -1732,7 +1732,7 @@
         </div>
         <div class="panel">
           <h2 class="page-title" style="font-size:18px">Proximas acciones</h2>
-          <div class="grid" style="margin-top:10px">
+          <div class="grid dash-actions" style="margin-top:10px">
             <button class="btn ghost full" data-route="dividir">Dividir compras por proveedor</button>
             <button class="btn ghost full" data-route="vehiculos">Revisar carga de vehiculos</button>
             <button class="btn ghost full" data-route="unidades">Revisar Unidades</button>
@@ -1979,7 +1979,7 @@
         </div>
         <div class="panel">
           <h2 class="page-title" style="font-size:18px">Acciones permitidas</h2>
-          <div class="grid" style="margin-top:10px">
+          <div class="grid dash-actions" style="margin-top:10px">
             <button class="btn ghost full" data-route="pedidos">Ver pedidos del dia</button>
             <button class="btn ghost full" data-route="vehiculos">Cambiar distribucion de vehiculos</button>
             <button class="btn ghost full" data-route="dividir">Cambiar distribucion de productos</button>
@@ -2102,6 +2102,9 @@
     const showCustomerLateWarning = currentUser.role === "customer" && isTimeBetween("05:30", "11:00");
     const products = sortProductsForClient(client ? client.id : "");
     const categories = getProductCategories();
+    if (!isCustomerOrder && (!Array.isArray(ui.orderSelectedCategories) || ui.orderSelectedCategories.length === 0)) {
+      ui.orderSelectedCategories = categories.slice();
+    }
     const selectedCategories = Array.isArray(ui.orderSelectedCategories) ? ui.orderSelectedCategories : [];
     const allCategoriesSelected = categories.length > 0 && categories.every((cat) => selectedCategories.includes(cat));
     const clientSelectorMarkup = isCustomerOrder
@@ -2354,21 +2357,18 @@
         applySelectedClient(clientSelect.value, true);
       });
     }
-    let previousDate = dateInput.value || todayISO();
     const rejectSunday = (value) => {
       if (!value) return false;
       const date = new Date(value + "T00:00:00");
       return date.getDay() === 0;
     };
-    dateInput.addEventListener("input", () => {
-      if (rejectSunday(dateInput.value)) {
-        alert("No se pueden crear pedidos para domingo");
-        dateInput.value = previousDate;
-      } else {
-        previousDate = dateInput.value || todayISO();
-      }
-    });
-    dateInput.addEventListener("change", () => {
+    if (rejectSunday(dateInput.value)) {
+      const corrected = isCustomerOrder ? getCustomerMinOrderDate() : nextNonSundayISO(todayISO());
+      dateInput.value = corrected;
+      ui.selectedDate = corrected;
+    }
+    let previousDate = dateInput.value || todayISO();
+    const handleDateChange = () => {
       if (rejectSunday(dateInput.value)) {
         alert("No se pueden crear pedidos para domingo");
         dateInput.value = previousDate;
@@ -2382,7 +2382,17 @@
         previousDate = ui.selectedDate;
         alert("No se puede cargar un pedido para una fecha anterior a la permitida.");
       }
+    };
+    dateInput.addEventListener("input", () => {
+      if (rejectSunday(dateInput.value)) {
+        alert("No se pueden crear pedidos para domingo");
+        dateInput.value = previousDate;
+      } else {
+        previousDate = dateInput.value || todayISO();
+      }
     });
+    dateInput.addEventListener("change", handleDateChange);
+    dateInput.addEventListener("blur", handleDateChange);
     document.querySelectorAll("[data-qty],[data-price]").forEach((input) => input.addEventListener("input", recalc));
     document.getElementById("order-cart").addEventListener("click", (event) => {
       const button = event.target.closest("[data-remove-cart-item]");
@@ -3927,7 +3937,7 @@
                 <select id="purchase-provider">
                   ${activeProviders().map((provider) => `<option value="${provider.id}" ${firstProvider && firstProvider.id === provider.id ? "selected" : ""}>${escapeHtml(provider.name)}</option>`).join("")}
                 </select>
-                <button class="btn small ghost" type="button" data-add-provider>Agregar proveedor</button>
+                <button class="btn small ghost" type="button" data-add-provider>Agregar</button>
               </div>
             </div>
             <div class="field" id="purchase-payment-status-wrap">
@@ -4840,7 +4850,7 @@
       "Dividir Compras",
       "Agrupacion diaria por producto y por cliente segun la asignacion cargada en Productos.",
       `<div class="divide-page-actions">
-         <button class="btn primary" data-add-provider>Agregar proveedor</button>
+         <button class="btn primary" data-add-provider>Agregar</button>
          <button class="btn ghost" data-print-divide="all">PDF todos</button>
          <button class="btn ghost" data-print-divide="${escapeAttr(selected.join(","))}">PDF seleccionado</button>
        </div>
@@ -6688,7 +6698,7 @@
     return pageShell(
       "Proveedores",
       "Alta y mantenimiento de proveedores para compras y division.",
-      `<button class="btn primary" data-add-provider>Agregar proveedor</button>`,
+      `<button class="btn primary" data-add-provider>Agregar</button>`,
       `
       ${renderTabs()}
       <div class="panel" style="margin-bottom:14px">
@@ -10196,7 +10206,8 @@
   }
 
   function getCustomerMinOrderDate() {
-    return currentTimeHHMM() >= "05:30" ? addDaysISO(todayISO(), 1) : todayISO();
+    const base = currentTimeHHMM() >= "05:30" ? addDaysISO(todayISO(), 1) : todayISO();
+    return nextNonSundayISO(base);
   }
 
   function addDaysISO(value, days) {
@@ -11646,6 +11657,17 @@
     const offset = date.getTimezoneOffset();
     const local = new Date(date.getTime() - offset * 60000);
     return local.toISOString().slice(0, 10);
+  }
+
+  function isSundayISO(dateISO) {
+    if (!dateISO) return false;
+    const date = new Date(dateISO + "T00:00:00");
+    return date.getDay() === 0;
+  }
+
+  function nextNonSundayISO(dateISO) {
+    if (!isSundayISO(dateISO)) return dateISO;
+    return addDaysISO(dateISO, 1);
   }
 
   function formatDate(value) {
