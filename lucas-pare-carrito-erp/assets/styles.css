@@ -3099,13 +3099,13 @@ tr:last-child td {
     font-size: 11px;
   }
 
-  #purchase-form > .form-grid.purchase-form-grid #purchase-date-wrap { grid-column: span 2; }
-  #purchase-form > .form-grid.purchase-form-grid #purchase-kind-wrap { grid-column: span 1; }
-  #purchase-form > .form-grid.purchase-form-grid #purchase-provider-wrap { grid-column: span 2; }
-  #purchase-form > .form-grid.purchase-form-grid #purchase-payment-status-wrap { grid-column: span 1; }
-  #purchase-form > .form-grid.purchase-form-grid #purchase-cash-box-wrap { grid-column: span 1; }
-  #purchase-form > .form-grid.purchase-form-grid #purchase-total-wrap { grid-column: span 1; }
-  #purchase-form > .form-grid.purchase-form-grid #purchase-notes-wrap { grid-column: span 1; }
+  #purchase-form > .form-grid.purchase-form-grid #purchase-date-wrap { grid-column: 1 / 3; grid-row: 1; }
+  #purchase-form > .form-grid.purchase-form-grid #purchase-kind-wrap { grid-column: 3; grid-row: 1; }
+  #purchase-form > .form-grid.purchase-form-grid #purchase-provider-wrap { grid-column: 1 / 3; grid-row: 2; }
+  #purchase-form > .form-grid.purchase-form-grid #purchase-cash-box-wrap { grid-column: 3; grid-row: 2; }
+  #purchase-form > .form-grid.purchase-form-grid #purchase-payment-status-wrap { grid-column: 1; grid-row: 3; }
+  #purchase-form > .form-grid.purchase-form-grid #purchase-total-wrap { grid-column: 2; grid-row: 3; }
+  #purchase-form > .form-grid.purchase-form-grid #purchase-notes-wrap { grid-column: 3; grid-row: 3; }
 
   #purchase-form > .form-grid.purchase-form-grid #purchase-vendor-wrap,
   #purchase-form > .form-grid.purchase-form-grid #purchase-assigned-employee-wrap {
@@ -3127,9 +3127,28 @@ tr:last-child td {
   }
 
   .order-edit-line,
-  .payment-order-line,
   .cart-line {
     grid-template-columns: 1fr;
+  }
+
+  .payment-order-line {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 6px;
+    align-items: end;
+  }
+
+  .payment-order-line select {
+    min-width: 0;
+    font-size: 11px;
+    padding: 3px 5px;
+    min-height: 34px;
+  }
+
+  .payment-order-line .btn.small.ghost {
+    min-height: 34px;
+    padding: 0 8px;
+    font-size: 12px;
   }
 
   .cart-line .btn.icon {
