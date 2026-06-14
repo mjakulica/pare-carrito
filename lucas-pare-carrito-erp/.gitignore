@@ -1,0 +1,14 @@
+# Backups locales generados durante ediciones
+*.bak.*
+*.backup-*
+
+# Logs del servidor local
+server.log
+*.log
+
+# Dependencias
+node_modules/
+
+# Variables de entorno
+.env
+.env.save

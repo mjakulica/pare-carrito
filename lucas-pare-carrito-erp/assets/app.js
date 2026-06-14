@@ -4704,7 +4704,6 @@
     const assignees = activeAssignees();
     const allValues = assignees.map((entry) => entry.value);
     let selected = Array.isArray(ui.divideAssignees) ? ui.divideAssignees : (ui.divideAssignee && ui.divideAssignee !== "all" ? [ui.divideAssignee] : allValues.slice());
-    if (selected.length === 0) selected = allValues.slice();
     ui.divideAssignees = selected;
     delete ui.divideAssignee;
     const isAllSelected = selected.length >= allValues.length;
@@ -4741,18 +4740,16 @@
           render();
         });
       });
-      const toggleAll = document.getElementById("divide-assignee-toggle-all");
-      if (toggleAll) toggleAll.addEventListener("change", () => {
-        const checkboxes = document.querySelectorAll("[data-divide-assignee]");
-        const nextValues = toggleAll.checked ? allValues.slice() : [];
-        checkboxes.forEach((cb) => cb.checked = toggleAll.checked);
-        ui.divideAssignees = nextValues;
-        render();
+      document.querySelectorAll("[data-divide-assignee-all]").forEach((button) => {
+        button.addEventListener("click", () => {
+          ui.divideAssignees = isAllSelected ? [] : allValues.slice();
+          render();
+        });
       });
-      document.querySelectorAll("[data-divide-assignee]").forEach((checkbox) => {
-        checkbox.addEventListener("change", () => {
-          const checked = Array.from(document.querySelectorAll("[data-divide-assignee]:checked")).map((cb) => cb.dataset.divideAssignee);
-          ui.divideAssignees = checked.length ? checked : allValues.slice();
+      document.querySelectorAll("[data-divide-assignee]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const value = button.dataset.divideAssignee;
+          ui.divideAssignees = selected.includes(value) ? selected.filter((v) => v !== value) : [...selected, value];
           render();
         });
       });
@@ -4774,29 +4771,33 @@
       document.querySelectorAll("[data-print-divide]").forEach((button) => {
         button.addEventListener("click", () => {
           const values = button.dataset.printDivide ? button.dataset.printDivide.split(",") : selected;
+          if (window.innerWidth <= 760) {
+            const isAll = !Array.isArray(values) || values.length === 0 || values.includes("all");
+            const route = isAll ? "dividir/imprimir/all" : "dividir/imprimir/" + encodeURIComponent(values.join(","));
+            navigate(route);
+            return;
+          }
           printDivideDocument(values);
         });
       });
     });
-    const selectedLabel = isAllSelected ? "Todos" : selected.map((value) => {
-      const entry = assignees.find((a) => a.value === value);
-      return entry ? entry.label : value;
-    }).join(", ");
     return pageShell(
       "Dividir Compras",
       "Agrupacion diaria por producto y por cliente segun la asignacion cargada en Productos.",
-      `<button class="btn primary" data-add-provider>Agregar proveedor</button>
-       <button class="btn ghost" data-print-divide="all">PDF todos</button>
-       <button class="btn ghost" data-print-divide="${escapeAttr(selected.join(","))}">PDF seleccionado</button>
-       <button class="btn ghost" data-copy-divide="${escapeAttr(selected.join(","))}">Copiar WhatsApp</button>`,
+      `<div class="divide-page-actions">
+         <button class="btn primary" data-add-provider>Agregar proveedor</button>
+         <button class="btn ghost" data-print-divide="all">PDF todos</button>
+         <button class="btn ghost" data-print-divide="${escapeAttr(selected.join(","))}">PDF seleccionado</button>
+         <button class="btn ghost" data-copy-divide="${escapeAttr(selected.join(","))}">Copiar WhatsApp</button>
+       </div>`,
       `
       <div class="panel" style="margin-bottom:14px">
         <div class="form-grid">
           <div class="field span-2">
             <label>Empleado o proveedor</label>
             <div class="divide-assignee-checklist">
-              <label class="check-item"><input type="checkbox" id="divide-assignee-toggle-all" value="all" ${isAllSelected ? "checked" : ""} /><span>Todos</span></label>
-              ${assignees.map((entry) => `<label class="check-item"><input type="checkbox" data-divide-assignee="${entry.value}" value="${entry.value}" ${selected.includes(entry.value) ? "checked" : ""} /><span>${escapeHtml(entry.label)}</span></label>`).join("")}
+              <button type="button" class="btn small ${isAllSelected ? "primary" : "ghost"}" data-divide-assignee-all>Todos</button>
+              ${assignees.map((entry) => `<button type="button" class="btn small ${selected.includes(entry.value) ? "primary" : "ghost"}" data-divide-assignee="${entry.value}">${escapeHtml(entry.label)}</button>`).join("")}
             </div>
           </div>
         </div>
@@ -4831,7 +4832,8 @@
   }
 
   function filterDivideAssignables(assignables, assigneeValues) {
-    if (!Array.isArray(assigneeValues) || assigneeValues.length === 0 || assigneeValues.includes("all")) return assignables;
+    if (!Array.isArray(assigneeValues) || assigneeValues.includes("all")) return assignables;
+    if (assigneeValues.length === 0) return [];
     return assignables.filter(({ item }) => assigneeValues.includes(getEffectiveItemAssigneeValue(item)));
   }
 
@@ -4847,7 +4849,7 @@
   function renderDivideProductGroups(assignables, assigneeValues) {
     const filtered = filterDivideAssignables(assignables, assigneeValues);
     if (!filtered.length) return `<div class="empty compact">Sin productos asignados para esta vista.</div>`;
-    const isAll = !Array.isArray(assigneeValues) || assigneeValues.length === 0 || assigneeValues.includes("all");
+    const isAll = !Array.isArray(assigneeValues) || assigneeValues.includes("all");
     const groups = {};
     filtered.forEach(({ order, item }) => {
       const assigned = getAssigneeByValue(getEffectiveItemAssigneeValue(item));
@@ -4869,7 +4871,7 @@
   function renderDivideClientGroups(assignables, assigneeValues) {
     const filtered = filterDivideAssignables(assignables, assigneeValues);
     if (!filtered.length) return `<div class="empty compact">Sin productos asignados para esta vista.</div>`;
-    const isAll = !Array.isArray(assigneeValues) || assigneeValues.length === 0 || assigneeValues.includes("all");
+    const isAll = !Array.isArray(assigneeValues) || assigneeValues.includes("all");
     const groups = {};
     filtered.forEach(({ order, item }) => {
       const client = getClient(order.clientId);
@@ -4892,11 +4894,11 @@
 
   function buildDivideClipboardText(assigneeValues) {
     const assignables = filterDivideAssignables(getDivideAssignables(), assigneeValues);
-    const isAll = !Array.isArray(assigneeValues) || assigneeValues.length === 0 || assigneeValues.includes("all");
-    const labels = isAll ? "Todos" : assigneeValues.map((value) => {
+    const isAll = !Array.isArray(assigneeValues) || assigneeValues.includes("all");
+    const labels = assigneeValues.length === 0 ? "Ninguno" : (isAll ? "Todos" : assigneeValues.map((value) => {
       const entry = activeAssignees().find((a) => a.value === value);
       return entry ? entry.label : value;
-    }).join(", ");
+    }).join(", "));
     const title = "Dividir compras - " + labels + " - " + formatDate(todayISO());
     const byProduct = {};
     const byClient = {};
@@ -4920,11 +4922,11 @@
 
   function printDivideDocument(assigneeValues) {
     const assignables = getDivideAssignables();
-    const isAll = !Array.isArray(assigneeValues) || assigneeValues.length === 0 || assigneeValues.includes("all");
-    const labels = isAll ? "Todos" : assigneeValues.map((value) => {
+    const isAll = !Array.isArray(assigneeValues) || assigneeValues.includes("all");
+    const labels = assigneeValues.length === 0 ? "Ninguno" : (isAll ? "Todos" : assigneeValues.map((value) => {
       const entry = activeAssignees().find((a) => a.value === value);
       return entry ? entry.label : value;
-    }).join(", ");
+    }).join(", "));
     const body = `
       <div class="print-compact">
         <h1 style="margin:0 0 2px;font-size:18px">${BUSINESS_NAME}</h1>
@@ -4986,7 +4988,7 @@
               <div class="muted">${escapeHtml(vehicle.type)} ${vehicle.driverName ? "- " + escapeHtml(vehicle.driverName) : ""}</div>
             </div>
             <div class="page-actions">
-              <button class="btn small ghost" data-print-vehicle="${vehicle.id}">Imprimir</button>
+              <button class="btn small ghost" data-print-vehicle="${vehicle.id}">&#128424;</button>
               ${canManageVehicles ? `<button class="btn small ghost" data-edit-vehicle="${vehicle.id}">Editar</button><button class="btn small danger" data-delete-vehicle="${vehicle.id}">Borrar</button>` : ""}
             </div>
           </div>
@@ -5007,20 +5009,18 @@
     return pageShell(
       "Vehiculos",
       "Carga por vehiculo con suma consolidada de productos.",
-      `<button class="btn ghost" data-print-vehicle="all">Imprimir todos los vehiculos</button>
-       <button class="btn ghost" data-print-vehicle="flat">Imprimir sin dividir</button>
-       ${canManageVehicles ? `<button class="btn primary" data-add-vehicle>Agregar vehiculo</button>` : ""}`,
-      `
-      <div class="panel" style="margin-bottom:14px">
-        <div class="form-grid">
-          <div class="field">
-            <label>Fecha</label>
-            <input type="date" id="vehicle-date" value="${date}" />
-          </div>
-        </div>
-      </div>
-      <div class="vehicle-board">${columns}</div>
-      `,
+      `<div class="vehicle-page-actions">
+         <div class="field vehicle-date-field">
+           <label>Fecha</label>
+           <input type="date" id="vehicle-date" value="${date}" />
+         </div>
+         <button class="btn ghost" data-print-vehicle="all">&#128424; Todos</button>
+         <button class="btn ghost" data-print-vehicle="flat">&#128424; Sin dividir</button>
+         <button class="btn ghost" data-copy-vehicle="all">${WHATSAPP_SVG} Todos</button>
+         <button class="btn ghost" data-copy-vehicle="flat">${WHATSAPP_SVG} Sin dividir</button>
+         ${canManageVehicles ? `<button class="btn primary" data-add-vehicle>Agregar vehiculo</button>` : ""}
+       </div>`,
+      `<div class="vehicle-board">${columns}</div>`,
       "vehiculos"
     );
   }
@@ -5075,6 +5075,18 @@
     });
     document.querySelectorAll("[data-print-vehicle]").forEach((button) => {
       button.addEventListener("click", () => printVehicleDirect(button.dataset.printVehicle));
+    });
+    document.querySelectorAll("[data-copy-vehicle]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const date = ui.vehicleDate || todayISO();
+        const text = button.dataset.copyVehicle === "flat" ? buildVehicleFlatText(date) : buildVehicleAllText(date);
+        try {
+          await navigator.clipboard.writeText(text);
+          alert("Texto copiado para WhatsApp.");
+        } catch (error) {
+          prompt("Copie este texto para WhatsApp", text);
+        }
+      });
     });
   }
 
@@ -5200,6 +5212,55 @@
     return `<div class="product-sum-grid">${lines}</div>`;
   }
 
+  function buildVehicleAllText(date) {
+    const vehicles = activeVehicles();
+    const title = `${BUSINESS_NAME} - Vehiculos - ${formatDate(date)}`;
+    const parts = [title];
+    vehicles.forEach((vehicle) => {
+      const totals = getVehicleTotals(vehicle.id, date);
+      const productTotals = Object.values(totals.products).sort((a, b) => a.productName.localeCompare(b.productName));
+      parts.push(`\n${vehicle.name}${vehicle.driverName ? " - " + vehicle.driverName : ""}`);
+      parts.push(`Pedidos: ${totals.orders.length} | Items: ${totals.itemCount} | Valor: ${formatMoney(totals.totalValue)}`);
+      totals.orders.forEach((order) => {
+        const client = getClient(order.clientId);
+        parts.push(`  ${order.id} - ${client ? client.name : order.clientId} - ${formatMoney(order.totalAmount)}`);
+        order.items.forEach((item) => {
+          parts.push(`    ${formatNumber(item.quantity)} ${item.unitType} ${item.productName}${item.note ? " (" + item.note + ")" : ""}`);
+        });
+      });
+      parts.push("Totales de carga:");
+      productTotals.forEach((item) => parts.push(`  ${item.productName}: ${formatNumber(item.quantity)} ${item.unitType}`));
+    });
+    return parts.join("\n");
+  }
+
+  function buildVehicleFlatText(date) {
+    const orders = ordersByDate(date);
+    const totals = {};
+    orders.forEach((order) => {
+      order.items.forEach((item) => {
+        const product = getProduct(item.productId);
+        if (product && product.showInVehicleTotals === false) return;
+        const key = item.productId + "|" + item.unitType;
+        if (!totals[key]) totals[key] = { productName: item.productName, unitType: item.unitType, quantity: 0 };
+        totals[key].quantity += Number(item.quantity || 0);
+      });
+    });
+    const productTotals = Object.values(totals).sort((a, b) => a.productName.localeCompare(b.productName));
+    const title = `${BUSINESS_NAME} - Pedidos sin dividir - ${formatDate(date)}`;
+    const lines = [title, ""];
+    orders.forEach((order) => {
+      const client = getClient(order.clientId);
+      lines.push(`${order.id} - ${client ? client.name : order.clientId} - Vehiculo: ${getVehicleName(order.deliveryVehicleId)} - ${formatMoney(order.totalAmount)}`);
+      order.items.forEach((item) => {
+        lines.push(`  ${formatNumber(item.quantity)} ${item.unitType} ${item.productName}${item.note ? " (" + item.note + ")" : ""}`);
+      });
+    });
+    lines.push("", "Sumatoria total de productos:");
+    productTotals.forEach((item) => lines.push(`${item.productName}: ${formatNumber(item.quantity)} ${item.unitType}`));
+    return lines.join("\n");
+  }
+
   function renderRemitos() {
     const todaysNotes = getTodaysProductNotes();
     const missingPurchases = getProductPurchaseShortages(todayISO());
@@ -5267,6 +5328,10 @@
       });
       document.querySelectorAll("[data-export-today-remitos]").forEach((button) => {
         button.addEventListener("click", () => {
+          if (window.innerWidth <= 760) {
+            navigate("remitos/imprimir-hoy");
+            return;
+          }
           if (todaysNotes.length && !confirm("Todavia hay notas en productos de pedidos de hoy. Exportar igual?")) return;
           if (missingPurchases.length && !confirm("Hay productos de hoy sin compra registrada. Exportar igual?")) return;
           printTodayRemitosDirect();
@@ -5614,6 +5679,10 @@
     });
     document.querySelectorAll("[data-export-today-remitos]").forEach((button) => {
       button.addEventListener("click", () => {
+        if (window.innerWidth <= 760) {
+          navigate("remitos/imprimir-hoy");
+          return;
+        }
         const date = ui.unitsDate || todayISO();
         const unitItems = getUnitWeightGroups(date).filter((group) => group.unitProduct && group.pendingEntries.length);
         const missingPurchases = getProductPurchaseShortages(date);
@@ -5713,7 +5782,7 @@
               <label>Metodo</label>
               <select id="payment-method">${methods.map((method) => `<option value="${method}">${escapeHtml(PAYMENT_METHODS[method])}</option>`).join("")}</select>
             </div>
-            <div class="field">
+            <div class="field payment-receiver-field">
               <label>Quien recibio</label>
               <select id="payment-receiver" ${currentUser.role === "employee" ? "disabled" : ""}>
                 ${(currentUser.role === "employee" ? [currentUser] : activeCashReceivers()).map((employee) => `<option value="${employee.id}" ${employee.id === currentUser.id ? "selected" : ""}>${escapeHtml(employee.name)} - ${escapeHtml(roleLabel(employee.role))}</option>`).join("")}
@@ -6799,28 +6868,27 @@
       "Registro de presencialidad y finalizacion del dia.",
       "",
       `
-      <div class="grid three">
+      <div class="grid two attendance-top-grid">
         ${metricCard("Horas semana", summary.hoursText, formatDate(summary.weekStart) + " - " + formatDate(summary.weekEnd))}
-        ${metricCard("Cobro semana", formatMoney(summary.due), "Disponible los sabados segun planilla")}
         ${metricCard("Mi caja", formatMoney(getEmployeeCajaTotal(currentUser.id)), "Cobros registrados a mi nombre")}
       </div>
-      <form id="attendance-form" class="panel" style="margin-top:14px">
-        <div class="form-grid attendance-form-grid">
-          <div class="field"><label>Fecha</label><input type="date" id="attendance-date" value="${todayEntry ? todayEntry.date : todayISO()}" /></div>
-          <div class="field attendance-present-field">
-            <label>Presente</label>
-            <label class="check-item">
-              <input type="checkbox" id="attendance-present" ${!todayEntry || todayEntry.present ? "checked" : ""} />
-              <span>Presente</span>
-            </label>
+      <div class="grid two attendance-middle-grid" style="margin-top:14px">
+        <form id="attendance-form" class="panel">
+          <div class="form-grid attendance-form-grid">
+            <div class="field"><label>Fecha</label><input type="date" id="attendance-date" value="${todayEntry ? todayEntry.date : todayISO()}" /></div>
+            <div class="field attendance-present-field">
+              <label>Presente</label>
+              <label class="check-item">
+                <input type="checkbox" id="attendance-present" ${!todayEntry || todayEntry.present ? "checked" : ""} />
+                <span>Presente</span>
+              </label>
+            </div>
+            <div class="field"><label>Inicio</label><input type="time" id="attendance-start" value="${escapeAttr(todayEntry ? todayEntry.startTime || "05:45" : "05:45")}" /></div>
+            <div class="field"><label>Fin del dia</label><input type="time" id="attendance-end" value="${escapeAttr(todayEntry ? todayEntry.endTime || currentTimeHHMM() : currentTimeHHMM())}" /></div>
+            <div class="field span-4"><label>Notas</label><input id="attendance-notes" value="${escapeAttr(todayEntry ? todayEntry.notes || "" : "")}" placeholder="Retiro temprano, franco, reemplazo, etc." /></div>
           </div>
-          <div class="field"><label>Inicio</label><input type="time" id="attendance-start" value="${escapeAttr(todayEntry ? todayEntry.startTime || "05:45" : "05:45")}" /></div>
-          <div class="field"><label>Fin del dia</label><input type="time" id="attendance-end" value="${escapeAttr(todayEntry ? todayEntry.endTime || currentTimeHHMM() : currentTimeHHMM())}" /></div>
-          <div class="field span-4"><label>Notas</label><input id="attendance-notes" value="${escapeAttr(todayEntry ? todayEntry.notes || "" : "")}" placeholder="Retiro temprano, franco, reemplazo, etc." /></div>
-        </div>
-        <div class="page-actions attendance-form-actions" style="margin-top:12px"><button class="btn primary" type="submit">Guardar horario</button></div>
-      </form>
-      <div class="grid two" style="margin-top:14px">
+          <div class="page-actions attendance-form-actions" style="margin-top:12px"><button class="btn primary" type="submit">Guardar horario</button></div>
+        </form>
         <form id="employee-reimbursement-form" class="panel">
           <h2 class="page-title" style="font-size:18px">Gastos para reintegro</h2>
           <div class="form-grid" style="margin-top:10px">
@@ -6830,17 +6898,17 @@
           </div>
           <div class="page-actions" style="margin-top:12px"><button class="btn primary" type="submit">Registrar reintegro</button></div>
         </form>
-        <form id="employee-salary-collection-form" class="panel">
-          <h2 class="page-title" style="font-size:18px">Cobro de sueldo</h2>
-          <div class="form-grid" style="margin-top:10px">
-            <div class="field"><label>Fecha</label><input type="date" id="salary-collection-date" value="${todayISO()}" /></div>
-            <div class="field"><label>Tipo</label><select id="salary-collection-mode"><option value="total">Total</option><option value="partial">Pago parcial</option></select></div>
-            <div class="field"><label>Monto</label><input id="salary-collection-amount" inputmode="decimal" value="${formatAmountInput(summary.due)}" /></div>
-            <div class="field span-2"><label>Notas</label><input id="salary-collection-notes" placeholder="Cobro semanal, adelanto..." /></div>
-          </div>
-          <div class="page-actions" style="margin-top:12px"><button class="btn primary" type="submit">Registrar cobro</button></div>
-        </form>
       </div>
+      <form id="employee-salary-collection-form" class="panel" style="margin-top:14px">
+        <h2 class="page-title" style="font-size:16px">Cobro semana ${formatMoney(summary.due)}</h2>
+        <div class="form-grid" style="margin-top:10px">
+          <div class="field"><label>Fecha</label><input type="date" id="salary-collection-date" value="${todayISO()}" /></div>
+          <div class="field"><label>Tipo</label><select id="salary-collection-mode"><option value="total">Total</option><option value="partial">Pago parcial</option></select></div>
+          <div class="field"><label>Monto</label><input id="salary-collection-amount" inputmode="decimal" value="${formatAmountInput(summary.due)}" /></div>
+          <div class="field span-2"><label>Notas</label><input id="salary-collection-notes" placeholder="Cobro semanal, adelanto..." /></div>
+        </div>
+        <div class="page-actions" style="margin-top:12px"><button class="btn primary" type="submit">Registrar cobro</button></div>
+      </form>
       <div class="panel" style="margin-top:14px">
         <div class="table-wrap">
           <table>
@@ -7725,9 +7793,9 @@
       if (!normalized) return alert("Ingrese un nombre de unidad.");
       const types = getUnitTypes();
       if (normalized !== name && types.some((u) => u.name === normalized)) return alert("Esa unidad ya existe.");
-      const wholesale = confirm("Marcar como producto mayorista?");
       const weightPrompt = prompt("Peso en kg para rendicion (ej: 1 para kg, 12 para docena):", unit.weight);
       const weight = parseAmount(weightPrompt);
+      const wholesale = confirm("Marcar como producto mayorista?");
       state.appSettings.unitTypes = types.map((u) => u.name === name ? { name: normalized, wholesale, weight: weight > 0 ? weight : 1 } : u);
       state.products.filter((product) => product.unitType === name).forEach((product) => { product.unitType = normalized; });
       saveState();

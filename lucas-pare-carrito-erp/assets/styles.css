@@ -291,6 +291,14 @@ a {
   gap: 8px;
 }
 
+.divide-page-actions,
+.vehicle-page-actions {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .topbar .page-actions {
   position: relative;
 }
@@ -2308,10 +2316,17 @@ tr:last-child td {
   }
 
   .payment-form-grid .field.payment-client-field,
+  .payment-form-grid .field.payment-receiver-field,
   .payment-form-grid .field.payment-orders-field,
   .payment-form-grid .field.payment-notes-field,
   .payment-form-grid #transfer-upload-wrap {
     grid-column: span 2;
+  }
+
+  .payment-form-grid .field.payment-client-field select {
+    font-size: 13px;
+    padding: 5px 7px;
+    min-height: 34px;
   }
 
   .payment-form-grid label {
@@ -2320,21 +2335,21 @@ tr:last-child td {
 
   .payment-form-grid input,
   .payment-form-grid select {
-    min-height: 36px;
-    padding: 6px 8px;
+    min-height: 34px;
+    padding: 5px 7px;
     font-size: 13px;
   }
 
   .payment-form-grid .page-actions .btn {
-    min-height: 34px;
-    padding: 0 10px;
+    min-height: 32px;
+    padding: 0 8px;
     font-size: 12px;
   }
 
   .payment-order-line .btn.small.ghost {
-    min-height: 32px;
+    min-height: 30px;
     padding: 0 6px;
-    font-size: 12px;
+    font-size: 11px;
   }
 
   .payment-amount-field,
@@ -2355,17 +2370,79 @@ tr:last-child td {
   }
 
   .attendance-form-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .attendance-form-grid .field {
+    min-width: 0;
   }
 
   .attendance-form-grid .field.span-4 {
-    grid-column: span 2;
+    grid-column: 1 / -1;
+  }
+
+  .attendance-form-grid label {
+    font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .attendance-form-grid input,
+  .attendance-form-grid select {
+    min-height: 34px;
+    padding: 5px 6px;
+    font-size: 12px;
   }
 
   .attendance-form-actions .btn {
     width: 100%;
-    min-height: 44px;
+    min-height: 40px;
+  }
+
+  .grid.two.attendance-top-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .grid.two.attendance-top-grid .metric-value {
+    font-size: 20px;
+  }
+
+  .grid.two.attendance-top-grid .metric-note {
+    font-size: 11px;
+  }
+
+  .grid.two.attendance-middle-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    align-items: start;
+  }
+
+  .grid.two.attendance-middle-grid .panel {
+    padding: 10px;
+  }
+
+  .grid.two.attendance-middle-grid .page-title {
+    font-size: 15px;
+  }
+
+  .grid.two.attendance-middle-grid label {
+    font-size: 11px;
+  }
+
+  .grid.two.attendance-middle-grid input,
+  .grid.two.attendance-middle-grid select {
+    min-height: 34px;
+    padding: 5px 6px;
+    font-size: 12px;
+  }
+
+  .grid.two.attendance-middle-grid .btn {
+    min-height: 36px;
+    font-size: 12px;
+    padding: 0 10px;
   }
 
   .order-row {
@@ -2408,11 +2485,128 @@ tr:last-child td {
   }
 
   .purchase-line {
-    grid-template-columns: 1fr;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 76px 42px;
+    grid-template-rows: auto auto;
+    gap: 6px;
+    align-items: end;
+  }
+
+  .purchase-line .field:nth-child(1) {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .purchase-line .field:nth-child(2) {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .purchase-line .field:nth-child(3) {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .purchase-line .field:nth-child(4) {
+    display: none;
+  }
+
+  .purchase-line .field:nth-child(5) {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  .purchase-line .field:nth-child(6) {
+    grid-column: 3;
+    grid-row: 2;
   }
 
   .purchase-line .btn.small.ghost {
-    justify-self: start;
+    grid-column: 3;
+    grid-row: 1;
+    justify-self: stretch;
+    align-self: end;
+  }
+
+  .market-price-mode .purchase-line {
+    grid-template-columns: minmax(0, 1fr) 90px 42px;
+    grid-template-rows: auto;
+  }
+
+  .market-price-mode .purchase-line .field:nth-child(1) {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .market-price-mode .purchase-line .field:nth-child(5) {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .market-price-mode .purchase-line .field:nth-child(6) {
+    grid-column: auto;
+    grid-row: auto;
+  }
+
+  .market-price-mode .purchase-line .btn.small.ghost {
+    grid-column: 3;
+    grid-row: 1;
+  }
+
+  .divide-page-actions {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+    width: 100%;
+  }
+
+  .divide-page-actions .btn {
+    font-size: 11px;
+    padding: 0 4px;
+    min-height: 38px;
+  }
+
+  .divide-assignee-checklist {
+    gap: 6px;
+  }
+
+  .divide-assignee-checklist .btn.small {
+    min-height: 34px;
+    padding: 0 8px;
+    font-size: 12px;
+  }
+
+  .vehicle-page-actions {
+    display: grid;
+    grid-template-columns: 100px repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    width: 100%;
+  }
+
+  .vehicle-page-actions .vehicle-date-field {
+    margin: 0;
+  }
+
+  .vehicle-page-actions .vehicle-date-field label {
+    font-size: 11px;
+  }
+
+  .vehicle-page-actions .vehicle-date-field input {
+    min-height: 38px;
+    font-size: 12px;
+    padding: 5px;
+  }
+
+  .vehicle-page-actions .btn {
+    font-size: 11px;
+    padding: 0 4px;
+    min-height: 38px;
+    gap: 4px;
+  }
+
+  .vehicle-page-actions .btn svg {
+    width: 16px;
+    height: 16px;
   }
 
   #purchase-form > .form-grid.purchase-form-grid {
