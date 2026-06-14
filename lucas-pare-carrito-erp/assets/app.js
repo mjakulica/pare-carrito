@@ -22,6 +22,112 @@
     { name: "bandeja", wholesale: false, weight: 1 }
   ];
   const CATEGORIES = ["FRUTAS", "VERDURAS", "HUEVOS", "OTROS"];
+  const PRODUCT_IMAGE_FILES = [
+  "acelga.jpg",
+  "aji_picante_kg.jpg",
+  "ajo_cabeza.jpg",
+  "ajo_ristra.jpg",
+  "albahaca_unidad.jpg",
+  "apio.jpg",
+  "arveja_kg.jpg",
+  "banana_cajon.jpg",
+  "bananas_docena.jpg",
+  "batata_bolsa.jpg",
+  "batata_kg.jpg",
+  "berenjena_jaula.jpg",
+  "berenjena_kg.jpg",
+  "brocoli.jpg",
+  "calabaza unidad.jpg",
+  "calabaza_bolsa_chica.jpg",
+  "calabaza_kg.jpg",
+  "cebolla_bolsa.jpg",
+  "cebolla_kg.jpg",
+  "cebolla_morada_kg.jpg",
+  "champinon.jpg",
+  "chaucha_kg.jpg",
+  "choclo_amarillo_docena.jpg",
+  "ciruela_cajon.jpg",
+  "ciruela_kg.jpg",
+  "dulce_de_cayote_kg.jpg",
+  "espinaca.jpg",
+  "frutilla_kg.jpg",
+  "huevos_caja.jpg",
+  "huevos_maple.jpg",
+  "kiwi_kg.jpg",
+  "lechuga_crespa_jaula.jpg",
+  "lechuga_crespa_unidad.jpg",
+  "lechuga_mantecosa.jpg",
+  "lechuga_morada_unidad.jpg",
+  "lechuga_repollada_jaula.jpg",
+  "lechuga_repollada_unidad.jpg",
+  "limon_docena.jpg",
+  "limon_jaula.jpg",
+  "locoto_kg.jpg",
+  "mandarina_docena.jpg",
+  "mandarina_jaula.jpg",
+  "mango_kg.jpg",
+  "mani_con_cascara_bolsa.jpg",
+  "manzana_roja_bandeja.jpg",
+  "manzana_roja_caja.jpg",
+  "manzana_roja_kg.jpg",
+  "manzana_roja_unidades.jpg",
+  "manzana_verde_bandeja.jpg",
+  "manzana_verde_caja.jpg",
+  "manzana_verde_kg.jpg",
+  "manzana_verde_unidades.jpg",
+  "menta.jpg",
+  "miel_de_abeja.jpg",
+  "miel_de_cana.jpg",
+  "morron_amarillo_kg.jpg",
+  "morron_amarillo_unidades.jpg",
+  "morron_rojo_jaula.jpg",
+  "morron_rojo_kg.jpg",
+  "morron_rojo_unidades.jpg",
+  "morron_verde_jaula.jpg",
+  "morron_verde_kg.jpg",
+  "morron_verde_unidades.jpg",
+  "naranja_docena.jpg",
+  "naranja_jaula.jpg",
+  "palta_madura_kg.jpg",
+  "papa_bolsa.jpg",
+  "papa_kg.jpg",
+  "papines.jpg",
+  "pepino_kg.jpg",
+  "pera_bandeja.jpg",
+  "pera_caja.jpg",
+  "pera_kg.jpg",
+  "pera_unidades.jpg",
+  "perejil.jpg",
+  "pomelo_docena.jpg",
+  "pomelo_jaula.jpg",
+  "puerro.jpg",
+  "remolacha.jpg",
+  "repollo_blanco.jpg",
+  "repollo_morado.jpg",
+  "rucula_unidad.jpg",
+  "sandia.jpg",
+  "tomate_cajon.jpg",
+  "tomate_cherry_jaula.jpg",
+  "tomate_cherry_kg.jpg",
+  "tomate_deshidratado.jpg",
+  "tomate_jaula.jpg",
+  "tomate_perita_kg.jpg",
+  "tomate_redondo_kg.jpg",
+  "uva_kg.jpg",
+  "uva_rosa_kg.jpg",
+  "verdeo.jpg",
+  "yerba_buena.jpg",
+  "zanahoria_bolsa.jpg",
+  "zanahoria_kg.jpg",
+  "zapallito_verde_jaula.jpg",
+  "zapallito_verde_kg.jpg",
+  "zapallo amarillo cambiar.jpg",
+  "zapallo_amarillo kg.jpg",
+  "zapallo_negro_kg.jpg",
+  "zapallo_negro_unidad.jpg",
+  "zukini_jaula.jpg",
+  "zukini_kg.jpg",
+];
   const PAYMENT_METHODS = {
     efectivo: "Efectivo",
     transferencia: "Transferencia",
@@ -102,6 +208,7 @@
 
   let afterRender = [];
   let state = loadState();
+  migrateProductImages();
   let currentUser = loadCurrentUser();
 
   const menu = [
@@ -10177,9 +10284,24 @@
     }[value] || value || "Cuenta corriente";
   }
 
+  function normalizeImageName(value) {
+    return String(value || "").toLowerCase()
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "");
+  }
+
+  function findProductImageFile(productName) {
+    const target = normalizeImageName(productName);
+    if (!target) return "";
+    return PRODUCT_IMAGE_FILES.find((file) => normalizeImageName(file.replace(/\.[^.]+$/, "")) === target) || "";
+  }
+
   function productThumb(product) {
     if (product && product.imageData) return product.imageData;
     if (product && product.imageUrl) return product.imageUrl;
+    const file = findProductImageFile(product && product.name);
+    if (file) return "./assets/product-images/" + file;
     const colors = {
       FRUTAS: ["#ffefd2", "#ba5c00"],
       VERDURAS: ["#e6f4ef", "#0f7a5d"],
@@ -10189,6 +10311,22 @@
     const label = String(product.name || "?").slice(0, 2).toUpperCase();
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 44 44"><rect width="44" height="44" rx="8" fill="${colors[0]}"/><text x="22" y="27" text-anchor="middle" font-family="Arial" font-size="13" font-weight="700" fill="${colors[1]}">${escapeHtml(label)}</text></svg>`;
     return "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg);
+  }
+
+  function migrateProductImages() {
+    if (!Array.isArray(state.products)) return;
+    let changed = false;
+    state.products.forEach((product) => {
+      const file = findProductImageFile(product.name);
+      if (!file) return;
+      const url = "./assets/product-images/" + file;
+      if (product.imageUrl !== url || product.imageData) {
+        product.imageUrl = url;
+        product.imageData = "";
+        changed = true;
+      }
+    });
+    if (changed) saveState();
   }
 
   function expenseTypeLabel(type) {
