@@ -2239,6 +2239,21 @@ tr:last-child td {
   }
 }
 
+/* Selector de caja dentro de gráficos de tendencias */
+.cashbox-selector {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0;
+}
+
+/* Botones de rango compactos para dashboard contador */
+.trend-range-buttons.compact {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 @media (max-width: 760px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -3209,6 +3224,81 @@ tr:last-child td {
     min-height: 38px;
     padding: 0 8px;
     font-size: 12px;
+  }
+
+  /* Scrollboxes horizontales para tablas en dashboards y gastos */
+  .table-scroll-box {
+    display: block;
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .table-scroll-box .table-wrap {
+    min-width: 620px;
+  }
+
+  /* Métricas del dashboard admin/gerente más compactas, 2 por fila */
+  .grid.dash-metrics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .grid.dash-metrics-grid .card.metric {
+    padding: 10px;
+  }
+
+  .grid.dash-metrics-grid .metric-value {
+    font-size: 18px;
+  }
+
+  .grid.dash-metrics-grid .metric-label,
+  .grid.dash-metrics-grid .metric-note {
+    font-size: 11px;
+  }
+
+  /* Selector de caja en gráficos de tendencias: 2 filas en mobile */
+  .cashbox-selector {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    margin: 6px 0;
+  }
+
+  .cashbox-selector .btn.small {
+    width: 100%;
+    min-height: 34px;
+    font-size: 11px;
+    padding: 0 4px;
+  }
+
+  /* Botones de rango del dashboard contador: 1 fila compacta */
+  .accountant-range-field .field {
+    margin: 0;
+  }
+
+  .trend-range-buttons.compact {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .trend-range-buttons.compact .btn {
+    width: 100%;
+    min-height: 34px;
+    font-size: 11px;
+    padding: 0 4px;
+  }
+}
+
+/* Totales por caja en pagina Caja */
+.cash-totals-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+@media (max-width: 1060px) {
+  .cash-totals-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 

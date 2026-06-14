@@ -265,6 +265,10 @@
     tplKey: "remito",
     dashFrom: addDaysISO(todayISO(), -29),
     dashTo: todayISO(),
+    accountantDashRange: "3m",
+    accountantDashFrom: "",
+    accountantDashTo: "",
+    accountantDashCashBox: "all",
     priceListClient: "",
     priceListView: "grid",
     priceListCategories: [],
@@ -282,7 +286,7 @@
   let currentUser = loadCurrentUser();
 
   const menu = [
-    { id: "dashboard", label: "Inicio", icon: "IN", roles: ["manager", "admin", "employee", "customer", "example"] },
+    { id: "dashboard", label: "Inicio", icon: "IN", roles: ["manager", "admin", "employee", "customer", "contador", "example"] },
     { id: "nuevo-pedido", label: "Nuevo Pedido", icon: "NP", roles: ["manager", "admin", "employee", "customer", "example"] },
     { id: "pedidos", label: "Pedidos", icon: "PE", roles: ["manager", "admin", "employee", "customer", "example"] },
     { id: "clientes", label: "Clientes", icon: "CL", roles: ["manager", "admin"] },
@@ -755,7 +759,9 @@
     const exampleOrders = Array.isArray(loaded.exampleOrders) && loaded.exampleOrders.length ? loaded.exampleOrders : defaultExampleOrders(products);
     const employeeReimbursements = Array.isArray(loaded.employeeReimbursements) ? loaded.employeeReimbursements : [];
     const clientTransfers = Array.isArray(loaded.clientTransfers) ? loaded.clientTransfers : [];
-    return { ...loaded, users, clients, products, providers, saldos, caja, cashBoxes, exampleOrders, employeeReimbursements, clientTransfers, appSettings: { ...defaultAppSettings(), ...(loaded.appSettings || {}) } };
+    const normalized = { ...loaded, users, clients, products, providers, saldos, caja, cashBoxes, exampleOrders, employeeReimbursements, clientTransfers, appSettings: { ...defaultAppSettings(), ...(loaded.appSettings || {}) } };
+    ensureUserCashBoxes(normalized);
+    return normalized;
   }
 
   function defaultAppSettings() {
@@ -883,6 +889,33 @@
     const id = normalizeText(box && box.id);
     const name = normalizeText(box && box.name);
     return id === "cash-proveedores" || id === "cash-efectivo" || id === "cash-empleados" || name === "proveedores" || name === "efectivo";
+  }
+
+  function ensureUserCashBoxes(targetState) {
+    targetState = targetState || state;
+    targetState.cashBoxes = targetState.cashBoxes || [];
+    (targetState.users || []).forEach((user) => {
+      if (!["manager", "admin", "employee"].includes(user.role)) return;
+      const id = getUserCashBoxId(user.id);
+      const defaultName = "Efectivo - " + user.name;
+      const existing = targetState.cashBoxes.find((box) => box.id === id);
+      if (!existing) {
+        targetState.cashBoxes.push({
+          id,
+          name: defaultName,
+          isActive: true,
+          visibleToAdmin: true,
+          userId: user.id,
+          notes: "Caja efectivo del usuario"
+        });
+      } else {
+        const expectedPrefix = "Efectivo - ";
+        if (!existing.name || (String(existing.name).startsWith(expectedPrefix) && existing.name !== defaultName)) {
+          existing.name = defaultName;
+        }
+        if (existing.userId !== user.id) existing.userId = user.id;
+      }
+    });
   }
 
   function mergeQuantityAliases(existing) {
@@ -1729,6 +1762,7 @@
   }
 
   function renderDashboard() {
+    if (currentUser.role === "contador") return renderAccountantDashboard();
     if (isClientLikeRole(currentUser.role)) return renderCustomerDashboard();
     if (currentUser.role === "employee") return renderEmployeeDashboard();
     const todaysOrders = ordersByDate(todayISO());
@@ -1758,7 +1792,7 @@
       `<button class="btn primary" data-route="nuevo-pedido">Nuevo pedido</button>
        <button class="btn blue" data-route="pagos">Registrar pago</button>`,
       `
-      <div class="grid four">
+      <div class="grid four dash-metrics-grid">
         ${metricCard("Pedidos de hoy", todaysOrders.length, "Pedidos activos cargados")}
         ${metricCard("Caja", formatMoney(cajaBalance), "Ingresos menos egresos")}
         ${metricCard("Caja empleados", formatMoney(employeeCashTotal), "Efectivo recibido por empleados")}
@@ -1769,11 +1803,13 @@
       <div class="grid two" style="margin-top:14px">
         <div class="panel">
           <h2 class="page-title" style="font-size:18px">Caja de empleados</h2>
-          <div class="table-wrap employee-cash-table" style="margin-top:10px">
-            <table>
-              <thead><tr><th>Empleado</th><th class="cobros-col">Cobros</th><th>Caja</th></tr></thead>
-              <tbody>${employeeCash.map((item) => `<tr><td>${escapeHtml(item.name)}</td><td class="num">${item.count}</td><td class="num">${formatMoney(item.total)}</td></tr>`).join("") || emptyRow(3, "Sin cobros de empleados.")}</tbody>
-            </table>
+          <div class="table-scroll-box">
+            <div class="table-wrap employee-cash-table" style="margin-top:10px">
+              <table>
+                <thead><tr><th>Empleado</th><th class="cobros-col">Cobros</th><th>Caja</th></tr></thead>
+                <tbody>${employeeCash.map((item) => `<tr><td>${escapeHtml(item.name)}</td><td class="num">${item.count}</td><td class="num">${formatMoney(item.total)}</td></tr>`).join("") || emptyRow(3, "Sin cobros de empleados.")}</tbody>
+              </table>
+            </div>
           </div>
         </div>
         <div class="panel">
@@ -1791,11 +1827,13 @@
       <div class="grid two" style="margin-top:14px">
         <div class="panel">
           <h2 class="page-title" style="font-size:18px">Vehiculos de hoy</h2>
-          <div class="table-wrap dash-vehicle-table" style="margin-top:10px">
-            <table>
-              <thead><tr><th>Vehiculo</th><th>Pedidos</th><th>Items</th><th>Total</th></tr></thead>
-              <tbody>${vehicleRows || emptyRow(4, "No hay pedidos para repartir.")}</tbody>
-            </table>
+          <div class="table-scroll-box">
+            <div class="table-wrap dash-vehicle-table" style="margin-top:10px">
+              <table>
+                <thead><tr><th>Vehiculo</th><th>Pedidos</th><th>Items</th><th>Total</th></tr></thead>
+                <tbody>${vehicleRows || emptyRow(4, "No hay pedidos para repartir.")}</tbody>
+              </table>
+            </div>
           </div>
         </div>
         <div class="panel">
@@ -1996,7 +2034,7 @@
             <div class="card line-chart-card">
               <strong>${escapeHtml(chart.title)}</strong>
               <span class="muted" style="font-size:12px">${formatDate(from)} - ${formatDate(to)}</span>
-              ${chart.cashSelector ? `<div class="page-actions" style="margin:4px 0">
+              ${chart.cashSelector ? `<div class="cashbox-selector">
                 <button class="btn small ${!ui.dashCashBox || ui.dashCashBox === "all" ? "blue" : "ghost"}" type="button" data-dash-cashbox="all">Todas</button>
                 ${activeCashBoxesForRole(currentUser.role).map((box) => `<button class="btn small ${ui.dashCashBox === box.id ? "blue" : "ghost"}" type="button" data-dash-cashbox="${escapeAttr(box.id)}">${escapeHtml(box.name)}</button>`).join("")}
               </div>` : ""}
@@ -2038,11 +2076,13 @@
       <div class="grid two" style="margin-top:14px">
         <div class="panel">
           <h2 class="page-title" style="font-size:18px">Vehiculos de hoy</h2>
-          <div class="table-wrap dash-vehicle-table" style="margin-top:10px">
-            <table>
-              <thead><tr><th>Vehiculo</th><th>Pedidos</th><th>Items</th><th>Total</th></tr></thead>
-              <tbody>${vehicleRows || emptyRow(4, "No hay pedidos para repartir.")}</tbody>
-            </table>
+          <div class="table-scroll-box">
+            <div class="table-wrap dash-vehicle-table" style="margin-top:10px">
+              <table>
+                <thead><tr><th>Vehiculo</th><th>Pedidos</th><th>Items</th><th>Total</th></tr></thead>
+                <tbody>${vehicleRows || emptyRow(4, "No hay pedidos para repartir.")}</tbody>
+              </table>
+            </div>
           </div>
         </div>
         <div class="panel">
@@ -2054,6 +2094,116 @@
             <button class="btn ghost full" data-route="saldos">Ver cuenta de clientes</button>
             <button class="btn ghost full" data-route="horarios">Registrar fin de dia</button>
           </div>
+        </div>
+      </div>
+      `,
+      "dashboard"
+    );
+  }
+
+  function renderAccountantDashboard() {
+    const balances = getClientBalances();
+    const totalReceivable = balances.reduce((sum, item) => sum + Math.max(0, item.balance), 0);
+    const providerDebtTotal = getProviderBalances().reduce((sum, item) => sum + Math.max(0, item.balance), 0);
+    const bankCash = getBankCajaTotal();
+    const cashBalance = getCajaBalance();
+    const range = ui.accountantDashRange || "3m";
+    const to = ui.accountantDashTo || todayISO();
+    let from = ui.accountantDashFrom;
+    if (!from) {
+      if (range === "3m") from = addMonthsISO(to, -3);
+      else if (range === "6m") from = addMonthsISO(to, -6);
+      else if (range === "1y") from = addMonthsISO(to, -12);
+      else from = addMonthsISO(to, -3);
+    }
+    const series = buildDashboardSeries(from, to);
+    const extra = buildDashboardExtraSeries(series.dates, ui.accountantDashCashBox || "all");
+    const charts = [
+      { title: "Ventas totales por dia", values: series.sales, color: "#7a3bd0", format: formatMoney },
+      { title: "Gastos totales por dia", values: series.expenses, color: "#b42318", format: formatMoney },
+      { title: "Resultado (ventas - gastos) por dia", values: series.result, color: "#a36300", format: formatMoney },
+      { title: "Caja (" + (ui.accountantDashCashBox === "all" || !ui.accountantDashCashBox ? "todas las cajas" : getCashBoxName(ui.accountantDashCashBox)) + ")", values: extra.cash, color: "#087a83", format: formatMoney, cashSelector: true },
+      { title: "Saldos de clientes (a cobrar)", values: extra.clientBalances, color: "#2156a8", format: formatMoney },
+      { title: "Saldos de proveedores (a pagar)", values: extra.providerBalances, color: "#b42318", format: formatMoney }
+    ];
+    const balanceRows = balances.map((item) => {
+      const client = getClient(item.clientId);
+      return `<tr><td>${escapeHtml(client ? client.id : item.clientId)}</td><td>${escapeHtml(client ? client.name : item.clientId)}</td><td class="num">${formatMoney(item.balance)}</td></tr>`;
+    }).join("");
+    afterRender.push(() => {
+      document.querySelectorAll("[data-accountant-range]").forEach((button) => button.addEventListener("click", () => {
+        ui.accountantDashRange = button.dataset.accountantRange;
+        ui.accountantDashFrom = "";
+        render();
+      }));
+      const fromInput = document.getElementById("accountant-dash-from");
+      const toInput = document.getElementById("accountant-dash-to");
+      if (fromInput) fromInput.addEventListener("change", () => {
+        ui.accountantDashFrom = fromInput.value;
+        if (ui.accountantDashTo < ui.accountantDashFrom) ui.accountantDashTo = ui.accountantDashFrom;
+        ui.accountantDashRange = "";
+        render();
+      });
+      if (toInput) toInput.addEventListener("change", () => {
+        ui.accountantDashTo = toInput.value;
+        if (ui.accountantDashTo < ui.accountantDashFrom) ui.accountantDashFrom = ui.accountantDashTo;
+        ui.accountantDashRange = "";
+        render();
+      });
+      document.querySelectorAll("[data-accountant-cashbox]").forEach((button) => button.addEventListener("click", () => {
+        ui.accountantDashCashBox = button.dataset.accountantCashbox;
+        render();
+      }));
+    });
+    return pageShell(
+      "Inicio",
+      "Resumen contable de saldos, caja y tendencias.",
+      `<button class="btn blue" data-route="saldos">Ver saldos detallados</button>
+       <button class="btn ghost" data-route="caja">Ver caja</button>`,
+      `
+      <div class="grid four dash-metrics-grid">
+        ${metricCard("A cobrar clientes", formatMoney(totalReceivable), "Total pendiente de cobro")}
+        ${metricCard("A pagar proveedores", formatMoney(providerDebtTotal), "Total adeudado a proveedores")}
+        ${metricCard("Caja banco", formatMoney(bankCash), "Transferencias y cheques")}
+        ${metricCard("Caja efectivo", formatMoney(cashBalance), "Ingresos menos egresos")}
+      </div>
+      <div class="panel" style="margin-top:14px">
+        <h2 class="page-title" style="font-size:18px">Saldos de clientes</h2>
+        <div class="table-scroll-box" style="margin-top:10px">
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>ID</th><th>Cliente</th><th>Saldo</th></tr></thead>
+              <tbody>${balanceRows || emptyRow(3, "No hay saldos para mostrar.")}</tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div class="panel" style="margin-top:14px">
+        <h2 class="page-title" style="font-size:18px">Tendencias</h2>
+        <div class="form-grid" style="margin-top:10px">
+          <div class="field"><label>Desde</label><input type="date" id="accountant-dash-from" value="${escapeAttr(from)}" /></div>
+          <div class="field"><label>Hasta</label><input type="date" id="accountant-dash-to" value="${escapeAttr(to)}" /></div>
+          <div class="field span-2 accountant-range-field">
+            <label>&nbsp;</label>
+            <div class="trend-range-buttons compact">
+              <button class="btn ghost ${range === "3m" ? "blue" : ""}" type="button" data-accountant-range="3m">3 meses</button>
+              <button class="btn ghost ${range === "6m" ? "blue" : ""}" type="button" data-accountant-range="6m">6 meses</button>
+              <button class="btn ghost ${range === "1y" ? "blue" : ""}" type="button" data-accountant-range="1y">1 año</button>
+            </div>
+          </div>
+        </div>
+        <div class="grid two dash-charts" style="margin-top:14px">
+          ${charts.map((chart) => `
+            <div class="card line-chart-card">
+              <strong>${escapeHtml(chart.title)}</strong>
+              <span class="muted" style="font-size:12px">${formatDate(from)} - ${formatDate(to)}</span>
+              ${chart.cashSelector ? `<div class="cashbox-selector">
+                <button class="btn small ${!ui.accountantDashCashBox || ui.accountantDashCashBox === "all" ? "blue" : "ghost"}" type="button" data-accountant-cashbox="all">Todas</button>
+                ${activeCashBoxesForRole(currentUser.role).map((box) => `<button class="btn small ${ui.accountantDashCashBox === box.id ? "blue" : "ghost"}" type="button" data-accountant-cashbox="${escapeAttr(box.id)}">${escapeHtml(box.name)}</button>`).join("")}
+              </div>` : ""}
+              ${renderLineChartSvg(series.dates, chart.values, chart.color, chart.format)}
+            </div>
+          `).join("")}
         </div>
       </div>
       `,
@@ -2117,13 +2267,15 @@
       </div>
       <div class="panel" style="margin-top:14px">
         <h2 class="page-title" style="font-size:18px">Ultimos pedidos</h2>
-        <div class="table-wrap" style="margin-top:10px">
-          <table>
-            <thead><tr><th>Pedido</th><th>Fecha</th><th>Estado</th><th>Total</th></tr></thead>
-            <tbody>
-              ${customerOrders.slice(0, 12).map((order) => `<tr><td>${escapeHtml(order.id)}</td><td>${formatDate(order.date)}</td><td>${statusLabel(order.status)}</td><td class="num">${formatMoney(order.totalAmount)}</td></tr>`).join("") || emptyRow(4, "No hay pedidos para este cliente.")}
-            </tbody>
-          </table>
+        <div class="table-scroll-box" style="margin-top:10px">
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Pedido</th><th>Fecha</th><th>Estado</th><th>Total</th></tr></thead>
+              <tbody>
+                ${customerOrders.slice(0, 12).map((order) => `<tr><td>${escapeHtml(order.id)}</td><td>${formatDate(order.date)}</td><td>${statusLabel(order.status)}</td><td class="num">${formatMoney(order.totalAmount)}</td></tr>`).join("") || emptyRow(4, "No hay pedidos para este cliente.")}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
       `,
@@ -3936,20 +4088,24 @@
         ${["manager", "admin"].includes(currentUser.role) ? renderPurchaseAssigneeFilter() : ""}
         ${purchaseTab === "proveedores" ? renderProviderPaymentTab() : (roleFlag(currentUser.role, "registrarGastos") ? renderPurchaseRegisterTab(canUseProviders) : `<div class="panel empty">Su rol no tiene permiso para registrar compras o gastos.</div>`)}
         <div class="panel">
-          <div class="table-wrap">
-            <table>
-              <thead><tr><th>Fecha</th><th>Tipo</th><th>Origen</th><th>Productos/Detalle</th><th>Estado</th><th>Caja</th><th>Total</th><th>Usuario</th><th>Notas</th></tr></thead>
-              <tbody>${rows || emptyRow(9, "Todavia no hay egresos.")}</tbody>
-            </table>
+          <div class="table-scroll-box">
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Fecha</th><th>Tipo</th><th>Origen</th><th>Productos/Detalle</th><th>Estado</th><th>Caja</th><th>Total</th><th>Usuario</th><th>Notas</th></tr></thead>
+                <tbody>${rows || emptyRow(9, "Todavia no hay egresos.")}</tbody>
+              </table>
+            </div>
           </div>
         </div>
         <div class="panel">
           <h2 class="page-title" style="font-size:18px">Compras por vendedor</h2>
-          <div class="table-wrap" style="margin-top:10px">
-            <table>
-              <thead><tr><th>Fecha</th><th>Vendedor</th><th>Producto</th><th>Cantidad</th><th>Costo</th><th>Usuario</th></tr></thead>
-              <tbody>${vendorRows || emptyRow(6, "Sin compras asociadas a vendedores.")}</tbody>
-            </table>
+          <div class="table-scroll-box" style="margin-top:10px">
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Fecha</th><th>Vendedor</th><th>Producto</th><th>Cantidad</th><th>Costo</th><th>Usuario</th></tr></thead>
+                <tbody>${vendorRows || emptyRow(6, "Sin compras asociadas a vendedores.")}</tbody>
+              </table>
+            </div>
           </div>
         </div>
       </div>
@@ -6704,6 +6860,13 @@
         ${metricCard("Ingresos", formatMoney(incomeTotal), "Pagos recibidos")}
         ${metricCard("Egresos", formatMoney(expenseTotal), "Compras y gastos")}
       </div>
+      ${["manager", "admin"].includes(currentUser.role) ? `
+      <div class="panel" style="margin-top:14px">
+        <h2 class="page-title" style="font-size:18px">Totales por caja</h2>
+        <div class="grid cash-totals-grid" style="margin-top:10px">
+          ${visibleBoxes.map((box) => metricCard(escapeHtml(box.name), formatMoney(getCajaBalance(box.id)), box.isActive !== false ? "Activa" : "Inactiva")).join("")}
+        </div>
+      </div>` : ""}
       ${currentUser.role === "manager" ? `
       <div class="panel" style="margin-top:14px">
         <div class="page-actions" style="justify-content:space-between">
@@ -7729,6 +7892,31 @@
       </div>` : ""}
       ${currentUser.role === "manager" ? `
       <div class="panel" style="margin-top:14px">
+        <div class="page-actions" style="justify-content:space-between">
+          <h2 class="page-title" style="font-size:18px">Cajas visibles para admin</h2>
+          <button class="btn primary" data-add-cash-box>Agregar caja</button>
+        </div>
+        <p class="muted" style="margin-top:6px">Marque que cajas generales y de usuario pueden ver y seleccionar los usuarios con rol admin.</p>
+        <div class="table-wrap" style="margin-top:10px">
+          <table>
+            <thead><tr><th>Caja</th><th>Estado</th><th>Visible admin</th><th>Activa</th><th>Notas</th><th>Editar</th></tr></thead>
+            <tbody>${(state.cashBoxes || []).filter((box) => !isDeprecatedCashBox(box)).map((box) => {
+              const userBox = isUserCashBoxId(box.id);
+              const user = userBox ? getUser(box.userId) : null;
+              return `<tr>
+                <td>${escapeHtml(box.name)}${userBox ? ` <span class="pill gray">Usuario</span>` : ""}${user ? `<br><span class="muted">${escapeHtml(user.name)} - ${escapeHtml(roleLabel(user.role))}</span>` : ""}</td>
+                <td>${box.isActive !== false ? `<span class="pill green">Activa</span>` : `<span class="pill gray">Inactiva</span>`}</td>
+                <td><input type="checkbox" data-cash-box-visible-admin="${box.id}" ${box.visibleToAdmin !== false ? "checked" : ""} /></td>
+                <td><input type="checkbox" data-cash-box-active="${box.id}" ${box.isActive !== false ? "checked" : ""} /></td>
+                <td>${escapeHtml(box.notes || "")}</td>
+                <td><button class="btn small ghost" data-edit-cash-box="${box.id}">Editar</button></td>
+              </tr>`;
+            }).join("") || emptyRow(6, "Sin cajas configuradas.")}</tbody>
+          </table>
+        </div>
+      </div>` : ""}
+      ${currentUser.role === "manager" ? `
+      <div class="panel" style="margin-top:14px">
         <h2 class="page-title" style="font-size:18px">Importaciones masivas</h2>
         <div class="form-grid" style="margin-top:10px">
           <div class="field span-2"><label>Tipo</label><select id="mass-import-type">
@@ -8102,6 +8290,22 @@
     document.querySelectorAll("[data-update-export]").forEach((button) => button.addEventListener("click", () => exportUpdateTable(button.dataset.updateExport)));
     const runUpdateImport = document.getElementById("run-update-import");
     if (runUpdateImport) runUpdateImport.addEventListener("click", importUpdateTable);
+    document.querySelectorAll("[data-add-cash-box]").forEach((button) => button.addEventListener("click", () => openCashBoxForm()));
+    document.querySelectorAll("[data-edit-cash-box]").forEach((button) => button.addEventListener("click", () => openCashBoxForm(button.dataset.editCashBox)));
+    document.querySelectorAll("[data-cash-box-visible-admin]").forEach((checkbox) => checkbox.addEventListener("change", () => {
+      const box = getCashBox(checkbox.dataset.cashBoxVisibleAdmin);
+      if (!box) return;
+      box.visibleToAdmin = checkbox.checked;
+      saveState();
+      render();
+    }));
+    document.querySelectorAll("[data-cash-box-active]").forEach((checkbox) => checkbox.addEventListener("change", () => {
+      const box = getCashBox(checkbox.dataset.cashBoxActive);
+      if (!box) return;
+      box.isActive = checkbox.checked;
+      saveState();
+      render();
+    }));
   }
 
   function downloadMassImportTemplate(type) {
@@ -9426,6 +9630,7 @@
           };
           if (user) Object.assign(user, payload);
           else state.users.push(payload);
+          ensureUserCashBoxes();
           saveState();
           closeModal();
         });
@@ -9732,7 +9937,6 @@
   }
 
   function roleHome() {
-    if (currentUser && currentUser.role === "contador") return "saldos";
     return "dashboard";
   }
 
@@ -10430,6 +10634,12 @@
   function addDaysISO(value, days) {
     const date = parseISODate(value || todayISO());
     date.setDate(date.getDate() + Number(days || 0));
+    return dateToISO(date);
+  }
+
+  function addMonthsISO(value, months) {
+    const date = parseISODate(value || todayISO());
+    date.setMonth(date.getMonth() + Number(months || 0));
     return dateToISO(date);
   }
 
@@ -11309,9 +11519,12 @@
       .filter((box) => !isDeprecatedCashBox(box))
       .filter((box) => box.isActive !== false)
       .filter((box) => role === "manager" ? true : box.visibleToAdmin !== false);
-    const userBoxes = activeCashReceivers()
+    const userBoxes = state.users
+      .filter((user) => ["manager", "admin", "employee"].includes(user.role))
       .filter((user) => role === "employee" ? currentUser && user.id === currentUser.id : true)
-      .map((user) => getUserCashBox(user));
+      .map((user) => getUserCashBox(user))
+      .filter((box) => box.isActive !== false)
+      .filter((box) => role === "manager" ? true : box.visibleToAdmin !== false);
     return uniqueCashBoxes([...baseBoxes, ...userBoxes]).sort((a, b) => a.name.localeCompare(b.name));
   }
 
@@ -11354,13 +11567,18 @@
 
   function getUserCashBox(user) {
     const account = user || currentUser || {};
+    const id = getUserCashBoxId(account.id || "");
+    const saved = (state.cashBoxes || []).find((box) => box.id === id);
+    const defaultName = "Efectivo - " + (account.name || "Usuario");
+    const savedIsActive = saved ? saved.isActive !== false : true;
+    const savedVisible = saved ? saved.visibleToAdmin !== false : true;
     return {
-      id: getUserCashBoxId(account.id || ""),
-      name: "Efectivo - " + (account.name || "Usuario"),
-      isActive: account.isActive !== false,
-      visibleToAdmin: true,
+      id,
+      name: saved && saved.name ? saved.name : defaultName,
+      isActive: account.isActive !== false && savedIsActive,
+      visibleToAdmin: savedVisible,
       userId: account.id || "",
-      notes: "Caja efectivo del usuario"
+      notes: saved && saved.notes ? saved.notes : "Caja efectivo del usuario"
     };
   }
 
@@ -11457,15 +11675,13 @@
   }
 
   function sortProductsForClient(clientId) {
-    const prefs = new Map(state.preferences.filter((pref) => pref.clientId === clientId).map((pref) => [pref.productId, pref]));
+    const prefs = new Set(state.preferences.filter((pref) => pref.clientId === clientId).map((pref) => pref.productId));
     return activeProducts().slice().sort((a, b) => {
-      const pa = prefs.get(a.id);
-      const pb = prefs.get(b.id);
+      const pa = prefs.has(a.id);
+      const pb = prefs.has(b.id);
       if (pa && !pb) return -1;
       if (!pa && pb) return 1;
-      if (pa && pb) return new Date(pb.lastOrderedAt) - new Date(pa.lastOrderedAt);
-      if (a.category !== b.category) return getProductCategories().indexOf(a.category) - getProductCategories().indexOf(b.category);
-      return a.sortOrder - b.sortOrder;
+      return (a.sortOrder || 0) - (b.sortOrder || 0);
     });
   }
 
