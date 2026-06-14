@@ -1723,7 +1723,7 @@
       <div class="grid two" style="margin-top:14px">
         <div class="panel">
           <h2 class="page-title" style="font-size:18px">Vehiculos de hoy</h2>
-          <div class="table-wrap" style="margin-top:10px">
+          <div class="table-wrap dash-vehicle-table" style="margin-top:10px">
             <table>
               <thead><tr><th>Vehiculo</th><th>Pedidos</th><th>Items</th><th>Total</th></tr></thead>
               <tbody>${vehicleRows || emptyRow(4, "No hay pedidos para repartir.")}</tbody>
@@ -1970,7 +1970,7 @@
       <div class="grid two" style="margin-top:14px">
         <div class="panel">
           <h2 class="page-title" style="font-size:18px">Vehiculos de hoy</h2>
-          <div class="table-wrap" style="margin-top:10px">
+          <div class="table-wrap dash-vehicle-table" style="margin-top:10px">
             <table>
               <thead><tr><th>Vehiculo</th><th>Pedidos</th><th>Items</th><th>Total</th></tr></thead>
               <tbody>${vehicleRows || emptyRow(4, "No hay pedidos para repartir.")}</tbody>
@@ -2187,10 +2187,6 @@
               </select>
             </div>`}
             ${showCustomerLateWarning ? `<div class="alert order-late-warning">Los pedidos se toman hasta las 5:30 am, en caso de necesitarlo para hoy, por favor comunicarse al 3874566725</div>` : ""}
-            ${isCustomerOrder ? "" : `<label class="field span-2" style="display:flex;align-items:center;gap:8px;grid-template-columns:auto 1fr">
-              <input type="checkbox" id="order-paid-now" style="width:auto;min-height:auto" />
-              <span>Marcar como cobrado en efectivo al guardar</span>
-            </label>`}
             <div class="field order-search-row">
               <label>Buscar producto</label>
               <div class="order-search-line">
@@ -2207,14 +2203,14 @@
               <label>Nota producto filtrado</label>
               <input id="order-quick-note" placeholder="Nota" />
             </div>
-            <div class="field">
+            <div class="field order-view-field">
               <label>Vista</label>
               <select id="order-view">
                 <option value="grid" ${ui.orderView === "grid" ? "selected" : ""}>Cuadricula</option>
                 <option value="list" ${ui.orderView === "list" ? "selected" : ""}>Lista</option>
               </select>
             </div>
-            <div class="field">
+            <div class="field order-actions-field">
               <label>&nbsp;</label>
               <div class="page-actions">
                 <button class="btn blue" id="add-order-products" type="button">Agregar Productos</button>
@@ -2454,6 +2450,10 @@
     }
     form.addEventListener("submit", (event) => {
       event.preventDefault();
+      if (rejectSunday(dateInput.value)) {
+        alert("No se pueden crear pedidos para domingo");
+        return;
+      }
       if (clientSearch) {
         const found = findClientByInput(clientSearch.value);
         if (found) clientSelect.value = found.id;
@@ -2521,16 +2521,6 @@
         paymentStatus: "pending",
         notes: "Registro de accountability. No suma caja hasta cobrar."
       });
-      const paidNow = document.getElementById("order-paid-now");
-      if (paidNow && paidNow.checked) {
-        recordPayment({
-          clientId: client.id,
-          orderId: order.id,
-          amount: order.totalAmount,
-          method: "efectivo",
-          notes: "Cobrado al cargar pedido."
-        });
-      }
       saveState();
       ui.selectedClientId = "";
       ui.orderProductFilter = "";
@@ -3912,7 +3902,7 @@
     const defaultPurchaseCashBox = getDefaultOutgoingCashBoxId();
     const providerPaymentMethods = currentUser.role === "employee" ? ["efectivo"] : Object.keys(PAYMENT_METHODS);
     return `
-      <form id="purchase-form" class="panel">
+      <form id="purchase-form" class="panel ${currentUser.role === "employee" ? "employee-purchase-form" : ""}">
           <div class="form-grid purchase-form-grid">
             <div class="field" id="purchase-date-wrap">
               <label>Fecha</label>
@@ -4853,7 +4843,10 @@
          <button class="btn primary" data-add-provider>Agregar proveedor</button>
          <button class="btn ghost" data-print-divide="all">PDF todos</button>
          <button class="btn ghost" data-print-divide="${escapeAttr(selected.join(","))}">PDF seleccionado</button>
-         <button class="btn ghost" data-copy-divide="${escapeAttr(selected.join(","))}">Copiar WhatsApp</button>
+       </div>
+       <div class="divide-page-actions divide-whatsapp-actions">
+         <button class="btn ghost" data-copy-divide="all">${WHATSAPP_SVG} WhatsApp todos</button>
+         <button class="btn ghost" data-copy-divide="${escapeAttr(selected.join(","))}">${WHATSAPP_SVG} WhatsApp seleccionado</button>
        </div>`,
       `
       <div class="panel" style="margin-bottom:14px">
@@ -5220,11 +5213,11 @@
             <div>Fecha: ${formatDate(date)}</div>
           </div>
           <table class="print-table borderless-table">
-            <thead><tr><th>Cliente</th><th>Pedido</th><th>Vehiculo</th><th>Productos</th></tr></thead>
+            <thead><tr><th>Cliente</th><th>Pedido</th><th>Vehiculo</th><th>Productos</th><th>Total</th></tr></thead>
             <tbody>${orders.map((order) => {
               const client = getClient(order.clientId);
-              return `<tr><td>${escapeHtml(client ? client.name : order.clientId)}<br>${escapeHtml(order.clientId)}</td><td>${escapeHtml(order.id)}</td><td>${escapeHtml(getVehicleName(order.deliveryVehicleId))}</td><td>${order.items.map((item) => `${escapeHtml(item.productName)}: ${formatNumber(item.quantity)} ${escapeHtml(item.unitType)}${item.note ? " (" + escapeHtml(item.note) + ")" : ""}`).join("<br>")}</td></tr>`;
-            }).join("") || `<tr><td colspan="4">Sin pedidos</td></tr>`}</tbody>
+              return `<tr><td>${escapeHtml(client ? client.name : order.clientId)}<br>${escapeHtml(order.clientId)}</td><td>${escapeHtml(order.id)}</td><td>${escapeHtml(getVehicleName(order.deliveryVehicleId))}</td><td>${order.items.map((item) => `${escapeHtml(item.productName)}: ${formatNumber(item.quantity)} ${escapeHtml(item.unitType)}${item.note ? " (" + escapeHtml(item.note) + ")" : ""}`).join("<br>")}</td><td class="num">${formatMoney(order.totalAmount)}</td></tr>`;
+            }).join("") || `<tr><td colspan="5">Sin pedidos</td></tr>`}</tbody>
           </table>
           <h2 style="font-size:14px;margin:8px 0 4px">Sumatoria total de productos</h2>
           ${renderProductSumColumns(productTotals)}
@@ -5877,7 +5870,7 @@
             <button class="btn primary" type="submit">Registrar pago recibido</button>
           </div>
         </form>
-        <div class="panel">
+        <div class="panel payment-history-wrap">
           <div class="table-wrap">
             <table>
               <thead><tr><th>Fecha</th><th>Cliente</th><th>Recibio</th><th>Metodo</th><th>Caja</th><th>Monto</th><th>Comprobante</th><th>Notas</th></tr></thead>
@@ -5907,7 +5900,7 @@
             return `<option value="${order.id}" ${value === order.id ? "selected" : ""}>${escapeHtml(order.id)} - ${escapeHtml(client ? client.name : order.clientId)} - pendiente ${formatMoney(remaining)}</option>`;
           }).join("")}
         </select>
-        <button class="btn small ghost" type="button" data-remove-payment-order>Quitar</button>
+        <button class="btn small ghost" type="button" data-remove-payment-order aria-label="Quitar">X</button>
       </div>
     `;
   }

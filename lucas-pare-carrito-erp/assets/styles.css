@@ -774,6 +774,13 @@ tr:last-child td {
   grid-column: auto;
 }
 
+.dash-vehicle-table th:nth-child(2),
+.dash-vehicle-table td:nth-child(2) {
+  width: 44px;
+  max-width: 44px;
+  text-align: center;
+}
+
 .cart-list {
   display: grid;
   gap: 7px;
@@ -2348,9 +2355,57 @@ tr:last-child td {
     grid-template-columns: 1fr;
   }
 
-  .payment-form-grid {
+  .admin-order-form .order-form-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
+  }
+
+  .admin-order-form .order-form-grid .field {
+    min-width: 0;
+  }
+
+  .admin-order-form .order-client-field,
+  .admin-order-form .order-notes-field,
+  .admin-order-form .order-search-row,
+  .admin-order-form .order-actions-field {
+    grid-column: 1 / -1;
+  }
+
+  .admin-order-form .order-date-field,
+  .admin-order-form .order-vehicle-field,
+  .admin-order-form .order-quick-note-field,
+  .admin-order-form .order-view-field {
+    grid-column: span 1;
+  }
+
+  .admin-order-form .order-form-grid label {
+    font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .admin-order-form .order-form-grid input,
+  .admin-order-form .order-form-grid select,
+  .admin-order-form .order-form-grid textarea {
+    min-height: 34px;
+    padding: 5px 7px;
+    font-size: 12px;
+  }
+
+  .admin-order-form .order-search-line {
+    grid-template-columns: minmax(0, 1fr) 64px auto;
+    gap: 6px;
+  }
+
+  .admin-order-form .order-search-line .order-quick-qty-field input,
+  .admin-order-form .order-search-line #clear-order-search {
+    min-height: 34px;
+  }
+
+  .payment-form-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
   }
 
   .payment-form-grid .field.payment-client-field,
@@ -2362,20 +2417,20 @@ tr:last-child td {
   }
 
   .payment-form-grid .field.payment-client-field select {
-    font-size: 13px;
-    padding: 5px 7px;
-    min-height: 34px;
+    font-size: 12px;
+    padding: 4px 6px;
+    min-height: 30px;
   }
 
   .payment-form-grid label {
-    font-size: 12px;
+    font-size: 11px;
   }
 
   .payment-form-grid input,
   .payment-form-grid select {
-    min-height: 34px;
-    padding: 5px 7px;
-    font-size: 13px;
+    min-height: 30px;
+    padding: 4px 6px;
+    font-size: 12px;
   }
 
   .payment-form-grid .page-actions .btn {
@@ -2385,9 +2440,19 @@ tr:last-child td {
   }
 
   .payment-order-line .btn.small.ghost {
-    min-height: 30px;
-    padding: 0 6px;
-    font-size: 11px;
+    min-height: 28px;
+    padding: 0 5px;
+    font-size: 12px;
+  }
+
+  .payment-history-wrap {
+    display: block;
+    width: 100%;
+    overflow-x: auto;
+  }
+
+  .payment-history-wrap .table-wrap {
+    min-width: 680px;
   }
 
   .payment-amount-field,
@@ -2726,18 +2791,24 @@ tr:last-child td {
 
   .divide-page-actions {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 6px;
     width: 100%;
   }
 
   .divide-page-actions .btn {
-    font-size: 10px;
-    padding: 0 3px;
+    font-size: 11px;
+    padding: 0 5px;
     min-height: 38px;
     line-height: 1.1;
     overflow-wrap: break-word;
     hyphens: auto;
+  }
+
+  .divide-page-actions .btn svg {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 auto;
   }
 
   .divide-assignee-checklist {
@@ -2823,6 +2894,32 @@ tr:last-child td {
   #purchase-form > .form-grid.purchase-form-grid #purchase-provider-wrap { grid-column: 1; }
   #purchase-form > .form-grid.purchase-form-grid #purchase-vendor-wrap { grid-column: 2; }
   #purchase-form > .form-grid.purchase-form-grid #purchase-total-wrap { grid-column: 3; }
+
+  #purchase-form.employee-purchase-form > .form-grid.purchase-form-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  #purchase-form.employee-purchase-form > .form-grid.purchase-form-grid #purchase-date-wrap,
+  #purchase-form.employee-purchase-form > .form-grid.purchase-form-grid #purchase-kind-wrap,
+  #purchase-form.employee-purchase-form > .form-grid.purchase-form-grid #purchase-cash-box-wrap,
+  #purchase-form.employee-purchase-form > .form-grid.purchase-form-grid #purchase-assigned-employee-wrap {
+    grid-column: span 1;
+  }
+
+  #purchase-form.employee-purchase-form > .form-grid.purchase-form-grid #purchase-total-wrap {
+    grid-column: span 2;
+  }
+
+  #purchase-form.employee-purchase-form > .form-grid.purchase-form-grid label {
+    font-size: 11px;
+  }
+
+  #purchase-form.employee-purchase-form > .form-grid.purchase-form-grid input,
+  #purchase-form.employee-purchase-form > .form-grid.purchase-form-grid select {
+    min-height: 34px;
+    padding: 5px 6px;
+    font-size: 12px;
+  }
 
   .order-edit-line,
   .payment-order-line,
