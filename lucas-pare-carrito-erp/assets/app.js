@@ -169,6 +169,7 @@
     orderView: "grid",
     orderProductFilter: "",
     orderSelectedCategories: [],
+    orderWholesaleFilter: ["mayor", "menor"],
     balanceFrom: todayISO(),
     balanceTo: todayISO(),
     balanceAccounts: null,
@@ -202,6 +203,7 @@
     priceListClient: "",
     priceListView: "grid",
     priceListCategories: [],
+    priceListWholesaleFilter: ["mayor", "menor"],
     remitosClientId: "all",
     remitosLinkedClientId: "all",
     transferClientId: "all",
@@ -1590,7 +1592,6 @@
           </button>
           <div class="topbar-date">
             <strong>${formatDate(todayISO())}</strong>
-            <div class="muted">Operacion diaria</div>
           </div>
         </div>
         <div class="page-actions">
@@ -2109,6 +2110,18 @@
     }
     const selectedCategories = Array.isArray(ui.orderSelectedCategories) ? ui.orderSelectedCategories : [];
     const allCategoriesSelected = categories.length > 0 && categories.every((cat) => selectedCategories.includes(cat));
+    if (!Array.isArray(ui.orderWholesaleFilter) || ui.orderWholesaleFilter.length === 0) {
+      ui.orderWholesaleFilter = ["mayor", "menor"];
+    }
+    const wholesaleFilter = ui.orderWholesaleFilter;
+    const wholesaleUnitNames = getWholesaleUnitNames();
+    const retailUnitNames = getRetailUnitNames();
+    const wholesaleMatches = (product) => {
+      const unitType = (product.unitType || "").toLowerCase();
+      if (wholesaleFilter.includes("mayor") && wholesaleUnitNames.includes(unitType)) return true;
+      if (wholesaleFilter.includes("menor") && retailUnitNames.includes(unitType)) return true;
+      return false;
+    };
     const clientSelectorMarkup = isCustomerOrder
       ? `<select id="order-client">
           ${clients.map((item) => `<option value="${item.id}" ${item.id === (client && client.id) ? "selected" : ""}>${escapeHtml(item.id)} - ${escapeHtml(item.name)}</option>`).join("")}
@@ -2122,6 +2135,7 @@
       if (!selectedCategories.length) return true;
       return selectedCategories.includes(product.category || "OTROS");
     };
+    const productMatches = (product) => categoryMatches(product) && wholesaleMatches(product);
     const nameMatches = (product) => {
       if (!ui.orderProductFilter) return true;
       return product.name.toLowerCase().includes(ui.orderProductFilter.toLowerCase());
@@ -2130,7 +2144,7 @@
       const pref = getPreference(client ? client.id : "", product.id);
       const price = getAdjustedProductPrice(product, client);
       const unit = pref ? pref.preferredUnitType : product.unitType;
-      const hidden = !categoryMatches(product) || !nameMatches(product);
+      const hidden = !productMatches(product) || !nameMatches(product);
       return `
         <div class="order-row ${ui.orderView === "grid" ? "compact" : ""}" data-product-row="${product.id}" ${hidden ? `style="display:none"` : ""}>
           <div class="order-product-title">
@@ -2156,6 +2170,11 @@
         </div>
       `;
     }).join("");
+    const wholesaleFilterButtons = `<div class="order-wholesale-filters">
+        <button type="button" class="btn small wholesale-filter-btn ${wholesaleFilter.includes("mayor") ? "blue" : "ghost"}" data-order-wholesale="mayor">Por Mayor</button>
+        <button type="button" class="btn small wholesale-filter-btn ${wholesaleFilter.includes("menor") ? "blue" : "ghost"}" data-order-wholesale="menor">Por Menor</button>
+      </div>`;
+    const visibleProductCount = products.filter((product) => productMatches(product) && nameMatches(product)).length;
     const categoryFilterButtons = categories.length
       ? `<div class="order-category-filters">
           <button type="button" class="btn small ${allCategoriesSelected ? "primary" : "ghost"}" data-order-category="all">Todos</button>
@@ -2248,7 +2267,9 @@
             <button class="btn primary full" type="submit">Enviar Pedido</button>
           </aside>
         </div>
+        ${wholesaleFilterButtons}
         ${categoryFilterButtons}
+        <div class="order-product-count" id="order-product-count">${visibleProductCount} producto${visibleProductCount === 1 ? "" : "s"}</div>
         <div class="order-grid ${ui.orderView === "grid" ? "order-grid-cards" : ""} ${hideOrderPrices ? "order-grid-simple" : ""}">${productRows}</div>
       </form>
       `,
@@ -2285,13 +2306,25 @@
       const categories = getProductCategories();
       const selected = Array.isArray(ui.orderSelectedCategories) ? ui.orderSelectedCategories : [];
       const catOk = selected.length === 0 || selected.includes(product.category || "OTROS") || categories.length === 0;
-      return nameOk && catOk;
+      const wholesaleFilter = Array.isArray(ui.orderWholesaleFilter) ? ui.orderWholesaleFilter : ["mayor", "menor"];
+      const wholesaleUnitNames = getWholesaleUnitNames();
+      const retailUnitNames = getRetailUnitNames();
+      const unitType = (product.unitType || "").toLowerCase();
+      const wholesaleOk = (wholesaleFilter.includes("mayor") && wholesaleUnitNames.includes(unitType)) || (wholesaleFilter.includes("menor") && retailUnitNames.includes(unitType));
+      return nameOk && catOk && wholesaleOk;
+    };
+    const updateOrderProductCount = () => {
+      const countNode = document.getElementById("order-product-count");
+      if (!countNode) return;
+      const count = Array.from(document.querySelectorAll("[data-product-row]")).filter((row) => row.style.display !== "none").length;
+      countNode.textContent = count + " producto" + (count === 1 ? "" : "s");
     };
     const applyOrderFilters = () => {
       document.querySelectorAll("[data-product-row]").forEach((row) => {
         const product = getProduct(row.dataset.productRow);
         row.style.display = filterMatches(product) ? "" : "none";
       });
+      updateOrderProductCount();
     };
     searchInput.addEventListener("input", () => {
       ui.orderProductFilter = searchInput.value.trim();
@@ -2314,6 +2347,16 @@
           selected = selected.includes(value) ? selected.filter((cat) => cat !== value) : [...selected, value];
         }
         ui.orderSelectedCategories = selected;
+        render();
+      });
+    });
+    document.querySelectorAll("[data-order-wholesale]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const value = button.dataset.orderWholesale;
+        let selected = Array.isArray(ui.orderWholesaleFilter) ? ui.orderWholesaleFilter : ["mayor", "menor"];
+        selected = selected.includes(value) ? selected.filter((item) => item !== value) : [...selected, value];
+        if (selected.length === 0) selected = ["mayor", "menor"];
+        ui.orderWholesaleFilter = selected;
         render();
       });
     });
@@ -7163,9 +7206,21 @@
     }
     const selectedCategories = Array.isArray(ui.priceListCategories) ? ui.priceListCategories : [];
     const allCategoriesSelected = categories.length > 0 && categories.every((cat) => selectedCategories.includes(cat));
+    if (!Array.isArray(ui.priceListWholesaleFilter) || ui.priceListWholesaleFilter.length === 0) {
+      ui.priceListWholesaleFilter = ["mayor", "menor"];
+    }
+    const wholesaleFilter = ui.priceListWholesaleFilter;
+    const wholesaleUnitNames = getWholesaleUnitNames();
+    const retailUnitNames = getRetailUnitNames();
+    const wholesaleMatches = (product) => {
+      const unitType = (product.unitType || "").toLowerCase();
+      if (wholesaleFilter.includes("mayor") && wholesaleUnitNames.includes(unitType)) return true;
+      if (wholesaleFilter.includes("menor") && retailUnitNames.includes(unitType)) return true;
+      return false;
+    };
     const filteredProducts = products.filter((product) => {
-      if (!selectedCategories.length) return true;
-      return selectedCategories.includes(product.category || "OTROS");
+      const catOk = !selectedCategories.length || selectedCategories.includes(product.category || "OTROS");
+      return catOk && wholesaleMatches(product);
     });
     const gridRows = filteredProducts.map((product) => {
       const netPrice = getAdjustedProductPrice(product, client);
@@ -7213,6 +7268,10 @@
         </select>
       </div>
     `;
+    const wholesaleFilterButtons = `<div class="order-wholesale-filters price-list-wholesale-filters">
+        <button type="button" class="btn small wholesale-filter-btn ${wholesaleFilter.includes("mayor") ? "blue" : "ghost"}" data-price-list-wholesale="mayor">Por Mayor</button>
+        <button type="button" class="btn small wholesale-filter-btn ${wholesaleFilter.includes("menor") ? "blue" : "ghost"}" data-price-list-wholesale="menor">Por Menor</button>
+      </div>`;
     const categoryFilterButtons = categories.length
       ? `<div class="order-category-filters price-list-category-filters">
           <button type="button" class="btn small ${allCategoriesSelected ? "primary" : "ghost"}" data-price-list-category="all">Todos</button>
@@ -7245,6 +7304,16 @@
           render();
         });
       });
+      document.querySelectorAll("[data-price-list-wholesale]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const value = button.dataset.priceListWholesale;
+          let selected = Array.isArray(ui.priceListWholesaleFilter) ? ui.priceListWholesaleFilter : ["mayor", "menor"];
+          selected = selected.includes(value) ? selected.filter((item) => item !== value) : [...selected, value];
+          if (selected.length === 0) selected = ["mayor", "menor"];
+          ui.priceListWholesaleFilter = selected;
+          render();
+        });
+      });
     });
     const content = ui.priceListView === "grid"
       ? `<div class="price-list-grid">${gridRows || `<div class="empty compact">No hay productos para mostrar.</div>`}</div>`
@@ -7261,6 +7330,7 @@
       "",
       `
       ${accountPanel}
+      ${wholesaleFilterButtons}
       ${categoryFilterButtons}
       ${content}
       `,
@@ -7484,7 +7554,7 @@
       const inUse = state.products.some((product) => product.unitType === unit.name);
       return `
         <div class="sidebar-order-row">
-          <span>${escapeHtml(unit.name)}${unit.wholesale ? ` <small class="muted">mayorista</small>` : ` <small class="muted">minorista</small>`} <small class="muted">${formatNumber(unit.weight)} kg</small>${inUse ? ` <small class="muted">en uso</small>` : ""}</span>
+          <span>${escapeHtml(unit.name)}${unit.wholesale ? ` <small class="muted">Pormayor</small>` : ` <small class="muted">Por menor</small>`} <small class="muted">${formatNumber(unit.weight)} kg</small>${inUse ? ` <small class="muted">en uso</small>` : ""}</span>
           <div class="page-actions">
             <button class="btn small ghost" type="button" data-edit-unit-type="${escapeAttr(unit.name)}">Editar</button>
             <button class="btn small ${inUse ? "ghost" : "danger"}" type="button" data-remove-unit-type="${escapeAttr(unit.name)}" ${inUse ? "disabled" : ""}>Quitar</button>
@@ -7571,7 +7641,7 @@
             <div class="field"><label>Peso (kg)</label><input id="new-unit-type-weight" inputmode="decimal" value="1" placeholder="1" /></div>
             <label class="field" style="display:flex;align-items:center;gap:8px;grid-template-columns:auto 1fr">
               <input type="checkbox" id="new-unit-type-wholesale" style="width:auto;min-height:auto" />
-              <span>Producto mayorista</span>
+              <span>Pormayor</span>
             </label>
             <div class="field"><label>&nbsp;</label><button class="btn primary" type="button" id="add-unit-type">Agregar unidad</button></div>
           </div>
@@ -7930,7 +8000,7 @@
       if (normalized !== name && types.some((u) => u.name === normalized)) return alert("Esa unidad ya existe.");
       const weightPrompt = prompt("Peso en kg para rendicion (ej: 1 para kg, 12 para docena):", unit.weight);
       const weight = parseAmount(weightPrompt);
-      const wholesale = confirm("Marcar como producto mayorista?");
+      const wholesale = confirm("Marcar como Pormayor?");
       state.appSettings.unitTypes = types.map((u) => u.name === name ? { name: normalized, wholesale, weight: weight > 0 ? weight : 1 } : u);
       state.products.filter((product) => product.unitType === name).forEach((product) => { product.unitType = normalized; });
       saveState();
