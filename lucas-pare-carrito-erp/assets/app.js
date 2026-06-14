@@ -2358,7 +2358,7 @@
         applySelectedClient(clientSelect.value, true);
       });
     }
-    const previousDate = dateInput.value || todayISO();
+    let previousDate = dateInput.value || todayISO();
     const rejectSunday = (value) => {
       if (!value) return false;
       const date = new Date(value + "T00:00:00");
@@ -2368,6 +2368,8 @@
       if (rejectSunday(dateInput.value)) {
         alert("No se pueden crear pedidos para domingo");
         dateInput.value = previousDate;
+      } else {
+        previousDate = dateInput.value || todayISO();
       }
     });
     dateInput.addEventListener("change", () => {
@@ -2377,9 +2379,11 @@
         return;
       }
       ui.selectedDate = dateInput.value || todayISO();
+      previousDate = ui.selectedDate;
       if (isCustomerOrder && ui.selectedDate < getCustomerMinOrderDate()) {
         ui.selectedDate = getCustomerMinOrderDate();
         dateInput.value = ui.selectedDate;
+        previousDate = ui.selectedDate;
         alert("No se puede cargar un pedido para una fecha anterior a la permitida.");
       }
     });
