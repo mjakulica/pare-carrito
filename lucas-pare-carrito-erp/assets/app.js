@@ -200,6 +200,8 @@
     dashFrom: addDaysISO(todayISO(), -29),
     dashTo: todayISO(),
     priceListClient: "",
+    priceListView: "grid",
+    priceListCategories: [],
     remitosClientId: "all",
     remitosLinkedClientId: "all",
     transferClientId: "all",
@@ -2179,16 +2181,16 @@
               <label>Fecha</label>
               <input type="date" id="order-date" value="${selectedDate}" ${isCustomerOrder ? `min="${minOrderDate}"` : ""} />
             </div>
-            <div class="field order-notes-field">
-              <label>Notas del pedido</label>
-              <textarea id="order-notes" placeholder="Notas generales para reparto o remito"></textarea>
-            </div>
             ${isCustomerOrder ? "" : `<div class="field order-vehicle-field">
               <label>Vehiculo</label>
               <select id="order-vehicle">
                 ${activeVehicles().map((vehicle) => `<option value="${vehicle.id}" ${client && client.vehicleId === vehicle.id ? "selected" : ""}>${escapeHtml(vehicle.name)}</option>`).join("")}
               </select>
             </div>`}
+            <div class="field order-notes-field">
+              <label>Notas del pedido</label>
+              <textarea id="order-notes" placeholder="Notas generales para reparto o remito"></textarea>
+            </div>
             ${showCustomerLateWarning ? `<div class="alert order-late-warning">Los pedidos se toman hasta las 5:30 am, en caso de necesitarlo para hoy, por favor comunicarse al 3874566725</div>` : ""}
             <div class="field order-search-row">
               <label>Buscar producto</label>
@@ -2214,10 +2216,9 @@
               </select>
             </div>
             <div class="field order-actions-field">
-              <label>&nbsp;</label>
               <div class="page-actions">
                 <button class="btn blue" id="add-order-products" type="button">Agregar Productos</button>
-                <button class="btn primary icon-only" type="submit" title="Enviar pedido">&#10148;</button>
+                <button class="btn primary" type="submit" title="Enviar pedido">Enviar</button>
               </div>
             </div>
           </div>
@@ -2226,9 +2227,9 @@
               <label>Pegar pedido de WhatsApp</label>
               <textarea id="order-whatsapp-paste" placeholder="Banana 1/2 doc&#10;Cebolla morada 1kg&#10;Uva 500gr"></textarea>
               <div class="order-whatsapp-actions">
-                <button class="btn ghost" id="parse-whatsapp-order" type="button">Cargar texto pegado</button>
+                <button class="btn ghost" id="parse-whatsapp-order" type="button">Cargar</button>
                 <button class="btn ghost" id="open-order-aliases" type="button">Ver alias</button>
-                <button class="btn ghost" id="order-image-ocr-button" type="button">Subir imagen manuscrita</button>
+                <button class="btn ghost" id="order-image-ocr-button" type="button">Subir imagen</button>
               </div>
               <input type="file" id="order-image-ocr-file" accept="image/*" hidden />
               <span class="muted" id="order-image-ocr-status"></span>
@@ -2248,7 +2249,7 @@
           </aside>
         </div>
         ${categoryFilterButtons}
-        <div class="order-grid ${ui.orderView === "grid" ? "order-grid-cards" : ""}">${productRows}</div>
+        <div class="order-grid ${ui.orderView === "grid" ? "order-grid-cards" : ""} ${hideOrderPrices ? "order-grid-simple" : ""}">${productRows}</div>
       </form>
       `,
       "nuevo-pedido"
@@ -2449,7 +2450,7 @@
           const text = await recognizeOrderImage(file, ocrStatus);
           const cleaned = cleanupOcrOrderText(text, clientSelect ? clientSelect.value : "");
           pasteInput.value = cleaned || text.trim();
-          if (ocrStatus) ocrStatus.textContent = (cleaned || text.trim()) ? "Texto reconocido y corregido. Revise y presione Cargar texto pegado." : "No se detecto texto claro.";
+          if (ocrStatus) ocrStatus.textContent = (cleaned || text.trim()) ? "Texto reconocido y corregido. Revise y presione Cargar." : "No se detecto texto claro.";
         } catch (error) {
           if (ocrStatus) ocrStatus.textContent = "";
           alert("No se pudo interpretar la imagen: " + error.message);
@@ -7156,7 +7157,17 @@
     if (!ui.priceListClient || !clientIds.includes(ui.priceListClient)) ui.priceListClient = clientIds[0] || "";
     const client = getClient(ui.priceListClient);
     const products = sortProductsForClient(client ? client.id : "");
-    const rows = products.map((product) => {
+    const categories = getProductCategories();
+    if (!Array.isArray(ui.priceListCategories) || ui.priceListCategories.length === 0) {
+      ui.priceListCategories = categories.slice();
+    }
+    const selectedCategories = Array.isArray(ui.priceListCategories) ? ui.priceListCategories : [];
+    const allCategoriesSelected = categories.length > 0 && categories.every((cat) => selectedCategories.includes(cat));
+    const filteredProducts = products.filter((product) => {
+      if (!selectedCategories.length) return true;
+      return selectedCategories.includes(product.category || "OTROS");
+    });
+    const gridRows = filteredProducts.map((product) => {
       const netPrice = getAdjustedProductPrice(product, client);
       const ivaRate = shouldApplyInvoiceVat(client) ? getIvaRate(product.ivaType) : 0;
       const ivaAmount = netPrice * (ivaRate / 100);
@@ -7174,28 +7185,84 @@
               <div><span>IVA ${ivaLabel(product.ivaType)}</span><strong>${formatMoney(ivaAmount)}</strong></div>
               <div><span>Precio final</span><strong>${formatMoney(finalPrice)}</strong></div>
             ` : `<div><span>Precio unitario</span><strong>${formatMoney(finalPrice)}</strong></div>`}
-            <div><span>ult act</span><strong>${formatDate(priceRecord.date || todayISO())}</strong></div>
+            <div><span>Ult act</span><strong>${formatDate(priceRecord.date || todayISO())}</strong></div>
           </div>
         </article>
       `;
     }).join("");
+    const listRows = filteredProducts.map((product) => {
+      const netPrice = getAdjustedProductPrice(product, client);
+      const ivaRate = shouldApplyInvoiceVat(client) ? getIvaRate(product.ivaType) : 0;
+      const ivaAmount = netPrice * (ivaRate / 100);
+      const finalPrice = netPrice + ivaAmount;
+      const priceRecord = state.prices[product.id] || {};
+      return `
+        <tr>
+          <td><div class="product-name"><img class="product-thumb" src="${productThumb(product)}" alt="" /> ${escapeHtml(product.name)}</div></td>
+          <td class="num"><strong>${formatMoney(finalPrice)}</strong>${ivaRate > 0 ? `<br><small>+IVA ${formatMoney(ivaAmount)}</small>` : ""}</td>
+          <td>${formatDate(priceRecord.date || todayISO())}</td>
+        </tr>
+      `;
+    }).join("");
+    const viewSelector = `
+      <div class="field price-list-view-field">
+        <label>Vista</label>
+        <select id="price-list-view">
+          <option value="grid" ${ui.priceListView === "grid" ? "selected" : ""}>Cuadricula</option>
+          <option value="list" ${ui.priceListView === "list" ? "selected" : ""}>Lista</option>
+        </select>
+      </div>
+    `;
+    const categoryFilterButtons = categories.length
+      ? `<div class="order-category-filters price-list-category-filters">
+          <button type="button" class="btn small ${allCategoriesSelected ? "primary" : "ghost"}" data-price-list-category="all">Todos</button>
+          ${categories.map((cat) => `<button type="button" class="btn small ${selectedCategories.includes(cat) ? "primary" : "ghost"}" data-price-list-category="${escapeAttr(cat)}">${escapeHtml(cat)}</button>`).join("")}
+        </div>`
+      : "";
     afterRender.push(() => {
       const select = document.getElementById("price-list-client");
       if (select) select.addEventListener("change", () => {
         ui.priceListClient = select.value;
         render();
       });
+      const viewSelect = document.getElementById("price-list-view");
+      if (viewSelect) viewSelect.addEventListener("change", () => {
+        ui.priceListView = viewSelect.value;
+        render();
+      });
+      document.querySelectorAll("[data-price-list-category]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const categories = getProductCategories();
+          const value = button.dataset.priceListCategory;
+          let selected = Array.isArray(ui.priceListCategories) ? ui.priceListCategories : [];
+          if (value === "all") {
+            const allSelected = categories.length > 0 && categories.every((cat) => selected.includes(cat));
+            selected = allSelected ? [] : categories.slice();
+          } else {
+            selected = selected.includes(value) ? selected.filter((cat) => cat !== value) : [...selected, value];
+          }
+          ui.priceListCategories = selected;
+          render();
+        });
+      });
     });
+    const content = ui.priceListView === "grid"
+      ? `<div class="price-list-grid">${gridRows || `<div class="empty compact">No hay productos para mostrar.</div>`}</div>`
+      : `<div class="table-wrap price-list-table"><table><thead><tr><th>Producto</th><th>Precio</th><th>Ult. act.</th></tr></thead><tbody>${listRows || emptyRow(3, "No hay productos para mostrar.")}</tbody></table></div>`;
+    const accountPanel = clientIds.length > 1
+      ? `<div class="panel" style="margin-bottom:14px"><div class="form-grid"><div class="field span-2"><label>Cuenta</label><select id="price-list-client">${clientIds.map((id) => {
+          const item = getClient(id);
+          return `<option value="${id}" ${id === ui.priceListClient ? "selected" : ""}>${escapeHtml(id)} - ${escapeHtml(item ? item.name : id)}</option>`;
+        }).join("")}</select></div>${viewSelector}</div></div>`
+      : `<div class="panel" style="margin-bottom:14px"><div class="form-grid">${viewSelector}</div></div>`;
     return pageShell(
       "Lista de Precios",
       "Precios de referencia de la ultima compra, los precios pueden cambiar de manera diaria",
       "",
       `
-      ${clientIds.length > 1 ? `<div class="panel" style="margin-bottom:14px"><div class="form-grid"><div class="field span-2"><label>Cuenta</label><select id="price-list-client">${clientIds.map((id) => {
-        const item = getClient(id);
-        return `<option value="${id}" ${id === ui.priceListClient ? "selected" : ""}>${escapeHtml(id)} - ${escapeHtml(item ? item.name : id)}</option>`;
-      }).join("")}</select></div></div></div>` : ""}
-      <div class="price-list-grid">${rows || `<div class="empty compact">No hay productos para mostrar.</div>`}</div>
+      ${accountPanel}
+      ${categoryFilterButtons}
+      ${content}
       `,
       "lista-precios"
     );

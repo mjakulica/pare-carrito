@@ -704,6 +704,7 @@ tr:last-child td {
 
 .order-whatsapp-actions {
   display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   margin-top: 8px;
 }
@@ -772,6 +773,14 @@ tr:last-child td {
 
 .customer-order-form .order-notes-field {
   grid-column: auto;
+}
+
+.dash-vehicle-table th:nth-child(1),
+.dash-vehicle-table td:nth-child(1) {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .dash-vehicle-table th:nth-child(2),
@@ -1431,6 +1440,34 @@ tr:last-child td {
   gap: 10px;
   border-top: 1px dashed var(--line);
   padding-top: 5px;
+}
+
+.price-list-view-field {
+  min-width: 120px;
+}
+
+.price-list-category-filters {
+  margin: 0 0 12px;
+}
+
+.price-list-table table {
+  min-width: 420px;
+}
+
+.price-list-table th,
+.price-list-table td {
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.price-list-table th {
+  text-align: left;
+  background: #f6f8fa;
+}
+
+.price-list-table td.num {
+  text-align: right;
+  white-space: nowrap;
 }
 
 .bar-row div {
@@ -2292,8 +2329,19 @@ tr:last-child td {
     grid-template-columns: 1fr;
   }
 
+  .order-whatsapp-actions {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+  }
+
   .order-whatsapp-actions .btn {
-    width: 100%;
+    min-height: 34px;
+    padding: 0 4px;
+    font-size: 11px;
+    line-height: 1.1;
+    white-space: normal;
+    overflow-wrap: break-word;
+    hyphens: auto;
   }
 
   .check-grid {
@@ -2397,6 +2445,22 @@ tr:last-child td {
   .admin-order-form .order-search-row,
   .admin-order-form .order-actions-field {
     grid-column: 1 / -1;
+  }
+
+  .order-actions-field {
+    margin-top: 4px;
+  }
+
+  .order-actions-field .page-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    width: 100%;
+  }
+
+  .order-actions-field .page-actions .btn {
+    width: 100%;
+    min-height: 44px;
   }
 
   .admin-order-form .order-date-field,
@@ -2665,6 +2729,44 @@ tr:last-child td {
     grid-row: 3;
   }
 
+  .order-grid-simple .order-row:not(.compact) {
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto auto auto;
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .order-grid-simple .order-row:not(.compact) .order-product-title {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+
+  .order-grid-simple .order-row:not(.compact) .order-thumb-field {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-self: center;
+    align-self: center;
+  }
+
+  .order-grid-simple .order-row:not(.compact) .order-product-thumb {
+    width: 120px;
+    height: 120px;
+    max-height: none;
+    min-height: auto;
+  }
+
+  .order-grid-simple .order-row:not(.compact) .order-qty-field {
+    grid-column: 1;
+    grid-row: 3;
+    min-width: 0;
+  }
+
+  .order-grid-simple .order-row:not(.compact) .order-note-field {
+    grid-column: 2;
+    grid-row: 3;
+    min-width: 0;
+  }
+
   .order-row.compact {
     grid-template-columns: 1fr;
     min-height: auto;
@@ -2891,10 +2993,14 @@ tr:last-child td {
     height: 16px;
   }
 
+  #purchase-form.panel {
+    padding: 8px;
+  }
+
   #purchase-form > .form-grid.purchase-form-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 6px;
+    gap: 5px;
   }
 
   #purchase-form > .form-grid.purchase-form-grid .field {
@@ -2909,7 +3015,8 @@ tr:last-child td {
   }
 
   #purchase-form > .form-grid.purchase-form-grid label {
-    font-size: 11px;
+    font-size: 10px;
+    margin-bottom: 1px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -2917,68 +3024,33 @@ tr:last-child td {
 
   #purchase-form > .form-grid.purchase-form-grid input,
   #purchase-form > .form-grid.purchase-form-grid select {
-    min-height: 36px;
-    padding: 5px 6px;
-    font-size: 12px;
-  }
-
-  #purchase-form > .form-grid.purchase-form-grid #purchase-date-wrap { grid-column: 1; }
-  #purchase-form > .form-grid.purchase-form-grid #purchase-kind-wrap { grid-column: 2; }
-  #purchase-form > .form-grid.purchase-form-grid #purchase-payment-status-wrap { grid-column: 3; }
-  #purchase-form > .form-grid.purchase-form-grid #purchase-assigned-employee-wrap { grid-column: 1; }
-  #purchase-form > .form-grid.purchase-form-grid #purchase-cash-box-wrap { grid-column: 2; }
-  #purchase-form > .form-grid.purchase-form-grid #purchase-notes-wrap { grid-column: 3; }
-  #purchase-form > .form-grid.purchase-form-grid #purchase-provider-wrap { grid-column: 1; }
-  #purchase-form > .form-grid.purchase-form-grid #purchase-vendor-wrap { grid-column: 2; }
-  #purchase-form > .form-grid.purchase-form-grid #purchase-total-wrap { grid-column: 3; }
-
-  #purchase-form.employee-purchase-form > .form-grid.purchase-form-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 5px;
-  }
-
-  #purchase-form.employee-purchase-form > .form-grid.purchase-form-grid #purchase-date-wrap {
-    grid-column: span 2;
-  }
-
-  #purchase-form.employee-purchase-form > .form-grid.purchase-form-grid #purchase-kind-wrap,
-  #purchase-form.employee-purchase-form > .form-grid.purchase-form-grid #purchase-cash-box-wrap,
-  #purchase-form.employee-purchase-form > .form-grid.purchase-form-grid #purchase-payment-status-wrap,
-  #purchase-form.employee-purchase-form > .form-grid.purchase-form-grid #purchase-total-wrap,
-  #purchase-form.employee-purchase-form > .form-grid.purchase-form-grid #purchase-notes-wrap {
-    grid-column: span 1;
-  }
-
-  #purchase-form.employee-purchase-form > .form-grid.purchase-form-grid #purchase-provider-wrap {
-    grid-column: span 2;
-  }
-
-  #purchase-form.employee-purchase-form > .form-grid.purchase-form-grid #purchase-vendor-wrap,
-  #purchase-form.employee-purchase-form > .form-grid.purchase-form-grid #purchase-assigned-employee-wrap {
-    display: none !important;
-  }
-
-  #purchase-form.employee-purchase-form > .form-grid.purchase-form-grid label {
-    font-size: 10px;
-    margin-bottom: 1px;
-  }
-
-  #purchase-form.employee-purchase-form > .form-grid.purchase-form-grid input,
-  #purchase-form.employee-purchase-form > .form-grid.purchase-form-grid select {
     min-height: 30px;
     padding: 3px 5px;
     font-size: 11px;
   }
 
-  #purchase-form.employee-purchase-form > .form-grid.purchase-form-grid #purchase-notes-wrap input {
+  #purchase-form > .form-grid.purchase-form-grid #purchase-date-wrap { grid-column: span 2; }
+  #purchase-form > .form-grid.purchase-form-grid #purchase-kind-wrap { grid-column: span 1; }
+  #purchase-form > .form-grid.purchase-form-grid #purchase-provider-wrap { grid-column: span 2; }
+  #purchase-form > .form-grid.purchase-form-grid #purchase-cash-box-wrap { grid-column: span 1; }
+  #purchase-form > .form-grid.purchase-form-grid #purchase-payment-status-wrap { grid-column: span 1; }
+  #purchase-form > .form-grid.purchase-form-grid #purchase-total-wrap { grid-column: span 1; }
+  #purchase-form > .form-grid.purchase-form-grid #purchase-notes-wrap { grid-column: span 1; }
+
+  #purchase-form > .form-grid.purchase-form-grid #purchase-vendor-wrap,
+  #purchase-form > .form-grid.purchase-form-grid #purchase-assigned-employee-wrap {
+    display: none !important;
+  }
+
+  #purchase-form > .form-grid.purchase-form-grid #purchase-notes-wrap input {
     min-height: 30px;
   }
 
-  #purchase-form.employee-purchase-form > .form-grid.purchase-form-grid .input-with-button {
+  #purchase-form > .form-grid.purchase-form-grid .input-with-button {
     gap: 5px;
   }
 
-  #purchase-form.employee-purchase-form > .form-grid.purchase-form-grid .input-with-button .btn.small.ghost {
+  #purchase-form > .form-grid.purchase-form-grid .input-with-button .btn.small.ghost {
     min-height: 30px;
     padding: 0 6px;
     font-size: 11px;
@@ -3024,6 +3096,20 @@ tr:last-child td {
     padding: 4px 5px;
     font-size: 11px;
     line-height: 1.2;
+  }
+
+  .price-list-view-field {
+    min-width: 0;
+  }
+
+  .price-list-table table {
+    min-width: 320px;
+  }
+
+  .price-list-table th,
+  .price-list-table td {
+    padding: 6px 8px;
+    font-size: 12px;
   }
 
   .dash-actions {
