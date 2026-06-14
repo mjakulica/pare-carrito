@@ -10,16 +10,16 @@
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
   const DEFAULT_UNIT_TYPES = [
-    { name: "kg", wholesale: false },
-    { name: "docena", wholesale: false },
-    { name: "jaula", wholesale: true },
-    { name: "cajon", wholesale: true },
-    { name: "bolsa", wholesale: true },
-    { name: "unidad", wholesale: false },
-    { name: "maple", wholesale: false },
-    { name: "ristra", wholesale: false },
-    { name: "cabeza", wholesale: false },
-    { name: "bandeja", wholesale: false }
+    { name: "kg", wholesale: false, weight: 1 },
+    { name: "docena", wholesale: false, weight: 1 },
+    { name: "jaula", wholesale: true, weight: 1 },
+    { name: "cajon", wholesale: true, weight: 1 },
+    { name: "bolsa", wholesale: true, weight: 1 },
+    { name: "unidad", wholesale: false, weight: 1 },
+    { name: "maple", wholesale: false, weight: 1 },
+    { name: "ristra", wholesale: false, weight: 1 },
+    { name: "cabeza", wholesale: false, weight: 1 },
+    { name: "bandeja", wholesale: false, weight: 1 }
   ];
   const CATEGORIES = ["FRUTAS", "VERDURAS", "HUEVOS", "OTROS"];
   const PAYMENT_METHODS = {
@@ -1642,13 +1642,8 @@
 
   function getKgFactor(product) {
     if (!product) return 1;
-    const unit = String(product.unitType || "").toLowerCase();
-    const name = normalizeText(product.name);
-    if (unit === "jaula" || unit === "bolsa") return 20;
-    if (unit === "cajon") return name.includes("banana") ? 20 : 16;
-    if (unit === "ristra") return 3.5;
-    if (unit === "cabeza") return 0.07;
-    if (unit === "bandeja") return 4;
+    const unit = getUnitTypes().find((u) => u.name === String(product.unitType || "").toLowerCase());
+    if (unit && Number(unit.weight) > 0) return Number(unit.weight);
     return 1;
   }
 
@@ -2093,7 +2088,10 @@
             </div>
             <div class="field">
               <label>&nbsp;</label>
-              <button class="btn blue" id="add-order-products" type="button">Agregar Productos</button>
+              <div class="page-actions">
+                <button class="btn blue" id="add-order-products" type="button">Agregar Productos</button>
+                <button class="btn primary icon-only" type="submit" title="Enviar pedido">&#10148;</button>
+              </div>
             </div>
           </div>
           ${isCustomerOrder ? "" : `<div class="panel order-whatsapp-panel">
@@ -7176,7 +7174,7 @@
       const inUse = state.products.some((product) => product.unitType === unit.name);
       return `
         <div class="sidebar-order-row">
-          <span>${escapeHtml(unit.name)}${unit.wholesale ? ` <small class="muted">mayorista</small>` : ` <small class="muted">minorista</small>`}${inUse ? ` <small class="muted">en uso</small>` : ""}</span>
+          <span>${escapeHtml(unit.name)}${unit.wholesale ? ` <small class="muted">mayorista</small>` : ` <small class="muted">minorista</small>`} <small class="muted">${formatNumber(unit.weight)} kg</small>${inUse ? ` <small class="muted">en uso</small>` : ""}</span>
           <div class="page-actions">
             <button class="btn small ghost" type="button" data-edit-unit-type="${escapeAttr(unit.name)}">Editar</button>
             <button class="btn small ${inUse ? "ghost" : "danger"}" type="button" data-remove-unit-type="${escapeAttr(unit.name)}" ${inUse ? "disabled" : ""}>Quitar</button>
@@ -7260,6 +7258,7 @@
           <div class="sidebar-order-list" style="margin-top:10px">${unitTypeRows}</div>
           <div class="form-grid" style="margin-top:12px">
             <div class="field"><label>Nueva unidad</label><input id="new-unit-type-name" placeholder="Ej: balde" /></div>
+            <div class="field"><label>Peso (kg)</label><input id="new-unit-type-weight" inputmode="decimal" value="1" placeholder="1" /></div>
             <label class="field" style="display:flex;align-items:center;gap:8px;grid-template-columns:auto 1fr">
               <input type="checkbox" id="new-unit-type-wholesale" style="width:auto;min-height:auto" />
               <span>Producto mayorista</span>
@@ -7592,11 +7591,13 @@
     if (addUnitType) addUnitType.addEventListener("click", () => {
       const nameInput = document.getElementById("new-unit-type-name");
       const wholesaleInput = document.getElementById("new-unit-type-wholesale");
+      const weightInput = document.getElementById("new-unit-type-weight");
       const name = String(nameInput.value || "").trim().toLowerCase();
+      const weight = parseAmount(weightInput.value);
       if (!name) return alert("Ingrese un nombre de unidad.");
       const types = getUnitTypes();
       if (types.some((unit) => unit.name === name)) return alert("Esa unidad ya existe.");
-      state.appSettings.unitTypes = normalizeUnitTypes([...types, { name, wholesale: wholesaleInput.checked }]);
+      state.appSettings.unitTypes = normalizeUnitTypes([...types, { name, wholesale: wholesaleInput.checked, weight: weight > 0 ? weight : 1 }]);
       saveState();
       render();
     });
@@ -7618,7 +7619,9 @@
       const types = getUnitTypes();
       if (normalized !== name && types.some((u) => u.name === normalized)) return alert("Esa unidad ya existe.");
       const wholesale = confirm("Marcar como producto mayorista?");
-      state.appSettings.unitTypes = types.map((u) => u.name === name ? { name: normalized, wholesale } : u);
+      const weightPrompt = prompt("Peso en kg para rendicion (ej: 1 para kg, 12 para docena):", unit.weight);
+      const weight = parseAmount(weightPrompt);
+      state.appSettings.unitTypes = types.map((u) => u.name === name ? { name: normalized, wholesale, weight: weight > 0 ? weight : 1 } : u);
       state.products.filter((product) => product.unitType === name).forEach((product) => { product.unitType = normalized; });
       saveState();
       render();
@@ -10784,8 +10787,8 @@
   function normalizeUnitTypes(unitTypes) {
     const seen = new Set();
     return (Array.isArray(unitTypes) ? unitTypes : [])
-      .map((unit) => (typeof unit === "string" ? { name: unit, wholesale: false } : { ...unit }))
-      .map((unit) => ({ name: String(unit.name || "").trim().toLowerCase(), wholesale: !!unit.wholesale }))
+      .map((unit) => (typeof unit === "string" ? { name: unit, wholesale: false, weight: 1 } : { ...unit }))
+      .map((unit) => ({ name: String(unit.name || "").trim().toLowerCase(), wholesale: !!unit.wholesale, weight: Number(unit.weight) > 0 ? Number(unit.weight) : 1 }))
       .filter((unit) => unit.name)
       .filter((unit) => {
         if (seen.has(unit.name)) return false;

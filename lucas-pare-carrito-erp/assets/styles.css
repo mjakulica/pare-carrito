@@ -397,6 +397,13 @@ a {
   width: 100%;
 }
 
+.btn.icon-only {
+  padding: 0;
+  width: var(--tap);
+  min-width: var(--tap);
+  font-size: 18px;
+}
+
 .grid {
   display: grid;
   gap: 14px;
