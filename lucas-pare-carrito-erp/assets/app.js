@@ -168,6 +168,7 @@
     purchaseAssigneeFilter: "all",
     orderView: "grid",
     orderProductFilter: "",
+    orderSelectedCategories: [],
     balanceFrom: todayISO(),
     balanceTo: todayISO(),
     balanceAccounts: null,
@@ -2100,6 +2101,9 @@
     const selectedDate = ui.selectedDate || todayISO();
     const showCustomerLateWarning = currentUser.role === "customer" && isTimeBetween("05:30", "11:00");
     const products = sortProductsForClient(client ? client.id : "");
+    const categories = getProductCategories();
+    const selectedCategories = Array.isArray(ui.orderSelectedCategories) ? ui.orderSelectedCategories : [];
+    const allCategoriesSelected = categories.length > 0 && categories.every((cat) => selectedCategories.includes(cat));
     const clientSelectorMarkup = isCustomerOrder
       ? `<select id="order-client">
           ${clients.map((item) => `<option value="${item.id}" ${item.id === (client && client.id) ? "selected" : ""}>${escapeHtml(item.id)} - ${escapeHtml(item.name)}</option>`).join("")}
@@ -2109,11 +2113,19 @@
         <datalist id="order-client-options">
           ${clients.map((item) => `<option value="${escapeAttr(item.id + " - " + item.name)}"></option>`).join("")}
         </datalist>`;
+    const categoryMatches = (product) => {
+      if (!selectedCategories.length) return true;
+      return selectedCategories.includes(product.category || "OTROS");
+    };
+    const nameMatches = (product) => {
+      if (!ui.orderProductFilter) return true;
+      return product.name.toLowerCase().includes(ui.orderProductFilter.toLowerCase());
+    };
     const productRows = products.map((product) => {
       const pref = getPreference(client ? client.id : "", product.id);
       const price = getAdjustedProductPrice(product, client);
       const unit = pref ? pref.preferredUnitType : product.unitType;
-      const hidden = ui.orderProductFilter && !product.name.toLowerCase().includes(ui.orderProductFilter.toLowerCase());
+      const hidden = !categoryMatches(product) || !nameMatches(product);
       return `
         <div class="order-row ${ui.orderView === "grid" ? "compact" : ""}" data-product-row="${product.id}" ${hidden ? `style="display:none"` : ""}>
           <div class="order-product-title">
@@ -2139,6 +2151,12 @@
         </div>
       `;
     }).join("");
+    const categoryFilterButtons = categories.length
+      ? `<div class="order-category-filters">
+          <button type="button" class="btn small ${allCategoriesSelected ? "primary" : "ghost"}" data-order-category="all">Todos</button>
+          ${categories.map((cat) => `<button type="button" class="btn small ${selectedCategories.includes(cat) ? "primary" : "ghost"}" data-order-category="${escapeAttr(cat)}">${escapeHtml(cat)}</button>`).join("")}
+        </div>`
+      : "";
 
     afterRender.push(bindNewOrder);
     return pageShell(
@@ -2173,14 +2191,17 @@
               <input type="checkbox" id="order-paid-now" style="width:auto;min-height:auto" />
               <span>Marcar como cobrado en efectivo al guardar</span>
             </label>`}
-            <div class="field order-search-field">
+            <div class="field order-search-row">
               <label>Buscar producto</label>
-              <div class="input-with-button"><input id="order-product-search" list="order-product-options" value="${escapeAttr(ui.orderProductFilter)}" placeholder="Escriba para filtrar productos" /><button class="btn small ghost" id="clear-order-search" type="button">X</button></div>
+              <div class="order-search-line">
+                <input id="order-product-search" list="order-product-options" value="${escapeAttr(ui.orderProductFilter)}" placeholder="Escriba para filtrar productos" />
+                <div class="field order-quick-qty-field">
+                  <label>Cant.</label>
+                  <input id="order-quick-qty" inputmode="decimal" placeholder="0" />
+                </div>
+                <button class="btn small ghost" id="clear-order-search" type="button">X</button>
+              </div>
               <datalist id="order-product-options">${activeProducts().map((product) => `<option value="${escapeAttr(product.name)}"></option>`).join("")}</datalist>
-            </div>
-            <div class="field order-quick-qty-field">
-              <label>Cantidad producto filtrado</label>
-              <input id="order-quick-qty" inputmode="decimal" placeholder="0" />
             </div>
             <div class="field order-quick-note-field">
               <label>Nota producto filtrado</label>
@@ -2227,6 +2248,7 @@
             <button class="btn primary full" type="submit">Enviar Pedido</button>
           </aside>
         </div>
+        ${categoryFilterButtons}
         <div class="order-grid ${ui.orderView === "grid" ? "order-grid-cards" : ""}">${productRows}</div>
       </form>
       `,
@@ -2257,18 +2279,42 @@
       if (vatTotalNode) vatTotalNode.textContent = "IVA " + formatMoney(vatTotal);
       if (orderTotal) orderTotal.textContent = formatMoney(subtotalTotal + vatTotal);
     };
-    searchInput.addEventListener("input", () => {
-      ui.orderProductFilter = searchInput.value.trim();
+    const filterMatches = (product) => {
+      if (!product) return false;
+      const nameOk = !ui.orderProductFilter || product.name.toLowerCase().includes(ui.orderProductFilter.toLowerCase());
+      const categories = getProductCategories();
+      const selected = Array.isArray(ui.orderSelectedCategories) ? ui.orderSelectedCategories : [];
+      const catOk = selected.length === 0 || selected.includes(product.category || "OTROS") || categories.length === 0;
+      return nameOk && catOk;
+    };
+    const applyOrderFilters = () => {
       document.querySelectorAll("[data-product-row]").forEach((row) => {
         const product = getProduct(row.dataset.productRow);
-        row.style.display = !ui.orderProductFilter || (product && product.name.toLowerCase().includes(ui.orderProductFilter.toLowerCase())) ? "" : "none";
+        row.style.display = filterMatches(product) ? "" : "none";
       });
+    };
+    searchInput.addEventListener("input", () => {
+      ui.orderProductFilter = searchInput.value.trim();
+      applyOrderFilters();
     });
     document.getElementById("clear-order-search").addEventListener("click", () => {
       searchInput.value = "";
       ui.orderProductFilter = "";
-      document.querySelectorAll("[data-product-row]").forEach((row) => {
-        row.style.display = "";
+      applyOrderFilters();
+    });
+    document.querySelectorAll("[data-order-category]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const categories = getProductCategories();
+        const value = button.dataset.orderCategory;
+        let selected = Array.isArray(ui.orderSelectedCategories) ? ui.orderSelectedCategories : [];
+        if (value === "all") {
+          const allSelected = categories.length > 0 && categories.every((cat) => selected.includes(cat));
+          selected = allSelected ? [] : categories.slice();
+        } else {
+          selected = selected.includes(value) ? selected.filter((cat) => cat !== value) : [...selected, value];
+        }
+        ui.orderSelectedCategories = selected;
+        render();
       });
     });
     const clearClientButton = document.getElementById("clear-order-client");
@@ -2312,7 +2358,24 @@
         applySelectedClient(clientSelect.value, true);
       });
     }
+    const previousDate = dateInput.value || todayISO();
+    const rejectSunday = (value) => {
+      if (!value) return false;
+      const date = new Date(value + "T00:00:00");
+      return date.getDay() === 0;
+    };
+    dateInput.addEventListener("input", () => {
+      if (rejectSunday(dateInput.value)) {
+        alert("No se pueden crear pedidos para domingo");
+        dateInput.value = previousDate;
+      }
+    });
     dateInput.addEventListener("change", () => {
+      if (rejectSunday(dateInput.value)) {
+        alert("No se pueden crear pedidos para domingo");
+        dateInput.value = previousDate;
+        return;
+      }
       ui.selectedDate = dateInput.value || todayISO();
       if (isCustomerOrder && ui.selectedDate < getCustomerMinOrderDate()) {
         ui.selectedDate = getCustomerMinOrderDate();
@@ -2346,9 +2409,7 @@
       ui.orderProductFilter = "";
       if (quickQty) quickQty.value = "";
       if (quickNote) quickNote.value = "";
-      document.querySelectorAll("[data-product-row]").forEach((row) => {
-        row.style.display = "";
-      });
+      applyOrderFilters();
       recalc();
     });
     const aliasButton = document.getElementById("open-order-aliases");
@@ -3849,11 +3910,11 @@
     return `
       <form id="purchase-form" class="panel">
           <div class="form-grid purchase-form-grid">
-            <div class="field">
+            <div class="field" id="purchase-date-wrap">
               <label>Fecha</label>
               <input type="date" id="purchase-date" value="${todayISO()}" />
             </div>
-            <div class="field">
+            <div class="field" id="purchase-kind-wrap">
               <label>Tipo</label>
               <select id="purchase-kind">
                 ${canPurchaseProviders ? `<option value="purchase">Compra a proveedor</option>` : ""}
@@ -3902,7 +3963,7 @@
               <label>Caja destino</label>
               <select id="purchase-cash-transfer-target">${renderCashMovementTargetOptions()}</select>
             </div>
-            <div class="field">
+            <div class="field" id="purchase-assigned-employee-wrap">
               <label>Empleado asignado</label>
               <select id="purchase-assigned-employee" ${currentUser.role === "employee" ? "disabled" : ""}>
                 ${(currentUser.role === "employee" ? [currentUser] : activeEmployees()).map((employee) => `<option value="${employee.id}" ${employee.id === currentUser.id ? "selected" : ""}>${escapeHtml(employee.name)}</option>`).join("")}
@@ -3921,11 +3982,11 @@
               <label>Monto</label>
               <input id="purchase-other-amount" inputmode="decimal" placeholder="0" />
             </div>
-            <div class="field">
+            <div class="field" id="purchase-total-wrap">
               <label>Total</label>
               <input id="purchase-total" disabled value="$0" />
             </div>
-            <div class="field span-2">
+            <div class="field span-2" id="purchase-notes-wrap">
               <label>Notas</label>
               <input id="purchase-notes" placeholder="Detalle de compra, gasto, cancelacion, etc." />
             </div>

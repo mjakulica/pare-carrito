@@ -724,6 +724,44 @@ tr:last-child td {
   grid-column: 1 / -1;
 }
 
+.order-search-row {
+  grid-column: 1 / -1;
+}
+
+.order-search-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 90px auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.order-search-line .order-quick-qty-field {
+  display: grid;
+  gap: 4px;
+}
+
+.order-search-line .order-quick-qty-field input {
+  min-height: 36px;
+}
+
+.order-search-line #clear-order-search {
+  min-height: 36px;
+  padding: 0 10px;
+}
+
+.order-category-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0 4px;
+}
+
+.order-category-filters .btn.small {
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
 .order-date-field {
   grid-column: 1;
 }
@@ -2445,8 +2483,84 @@ tr:last-child td {
     padding: 0 10px;
   }
 
+  .order-search-line {
+    grid-template-columns: minmax(0, 1fr) 72px auto;
+    gap: 6px;
+  }
+
+  .order-search-line .order-quick-qty-field input,
+  .order-search-line #clear-order-search {
+    min-height: 40px;
+  }
+
+  .order-search-line .order-quick-qty-field label {
+    font-size: 11px;
+  }
+
+  .order-category-filters {
+    gap: 6px;
+    margin: 8px 0 4px;
+  }
+
+  .order-category-filters .btn.small {
+    min-height: 30px;
+    padding: 0 8px;
+    font-size: 11px;
+  }
+
   .order-row {
     grid-template-columns: 1fr;
+  }
+
+  .order-row:not(.compact) {
+    grid-template-columns: minmax(0, 1fr) 76px minmax(70px, 1fr) 76px;
+    grid-template-rows: auto auto;
+    gap: 6px;
+    align-items: stretch;
+    padding: 8px;
+  }
+
+  .order-row:not(.compact) .order-product-title {
+    grid-column: 1 / -1;
+    grid-row: 1;
+    align-self: start;
+  }
+
+  .order-row:not(.compact) .order-qty-field {
+    grid-column: 1;
+    grid-row: 2;
+    min-width: 0;
+  }
+
+  .order-row:not(.compact) .order-note-field {
+    grid-column: 2 / 4;
+    grid-row: 2;
+    min-width: 0;
+  }
+
+  .order-row:not(.compact) .order-note-field input {
+    max-width: none;
+    width: 100%;
+  }
+
+  .order-row:not(.compact) .order-thumb-field {
+    grid-column: 4;
+    grid-row: 2;
+    justify-self: end;
+    align-self: stretch;
+  }
+
+  .order-row:not(.compact) .order-product-thumb {
+    width: 100%;
+    height: 100%;
+    min-height: 52px;
+    max-height: 76px;
+    object-fit: cover;
+  }
+
+  .order-row:not(.compact) .order-price-field {
+    grid-column: 1 / -1;
+    grid-row: 3;
   }
 
   .order-row.compact {
@@ -2484,17 +2598,45 @@ tr:last-child td {
     max-width: 90px;
   }
 
+.purchase-form-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
   .purchase-line {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 76px 42px;
-    grid-template-rows: auto auto;
-    gap: 6px;
+    grid-template-columns: minmax(74px, 1.2fr) 56px 52px 52px 52px 32px;
+    grid-template-rows: auto;
+    gap: 5px;
     align-items: end;
+  }
+
+  .purchase-line .field {
+    min-width: 0;
+  }
+
+  .purchase-line .field label {
+    font-size: 9px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .purchase-line input,
+  .purchase-line select {
+    min-height: 34px;
+    padding: 4px 5px;
+    font-size: 12px;
   }
 
   .purchase-line .field:nth-child(1) {
     grid-column: 1;
     grid-row: 1;
+  }
+
+  .purchase-line .field:nth-child(1) input {
+    min-width: 0;
   }
 
   .purchase-line .field:nth-child(2) {
@@ -2503,8 +2645,17 @@ tr:last-child td {
   }
 
   .purchase-line .field:nth-child(3) {
-    grid-column: 1;
-    grid-row: 2;
+    grid-column: 3;
+    grid-row: 1;
+  }
+
+  .purchase-line .field:nth-child(3) label {
+    font-size: 0;
+  }
+
+  .purchase-line .field:nth-child(3) label::before {
+    content: "Costo";
+    font-size: 9px;
   }
 
   .purchase-line .field:nth-child(4) {
@@ -2512,20 +2663,41 @@ tr:last-child td {
   }
 
   .purchase-line .field:nth-child(5) {
-    grid-column: 2;
-    grid-row: 2;
+    grid-column: 4;
+    grid-row: 1;
+  }
+
+  .purchase-line .field:nth-child(5) label {
+    font-size: 0;
+  }
+
+  .purchase-line .field:nth-child(5) label::before {
+    content: "Mercado";
+    font-size: 9px;
   }
 
   .purchase-line .field:nth-child(6) {
-    grid-column: 3;
-    grid-row: 2;
+    grid-column: 5;
+    grid-row: 1;
+  }
+
+  .purchase-line .field:nth-child(6) label {
+    font-size: 0;
+  }
+
+  .purchase-line .field:nth-child(6) label::before {
+    content: "Subtot.";
+    font-size: 9px;
   }
 
   .purchase-line .btn.small.ghost {
-    grid-column: 3;
+    grid-column: 6;
     grid-row: 1;
     justify-self: stretch;
     align-self: end;
+    min-height: 34px;
+    padding: 0 4px;
+    font-size: 11px;
   }
 
   .market-price-mode .purchase-line {
@@ -2544,8 +2716,7 @@ tr:last-child td {
   }
 
   .market-price-mode .purchase-line .field:nth-child(6) {
-    grid-column: auto;
-    grid-row: auto;
+    display: none;
   }
 
   .market-price-mode .purchase-line .btn.small.ghost {
@@ -2561,9 +2732,12 @@ tr:last-child td {
   }
 
   .divide-page-actions .btn {
-    font-size: 11px;
-    padding: 0 4px;
+    font-size: 10px;
+    padding: 0 3px;
     min-height: 38px;
+    line-height: 1.1;
+    overflow-wrap: break-word;
+    hyphens: auto;
   }
 
   .divide-assignee-checklist {
@@ -2610,14 +2784,45 @@ tr:last-child td {
   }
 
   #purchase-form > .form-grid.purchase-form-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  #purchase-form > .form-grid.purchase-form-grid .field {
+    grid-column: auto;
+    min-width: 0;
   }
 
   #purchase-form > .form-grid.purchase-form-grid .field.span-2,
   #purchase-form > .form-grid.purchase-form-grid .field.span-3,
   #purchase-form > .form-grid.purchase-form-grid .field.span-4 {
-    grid-column: span 2;
+    grid-column: span 1;
   }
+
+  #purchase-form > .form-grid.purchase-form-grid label {
+    font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  #purchase-form > .form-grid.purchase-form-grid input,
+  #purchase-form > .form-grid.purchase-form-grid select {
+    min-height: 36px;
+    padding: 5px 6px;
+    font-size: 12px;
+  }
+
+  #purchase-form > .form-grid.purchase-form-grid #purchase-date-wrap { grid-column: 1; }
+  #purchase-form > .form-grid.purchase-form-grid #purchase-kind-wrap { grid-column: 2; }
+  #purchase-form > .form-grid.purchase-form-grid #purchase-payment-status-wrap { grid-column: 3; }
+  #purchase-form > .form-grid.purchase-form-grid #purchase-assigned-employee-wrap { grid-column: 1; }
+  #purchase-form > .form-grid.purchase-form-grid #purchase-cash-box-wrap { grid-column: 2; }
+  #purchase-form > .form-grid.purchase-form-grid #purchase-notes-wrap { grid-column: 3; }
+  #purchase-form > .form-grid.purchase-form-grid #purchase-provider-wrap { grid-column: 1; }
+  #purchase-form > .form-grid.purchase-form-grid #purchase-vendor-wrap { grid-column: 2; }
+  #purchase-form > .form-grid.purchase-form-grid #purchase-total-wrap { grid-column: 3; }
 
   .order-edit-line,
   .payment-order-line,
