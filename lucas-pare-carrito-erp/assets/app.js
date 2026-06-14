@@ -1591,7 +1591,7 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
           </button>
           <div class="topbar-date">
-            <strong>${formatDate(todayISO())}</strong>
+            <strong>${formatDateShort(todayISO())}</strong>
           </div>
         </div>
         <div class="page-actions">
@@ -2145,6 +2145,7 @@
       const price = getAdjustedProductPrice(product, client);
       const unit = pref ? pref.preferredUnitType : product.unitType;
       const hidden = !productMatches(product) || !nameMatches(product);
+      const integerQty = isCustomerOrder && product.unitType === "unidad";
       return `
         <div class="order-row ${ui.orderView === "grid" ? "compact" : ""}" data-product-row="${product.id}" ${hidden ? `style="display:none"` : ""}>
           <div class="order-product-title">
@@ -2153,7 +2154,7 @@
           </div>
           <div class="field order-qty-field">
             <label>Cantidad</label>
-            <input data-qty value="" inputmode="decimal" placeholder="0" />
+            <input data-qty value="" ${integerQty ? `type="number" step="1" inputmode="numeric" data-integer-qty` : `inputmode="decimal"`} placeholder="0" />
             <input type="hidden" data-unit value="${escapeAttr(unit)}" />
           </div>
           <div class="order-thumb-field">
@@ -2270,7 +2271,7 @@
         ${wholesaleFilterButtons}
         ${categoryFilterButtons}
         <div class="order-product-count" id="order-product-count">${visibleProductCount} producto${visibleProductCount === 1 ? "" : "s"}</div>
-        <div class="order-grid ${ui.orderView === "grid" ? "order-grid-cards" : ""} ${hideOrderPrices ? "order-grid-simple" : ""}">${productRows}</div>
+        <div class="order-grid ${ui.orderView === "grid" ? "order-grid-cards" : ""}">${productRows}</div>
       </form>
       `,
       "nuevo-pedido"
@@ -2438,6 +2439,20 @@
     dateInput.addEventListener("change", handleDateChange);
     dateInput.addEventListener("blur", handleDateChange);
     document.querySelectorAll("[data-qty],[data-price]").forEach((input) => input.addEventListener("input", recalc));
+    const orderGrid = document.querySelector(".order-grid");
+    if (orderGrid) {
+      orderGrid.addEventListener("input", (event) => {
+        const input = event.target.closest("[data-qty][data-integer-qty]");
+        if (!input) return;
+        const sanitized = input.value.replace(/[^0-9.,]/g, "").replace(/,/g, ".");
+        const num = parseFloat(sanitized);
+        const value = Number.isFinite(num) ? String(Math.max(0, Math.round(num))) : "";
+        if (input.value !== value) {
+          input.value = value;
+          recalc();
+        }
+      });
+    }
     document.getElementById("order-cart").addEventListener("click", (event) => {
       const button = event.target.closest("[data-remove-cart-item]");
       if (!button) return;
