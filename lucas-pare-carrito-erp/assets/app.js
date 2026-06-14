@@ -9,6 +9,7 @@
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
+  const PRINTER_SVG = `<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M18 3H6v4h12V3zM19 8H5c-1.66 0-3 1.34-3 3v6h4v4h12v-4h4v-6c0-1.66-1.34-3-3-3zm-2 11H7v-5h10v5zm2-7c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1z"/></svg>`;
   const DEFAULT_UNIT_TYPES = [
     { name: "kg", wholesale: false, weight: 1 },
     { name: "docena", wholesale: false, weight: 1 },
@@ -1534,7 +1535,7 @@
   function pageShell(title, subtitle, actions, body, routeName) {
     const toolbar = toolbarRoutes.has(routeName) ? renderToolbar() : "";
     return `
-      <section class="page">
+      <section class="page" data-page="${escapeAttr(routeName)}">
         ${toolbar}
         <div class="page-header">
           <div>
@@ -4596,8 +4597,8 @@
   function renderDividePurchases() {
     const assignees = activeAssignees();
     const allValues = assignees.map((entry) => entry.value);
-    let selected = Array.isArray(ui.divideAssignees) ? ui.divideAssignees : (ui.divideAssignee && ui.divideAssignee !== "all" ? [ui.divideAssignee] : allValues.slice());
-    if (selected.length === 0) selected = allValues.slice();
+    let selected = Array.isArray(ui.divideAssignees) ? ui.divideAssignees : (ui.divideAssignee && ui.divideAssignee !== "all" ? [ui.divideAssignee] : []);
+
     ui.divideAssignees = selected;
     delete ui.divideAssignee;
     const isAllSelected = selected.length >= allValues.length;
@@ -4635,17 +4636,18 @@
         });
       });
       const toggleAll = document.getElementById("divide-assignee-toggle-all");
-      if (toggleAll) toggleAll.addEventListener("change", () => {
-        const checkboxes = document.querySelectorAll("[data-divide-assignee]");
-        const nextValues = toggleAll.checked ? allValues.slice() : [];
-        checkboxes.forEach((cb) => cb.checked = toggleAll.checked);
-        ui.divideAssignees = nextValues;
+      if (toggleAll) toggleAll.addEventListener("click", () => {
+        const allSelected = (ui.divideAssignees || []).length >= allValues.length;
+        ui.divideAssignees = allSelected ? [] : allValues.slice();
         render();
       });
-      document.querySelectorAll("[data-divide-assignee]").forEach((checkbox) => {
-        checkbox.addEventListener("change", () => {
-          const checked = Array.from(document.querySelectorAll("[data-divide-assignee]:checked")).map((cb) => cb.dataset.divideAssignee);
-          ui.divideAssignees = checked.length ? checked : allValues.slice();
+      document.querySelectorAll("[data-divide-assignee]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const value = button.dataset.divideAssignee;
+          const current = new Set(ui.divideAssignees || []);
+          if (current.has(value)) current.delete(value);
+          else current.add(value);
+          ui.divideAssignees = Array.from(current);
           render();
         });
       });
@@ -4664,12 +4666,7 @@
           }
         });
       });
-      document.querySelectorAll("[data-print-divide]").forEach((button) => {
-        button.addEventListener("click", () => {
-          const values = button.dataset.printDivide ? button.dataset.printDivide.split(",") : selected;
-          printDivideDocument(values);
-        });
-      });
+
     });
     const selectedLabel = isAllSelected ? "Todos" : selected.map((value) => {
       const entry = assignees.find((a) => a.value === value);
@@ -4679,8 +4676,8 @@
       "Dividir Compras",
       "Agrupacion diaria por producto y por cliente segun la asignacion cargada en Productos.",
       `<button class="btn primary" data-add-provider>Agregar proveedor</button>
-       <button class="btn ghost" data-print-divide="all">PDF todos</button>
-       <button class="btn ghost" data-print-divide="${escapeAttr(selected.join(","))}">PDF seleccionado</button>
+       <button class="btn ghost" data-route="dividir/imprimir/all">PDF todos</button>
+       <button class="btn ghost" data-route="dividir/imprimir/${escapeAttr(selected.join(","))}">PDF seleccionado</button>
        <button class="btn ghost" data-copy-divide="${escapeAttr(selected.join(","))}">Copiar WhatsApp</button>`,
       `
       <div class="panel" style="margin-bottom:14px">
@@ -4688,8 +4685,8 @@
           <div class="field span-2">
             <label>Empleado o proveedor</label>
             <div class="divide-assignee-checklist">
-              <label class="check-item"><input type="checkbox" id="divide-assignee-toggle-all" value="all" ${isAllSelected ? "checked" : ""} /><span>Todos</span></label>
-              ${assignees.map((entry) => `<label class="check-item"><input type="checkbox" data-divide-assignee="${entry.value}" value="${entry.value}" ${selected.includes(entry.value) ? "checked" : ""} /><span>${escapeHtml(entry.label)}</span></label>`).join("")}
+              <button type="button" class="btn small ${isAllSelected ? 'primary' : 'ghost'}" id="divide-assignee-toggle-all">Todos</button>
+              ${assignees.map((entry) => `<button type="button" class="btn small ${selected.includes(entry.value) ? 'primary' : 'ghost'}" data-divide-assignee="${entry.value}">${escapeHtml(entry.label)}</button>`).join("")}
             </div>
           </div>
         </div>
@@ -4879,7 +4876,7 @@
               <div class="muted">${escapeHtml(vehicle.type)} ${vehicle.driverName ? "- " + escapeHtml(vehicle.driverName) : ""}</div>
             </div>
             <div class="page-actions">
-              <button class="btn small ghost" data-print-vehicle="${vehicle.id}">Imprimir</button>
+              <button class="btn small ghost" data-print-vehicle="${vehicle.id}" title="Imprimir">${PRINTER_SVG}</button>
               ${canManageVehicles ? `<button class="btn small ghost" data-edit-vehicle="${vehicle.id}">Editar</button><button class="btn small danger" data-delete-vehicle="${vehicle.id}">Borrar</button>` : ""}
             </div>
           </div>
@@ -4900,18 +4897,17 @@
     return pageShell(
       "Vehiculos",
       "Carga por vehiculo con suma consolidada de productos.",
-      `<button class="btn ghost" data-print-vehicle="all">Imprimir todos los vehiculos</button>
-       <button class="btn ghost" data-print-vehicle="flat">Imprimir sin dividir</button>
-       ${canManageVehicles ? `<button class="btn primary" data-add-vehicle>Agregar vehiculo</button>` : ""}`,
+      `<div class="vehicle-actions">
+  <div class="field vehicle-date-field"><label>Fecha</label><input type="date" id="vehicle-date" value="${date}" /></div>
+  <button class="btn ghost" data-print-vehicle="all" title="Imprimir todos">${PRINTER_SVG} <span class="vehicle-action-label">Todos</span></button>
+  <button class="btn ghost" data-print-vehicle="flat" title="Imprimir sin dividir">${PRINTER_SVG} <span class="vehicle-action-label">Sin dividir</span></button>
+  ${canManageVehicles ? `<button class="btn primary" data-add-vehicle>Agregar vehiculo</button>` : ""}
+</div>
+<div class="vehicle-whatsapp-actions">
+  <button class="btn green" data-copy-vehicle="all">${WHATSAPP_SVG} WhatsApp todos</button>
+  <button class="btn green" data-copy-vehicle="flat">${WHATSAPP_SVG} WhatsApp sin dividir</button>
+</div>`,
       `
-      <div class="panel" style="margin-bottom:14px">
-        <div class="form-grid">
-          <div class="field">
-            <label>Fecha</label>
-            <input type="date" id="vehicle-date" value="${date}" />
-          </div>
-        </div>
-      </div>
       <div class="vehicle-board">${columns}</div>
       `,
       "vehiculos"
@@ -4968,6 +4964,21 @@
     });
     document.querySelectorAll("[data-print-vehicle]").forEach((button) => {
       button.addEventListener("click", () => printVehicleDirect(button.dataset.printVehicle));
+    });
+    document.querySelectorAll("[data-copy-vehicle]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const vehicleId = button.dataset.copyVehicle;
+        const html = stripPrintControls(vehicleId === "flat" ? renderVehicleFlatPrint(ui.vehicleDate || todayISO()) : renderVehiclePrint(vehicleId));
+        const wrapper = document.createElement("div");
+        wrapper.innerHTML = html;
+        const text = wrapper.innerText || wrapper.textContent || "";
+        try {
+          await navigator.clipboard.writeText(text);
+          alert("Texto copiado para WhatsApp.");
+        } catch (error) {
+          prompt("Copie este texto para WhatsApp", text);
+        }
+      });
     });
   }
 
@@ -5162,7 +5173,7 @@
         button.addEventListener("click", () => {
           if (todaysNotes.length && !confirm("Todavia hay notas en productos de pedidos de hoy. Exportar igual?")) return;
           if (missingPurchases.length && !confirm("Hay productos de hoy sin compra registrada. Exportar igual?")) return;
-          printTodayRemitosDirect();
+          navigate("remitos/imprimir-hoy");
         });
       });
     });
@@ -5514,7 +5525,7 @@
         if (unitItems.length && !confirm("Hay productos por unidades pendientes. Exportar remitos igual?")) return;
         if (missingPurchases.length && !confirm("Hay productos sin compra o compra insuficiente. Exportar remitos igual?")) return;
         if (notes.length && !confirm("Hay notas de productos pendientes. Exportar remitos igual?")) return;
-        printTodayRemitosDirect();
+        navigate("remitos/imprimir-hoy");
       });
     });
   }
@@ -5606,7 +5617,7 @@
               <label>Metodo</label>
               <select id="payment-method">${methods.map((method) => `<option value="${method}">${escapeHtml(PAYMENT_METHODS[method])}</option>`).join("")}</select>
             </div>
-            <div class="field">
+            <div class="field payment-receiver-field">
               <label>Quien recibio</label>
               <select id="payment-receiver" ${currentUser.role === "employee" ? "disabled" : ""}>
                 ${(currentUser.role === "employee" ? [currentUser] : activeCashReceivers()).map((employee) => `<option value="${employee.id}" ${employee.id === currentUser.id ? "selected" : ""}>${escapeHtml(employee.name)} - ${escapeHtml(roleLabel(employee.role))}</option>`).join("")}
@@ -6692,29 +6703,28 @@
       "Registro de presencialidad y finalizacion del dia.",
       "",
       `
-      <div class="grid three">
+      <div class="grid two attendance-metrics-row">
         ${metricCard("Horas semana", summary.hoursText, formatDate(summary.weekStart) + " - " + formatDate(summary.weekEnd))}
-        ${metricCard("Cobro semana", formatMoney(summary.due), "Disponible los sabados segun planilla")}
         ${metricCard("Mi caja", formatMoney(getEmployeeCajaTotal(currentUser.id)), "Cobros registrados a mi nombre")}
       </div>
-      <form id="attendance-form" class="panel" style="margin-top:14px">
-        <div class="form-grid attendance-form-grid">
-          <div class="field"><label>Fecha</label><input type="date" id="attendance-date" value="${todayEntry ? todayEntry.date : todayISO()}" /></div>
-          <div class="field attendance-present-field">
-            <label>Presente</label>
-            <label class="check-item">
-              <input type="checkbox" id="attendance-present" ${!todayEntry || todayEntry.present ? "checked" : ""} />
-              <span>Presente</span>
-            </label>
+      <div class="grid two attendance-main-row" style="margin-top:14px">
+        <form id="attendance-form" class="panel attendance-form-panel" style="margin-top:0">
+          <div class="form-grid attendance-form-grid">
+            <div class="field"><label>Fecha</label><input type="date" id="attendance-date" value="${todayEntry ? todayEntry.date : todayISO()}" /></div>
+            <div class="field attendance-present-field">
+              <label>Presente</label>
+              <label class="check-item">
+                <input type="checkbox" id="attendance-present" ${!todayEntry || todayEntry.present ? "checked" : ""} />
+                <span>Presente</span>
+              </label>
+            </div>
+            <div class="field"><label>Inicio</label><input type="time" id="attendance-start" value="${escapeAttr(todayEntry ? todayEntry.startTime || "05:45" : "05:45")}" /></div>
+            <div class="field"><label>Fin del dia</label><input type="time" id="attendance-end" value="${escapeAttr(todayEntry ? todayEntry.endTime || currentTimeHHMM() : currentTimeHHMM())}" /></div>
+            <div class="field span-4"><label>Notas</label><input id="attendance-notes" value="${escapeAttr(todayEntry ? todayEntry.notes || "" : "")}" placeholder="Retiro temprano, franco, reemplazo, etc." /></div>
           </div>
-          <div class="field"><label>Inicio</label><input type="time" id="attendance-start" value="${escapeAttr(todayEntry ? todayEntry.startTime || "05:45" : "05:45")}" /></div>
-          <div class="field"><label>Fin del dia</label><input type="time" id="attendance-end" value="${escapeAttr(todayEntry ? todayEntry.endTime || currentTimeHHMM() : currentTimeHHMM())}" /></div>
-          <div class="field span-4"><label>Notas</label><input id="attendance-notes" value="${escapeAttr(todayEntry ? todayEntry.notes || "" : "")}" placeholder="Retiro temprano, franco, reemplazo, etc." /></div>
-        </div>
-        <div class="page-actions attendance-form-actions" style="margin-top:12px"><button class="btn primary" type="submit">Guardar horario</button></div>
-      </form>
-      <div class="grid two" style="margin-top:14px">
-        <form id="employee-reimbursement-form" class="panel">
+          <div class="page-actions attendance-form-actions" style="margin-top:12px"><button class="btn primary" type="submit">Guardar horario</button></div>
+        </form>
+        <form id="employee-reimbursement-form" class="panel reimbursement-panel" style="margin-top:0">
           <h2 class="page-title" style="font-size:18px">Gastos para reintegro</h2>
           <div class="form-grid" style="margin-top:10px">
             <div class="field"><label>Fecha</label><input type="date" id="reimbursement-date" value="${todayISO()}" /></div>
@@ -6723,7 +6733,10 @@
           </div>
           <div class="page-actions" style="margin-top:12px"><button class="btn primary" type="submit">Registrar reintegro</button></div>
         </form>
-        <form id="employee-salary-collection-form" class="panel">
+      </div>
+      <div class="grid two attendance-salary-row" style="margin-top:14px">
+        ${metricCard("Cobro semana", formatMoney(summary.due), "Disponible los sabados segun planilla")}
+        <form id="employee-salary-collection-form" class="panel" style="margin-top:0">
           <h2 class="page-title" style="font-size:18px">Cobro de sueldo</h2>
           <div class="form-grid" style="margin-top:10px">
             <div class="field"><label>Fecha</label><input type="date" id="salary-collection-date" value="${todayISO()}" /></div>

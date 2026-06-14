@@ -899,21 +899,14 @@ tr:last-child td {
 .divide-assignee-checklist {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px 16px;
+  gap: 8px;
   margin-top: 6px;
 }
 
-.divide-assignee-checklist .check-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  white-space: nowrap;
-}
-
-.divide-assignee-checklist .check-item input {
-  width: auto;
-  min-height: auto;
+.divide-assignee-checklist .btn {
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 12px;
 }
 
 .favorite-grid {
@@ -1388,6 +1381,33 @@ tr:last-child td {
   border-radius: 6px;
   padding: 5px 7px;
   font-size: 12px;
+}
+
+.vehicle-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+}
+.vehicle-actions .vehicle-date-field {
+  max-width: 150px;
+  min-width: 120px;
+}
+.vehicle-actions .vehicle-date-field input {
+  min-height: 38px;
+}
+.vehicle-action-label {
+  display: inline;
+}
+.vehicle-whatsapp-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.vehicle-whatsapp-actions .btn {
+  flex: 1 1 auto;
+  min-height: 38px;
 }
 
 .vehicle-board {
@@ -2138,6 +2158,49 @@ tr:last-child td {
     padding: 14px 18px;
   }
 
+  [data-page="dividir"] .page-header .page-actions {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 6px;
+  }
+  [data-page="dividir"] .page-header .page-actions .btn {
+    flex: 1 1 auto;
+    min-width: 0;
+    width: auto;
+    padding: 0 6px;
+    font-size: 11px;
+  }
+
+  .vehicle-actions {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .vehicle-actions .vehicle-date-field {
+    flex: 1 1 auto;
+    min-width: 110px;
+    max-width: 140px;
+  }
+  .vehicle-actions .btn {
+    width: auto;
+  }
+  .vehicle-actions [data-print-vehicle] {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 0 6px;
+    font-size: 11px;
+  }
+  .vehicle-actions [data-add-vehicle] {
+    width: 100%;
+  }
+  .vehicle-action-label {
+    display: none;
+  }
+  .vehicle-whatsapp-actions .btn {
+    flex: 1 1 auto;
+    width: auto;
+    font-size: 12px;
+    padding: 0 8px;
+  }
 
   .topbar-logo,
   .topbar-logo-inline {
@@ -2303,44 +2366,64 @@ tr:last-child td {
   }
 
   .payment-form-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
+    grid-template-columns: 1fr;
+    gap: 6px;
   }
 
+  .payment-form-grid .field,
   .payment-form-grid .field.payment-client-field,
+  .payment-form-grid .field.payment-amount-field,
+  .payment-form-grid .field.payment-method-field,
   .payment-form-grid .field.payment-orders-field,
   .payment-form-grid .field.payment-notes-field,
+  .payment-form-grid .field.payment-receiver-field,
   .payment-form-grid #transfer-upload-wrap {
-    grid-column: span 2;
+    grid-column: 1;
   }
 
   .payment-form-grid label {
-    font-size: 12px;
+    font-size: 11px;
+    margin-bottom: 2px;
   }
 
   .payment-form-grid input,
-  .payment-form-grid select {
-    min-height: 36px;
-    padding: 6px 8px;
-    font-size: 13px;
+  .payment-form-grid select,
+  .payment-form-grid textarea {
+    min-height: 34px;
+    padding: 5px 7px;
+    font-size: 12px;
   }
 
-  .payment-form-grid .page-actions .btn {
-    min-height: 34px;
+  .payment-form-grid .page-actions {
+    gap: 6px;
+  }
+
+  .payment-form-grid .page-actions .btn,
+  .payment-form-actions .btn {
+    min-height: 38px;
     padding: 0 10px;
     font-size: 12px;
+    width: 100%;
+  }
+
+  .payment-order-line {
+    grid-template-columns: 1fr auto;
+    gap: 6px;
+  }
+
+  .payment-order-line select {
+    min-width: 0;
   }
 
   .payment-order-line .btn.small.ghost {
-    min-height: 32px;
+    min-height: 30px;
     padding: 0 6px;
-    font-size: 12px;
+    font-size: 11px;
   }
 
-  .payment-amount-field,
-  .payment-method-field,
-  .customer-order-form .order-notes-field {
-    grid-column: 1;
+  #payment-orders-total,
+  #payment-orders-difference {
+    font-size: 12px;
   }
 
   .field.span-2,
@@ -2366,6 +2449,37 @@ tr:last-child td {
   .attendance-form-actions .btn {
     width: 100%;
     min-height: 44px;
+  }
+
+  .attendance-metrics-row,
+  .attendance-main-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .attendance-salary-row {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  .attendance-form-panel,
+  .reimbursement-panel {
+    min-width: 0;
+  }
+  .attendance-form-panel .form-grid,
+  .reimbursement-panel .form-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .attendance-form-panel .form-grid .field.span-4,
+  .reimbursement-panel .form-grid .field.span-2 {
+    grid-column: span 2;
+  }
+  .attendance-form-actions .btn {
+    width: 100%;
+    min-height: 40px;
+  }
+  .reimbursement-panel .page-actions .btn {
+    width: 100%;
+    min-height: 40px;
   }
 
   .order-row {
@@ -2408,11 +2522,54 @@ tr:last-child td {
   }
 
   .purchase-line {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr 60px 60px 32px;
+    gap: 6px;
+    align-items: end;
   }
-
+  .purchase-line .field:nth-child(1) {
+    grid-column: 1 / span 2;
+    grid-row: 1;
+  }
+  .purchase-line .field:nth-child(2) {
+    grid-column: 3;
+    grid-row: 1;
+  }
+  .purchase-line .field:nth-child(3) {
+    grid-column: 1;
+    grid-row: 2;
+  }
+  .purchase-line .field:nth-child(4) {
+    display: none;
+  }
+  .purchase-line .field:nth-child(5) {
+    grid-column: 2;
+    grid-row: 2;
+  }
+  .purchase-line .field:nth-child(6) {
+    grid-column: 3 / span 2;
+    grid-row: 2;
+  }
   .purchase-line .btn.small.ghost {
-    justify-self: start;
+    grid-column: 4;
+    grid-row: 1;
+    justify-self: stretch;
+    min-height: 34px;
+    padding: 0 4px;
+  }
+  .market-price-mode .purchase-line {
+    grid-template-columns: 1fr 1fr 60px 32px;
+  }
+  .market-price-mode .purchase-line .field:nth-child(1) {
+    grid-column: 1 / span 3;
+    grid-row: 1;
+  }
+  .market-price-mode .purchase-line .field:nth-child(5) {
+    grid-column: 1 / span 3;
+    grid-row: 2;
+  }
+  .market-price-mode .purchase-line .btn.small.ghost {
+    grid-column: 4;
+    grid-row: 1;
   }
 
   #purchase-form > .form-grid.purchase-form-grid {
