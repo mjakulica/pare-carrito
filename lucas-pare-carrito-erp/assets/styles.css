@@ -468,6 +468,40 @@ a {
   color: var(--muted);
 }
 
+.pending-transfers-banner {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #fff;
+  border: 2px solid #b42318;
+  border-radius: var(--radius);
+  padding: 8px 14px;
+  margin-bottom: 14px;
+  box-shadow: 0 2px 6px rgba(180, 35, 24, 0.15);
+  color: #111;
+  text-decoration: none;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.pending-transfers-banner:hover {
+  background: #fef2f2;
+}
+
+.pending-transfers-count {
+  color: #b42318;
+  font-size: 22px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.pending-transfers-label {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -3278,6 +3312,20 @@ tr:last-child td {
     min-height: 38px;
     padding: 0 8px;
     font-size: 12px;
+  }
+
+  .pending-transfers-banner {
+    width: 100%;
+    justify-content: center;
+    padding: 10px 14px;
+  }
+
+  .pending-transfers-count {
+    font-size: 24px;
+  }
+
+  .pending-transfers-label {
+    font-size: 14px;
   }
 
   /* Scrollboxes horizontales para tablas en dashboards y gastos */

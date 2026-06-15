@@ -1809,6 +1809,7 @@
       `<button class="btn primary" data-route="nuevo-pedido">Nuevo pedido</button>
        <button class="btn blue" data-route="pagos">Registrar pago</button>`,
       `
+      ${renderPendingTransfersBanner()}
       <div class="grid four dash-metrics-grid">
         ${metricCard("Pedidos de hoy", todaysOrders.length, "Pedidos activos cargados")}
         ${metricCard("Caja", formatMoney(cajaBalance), "Ingresos menos egresos")}
@@ -2183,6 +2184,7 @@
       `<button class="btn blue" data-route="saldos">Ver saldos detallados</button>
        <button class="btn ghost" data-route="caja">Ver caja</button>`,
       `
+      ${renderPendingTransfersBanner()}
       <div class="grid four dash-metrics-grid">
         ${metricCard("A cobrar clientes", formatMoney(totalReceivable), "Total pendiente de cobro")}
         ${metricCard("A pagar proveedores", formatMoney(providerDebtTotal), "Total adeudado a proveedores")}
@@ -2312,6 +2314,19 @@
         <div class="metric-value">${escapeHtml(String(value))}</div>
         <div class="metric-note">${escapeHtml(note)}</div>
       </div>
+    `;
+  }
+
+  function renderPendingTransfersBanner() {
+    const count = Array.isArray(state.clientTransfers)
+      ? state.clientTransfers.filter((transfer) => transfer.status === "pending").length
+      : 0;
+    if (!count) return "";
+    return `
+      <a class="pending-transfers-banner" data-route="comprobar-transferencias" title="Comprobar transferencias pendientes">
+        <span class="pending-transfers-count">${count}</span>
+        <span class="pending-transfers-label">Comp pend.</span>
+      </a>
     `;
   }
 
