@@ -2641,9 +2641,54 @@ tr:last-child td {
     grid-column: span 1;
   }
 
-  .balance-date-grid .balance-range-buttons .btn {
+  .form-grid.balance-date-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .balance-date-grid .balance-date-field {
+    grid-column: span 1;
+    min-width: 0;
+  }
+
+  .balance-date-grid .balance-date-field label {
+    font-size: 11px;
+  }
+
+  .balance-date-grid .balance-date-field input {
+    min-height: 38px;
+    padding: 5px 7px;
+    font-size: 13px;
+  }
+
+  .balance-date-grid .balance-range-buttons {
+    grid-column: 1 / -1;
+  }
+
+  .balance-date-grid .balance-range-buttons .page-actions {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .balance-date-grid .balance-range-buttons .btn,
+  .balance-date-grid .balance-range-buttons .balance-range-btn {
     width: 100%;
-    min-height: 40px;
+    min-height: 34px;
+    padding: 0 4px;
+    font-size: 11px;
+    line-height: 1.1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .dash-date-grid .balance-range-buttons .page-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .accountant-date-grid .balance-range-buttons .page-actions {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .attendance-form-grid {

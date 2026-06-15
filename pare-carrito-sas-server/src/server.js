@@ -324,6 +324,43 @@ app.put("/state", authenticate, requireRole(...SYNC_ROLES), async (req, res) => 
   }
 });
 
+// ---------- Transferencias enviadas por clientes ----------
+app.post("/transfers", authenticate, requireRole("customer", "example"), async (req, res) => {
+  const body = req.body || {};
+  if (!body.transfer || typeof body.transfer !== "object") {
+    return res.status(400).json({ error: "Cuerpo invalido: se espera { transfer: { ... } }." });
+  }
+  const clientDb = await pool.connect();
+  try {
+    await clientDb.query("BEGIN");
+    const row = await clientDb.query("SELECT data FROM app_state WHERE id = 'main' FOR UPDATE");
+    if (!row.rows.length) {
+      await clientDb.query("ROLLBACK");
+      return res.status(404).json({ error: "Sin datos." });
+    }
+    const data = row.rows[0].data;
+    const transfer = {
+      ...body.transfer,
+      id: body.transfer.id || "TRF-" + Date.now(),
+      status: "pending",
+      createdByUserId: req.user.sub,
+      createdByName: req.user.name || req.user.username,
+      timestamp: new Date().toISOString()
+    };
+    data.clientTransfers = data.clientTransfers || [];
+    data.clientTransfers.push(transfer);
+    await clientDb.query("UPDATE app_state SET data = $1, updated_at = now(), updated_by = $2 WHERE id = 'main'", [data, req.user.username]);
+    await clientDb.query("COMMIT");
+    res.json({ ok: true, transfer });
+  } catch (error) {
+    await clientDb.query("ROLLBACK").catch(() => {});
+    console.error("POST /transfers:", error);
+    res.status(500).json({ error: "No se pudo guardar la transferencia: " + error.message });
+  } finally {
+    clientDb.release();
+  }
+});
+
 // Espejo relacional: refresco transaccional completo (estados chicos, robustez maxima)
 async function mirrorStateToTables(db, data) {
   const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);

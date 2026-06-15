@@ -1084,6 +1084,21 @@
     }
   }
 
+  async function syncClientTransferToCloud(transfer) {
+    const config = getCloudSyncConfig();
+    if (!cloudSyncReady(config)) return;
+    try {
+      const response = await cloudRequest(config, "/transfers", {
+        method: "POST",
+        body: JSON.stringify({ transfer })
+      });
+      if (!response.ok) throw new Error("HTTP " + response.status + (await readCloudErrorDetail(response)));
+    } catch (error) {
+      console.warn("Sincronizacion de transferencia fallida:", error.message);
+      throw error;
+    }
+  }
+
   function mergeCloudStates(remoteData, localData) {
     const remote = remoteData || {};
     const local = localData || {};
@@ -2023,11 +2038,16 @@
     return `
       <div class="panel" style="margin-top:14px">
         <h2 class="page-title" style="font-size:18px">Tendencias</h2>
-        <div class="form-grid" style="margin-top:10px">
-          <div class="field"><label>Desde</label><input type="date" id="dash-from" value="${escapeAttr(from)}" /></div>
-          <div class="field"><label>Hasta</label><input type="date" id="dash-to" value="${escapeAttr(to)}" /></div>
-          <div class="field"><label>&nbsp;</label><button class="btn ghost" type="button" data-dash-range="7">7 dias</button></div>
-          <div class="field"><label>&nbsp;</label><button class="btn ghost" type="button" data-dash-range="30">30 dias</button></div>
+        <div class="form-grid balance-date-grid dash-date-grid" style="margin-top:10px">
+          <div class="field balance-date-field"><label>Desde</label><input type="date" id="dash-from" value="${escapeAttr(from)}" /></div>
+          <div class="field balance-date-field"><label>Hasta</label><input type="date" id="dash-to" value="${escapeAttr(to)}" /></div>
+          <div class="field span-2 balance-range-buttons dash-range-field">
+            <label>&nbsp;</label>
+            <div class="page-actions">
+              <button class="btn ghost balance-range-btn" type="button" data-dash-range="7">7 dias</button>
+              <button class="btn ghost balance-range-btn" type="button" data-dash-range="30">30 dias</button>
+            </div>
+          </div>
         </div>
         <div class="grid two dash-charts" style="margin-top:14px">
           ${charts.map((chart) => `
@@ -2180,15 +2200,15 @@
       </div>
       <div class="panel" style="margin-top:14px">
         <h2 class="page-title" style="font-size:18px">Tendencias</h2>
-        <div class="form-grid" style="margin-top:10px">
-          <div class="field"><label>Desde</label><input type="date" id="accountant-dash-from" value="${escapeAttr(from)}" /></div>
-          <div class="field"><label>Hasta</label><input type="date" id="accountant-dash-to" value="${escapeAttr(to)}" /></div>
-          <div class="field span-2 accountant-range-field">
+        <div class="form-grid balance-date-grid accountant-date-grid" style="margin-top:10px">
+          <div class="field balance-date-field"><label>Desde</label><input type="date" id="accountant-dash-from" value="${escapeAttr(from)}" /></div>
+          <div class="field balance-date-field"><label>Hasta</label><input type="date" id="accountant-dash-to" value="${escapeAttr(to)}" /></div>
+          <div class="field span-4 balance-range-buttons accountant-range-field">
             <label>&nbsp;</label>
-            <div class="trend-range-buttons compact">
-              <button class="btn ghost ${range === "3m" ? "blue" : ""}" type="button" data-accountant-range="3m">3 meses</button>
-              <button class="btn ghost ${range === "6m" ? "blue" : ""}" type="button" data-accountant-range="6m">6 meses</button>
-              <button class="btn ghost ${range === "1y" ? "blue" : ""}" type="button" data-accountant-range="1y">1 año</button>
+            <div class="page-actions">
+              <button class="btn ghost balance-range-btn ${range === "3m" ? "blue" : ""}" type="button" data-accountant-range="3m">3 meses</button>
+              <button class="btn ghost balance-range-btn ${range === "6m" ? "blue" : ""}" type="button" data-accountant-range="6m">6 meses</button>
+              <button class="btn ghost balance-range-btn ${range === "1y" ? "blue" : ""}" type="button" data-accountant-range="1y">1 año</button>
             </div>
           </div>
         </div>
@@ -4212,10 +4232,12 @@
             </div>
             ${canPayProviders ? `
             <div class="field span-2" id="purchase-provider-wrap">
-              <label>Proveedor</label>
+              <label>Proveedor / Asignado a</label>
               <div class="input-with-button">
                 <select id="purchase-provider">
-                  ${activeProviders().map((provider) => `<option value="${provider.id}" ${firstProvider && firstProvider.id === provider.id ? "selected" : ""}>${escapeHtml(provider.name)}</option>`).join("")}
+                  <option value="all">Todos</option>
+                  ${activeProviders().map((provider) => `<option value="provider:${provider.id}" ${firstProvider && firstProvider.id === provider.id ? "selected" : ""}>${escapeHtml(provider.name)}</option>`).join("")}
+                  ${activeEmployees().map((employee) => `<option value="employee:${employee.id}">${escapeHtml(employee.name)}</option>`).join("")}
                 </select>
                 <button class="btn small ghost" type="button" data-add-provider>Agregar</button>
               </div>
@@ -4414,9 +4436,10 @@
     const requiredGrid = document.getElementById("required-purchase-grid");
     const getSelectedAssigneeValue = () => {
       if (currentUser.role === "employee") return "employee:" + currentUser.id;
-      if (kind.value === "purchase" && providerInput) {
-        const provider = findProviderByInput(providerInput.value);
-        if (provider) return "provider:" + provider.id;
+      if (providerInput) {
+        const parsed = parsePurchaseProviderValue(providerInput.value);
+        if (parsed.type === "provider" && parsed.provider) return parsed.assigneeValue;
+        if (parsed.type === "employee" && parsed.employee) return parsed.assigneeValue;
       }
       if (assignedEmployeeSelect && assignedEmployeeSelect.value) return "employee:" + assignedEmployeeSelect.value;
       return "";
@@ -4431,7 +4454,8 @@
         return;
       }
       if (kind.value === "provider_payment") {
-        const provider = providerInput ? findProviderByInput(providerInput.value) : null;
+        const parsed = providerInput ? parsePurchaseProviderValue(providerInput.value) : { provider: null };
+        const provider = parsed.provider;
         const balance = provider ? getProviderBalance(provider.id) : 0;
         if (providerPaymentMode && providerPaymentMode.value === "full") providerPaymentAmount.value = formatAmountInput(Math.max(0, balance));
         total.value = formatMoney(parseAmount(providerPaymentAmount ? providerPaymentAmount.value : 0));
@@ -4525,7 +4549,8 @@
     });
     if (providerInput) {
       const updateProviderSelection = () => {
-        renderProviderFavorites(findProviderByInput(providerInput.value));
+        const parsed = parsePurchaseProviderValue(providerInput.value);
+        renderProviderFavorites(parsed.provider);
         refreshRequiredGrid();
         recalc();
       };
@@ -4614,7 +4639,8 @@
     document.getElementById("purchase-form").addEventListener("submit", (event) => {
       event.preventDefault();
       const expenseType = kind.value;
-      const provider = providerInput ? findProviderByInput(providerInput.value) : null;
+      const providerParsed = providerInput ? parsePurchaseProviderValue(providerInput.value) : { provider: null };
+      const provider = providerParsed.provider;
       const description = document.getElementById("purchase-description").value.trim();
       const paymentStatus = document.getElementById("purchase-payment-status") ? document.getElementById("purchase-payment-status").value : "paid";
       if (expenseType === "cash_movement") {
@@ -4678,7 +4704,7 @@
         return;
       }
       if (expenseType === "provider_payment") {
-        if (!provider) return alert("Seleccione un proveedor.");
+        if (!provider) return alert("Seleccione un proveedor en el dropdown.");
         const providerPayment = processProviderPayment({
           provider,
           mode: document.getElementById("purchase-provider-payment-mode").value,
@@ -4694,7 +4720,7 @@
         render();
         return;
       }
-      if (expenseType === "purchase" && !provider) return alert("Seleccione un proveedor.");
+      if (expenseType === "purchase" && !provider) return alert("Seleccione un proveedor en el dropdown.");
       if (expenseType === "other_expense" && !description) return alert("Ingrese una descripcion para el gasto.");
       const items = expenseType === "other_expense" ? [] : expenseType === "market_price" ? readMarketPriceItems() : readPurchaseItems(expenseType === "prepared");
       const totalCost = expenseType === "other_expense"
@@ -6330,15 +6356,15 @@
       `
       <div class="panel" style="margin-bottom:14px">
         <div class="form-grid balance-date-grid">
-          <div class="field balance-date-field"><label>Desde movimientos</label><input type="date" id="balance-from" value="${ui.balanceFrom}" /></div>
-          <div class="field balance-date-field"><label>Hasta movimientos</label><input type="date" id="balance-to" value="${ui.balanceTo}" /></div>
+          <div class="field balance-date-field"><label>Desde</label><input type="date" id="balance-from" value="${ui.balanceFrom}" /></div>
+          <div class="field balance-date-field"><label>Hasta</label><input type="date" id="balance-to" value="${ui.balanceTo}" /></div>
           <div class="field span-4 balance-range-buttons">
             <label>&nbsp;</label>
             <div class="page-actions">
-              <button class="btn ghost" type="button" data-balance-range="this-week">Esta semana</button>
-              <button class="btn ghost" type="button" data-balance-range="last-week">Semana pasada</button>
-              <button class="btn ghost" type="button" data-balance-range="30-days">30 días</button>
-              <button class="btn ghost" type="button" data-balance-range="this-month">Este mes</button>
+              <button class="btn ghost balance-range-btn" type="button" data-balance-range="this-week">Esta semana</button>
+              <button class="btn ghost balance-range-btn" type="button" data-balance-range="last-week">Semana pasada</button>
+              <button class="btn ghost balance-range-btn" type="button" data-balance-range="30-days">30 días</button>
+              <button class="btn ghost balance-range-btn" type="button" data-balance-range="this-month">Este mes</button>
             </div>
           </div>
           <div class="field span-4"><label>&nbsp;</label><span class="muted">El rango se usa al abrir Ver movimientos y al imprimir/exportar.</span></div>
@@ -6479,15 +6505,15 @@
       </div>
       <div class="panel" style="margin-bottom:14px">
         <div class="form-grid balance-date-grid">
-          <div class="field balance-date-field"><label>Desde movimientos</label><input type="date" id="balance-from" value="${ui.balanceFrom}" /></div>
-          <div class="field balance-date-field"><label>Hasta movimientos</label><input type="date" id="balance-to" value="${ui.balanceTo}" /></div>
+          <div class="field balance-date-field"><label>Desde</label><input type="date" id="balance-from" value="${ui.balanceFrom}" /></div>
+          <div class="field balance-date-field"><label>Hasta</label><input type="date" id="balance-to" value="${ui.balanceTo}" /></div>
           <div class="field span-4 balance-range-buttons">
             <label>&nbsp;</label>
             <div class="page-actions">
-              <button class="btn ghost" type="button" data-balance-range="this-week">Esta semana</button>
-              <button class="btn ghost" type="button" data-balance-range="last-week">Semana pasada</button>
-              <button class="btn ghost" type="button" data-balance-range="30-days">30 días</button>
-              <button class="btn ghost" type="button" data-balance-range="this-month">Este mes</button>
+              <button class="btn ghost balance-range-btn" type="button" data-balance-range="this-week">Esta semana</button>
+              <button class="btn ghost balance-range-btn" type="button" data-balance-range="last-week">Semana pasada</button>
+              <button class="btn ghost balance-range-btn" type="button" data-balance-range="30-days">30 días</button>
+              <button class="btn ghost balance-range-btn" type="button" data-balance-range="this-month">Este mes</button>
             </div>
           </div>
           ${accountButtons}
@@ -6633,7 +6659,7 @@
       const amount = parseAmount(amountInput.value);
       if (amount <= 0) return alert("Ingrese un monto mayor a cero.");
       state.clientTransfers = state.clientTransfers || [];
-      state.clientTransfers.push({
+      const newTransfer = {
         id: nextDatedId("TRF", state.clientTransfers),
         date: document.getElementById("transfer-date").value || todayISO(),
         timestamp: new Date().toISOString(),
@@ -6648,8 +6674,12 @@
         status: "pending",
         createdByUserId: currentUser.id,
         createdByName: currentUser.name
-      });
+      };
+      state.clientTransfers.push(newTransfer);
       saveState();
+      if (isClientLikeRole(currentUser.role)) {
+        syncClientTransferToCloud(newTransfer).catch(() => {});
+      }
       alert("Los datos de trasferencia han sido enviados, una vez comprobada, se descontara de su saldo");
       render();
     });
@@ -11076,6 +11106,21 @@
     return state.providers.find((provider) => provider.id.toLowerCase() === clean || provider.name.toLowerCase() === clean) || null;
   }
 
+  function parsePurchaseProviderValue(value) {
+    const str = String(value || "").trim();
+    if (str.startsWith("provider:")) {
+      const id = str.slice("provider:".length);
+      const provider = getProvider(id);
+      return { type: "provider", id, provider, assigneeValue: "provider:" + id };
+    }
+    if (str.startsWith("employee:")) {
+      const id = str.slice("employee:".length);
+      const employee = getUser(id);
+      return { type: "employee", id, employee, assigneeValue: "employee:" + id };
+    }
+    return { type: "all", id: "", provider: null, employee: null, assigneeValue: "" };
+  }
+
   function findClientByInput(value) {
     const clean = String(value || "").trim().toLowerCase();
     if (!clean) return null;
@@ -11483,7 +11528,14 @@
   function getProductCategories() {
     const configured = state.appSettings && Array.isArray(state.appSettings.productCategories) ? state.appSettings.productCategories : [];
     const base = configured.length ? configured : CATEGORIES;
-    return normalizeProductCategories([...base, ...state.products.map((product) => product.category || "OTROS")]);
+    const categoryRank = (category) => {
+      const rank = { FRUTAS: 1, VERDURAS: 2, HUEVOS: 3, OTROS: 4 }[String(category || "").toUpperCase()];
+      return rank || 99;
+    };
+    return normalizeProductCategories([...base, ...state.products.map((product) => product.category || "OTROS")]).sort((a, b) => {
+      const diff = categoryRank(a) - categoryRank(b);
+      return diff || String(a).localeCompare(String(b));
+    });
   }
 
   function normalizeUnitTypes(unitTypes) {
@@ -11676,7 +11728,14 @@
 
   function sortProductsForClient(clientId) {
     const prefs = new Set(state.preferences.filter((pref) => pref.clientId === clientId).map((pref) => pref.productId));
+    const categoryRank = (category) => {
+      const rank = { FRUTAS: 1, VERDURAS: 2, HUEVOS: 3, OTROS: 4 }[String(category || "").toUpperCase()];
+      return rank || 99;
+    };
     return activeProducts().slice().sort((a, b) => {
+      const rankA = categoryRank(a.category);
+      const rankB = categoryRank(b.category);
+      if (rankA !== rankB) return rankA - rankB;
       const pa = prefs.has(a.id);
       const pb = prefs.has(b.id);
       if (pa && !pb) return -1;
