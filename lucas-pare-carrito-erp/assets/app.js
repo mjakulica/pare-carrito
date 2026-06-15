@@ -260,6 +260,8 @@
     cajaSelectedId: "all",
     dashCashBox: "all",
     ordersTab: "activos",
+    ordersFrom: todayISO(),
+    ordersTo: todayISO(),
     pendingHandwritten: "",
     permRole: "employee",
     tplKey: "remito",
@@ -2939,10 +2941,11 @@
     if (isClientLikeRole(currentUser.role)) return renderCustomerOrders();
     const showAnnulledTab = ["manager", "admin"].includes(currentUser.role);
     const annulledView = showAnnulledTab && ui.ordersTab === "anulados";
-    const orders = (annulledView
+    let baseOrders = annulledView
       ? state.orders.filter((order) => order.status === "anulado")
-      : visibleOrders().filter((order) => order.status !== "anulado")
-    ).slice().sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+      : visibleOrders().filter((order) => order.status !== "anulado");
+    baseOrders = baseOrders.filter((order) => isDateInRange(order.date, ui.ordersFrom, ui.ordersTo));
+    const orders = baseOrders.slice().sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
     const canEditStatus = ["manager", "admin"].includes(currentUser.role) && !annulledView;
     const showActions = currentUser.role !== "customer";
     const rows = orders.map((order) => {
@@ -2985,6 +2988,22 @@
         : currentUser.role === "employee" ? `<button class="btn primary" data-route="nuevo-pedido">Nuevo Pedido</button><button class="btn blue" data-route="pagos">Registrar pago</button>` : "",
       `
       ${showAnnulledTab ? `<div class="tabs"><button class="tab ${!annulledView ? "active" : ""}" data-orders-tab="activos">Pedidos</button><button class="tab ${annulledView ? "active" : ""}" data-orders-tab="anulados">Anulados (papelera)</button></div>` : ""}
+      <div class="panel" style="margin-bottom:14px">
+        <div class="form-grid balance-date-grid orders-date-grid">
+          <div class="field balance-date-field"><label>Desde</label><input type="date" id="orders-from" value="${ui.ordersFrom}" /></div>
+          <div class="field balance-date-field"><label>Hasta</label><input type="date" id="orders-to" value="${ui.ordersTo}" /></div>
+          <div class="field span-4 balance-range-buttons orders-range-field">
+            <label>&nbsp;</label>
+            <div class="page-actions">
+              <button class="btn ghost balance-range-btn" type="button" data-orders-range="today">Hoy</button>
+              <button class="btn ghost balance-range-btn" type="button" data-orders-range="this-week">Esta semana</button>
+              <button class="btn ghost balance-range-btn" type="button" data-orders-range="last-week">Semana pasada</button>
+              <button class="btn ghost balance-range-btn" type="button" data-orders-range="this-month">Este mes</button>
+              <button class="btn ghost balance-range-btn" type="button" data-orders-range="30-days">30 dias</button>
+            </div>
+          </div>
+        </div>
+      </div>
       ${["manager", "admin"].includes(currentUser.role) && !annulledView ? `<div class="panel" style="margin-bottom:14px"><div class="form-grid"><div class="field"><label>Estado masivo</label><select id="bulk-order-status">${["pendiente", "preparando", "listo", "entregado", "cancelado"].map((status) => `<option value="${status}">${statusLabel(status)}</option>`).join("")}</select></div><div class="field"><label>&nbsp;</label><button class="btn ghost" id="apply-bulk-order-status" type="button">Actualizar pedidos visibles</button></div></div></div>` : ""}
       <div class="panel">
         <div class="table-wrap orders-table">
@@ -3000,6 +3019,40 @@
   }
 
   function bindOrders() {
+    const fromInput = document.getElementById("orders-from");
+    const toInput = document.getElementById("orders-to");
+    if (fromInput) fromInput.addEventListener("change", () => {
+      ui.ordersFrom = fromInput.value || todayISO();
+      if (ui.ordersTo < ui.ordersFrom) ui.ordersTo = ui.ordersFrom;
+      render();
+    });
+    if (toInput) toInput.addEventListener("change", () => {
+      ui.ordersTo = toInput.value || todayISO();
+      if (ui.ordersTo < ui.ordersFrom) ui.ordersFrom = ui.ordersTo;
+      render();
+    });
+    document.querySelectorAll("[data-orders-range]").forEach((button) => button.addEventListener("click", () => {
+      const today = todayISO();
+      const range = button.dataset.ordersRange;
+      if (range === "today") {
+        ui.ordersFrom = today;
+        ui.ordersTo = today;
+      } else if (range === "this-week") {
+        ui.ordersFrom = getWeekMondayISO(today);
+        ui.ordersTo = today;
+      } else if (range === "last-week") {
+        const monday = getWeekMondayISO(today);
+        ui.ordersFrom = addDaysISO(monday, -7);
+        ui.ordersTo = addDaysISO(monday, -1);
+      } else if (range === "this-month") {
+        ui.ordersFrom = getMonthStartISO(today);
+        ui.ordersTo = today;
+      } else if (range === "30-days") {
+        ui.ordersFrom = addDaysISO(today, -29);
+        ui.ordersTo = today;
+      }
+      render();
+    }));
     document.querySelectorAll("[data-order-status]").forEach((select) => {
       select.addEventListener("change", () => {
         const order = getOrder(select.dataset.orderStatus);
@@ -3198,6 +3251,7 @@
     if (ui.customerDashboardClient !== "all" && !clientIds.includes(ui.customerDashboardClient)) ui.customerDashboardClient = "all";
     const ids = ui.customerDashboardClient === "all" ? clientIds : [ui.customerDashboardClient];
     const orders = getCustomerOrdersForIds(ids)
+      .filter((order) => isDateInRange(order.date, ui.ordersFrom, ui.ordersTo))
       .sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
     const rows = orders.map((order) => {
       const client = getClient(order.clientId);
@@ -3222,6 +3276,40 @@
       `;
     }).join("");
     afterRender.push(() => {
+      const fromInput = document.getElementById("orders-from");
+      const toInput = document.getElementById("orders-to");
+      if (fromInput) fromInput.addEventListener("change", () => {
+        ui.ordersFrom = fromInput.value || todayISO();
+        if (ui.ordersTo < ui.ordersFrom) ui.ordersTo = ui.ordersFrom;
+        render();
+      });
+      if (toInput) toInput.addEventListener("change", () => {
+        ui.ordersTo = toInput.value || todayISO();
+        if (ui.ordersTo < ui.ordersFrom) ui.ordersFrom = ui.ordersTo;
+        render();
+      });
+      document.querySelectorAll("[data-orders-range]").forEach((button) => button.addEventListener("click", () => {
+        const today = todayISO();
+        const range = button.dataset.ordersRange;
+        if (range === "today") {
+          ui.ordersFrom = today;
+          ui.ordersTo = today;
+        } else if (range === "this-week") {
+          ui.ordersFrom = getWeekMondayISO(today);
+          ui.ordersTo = today;
+        } else if (range === "last-week") {
+          const monday = getWeekMondayISO(today);
+          ui.ordersFrom = addDaysISO(monday, -7);
+          ui.ordersTo = addDaysISO(monday, -1);
+        } else if (range === "this-month") {
+          ui.ordersFrom = getMonthStartISO(today);
+          ui.ordersTo = today;
+        } else if (range === "30-days") {
+          ui.ordersFrom = addDaysISO(today, -29);
+          ui.ordersTo = today;
+        }
+        render();
+      }));
       document.querySelectorAll("[data-customer-order-client]").forEach((button) => button.addEventListener("click", () => {
         ui.customerDashboardClient = button.dataset.customerOrderClient;
         render();
@@ -3234,6 +3322,22 @@
       "Pedidos de sus cuentas vinculadas.",
       `<button class="btn primary" data-route="nuevo-pedido">Nuevo pedido</button><button class="btn blue" data-route="registrar-transferencia">Registrar transferencia</button>`,
       `
+      <div class="panel" style="margin-bottom:14px">
+        <div class="form-grid balance-date-grid orders-date-grid">
+          <div class="field balance-date-field"><label>Desde</label><input type="date" id="orders-from" value="${ui.ordersFrom}" /></div>
+          <div class="field balance-date-field"><label>Hasta</label><input type="date" id="orders-to" value="${ui.ordersTo}" /></div>
+          <div class="field span-4 balance-range-buttons orders-range-field">
+            <label>&nbsp;</label>
+            <div class="page-actions">
+              <button class="btn ghost balance-range-btn" type="button" data-orders-range="today">Hoy</button>
+              <button class="btn ghost balance-range-btn" type="button" data-orders-range="this-week">Esta semana</button>
+              <button class="btn ghost balance-range-btn" type="button" data-orders-range="last-week">Semana pasada</button>
+              <button class="btn ghost balance-range-btn" type="button" data-orders-range="this-month">Este mes</button>
+              <button class="btn ghost balance-range-btn" type="button" data-orders-range="30-days">30 dias</button>
+            </div>
+          </div>
+        </div>
+      </div>
       <div class="tabs">
         <button class="tab ${ui.customerDashboardClient === "all" ? "active" : ""}" data-customer-order-client="all">Todos</button>
         ${clientIds.map((id) => {
@@ -4757,7 +4861,10 @@
       if (provider && items.length) rememberProviderProducts(provider.id, items);
       if (purchase.vendorName && items.length) rememberVendorProducts(purchase.vendorName, items, purchase.date);
       if (items.length && expenseType === "market_price") updateMarketPrices(items);
-      else if (items.length && expenseType !== "prepared") updateProductCostsFromPurchase(items, provider);
+      else if (items.length && expenseType !== "prepared") {
+        updateProductCostsFromPurchase(items, provider);
+        updateOrdersWithNewPrices(purchase.date, items);
+      }
       if (purchase.paymentStatus === "account_current" && provider) {
         addProviderLedgerEntry({
           providerId: provider.id,
@@ -5142,12 +5249,6 @@
       document.querySelectorAll("[data-print-divide]").forEach((button) => {
         button.addEventListener("click", () => {
           const values = button.dataset.printDivide ? button.dataset.printDivide.split(",") : selected;
-          if (window.innerWidth <= 760) {
-            const isAll = !Array.isArray(values) || values.length === 0 || values.includes("all");
-            const route = isAll ? "dividir/imprimir/all" : "dividir/imprimir/" + encodeURIComponent(values.join(","));
-            navigate(route);
-            return;
-          }
           printDivideDocument(values);
         });
       });
@@ -5266,6 +5367,46 @@
     }).join("");
   }
 
+  function renderDivideProductList(assignables, assigneeValues) {
+    const filtered = filterDivideAssignables(assignables, assigneeValues);
+    if (!filtered.length) return `<p class="muted" style="font-size:11px;margin:0">Sin productos asignados para esta vista.</p>`;
+    const isAll = !Array.isArray(assigneeValues) || assigneeValues.includes("all");
+    const groups = {};
+    filtered.forEach(({ order, item }) => {
+      const assigned = getAssigneeByValue(getEffectiveItemAssigneeValue(item));
+      const key = item.productId + "|" + item.productName + "|" + item.unitType + "|" + (assigned ? assigned.value : "");
+      if (!groups[key]) {
+        groups[key] = { productName: item.productName, unitType: item.unitType, assigneeName: assigned ? assigned.name : "Sin asignar", clients: {} };
+      }
+      groups[key].clients[order.clientId] = (groups[key].clients[order.clientId] || 0) + Number(item.quantity || 0);
+    });
+    const sorted = sortDivideGroupsByAssignee(Object.values(groups));
+    return `<ul class="divide-print-list">${sorted.map((group) => {
+      const clients = Object.keys(group.clients).sort(compareClientIdStrings).map((clientId) => `${escapeHtml(clientId)}) ${formatNumber(group.clients[clientId])}`).join(", ");
+      return `<li><strong>${escapeHtml(group.productName)}${isAll ? " - " + escapeHtml(group.assigneeName) : ""}</strong>: ${clients} ${escapeHtml(group.unitType)}</li>`;
+    }).join("")}</ul>`;
+  }
+
+  function renderDivideClientList(assignables, assigneeValues) {
+    const filtered = filterDivideAssignables(assignables, assigneeValues);
+    if (!filtered.length) return `<p class="muted" style="font-size:11px;margin:0">Sin productos asignados para esta vista.</p>`;
+    const isAll = !Array.isArray(assigneeValues) || assigneeValues.includes("all");
+    const groups = {};
+    filtered.forEach(({ order, item }) => {
+      if (!groups[order.clientId]) {
+        const client = getClient(order.clientId);
+        groups[order.clientId] = { clientName: client ? client.name : order.clientId, items: [] };
+      }
+      const assigned = getAssigneeByValue(getEffectiveItemAssigneeValue(item));
+      groups[order.clientId].items.push({ ...item, assigneeName: assigned ? assigned.name : "Sin asignar" });
+    });
+    return `<ul class="divide-print-list">${Object.keys(groups).sort(compareClientIdStrings).map((clientId) => {
+      const group = groups[clientId];
+      const itemsHtml = group.items.map((item) => `<li>${formatNumber(item.quantity)} ${escapeHtml(item.unitType)} ${escapeHtml(item.productName)}${isAll ? " - " + escapeHtml(item.assigneeName) : ""}${item.note ? " (" + escapeHtml(item.note) + ")" : ""}</li>`).join("");
+      return `<li><strong>${escapeHtml(clientId)}) ${escapeHtml(group.clientName)}</strong><ul>${itemsHtml}</ul></li>`;
+    }).join("")}</ul>`;
+  }
+
   function buildDivideClipboardText(assigneeValues) {
     const assignables = filterDivideAssignables(getDivideAssignables(), assigneeValues);
     const isAll = !Array.isArray(assigneeValues) || assigneeValues.includes("all");
@@ -5307,9 +5448,9 @@
         <h2 style="margin:0 0 2px;font-size:14px">${escapeHtml(tplGet("dividir", "titulo", "Dividir compras"))} - ${escapeHtml(labels)}</h2>
         <p style="margin:0 0 8px;font-size:11px">Fecha: ${formatDate(todayISO())}</p>
         <h3 style="margin:6px 0 4px;font-size:12px">Agrupado por producto</h3>
-        ${renderDivideProductGroups(assignables, isAll ? "all" : assigneeValues)}
+        ${renderDivideProductList(assignables, isAll ? "all" : assigneeValues)}
         <h3 style="margin:10px 0 4px;font-size:12px">Agrupado por cliente</h3>
-        <div class="divide-two-col">${renderDivideClientGroups(assignables, isAll ? "all" : assigneeValues)}</div>
+        ${renderDivideClientList(assignables, isAll ? "all" : assigneeValues)}
       </div>
     `;
     const title = isAll
@@ -5334,15 +5475,15 @@
           <button class="btn ghost" data-route="dividir">&lt; Volver</button>
           <button class="btn primary" data-print>Exportar PDF / Imprimir</button>
         </div>
-        <article class="print-sheet">
+        <article class="print-sheet print-compact">
           <div class="print-title">
             <div><h1>${BUSINESS_NAME.toUpperCase()}</h1><strong>Productos asignados</strong></div>
             <div>Fecha: ${formatDate(todayISO())}<br>${escapeHtml(assignee ? assignee.label : "Todos")}</div>
           </div>
-          <h2 style="font-size:16px">Agrupado por producto</h2>
-          <div class="assigned-group-list print-assigned">${renderDivideProductGroups(assignables, id || "all")}</div>
-          <h2 style="font-size:16px">Agrupado por cliente</h2>
-          <div class="assigned-group-list print-assigned">${renderDivideClientGroups(assignables, id || "all")}</div>
+          <h2 style="font-size:14px;margin:8px 0 4px">Agrupado por producto</h2>
+          ${renderDivideProductList(assignables, id || "all")}
+          <h2 style="font-size:14px;margin:12px 0 4px">Agrupado por cliente</h2>
+          ${renderDivideClientList(assignables, id || "all")}
         </article>
       </section>
     `;
@@ -5517,6 +5658,20 @@
       });
     });
     const productTotals = Object.values(totals).sort((a, b) => a.productName.localeCompare(b.productName));
+    const orderItems = orders.map((order) => {
+      const client = getClient(order.clientId);
+      return `
+        <li>
+          <div class="vehicle-print-line">
+            <strong>${escapeHtml(client ? client.name : order.clientId)}</strong>
+            <span>${escapeHtml(order.id)}</span>
+            <span>${escapeHtml(getVehicleName(order.deliveryVehicleId))}</span>
+            <strong class="num">${formatMoney(order.totalAmount)}</strong>
+          </div>
+          <ul>${order.items.map((item) => `<li>${escapeHtml(item.productName)}: ${formatNumber(item.quantity)} ${escapeHtml(item.unitType)}${item.note ? " (" + escapeHtml(item.note) + ")" : ""}</li>`).join("")}</ul>
+        </li>
+      `;
+    }).join("");
     return `
       <section class="print-page">
         <div class="print-controls no-print">
@@ -5528,13 +5683,7 @@
             <div><h1>${BUSINESS_NAME.toUpperCase()}</h1><strong>${escapeHtml(tplGet("vehiculos", "tituloSinDividir", "Pedidos sin dividir"))}</strong></div>
             <div>Fecha: ${formatDate(date)}</div>
           </div>
-          <table class="print-table borderless-table">
-            <thead><tr><th>Cliente</th><th>Pedido</th><th>Vehiculo</th><th>Productos</th><th>Total</th></tr></thead>
-            <tbody>${orders.map((order) => {
-              const client = getClient(order.clientId);
-              return `<tr><td>${escapeHtml(client ? client.name : order.clientId)}<br>${escapeHtml(order.clientId)}</td><td>${escapeHtml(order.id)}</td><td>${escapeHtml(getVehicleName(order.deliveryVehicleId))}</td><td>${order.items.map((item) => `${escapeHtml(item.productName)}: ${formatNumber(item.quantity)} ${escapeHtml(item.unitType)}${item.note ? " (" + escapeHtml(item.note) + ")" : ""}`).join("<br>")}</td><td class="num">${formatMoney(order.totalAmount)}</td></tr>`;
-            }).join("") || `<tr><td colspan="5">Sin pedidos</td></tr>`}</tbody>
-          </table>
+          <ul class="vehicle-print-list">${orderItems || "<li>Sin pedidos</li>"}</ul>
           <h2 style="font-size:14px;margin:8px 0 4px">Sumatoria total de productos</h2>
           ${renderProductSumColumns(productTotals)}
         </article>
@@ -5546,6 +5695,21 @@
     const vehicle = getVehicle(vehicleId);
     const totals = getVehicleTotals(vehicleId, date);
     const productTotals = Object.values(totals.products).sort((a, b) => a.productName.localeCompare(b.productName));
+    const orderItems = totals.orders.map((order) => {
+      const client = getClient(order.clientId);
+      return `
+        <li>
+          <div class="vehicle-print-line">
+            <strong>${escapeHtml(client ? client.name : order.clientId)}</strong>
+            <span>${escapeHtml(order.id)}</span>
+            <strong class="num">${formatMoney(order.totalAmount)}</strong>
+          </div>
+          ${client && client.address ? `<div class="vehicle-print-sub">${escapeHtml(client.address)}</div>` : ""}
+          ${order.notes ? `<div class="vehicle-print-sub">Nota: ${escapeHtml(order.notes)}</div>` : ""}
+          <ul>${order.items.map((item) => `<li>${escapeHtml(item.productName)}: ${formatNumber(item.quantity)} ${escapeHtml(item.unitType)}${item.note ? " (" + escapeHtml(item.note) + ")" : ""}</li>`).join("")}</ul>
+        </li>
+      `;
+    }).join("");
     return `
       <article class="print-sheet print-compact">
         <div class="print-title">
@@ -5558,20 +5722,7 @@
             <div>Conductor: ${escapeHtml(vehicle && vehicle.driverName ? vehicle.driverName : "-")}</div>
           </div>
         </div>
-        <table class="print-table borderless-table">
-          <thead><tr><th>Cliente</th><th>Pedido</th><th>Productos</th><th>Total</th></tr></thead>
-          <tbody>
-            ${totals.orders.map((order) => {
-              const client = getClient(order.clientId);
-              return `<tr>
-                <td>${escapeHtml(client ? client.name : order.clientId)}<br>${escapeHtml(client ? client.address : "")}</td>
-                <td>${escapeHtml(order.id)}${order.notes ? `<br>Nota: ${escapeHtml(order.notes)}` : ""}</td>
-                <td>${order.items.map((item) => `${escapeHtml(item.productName)}: ${formatNumber(item.quantity)} ${escapeHtml(item.unitType)}${item.note ? " (" + escapeHtml(item.note) + ")" : ""}`).join("<br>")}</td>
-                <td class="num">${formatMoney(order.totalAmount)}</td>
-              </tr>`;
-            }).join("") || `<tr><td colspan="4">Sin pedidos</td></tr>`}
-          </tbody>
-        </table>
+        <ul class="vehicle-print-list">${orderItems || "<li>Sin pedidos</li>"}</ul>
         <h2 style="font-size:14px;margin:8px 0 4px">Suma de productos</h2>
         ${renderProductSumColumns(productTotals)}
       </article>
@@ -8397,6 +8548,7 @@
     if (provider && purchase.paymentStatus === "account_current") addProviderLedgerEntry({ providerId: provider.id, date: purchase.date, type: "deuda", description: "Importacion - " + purchase.id, amount: purchase.totalCost, relatedEntityId: purchase.id, relatedEntityType: "purchase", notes: purchase.notes });
     if (provider) rememberProviderProducts(provider.id, [item]);
     updateProductCostsFromPurchase([item], provider);
+    updateOrdersWithNewPrices(purchase.date, [item]);
     return true;
   }
 
@@ -11456,6 +11608,37 @@
     });
   }
 
+  function updateOrdersWithNewPrices(purchaseDate, items) {
+    const affectedProductIds = new Set(items.map((item) => item.productId).filter(Boolean));
+    if (!affectedProductIds.size) return;
+    let changedAny = false;
+    state.orders
+      .filter((order) => order.date === purchaseDate && !["cancelado", "anulado"].includes(order.status))
+      .forEach((order) => {
+        const client = getClient(order.clientId);
+        let changed = false;
+        order.items.forEach((item) => {
+          if (!affectedProductIds.has(item.productId)) return;
+          const product = getProduct(item.productId);
+          if (!product) return;
+          const newUnitPrice = getAdjustedProductPrice(product, client);
+          if (Number(item.unitPrice || 0) === newUnitPrice) return;
+          item.unitPrice = newUnitPrice;
+          item.subtotal = item.quantity * newUnitPrice;
+          const ivaRate = shouldApplyInvoiceVat(client) ? getIvaRate(product.ivaType) : 0;
+          item.ivaRate = ivaRate;
+          item.ivaAmount = item.subtotal * (ivaRate / 100);
+          item.totalWithIva = item.subtotal + item.ivaAmount;
+          changed = true;
+        });
+        if (changed) {
+          recalcOrderTotals(order);
+          updateOrderAccounting(order);
+          changedAny = true;
+        }
+      });
+  }
+
   function updateRelationDivisorFromItem(item) {
     if (!item || Number(item.relationUnits || 0) <= 0) return;
     state.costRelations
@@ -12672,6 +12855,13 @@
       .print-compact .print-title h1{font-size:16px}
       .borderless-table th,.borderless-table td{border:0 !important;border-bottom:1px solid #ececec !important;padding:2px 5px;font-size:10px}
       .borderless-table th{background:transparent;border-bottom:1px solid #999 !important;text-transform:uppercase;font-size:9px;color:#333}
+      .divide-print-list,.vehicle-print-list{list-style:none;padding:0;margin:0;font-size:10px}
+      .divide-print-list li,.vehicle-print-list li{padding:2px 0;border-bottom:1px solid #ececec}
+      .divide-print-list ul,.vehicle-print-list ul{list-style:none;padding-left:14px;margin:2px 0 4px}
+      .divide-print-list li:last-child,.vehicle-print-list li:last-child{border-bottom:0}
+      .vehicle-print-line{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
+      .vehicle-print-line span{color:#475467}
+      .vehicle-print-sub{font-size:9px;color:#475467;margin:1px 0 2px}
       .divide-two-col{display:grid;grid-template-columns:1fr 1fr;gap:2px 18px;align-items:start}
       .divide-two-col .assigned-group{break-inside:avoid;page-break-inside:avoid}
       .product-sum-grid{column-count:2;column-gap:22px;font-size:10px}
