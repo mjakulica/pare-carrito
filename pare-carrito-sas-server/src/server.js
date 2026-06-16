@@ -83,6 +83,15 @@ function fingerprint(value) {
   return crypto.createHash("sha256").update(String(value || "")).digest("hex");
 }
 
+function escapeHtml(text) {
+  return String(text || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function signToken(user) {
   return jwt.sign({ sub: user.id, username: user.username, role: user.role, name: user.name }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
 }
@@ -227,6 +236,28 @@ app.post("/auth/register", async (req, res) => {
       `<p>Se registro un nuevo cliente:</p><ul><li>Local: <strong>${client.name}</strong></li><li>Usuario: ${username}</li><li>Zona: ${client.zone}</li><li>Telefono: ${client.phone}</li><li>CUIT: ${client.cuit}</li><li>Factura: ${client.invoiceType}</li></ul><p>Para aprobarlo: ingrese al sistema → pagina <strong>Usuarios</strong> → activar la cuenta.</p>`);
   }
   res.status(201).json({ ok: true, pending: true, clientId });
+});
+
+// Notificacion de bienvenida al crear un usuario desde el ERP (manager/admin)
+app.post("/auth/welcome", async (req, res) => {
+  const b = req.body || {};
+  const email = String(b.email || "").trim();
+  if (!email) return res.status(400).json({ error: "Falta el correo electronico." });
+  const name = String(b.name || "").trim();
+  const username = String(b.username || "").trim();
+  const password = String(b.password || "");
+  const isActive = b.isActive === true;
+  const link = PUBLIC_URL || "";
+  const statusText = isActive
+    ? "<p>Su cuenta ya esta <strong>activa</strong> y puede ingresar.</p>"
+    : "<p>Su cuenta queda <strong>pendiente de aprobacion</strong>: administracion la revisara a la brevedad y le avisaremos cuando este activa.</p>";
+  const sent = await sendMail(email, "Bienvenido/a a Pare Carrito SAS",
+    `<p>Hola ${name || username},</p>` +
+    `<p>Le informamos que se creo su usuario en el sistema de Pare Carrito SAS.</p>` +
+    `<ul><li><strong>Usuario:</strong> ${escapeHtml(username)}</li><li><strong>Contrasena:</strong> ${escapeHtml(password)}</li></ul>` +
+    `${statusText}<p>Para ingresar: <a href="${escapeHtml(link)}">${escapeHtml(link) || "Pare Carrito SAS"}</a></p>` +
+    `<p>Ante cualquier consulta, escribanos por WhatsApp al +54 9 387 456 6725.</p>`);
+  res.json({ ok: sent });
 });
 
 app.post("/auth/recover", async (req, res) => {

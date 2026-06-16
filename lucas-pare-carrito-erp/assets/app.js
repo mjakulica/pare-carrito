@@ -2024,6 +2024,7 @@
        <button class="btn blue" data-route="pagos">Registrar pago</button>`,
       `
       ${renderPendingTransfersBanner()}
+      ${renderPendingUsersBanner()}
       <div class="grid four dash-metrics-grid">
         ${metricCard("Pedidos de hoy", todaysOrders.length, "Pedidos activos cargados")}
         ${metricCard("Caja", formatMoney(cajaBalance), "Ingresos menos egresos")}
@@ -2542,6 +2543,19 @@
       <a class="pending-transfers-banner" data-route="comprobar-transferencias" title="Comprobar transferencias pendientes">
         <span class="pending-transfers-count">${count}</span>
         <span class="pending-transfers-label">Comp pend.</span>
+      </a>
+    `;
+  }
+
+  function renderPendingUsersBanner() {
+    if (!["manager", "admin"].includes(currentUser.role)) return "";
+    const canSeeManagers = currentUser.role === "manager";
+    const count = (state.users || []).filter((user) => user.isActive === false && (canSeeManagers || user.role !== "manager")).length;
+    if (!count) return "";
+    return `
+      <a class="pending-transfers-banner pending-users-banner" data-route="usuarios" title="Usuarios inactivos pendientes de activacion">
+        <span class="pending-transfers-count">${count}</span>
+        <span class="pending-transfers-label">Usuarios inactivos</span>
       </a>
     `;
   }
@@ -8237,7 +8251,8 @@
   }
 
   function renderUsers() {
-    const rows = state.users.map((user) => {
+    const canSeeManagers = currentUser.role === "manager";
+    const rows = (state.users || []).filter((user) => canSeeManagers || user.role !== "manager").map((user) => {
       const client = user.clientId ? getClient(user.clientId) : null;
       return `
         <tr>
@@ -10150,9 +10165,34 @@
     );
   }
 
+  async function notifyNewUser(payload) {
+    if (!payload.email) return;
+    const base = await findServerBase();
+    if (!base) return;
+    try {
+      await fetch(base + "/auth/welcome", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          email: payload.email,
+          name: payload.name,
+          username: payload.username,
+          password: payload.password,
+          isActive: payload.isActive === true
+        })
+      });
+    } catch (error) {
+      console.warn("No se pudo enviar mail de bienvenida:", error.message);
+    }
+  }
+
   function openUserForm(id) {
     const user = id ? getUser(id) : null;
     const clientOptions = activeClients().map((client) => `<option value="${client.id}" ${user && user.clientId === client.id ? "selected" : ""}>${escapeHtml(client.id)} - ${escapeHtml(client.name)}</option>`).join("");
+    const roleOptions = (currentUser.role === "admin"
+      ? ["admin", "employee", "customer", "contador", "example"]
+      : ["manager", "admin", "employee", "customer", "contador", "example"]
+    ).map((role) => `<option value="${role}" ${user && user.role === role ? "selected" : ""}>${escapeHtml(roleLabel(role))}</option>`).join("");
     showModal(
       user ? "Editar usuario" : "Agregar usuario",
       `
@@ -10160,7 +10200,7 @@
         <div class="field span-2"><label>Nombre</label><input id="user-name" value="${escapeAttr(user ? user.name : "")}" required /></div>
         <div class="field"><label>Usuario</label><input id="user-username" value="${escapeAttr(user ? user.username : "")}" required /></div>
         <div class="field"><label>Contrasena</label><input id="user-password" value="${escapeAttr(user ? user.password : generatePassword())}" required /></div>
-        <div class="field"><label>Rol</label><select id="user-role">${["manager", "admin", "employee", "customer", "contador", "example"].map((role) => `<option value="${role}" ${user && user.role === role ? "selected" : ""}>${escapeHtml(roleLabel(role))}</option>`).join("")}</select></div>
+        <div class="field"><label>Rol</label><select id="user-role">${roleOptions}</select></div>
         <div class="field span-2"><label>Correo</label><input id="user-email" type="email" value="${escapeAttr(user ? user.email || "" : "")}" /></div>
         <div class="field"><label>Telefono</label><input id="user-phone" value="${escapeAttr(user ? user.phone || "" : "")}" /></div>
         <div class="field"><label>Valor hora</label><input id="user-hourly-rate" inputmode="decimal" value="${formatAmountInput(user ? user.hourlyRate || 0 : 0)}" /></div>
@@ -10212,7 +10252,10 @@
             isActive: document.getElementById("user-active").checked
           };
           if (user) Object.assign(user, payload);
-          else state.users.push(payload);
+          else {
+            state.users.push(payload);
+            notifyNewUser(payload);
+          }
           ensureUserCashBoxes();
           saveState();
           closeModal();
