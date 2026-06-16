@@ -4427,12 +4427,16 @@
     const visiblePurchases = currentUser.role === "employee"
       ? state.purchases.filter((purchase) => purchase.userRole === "employee" || purchase.recordedBy === currentUser.name)
       : state.purchases;
+    const isManager = currentUser.role === "manager";
     const rows = visiblePurchases.slice().reverse().map((purchase) => {
       const provider = getProvider(purchase.providerId);
       const origin = provider ? provider.name : purchase.providerName || (purchase.expenseType === "other_expense" ? "Gasto general" : "Gasto producto");
       const itemText = purchaseItemsSummary(purchase);
+      const isAnnulled = purchase.status === "anulado";
+      const annulButton = isManager && !isAnnulled ? `<button class="btn small danger" data-annul-purchase="${purchase.id}" title="Anular egreso">X</button>` : "";
+      const annulledLabel = isAnnulled ? `<span class="pill gray">Anulado</span>` : "";
       return `
-        <tr>
+        <tr style="${isAnnulled ? "text-decoration:line-through;opacity:0.6" : ""}">
           <td>${formatDate(purchase.date)}</td>
           <td>${escapeHtml(expenseTypeLabel(purchase.expenseType || "purchase"))}</td>
           <td>${escapeHtml(origin)}</td>
@@ -4442,6 +4446,7 @@
           <td class="num">${formatMoney(purchase.totalCost)}</td>
           <td>${escapeHtml(purchase.recordedBy || "")}</td>
           <td>${escapeHtml(purchase.notes || "")}</td>
+          <td>${annulButton}${annulledLabel}</td>
         </tr>
       `;
     }).join("");
@@ -4472,7 +4477,7 @@
           <div class="table-scroll-box">
             <div class="table-wrap">
               <table>
-                <thead><tr><th>Fecha</th><th>Tipo</th><th>Origen</th><th>Productos/Detalle</th><th>Estado</th><th>Caja</th><th>Total</th><th>Usuario</th><th>Notas</th></tr></thead>
+                <thead><tr><th>Fecha</th><th>Tipo</th><th>Origen</th><th>Productos/Detalle</th><th>Estado</th><th>Caja</th><th>Total</th><th>Usuario</th><th>Notas</th><th>Acciones</th></tr></thead>
                 <tbody>${rows || emptyRow(9, "Todavia no hay egresos.")}</tbody>
               </table>
             </div>
@@ -5156,6 +5161,14 @@
       saveState();
       render();
     });
+    document.querySelectorAll("[data-annul-purchase]").forEach((button) => button.addEventListener("click", () => {
+      const purchase = state.purchases.find((item) => item.id === button.dataset.annulPurchase);
+      if (!purchase) return;
+      if (!confirm("¿Anular el egreso " + purchase.id + "? Se revertira su impacto en caja y saldos.")) return;
+      annulPurchase(purchase);
+      saveState();
+      render();
+    }));
   }
 
   function bindPurchaseTabs() {
@@ -12338,6 +12351,72 @@
     order.updatedAt = new Date().toISOString();
     state.saldos = state.saldos.filter((entry) => !(entry.relatedEntityType === "order_annul" && entry.relatedEntityId === order.id));
     recomputeClientSaldoBalances(order.clientId);
+  }
+
+  function annulPurchase(purchase) {
+    if (purchase.status === "anulado") return;
+    const expenseType = purchase.expenseType || "purchase";
+    const amount = Number(purchase.totalCost || 0);
+    if (!amount) return;
+    purchase.status = "anulado";
+    purchase.annulledAt = new Date().toISOString();
+    purchase.annulledBy = currentUser ? currentUser.name : "";
+
+    // Revertir deuda con proveedor para compras en cuenta corriente
+    if (purchase.paymentStatus === "account_current" && purchase.providerId) {
+      addProviderLedgerEntry({
+        providerId: purchase.providerId,
+        date: purchase.date,
+        type: "anulacion",
+        description: "Anulacion egreso " + purchase.id,
+        amount: -amount,
+        relatedEntityId: purchase.id,
+        relatedEntityType: "purchase_annul",
+        notes: "Egreso anulado: se descuenta de la deuda con el proveedor."
+      });
+    }
+
+    // Revertir caja para egresos pagados (incluye pago a proveedor)
+    if (!["prepared", "market_price"].includes(expenseType) && purchase.paymentStatus !== "account_current") {
+      const concept = expenseType === "provider_payment" ? "Anulacion pago proveedor " + purchase.id : "Anulacion egreso " + purchase.id;
+      addCajaEntry({
+        date: purchase.date,
+        type: "purchase_annul",
+        concept,
+        relatedEntityId: purchase.id,
+        relatedEntityType: "purchase_annul",
+        amountIngreso: amount,
+        amountEgreso: 0,
+        cashBoxId: getPurchaseCashBoxId(purchase),
+        notes: "Egreso anulado: se devuelve el importe a la caja."
+      });
+    }
+
+    // Revertir ambos lados de un movimiento de caja
+    if (expenseType === "cash_movement" && purchase.targetCashBoxId) {
+      addCajaEntry({
+        date: purchase.date,
+        type: "cash_movement_annul_in",
+        concept: "Anulacion movimiento de caja " + purchase.id,
+        relatedEntityId: purchase.id,
+        relatedEntityType: "purchase_annul",
+        amountIngreso: amount,
+        amountEgreso: 0,
+        cashBoxId: purchase.cashBoxId,
+        notes: "Movimiento anulado: se revierte el egreso de caja origen."
+      });
+      addCajaEntry({
+        date: purchase.date,
+        type: "cash_movement_annul_out",
+        concept: "Anulacion movimiento de caja " + purchase.id,
+        relatedEntityId: purchase.id,
+        relatedEntityType: "purchase_annul",
+        amountIngreso: 0,
+        amountEgreso: amount,
+        cashBoxId: purchase.targetCashBoxId,
+        notes: "Movimiento anulado: se revierte el ingreso de caja destino."
+      });
+    }
   }
 
   function deleteOrder(orderId) {
