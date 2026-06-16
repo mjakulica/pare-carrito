@@ -8081,15 +8081,16 @@
     );
   }
 
-  function getBillingPendingForClient(client) {
+  function getBillingPendingForClient(client, from, to) {
     let lastCut = "";
     for (const log of state.billingLog || []) {
       if (log.clientId === client.id && ["ok", "simulada"].includes(log.status) && log.to > lastCut) lastCut = log.to;
     }
-    const from = lastCut ? addDaysISO(lastCut, 1) : todayISO().slice(0, 8) + "01";
-    const orders = state.orders.filter((order) => order.clientId === client.id && order.date >= from && order.date <= todayISO() && !["cancelado", "anulado"].includes(order.status));
+    const fromDate = from || (lastCut ? addDaysISO(lastCut, 1) : todayISO().slice(0, 8) + "01");
+    const toDate = to || todayISO();
+    const orders = state.orders.filter((order) => order.clientId === client.id && order.date >= fromDate && order.date <= toDate && !["cancelado", "anulado"].includes(order.status));
     return {
-      from,
+      from: fromDate,
       total: orders.reduce((sum, order) => sum + Number(order.totalAmount || 0), 0),
       iva: orders.reduce((sum, order) => sum + Number(order.ivaAmount || 0), 0),
       orders: orders.length
@@ -8097,9 +8098,17 @@
   }
 
   function renderFacturacion() {
+    const today = todayISO();
+    const defaultFrom = getMonthStartISO(today);
+    const from = ui.billingFrom || defaultFrom;
+    const to = ui.billingTo || today;
     const clients = activeClients().filter((client) => client.needsInvoice && ["Factura A", "Factura B"].includes(client.invoiceType));
+    let ivaTotal = 0;
+    let totalAcumulado = 0;
     const rows = clients.map((client) => {
-      const pending = getBillingPendingForClient(client);
+      const pending = getBillingPendingForClient(client, from, to);
+      ivaTotal += pending.iva;
+      totalAcumulado += pending.total;
       return `
         <tr>
           <td><strong>${escapeHtml(client.id)} - ${escapeHtml(client.name)}</strong><br><span class="muted">${escapeHtml(client.legalName || "")}</span></td>
@@ -8138,6 +8147,28 @@
       } else if (statusNode) {
         statusNode.innerHTML = `<span class="pill gray">Requiere el servidor propio (Opcion F) para emitir</span>`;
       }
+      const fromInput = document.getElementById("billing-from");
+      const toInput = document.getElementById("billing-to");
+      if (fromInput) fromInput.addEventListener("change", () => {
+        ui.billingFrom = fromInput.value;
+        render();
+      });
+      if (toInput) toInput.addEventListener("change", () => {
+        ui.billingTo = toInput.value;
+        render();
+      });
+      document.querySelectorAll("[data-billing-range]").forEach((button) => button.addEventListener("click", () => {
+        const range = button.dataset.billingRange;
+        if (range === "this-month") {
+          ui.billingFrom = getMonthStartISO(todayISO());
+          ui.billingTo = todayISO();
+        } else if (range === "last-month") {
+          const lastDay = addDaysISO(getMonthStartISO(todayISO()), -1);
+          ui.billingFrom = getMonthStartISO(lastDay);
+          ui.billingTo = lastDay;
+        }
+        render();
+      }));
       document.querySelectorAll("[data-billing-run]").forEach((button) => button.addEventListener("click", async () => {
         const simulate = button.dataset.billingRun === "simulate";
         const cfg = getCloudSyncConfig();
@@ -8167,6 +8198,20 @@
           <span id="billing-server-status"><span class="muted">Consultando...</span></span>
         </div>
         <p class="muted">Las credenciales (apikey, apitoken, usertoken) se configuran en el archivo .env del servidor. Sin credenciales, la emision corre en modo simulacion para que pruebe los periodos sin facturar de verdad.</p>
+      </div>
+      <div class="panel" style="margin-bottom:14px">
+        <h2 class="page-title" style="font-size:18px">Rango de facturacion</h2>
+        <div class="form-grid billing-range-grid" style="margin-top:10px;align-items:end">
+          <div class="field"><label>Desde</label><input type="date" id="billing-from" value="${from}" /></div>
+          <div class="field"><label>Hasta</label><input type="date" id="billing-to" value="${to}" /></div>
+          <div class="field"><label>&nbsp;</label><button class="btn ghost full" type="button" data-billing-range="this-month">Este mes</button></div>
+          <div class="field"><label>&nbsp;</label><button class="btn ghost full" type="button" data-billing-range="last-month">Mes pasado</button></div>
+        </div>
+      </div>
+      <div class="grid three" style="margin-bottom:14px">
+        ${metricCard("IVA acumulado", formatMoney(ivaTotal), `Clientes con factura (${formatDate(from)} - ${formatDate(to)})`)}
+        ${metricCard("Total acumulado", formatMoney(totalAcumulado), "Base + IVA")}
+        ${metricCard("Clientes", String(clients.length), "Con factura A o B")}
       </div>
       <div class="panel" style="margin-bottom:14px">
         <h2 class="page-title" style="font-size:18px">Clientes con factura</h2>
