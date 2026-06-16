@@ -345,10 +345,12 @@
   ]);
 
   window.addEventListener("hashchange", render);
-  window.addEventListener("DOMContentLoaded", () => {
-    render();
+  window.addEventListener("DOMContentLoaded", async () => {
     const cloudConfig = getCloudSyncConfig();
-    if (cloudSyncReady(cloudConfig) && cloudConfig.auto !== false) cloudPull(false);
+    if (cloudSyncReady(cloudConfig) && cloudConfig.auto !== false) {
+      await cloudPull(false, true);
+    }
+    render();
     startCloudAutoSync();
   });
   window.addEventListener("online", () => {
@@ -934,7 +936,55 @@
 
   function saveState() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    scheduleCloudPush();
+    const config = getCloudSyncConfig();
+    if (cloudSyncReady(config) && config.auto !== false) {
+      flushCloudPush();
+    } else {
+      scheduleCloudPush();
+    }
+  }
+
+  function backupLocalState(label) {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      const backups = JSON.parse(localStorage.getItem("lpc_erp_local_backups_v1") || "[]");
+      backups.unshift({
+        at: new Date().toISOString(),
+        label: label || "auto",
+        stateRaw: raw
+      });
+      while (backups.length > 10) backups.pop();
+      localStorage.setItem("lpc_erp_local_backups_v1", JSON.stringify(backups));
+    } catch (e) {
+      console.warn("No se pudo crear backup local:", e);
+    }
+  }
+
+  function listLocalBackups() {
+    try {
+      return JSON.parse(localStorage.getItem("lpc_erp_local_backups_v1") || "[]");
+    } catch {
+      return [];
+    }
+  }
+
+  function restoreLocalBackup(index) {
+    const backups = listLocalBackups();
+    const backup = backups[index];
+    if (!backup || !backup.stateRaw) return false;
+    try {
+      const parsed = JSON.parse(backup.stateRaw);
+      if (!parsed.clients || !parsed.products) return false;
+      state = normalizeLoadedState({ ...seedState(), ...parsed }, seedState());
+      localStorage.setItem(STORAGE_KEY, backup.stateRaw);
+      currentUser = loadCurrentUser();
+      render();
+      return true;
+    } catch (e) {
+      console.warn("No se pudo restaurar backup:", e);
+      return false;
+    }
   }
 
   const SYNC_KEY = "lpc_cloud_sync_v1";
@@ -1008,19 +1058,37 @@
   }
 
   function flushCloudPush() {
-    if (!cloudPushTimer) return;
-    clearTimeout(cloudPushTimer);
-    cloudPushTimer = null;
+    if (cloudPushTimer) {
+      clearTimeout(cloudPushTimer);
+      cloudPushTimer = null;
+    }
     const config = getCloudSyncConfig();
-    if (!cloudSyncReady(config) || config.auto === false) return;
+    if (!cloudSyncReady(config) || config.auto === false) return false;
     try {
       const xhr = new XMLHttpRequest();
       xhr.open("PUT", cloudBaseUrl(config) + "/state", false);
       xhr.setRequestHeader("content-type", "application/json");
       xhr.setRequestHeader("authorization", "Bearer " + (config.username ? config.jwt : config.token));
       xhr.send(JSON.stringify({ data: state, baseUpdatedAt: config.lastSync || null }));
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const payload = JSON.parse(xhr.responseText);
+          config.lastSync = payload.updatedAt || new Date().toISOString();
+          config.lastError = "";
+          saveCloudSyncConfig(config);
+          return true;
+        } catch {
+          return false;
+        }
+      }
+      if (xhr.status === 401 && config.username) {
+        // Token expirado; dejar que el push async normal maneje el re-login
+        scheduleCloudPush();
+      }
+      return false;
     } catch (error) {
-      console.warn("No se pudo enviar el push sincronico al cerrar:", error);
+      console.warn("No se pudo enviar el push sincronico:", error);
+      return false;
     }
   }
 
@@ -1161,6 +1229,24 @@
     );
   }
 
+  function stateOperationalCounts(data) {
+    return {
+      orders: Array.isArray(data.orders) ? data.orders.length : 0,
+      clients: Array.isArray(data.clients) ? data.clients.length : 0,
+      products: Array.isArray(data.products) ? data.products.length : 0,
+      purchases: Array.isArray(data.purchases) ? data.purchases.length : 0,
+      payments: Array.isArray(data.payments) ? data.payments.length : 0,
+      saldos: Array.isArray(data.saldos) ? data.saldos.length : 0,
+      caja: Array.isArray(data.caja) ? data.caja.length : 0
+    };
+  }
+
+  function localStateIsNewerOrRicher(localData, remoteData) {
+    const local = stateOperationalCounts(localData);
+    const remote = stateOperationalCounts(remoteData);
+    return Object.keys(local).some((key) => local[key] > remote[key]);
+  }
+
   async function cloudPull(manual, isLogin) {
     const config = getCloudSyncConfig();
     if (!cloudSyncReady(config)) {
@@ -1190,10 +1276,29 @@
         console.warn("Sincronizacion: el servidor tiene datos de ejemplo/vacio; se conservan los datos locales.");
         return;
       }
-      if (manual && !confirm("Reemplazar los datos locales con los datos guardados en la nube?")) return;
+      // Safety check: prevent silent overwrite when local state has more operational data
+      if (localStateIsNewerOrRicher(state, payload.data)) {
+        const local = stateOperationalCounts(state);
+        const remote = stateOperationalCounts(payload.data);
+        const details = Object.keys(local)
+          .filter((k) => local[k] !== remote[k])
+          .map((k) => `${k}: local ${local[k]} vs nube ${remote[k]}`)
+          .join(", ");
+        if (!manual) {
+          const msg = `Sincronizacion bloqueada: los datos locales tienen mas informacion (${details}). Use 'Subir datos ahora' para enviarlos, o 'Descargar datos ahora' si esta seguro de reemplazarlos.`;
+          console.warn(msg);
+          config.lastError = msg;
+          saveCloudSyncConfig(config);
+          render();
+          return;
+        }
+        if (!confirm(`ADVERTENCIA: los datos locales tienen mas informacion que la nube (${details}). Reemplazar los datos locales con la nube?`)) return;
+      }
+      backupLocalState("antes de descarga de nube");
       state = normalizeLoadedState({ ...seedState(), ...payload.data }, seedState());
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
       config.lastSync = remoteUpdated || new Date().toISOString();
+      config.lastError = "";
       saveCloudSyncConfig(config);
       currentUser = loadCurrentUser();
       render();
@@ -8821,6 +8926,31 @@
     state.appSettings.sidebarOrder = order;
   }
 
+  function renderLocalBackupPanel() {
+    const backups = listLocalBackups();
+    if (!backups.length) return "";
+    const rows = backups.map((b, i) => {
+      const date = formatTimestampShort(b.at);
+      const counts = stateOperationalCounts(JSON.parse(b.stateRaw || "{}"));
+      return `
+        <div class="local-backup-row" style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #e2e8f0">
+          <div>
+            <strong>${escapeHtml(date)}</strong>
+            <div class="muted" style="font-size:12px">${escapeHtml(b.label || "auto")} — Pedidos: ${counts.orders}, Clientes: ${counts.clients}, Productos: ${counts.products}</div>
+          </div>
+          <button class="btn small warn" type="button" data-restore-local-backup="${i}">Restaurar</button>
+        </div>
+      `;
+    }).join("");
+    return `
+      <div class="panel" style="margin-top:14px">
+        <h2 class="page-title" style="font-size:18px">Backups locales automaticos</h2>
+        <p class="muted">Antes de cada descarga de la nube se guarda una copia local. Podes restaurarla si perdiste datos.</p>
+        <div style="margin-top:10px">${rows}</div>
+      </div>
+    `;
+  }
+
   function renderBackup() {
     afterRender.push(bindBackup);
     return pageShell(
@@ -8840,6 +8970,7 @@
           <input type="file" id="import-backup" accept="application/json" />
         </div>
       </div>
+      ${renderLocalBackupPanel()}
       <div class="panel" style="margin-top:14px">
         <h2 class="page-title" style="font-size:18px">Sincronizacion en la nube (Cloudflare)</h2>
         <p class="muted">Conecte el backend de la Opcion E (DEPLOYMENT.md) para compartir los datos entre dispositivos. Version de la app: <strong>${APP_VERSION}</strong>. Ultima sincronizacion: <strong id="cloud-sync-status">${escapeHtml(getCloudSyncConfig().lastSync ? formatTimestampShort(getCloudSyncConfig().lastSync) : "nunca")}</strong></p>
@@ -9011,6 +9142,15 @@
     document.querySelectorAll("[data-mass-export]").forEach((button) => button.addEventListener("click", () => exportMassRegistro(button.dataset.massExport)));
     const massImportButton = document.getElementById("mass-import-run");
     if (massImportButton) massImportButton.addEventListener("click", importMassRegistro);
+    document.querySelectorAll("[data-restore-local-backup]").forEach((button) => button.addEventListener("click", () => {
+      const idx = Number(button.dataset.restoreLocalBackup);
+      if (!confirm("Restaurar este backup local? Reemplazara los datos actuales.")) return;
+      if (restoreLocalBackup(idx)) {
+        alert("Backup local restaurado. Ahora use 'Subir datos ahora' para enviarlo al servidor.");
+      } else {
+        alert("No se pudo restaurar el backup.");
+      }
+    }));
   }
 
   const MASS_REGISTROS = {
