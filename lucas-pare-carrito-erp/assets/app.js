@@ -6547,10 +6547,14 @@
 
   function renderPayments() {
     const methods = ["efectivo", "transferencia", "cheque"];
+    const isManager = currentUser.role === "manager";
     const paymentRows = state.payments.slice().reverse().map((payment) => {
       const client = getClient(payment.clientId);
+      const isAnnulled = payment.status === "anulado";
+      const annulButton = isManager && !isAnnulled ? `<button class="btn small danger" data-annul-payment="${payment.id}" title="Anular pago">X</button>` : "";
+      const annulledLabel = isAnnulled ? `<span class="pill gray">Anulado</span>` : "";
       return `
-        <tr>
+        <tr style="${isAnnulled ? "text-decoration:line-through;opacity:0.6" : ""}">
           <td>${formatDate(payment.date)}<br><span class="muted">${escapeHtml(payment.recordedBy || "")}</span></td>
           <td>${escapeHtml(client ? client.name : payment.clientId)}</td>
           <td>${escapeHtml(payment.receivedByName || payment.recordedBy || "")}</td>
@@ -6559,6 +6563,7 @@
           <td class="num">${formatMoney(payment.amount)}</td>
           <td>${payment.transferProofFile ? `<span class="pill green">Con comprobante</span>` : payment.method === "transferencia" ? `<span class="pill amber">Sin comprobante</span>` : `<span class="pill gray">No aplica</span>`}</td>
           <td>${Number(payment.pendingDifference || 0) > 0 ? `<span class="pill amber">Pendiente ${formatMoney(payment.pendingDifference)}</span><br>` : ""}${escapeHtml(payment.notes || "")}</td>
+          <td>${annulButton}${annulledLabel}</td>
         </tr>
       `;
     }).join("");
@@ -6617,7 +6622,7 @@
         <div class="panel payment-history-wrap">
           <div class="table-wrap">
             <table>
-              <thead><tr><th>Fecha</th><th>Cliente</th><th>Recibio</th><th>Metodo</th><th>Caja</th><th>Monto</th><th>Comprobante</th><th>Notas</th></tr></thead>
+              <thead><tr><th>Fecha</th><th>Cliente</th><th>Recibio</th><th>Metodo</th><th>Caja</th><th>Monto</th><th>Comprobante</th><th>Notas</th><th>Acciones</th></tr></thead>
               <tbody>${paymentRows || emptyRow(8, "Todavia no hay pagos.")}</tbody>
             </table>
           </div>
@@ -6726,6 +6731,14 @@
       alert("Pago registrado.");
       render();
     });
+    document.querySelectorAll("[data-annul-payment]").forEach((button) => button.addEventListener("click", () => {
+      const payment = state.payments.find((item) => item.id === button.dataset.annulPayment);
+      if (!payment) return;
+      if (!confirm("¿Anular el pago " + payment.id + "? Se revertira su impacto en caja, saldos y pedidos.")) return;
+      annulPayment(payment);
+      saveState();
+      render();
+    }));
   }
 
   function renderBalances() {
@@ -12417,6 +12430,54 @@
         notes: "Movimiento anulado: se revierte el ingreso de caja destino."
       });
     }
+  }
+
+  function annulPayment(payment) {
+    if (payment.status === "anulado") return;
+    const amount = Number(payment.amount || 0);
+    if (!amount) return;
+    payment.status = "anulado";
+    payment.annulledAt = new Date().toISOString();
+    payment.annulledBy = currentUser ? currentUser.name : "";
+    const client = getClient(payment.clientId);
+
+    // Revertir saldo del cliente
+    addSaldoEntry({
+      clientId: payment.clientId,
+      type: "anulacion",
+      description: "Anulacion pago " + payment.id,
+      amount: amount,
+      relatedEntityId: payment.id,
+      relatedEntityType: "payment_annul",
+      notes: "Pago anulado: se revierte el saldo a favor del cliente."
+    });
+    recomputeClientSaldoBalances(payment.clientId);
+
+    // Revertir ingreso en caja
+    addCajaEntry({
+      date: payment.date,
+      type: "payment_annul",
+      concept: "Anulacion pago " + payment.id + " - " + (client ? client.name : payment.clientId),
+      relatedEntityId: payment.id,
+      relatedEntityType: "payment_annul",
+      amountIngreso: 0,
+      amountEgreso: amount,
+      cashBoxId: payment.cashBoxId || getPaymentCashBoxId(payment, getUser(payment.receivedByUserId)),
+      notes: "Pago anulado: se devuelve el importe de la caja."
+    });
+
+    // Recalcular pagos recibidos de los pedidos afectados
+    const orderIds = Array.isArray(payment.orderIds) ? payment.orderIds : [payment.orderId].filter(Boolean);
+    const affectedOrderIds = new Set(orderIds);
+    affectedOrderIds.forEach((orderId) => {
+      const order = getOrder(orderId);
+      if (!order) return;
+      const totalPaid = state.payments
+        .filter((p) => p.status !== "anulado" && (p.orderId === orderId || (Array.isArray(p.orderIds) && p.orderIds.includes(orderId))))
+        .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+      order.paymentReceived = totalPaid;
+      order.paymentStatus = order.paymentReceived >= order.totalAmount ? "paid" : (order.paymentReceived > 0 ? "partial" : "pending");
+    });
   }
 
   function deleteOrder(orderId) {
