@@ -293,7 +293,11 @@ app.put("/state", authenticate, requireRole(...SYNC_ROLES), async (req, res) => 
   try {
     await clientDb.query("BEGIN");
     const current = await clientDb.query("SELECT updated_at FROM app_state WHERE id = 'main' FOR UPDATE");
-    if (current.rows.length && body.baseUpdatedAt !== undefined && body.baseUpdatedAt !== null) {
+    if (current.rows.length) {
+      if (body.baseUpdatedAt === undefined || body.baseUpdatedAt === null) {
+        await clientDb.query("ROLLBACK");
+        return res.status(409).json({ error: "conflicto: el cliente no tiene la ultima version. Descargue primero.", updatedAt: current.rows[0].updated_at.toISOString() });
+      }
       const storedIso = current.rows[0].updated_at.toISOString();
       if (storedIso !== String(body.baseUpdatedAt)) {
         await clientDb.query("ROLLBACK");

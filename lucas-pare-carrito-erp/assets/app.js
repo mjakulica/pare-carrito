@@ -1123,6 +1123,27 @@
       return;
     }
     try {
+      if (!isRetry && config.lastSync) {
+        try {
+          const peek = await cloudRequest(config, "/state", { method: "GET" });
+          if (peek.ok) {
+            const remoteInfo = await peek.json();
+            const remoteUpdated = String(remoteInfo.updatedAt || "");
+            if (remoteUpdated && remoteUpdated !== config.lastSync && localStateIsNewerOrRicher(remoteInfo.data || {}, state)) {
+              const local = stateOperationalCounts(state);
+              const remote = stateOperationalCounts(remoteInfo.data || {});
+              const details = Object.keys(local).filter((k) => local[k] !== remote[k]).map((k) => `${k}: local ${local[k]} vs nube ${remote[k]}`).join(", ");
+              const msg = `No se puede subir: el servidor tiene datos mas recientes (${details}). Descargue primero con "Descargar datos ahora".`;
+              config.lastError = msg;
+              saveCloudSyncConfig(config);
+              if (manual) alert(msg);
+              return;
+            }
+          }
+        } catch (peekErr) {
+          console.warn("No se pudo verificar estado remoto antes de subir:", peekErr.message);
+        }
+      }
       const response = await cloudRequest(config, "/state", {
         method: "PUT",
         body: JSON.stringify({ data: state, baseUpdatedAt: config.lastSync || null })
