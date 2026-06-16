@@ -1506,13 +1506,13 @@
     if (view === "register") {
       body = `
         <h2 style="margin:0 0 8px;font-size:18px">Registro de cliente</h2>
-        <div class="alert" style="margin-bottom:12px">Con Factura se cobrara el IVA</div>
+        <div class="alert" style="margin-bottom:12px;display:none" id="reg-invoice-alert">Con Factura se cobrara el IVA</div>
         <form id="register-form" class="form-grid register-grid">
           <div class="field span-2"><label>Nombre de usuario *</label><input id="reg-username" autocomplete="off" /></div>
           <div class="field span-2"><label>Contrasena * (minimo 6)</label><input id="reg-password" type="password" autocomplete="new-password" /></div>
           <div class="field span-2"><label>Nombre del local *</label><input id="reg-local" /></div>
           <div class="field span-2"><label>Direccion *</label><input id="reg-address" /></div>
-          <div class="field span-2"><label>CUIT *</label><input id="reg-cuit" placeholder="30-12345678-9" /></div>
+          <div class="field span-2"><label id="reg-cuit-label">CUIT</label><input id="reg-cuit" placeholder="30-12345678-9" /></div>
           <div class="field span-2"><label>Correo electronico *</label><input id="reg-email" type="email" /></div>
           <div class="field"><label>Apertura del local *</label><input id="reg-opening" type="time" /></div>
           <div class="field"><label>Horario maximo de entrega *</label><input id="reg-delivery" type="time" /></div>
@@ -1616,6 +1616,17 @@
       if (String(location.hash || "").startsWith("#/restablecer/")) location.hash = "";
       render();
     });
+    const regInvoice = document.getElementById("reg-invoice");
+    if (regInvoice) {
+      regInvoice.addEventListener("change", () => {
+        const needsInvoice = regInvoice.value !== "Sin Factura";
+        const invoiceAlert = document.getElementById("reg-invoice-alert");
+        if (invoiceAlert) invoiceAlert.style.display = needsInvoice ? "block" : "none";
+        const cuitLabel = document.getElementById("reg-cuit-label");
+        if (cuitLabel) cuitLabel.textContent = needsInvoice ? "CUIT *" : "CUIT";
+      });
+      regInvoice.dispatchEvent(new Event("change"));
+    }
     const registerForm = document.getElementById("register-form");
     if (registerForm) registerForm.addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -1635,7 +1646,8 @@
         billingEmail: get("reg-billing-email"),
         notes: get("reg-notes")
       };
-      const requiredOk = payload.username && payload.password && payload.localName && payload.address && payload.cuit && payload.email && payload.openingTime && payload.maxDeliveryTime && payload.phone && payload.zone;
+      const needsInvoice = payload.invoiceType !== "Sin Factura";
+      const requiredOk = payload.username && payload.password && payload.localName && payload.address && (!needsInvoice || payload.cuit) && payload.email && payload.openingTime && payload.maxDeliveryTime && payload.phone && payload.zone;
       if (!requiredOk) return alert("Complete todos los campos obligatorios (*).");
       if (payload.password.length < 6) return alert("La contrasena debe tener al menos 6 caracteres.");
       const base = await findServerBase();

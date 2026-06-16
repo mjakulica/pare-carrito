@@ -163,11 +163,13 @@ const INVOICE_TYPES = ["Sin Factura", "Factura A", "Factura B"];
 
 app.post("/auth/register", async (req, res) => {
   const b = req.body || {};
-  const required = { username: "nombre de usuario", password: "contrasena", localName: "nombre del local", address: "direccion", cuit: "CUIT", email: "correo electronico", openingTime: "horario de apertura", maxDeliveryTime: "horario maximo de entrega", phone: "telefono", zone: "zona", invoiceType: "tipo de factura" };
+  const required = { username: "nombre de usuario", password: "contrasena", localName: "nombre del local", address: "direccion", email: "correo electronico", openingTime: "horario de apertura", maxDeliveryTime: "horario maximo de entrega", phone: "telefono", zone: "zona", invoiceType: "tipo de factura" };
   for (const [key, label] of Object.entries(required)) {
     if (!String(b[key] || "").trim()) return res.status(400).json({ error: "Falta el campo obligatorio: " + label + "." });
   }
   if (!INVOICE_TYPES.includes(b.invoiceType)) return res.status(400).json({ error: "Tipo de factura invalido." });
+  const needsInvoice = b.invoiceType !== "Sin Factura";
+  if (needsInvoice && !String(b.cuit || "").trim()) return res.status(400).json({ error: "Falta el campo obligatorio: CUIT." });
   if (String(b.password).length < 6) return res.status(400).json({ error: "La contrasena debe tener al menos 6 caracteres." });
   const username = String(b.username).trim().toLowerCase();
   const taken = await pool.query("SELECT 1 FROM users WHERE lower(username) = $1", [username]);
@@ -192,7 +194,7 @@ app.post("/auth/register", async (req, res) => {
     id: clientId, name: String(b.localName).trim(), address: String(b.address).trim(), phone: String(b.phone).trim(),
     email: String(b.email).trim(), billingEmail: String(b.billingEmail || "").trim(), contactName: "",
     paymentType: "cuenta_corriente", priceTier: needsInvoice ? "con_factura" : "general", priceAdjustmentPct: 0,
-    needsInvoice, cuit: String(b.cuit).trim(), legalName: String(b.localName).trim(), invoiceType: b.invoiceType,
+    needsInvoice, cuit: needsInvoice ? String(b.cuit).trim() : "", legalName: String(b.localName).trim(), invoiceType: b.invoiceType,
     invoiceFrequency: "mensual", zone: String(b.zone).trim(), openingTime: String(b.openingTime).trim(),
     maxDeliveryTime: String(b.maxDeliveryTime).trim(), vehicleId: "", isActive: true,
     notes: String(b.notes || "").trim()
