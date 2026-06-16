@@ -2049,6 +2049,8 @@
             <div class="page-actions">
               <button class="btn ghost balance-range-btn" type="button" data-dash-range="7">7 dias</button>
               <button class="btn ghost balance-range-btn" type="button" data-dash-range="30">30 dias</button>
+              <button class="btn ghost balance-range-btn" type="button" data-dash-range="90">3 meses</button>
+              <button class="btn ghost balance-range-btn" type="button" data-dash-range="180">6 meses</button>
             </div>
           </div>
         </div>
@@ -4177,13 +4179,9 @@
     const canUseProviders = ["manager", "admin"].includes(currentUser.role);
     if (!canUseProviders) ui.purchaseTab = "registro";
     const purchaseTab = ui.purchaseTab || "registro";
-    let visiblePurchases = currentUser.role === "employee"
+    const visiblePurchases = currentUser.role === "employee"
       ? state.purchases.filter((purchase) => purchase.userRole === "employee" || purchase.recordedBy === currentUser.name)
       : state.purchases;
-    if (["manager", "admin"].includes(currentUser.role) && ui.purchaseAssigneeFilter !== "all") {
-      const [type, id] = ui.purchaseAssigneeFilter.split(":");
-      visiblePurchases = visiblePurchases.filter((purchase) => type === "provider" ? purchase.providerId === id : purchase.assignedEmployeeId === id);
-    }
     const rows = visiblePurchases.slice().reverse().map((purchase) => {
       const provider = getProvider(purchase.providerId);
       const origin = provider ? provider.name : purchase.providerName || (purchase.expenseType === "other_expense" ? "Gasto general" : "Gasto producto");
@@ -4224,7 +4222,6 @@
       `
       <div class="grid">
         ${canUseProviders ? renderPurchaseTabs(purchaseTab) : ""}
-        ${["manager", "admin"].includes(currentUser.role) ? renderPurchaseAssigneeFilter() : ""}
         ${purchaseTab === "proveedores" ? renderProviderPaymentTab() : (roleFlag(currentUser.role, "registrarGastos") ? renderPurchaseRegisterTab(canUseProviders) : `<div class="panel empty">Su rol no tiene permiso para registrar compras o gastos.</div>`)}
         <div class="panel">
           <div class="table-scroll-box">
@@ -4262,47 +4259,47 @@
     `;
   }
 
-  function renderPurchaseAssigneeFilter() {
-    const assignees = activeAssignees();
-    afterRender.push(() => {
-      const select = document.getElementById("purchase-assignee-filter");
-      if (select) select.addEventListener("change", () => {
-        ui.purchaseAssigneeFilter = select.value;
-        render();
-      });
-    });
-    return `
-      <div class="panel">
-        <div class="form-grid">
-          <div class="field span-2"><label>Ver asignados a</label><select id="purchase-assignee-filter"><option value="all">Todos</option>${assignees.map((entry) => `<option value="${entry.value}" ${ui.purchaseAssigneeFilter === entry.value ? "selected" : ""}>${escapeHtml(entry.label)}</option>`).join("")}</select></div>
-        </div>
-      </div>
-    `;
-  }
-
   function renderRequiredPurchaseGrid(selectedAssigneeValue) {
     const assignedValue = currentUser.role === "employee" ? "employee:" + currentUser.id : (selectedAssigneeValue || "");
-    const shortages = getProductPurchaseShortages(todayISO());
-    const todaysGroups = Object.values(getOrderProductGroups(todayISO()));
-    const todaysIds = new Set(todaysGroups.map((group) => group.productId));
+    const date = todayISO();
+    const groups = Object.values(getOrderProductGroups(date));
+    const remaining = { ...getPurchasedQuantities(date) };
+    const allItems = groups.map((group) => {
+      const available = Number(remaining[group.productId] || 0);
+      const purchasedQuantity = Math.min(available, Number(group.quantity || 0));
+      remaining[group.productId] = available - purchasedQuantity;
+      return {
+        ...group,
+        purchasedQuantity,
+        shortageQuantity: Math.max(0, Number(group.quantity || 0) - purchasedQuantity)
+      };
+    }).sort((a, b) => a.productName.localeCompare(b.productName));
+
+    const todaysIds = new Set(groups.map((group) => group.productId));
     const relatedIds = new Set();
     (state.productRelations || []).forEach((relation) => {
       if (todaysIds.has(relation.retailProductId)) relatedIds.add(relation.wholesaleProductId);
       if (todaysIds.has(relation.wholesaleProductId)) relatedIds.add(relation.retailProductId);
     });
+
     const [assigneeType, assigneeId] = String(assignedValue || "").split(":");
     const provider = assigneeType === "provider" ? getProvider(assigneeId) : null;
     const providerProducts = new Set(provider && Array.isArray(provider.productsSupplied) ? provider.productsSupplied : []);
+    const isAll = !assignedValue || assignedValue === "all";
+
     const matchesAssignee = (group) => {
-      if (!assignedValue) return true;
+      if (isAll) return true;
       if (providerProducts.has(group.productId)) return true;
       return group.entries.some(({ item }) => getEffectiveItemAssigneeValue(item) === assignedValue);
     };
-    const requiredItems = shortages.filter(matchesAssignee).map((item) => ({ ...item, favorite: true }));
+
+    const requiredItems = allItems.filter((item) => matchesAssignee(item) && item.shortageQuantity > 0).map((item) => ({ ...item, favorite: true }));
     const requiredIds = new Set(requiredItems.map((item) => item.productId));
     const restItems = [];
-    shortages.forEach((group) => {
-      if (!requiredIds.has(group.productId)) restItems.push({ productId: group.productId, productName: group.productName, unitType: group.unitType, shortageQuantity: 0, favorite: false });
+    allItems.forEach((group) => {
+      if (!requiredIds.has(group.productId) && matchesAssignee(group)) {
+        restItems.push({ ...group, shortageQuantity: 0, favorite: false });
+      }
     });
     const seenIds = new Set([...requiredIds, ...restItems.map((item) => item.productId)]);
     relatedIds.forEach((productId) => {
@@ -4311,10 +4308,17 @@
       if (!product || product.isActive === false) return;
       restItems.push({ productId: product.id, productName: product.name, unitType: product.unitType, shortageQuantity: 0, favorite: false });
     });
+
+    const labelFor = (item) => {
+      if (item.favorite) return "Falta " + formatNumber(item.shortageQuantity || item.quantity || 0) + " " + escapeHtml(item.unitType);
+      if (item.quantity) return "Pedido " + formatNumber(item.quantity) + " " + escapeHtml(item.unitType);
+      return "Agregar";
+    };
+
     const cards = [...requiredItems, ...restItems].map((item) => `
       <button class="assigned-product-card ${item.favorite ? "favorite" : ""}" type="button" data-employee-assigned-product="${item.productId}" data-default-qty="${formatAmountInput(item.shortageQuantity || item.quantity || 0)}">
         <span>${escapeHtml(item.productName)}</span>
-        <strong>${item.favorite ? "Falta " + formatNumber(item.shortageQuantity || item.quantity) + " " + escapeHtml(item.unitType) : "Agregar"}</strong>
+        <strong>${labelFor(item)}</strong>
       </button>
     `).join("");
     return `<div class="assigned-products-grid">${cards || `<div class="empty compact">No hay productos pendientes de compra para hoy.</div>`}</div>`;
