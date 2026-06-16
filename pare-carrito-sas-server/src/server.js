@@ -189,7 +189,6 @@ app.post("/auth/register", async (req, res) => {
     if (Number.isFinite(n) && n >= nextNum) nextNum = n + 1;
   });
   const clientId = String(nextNum).padStart(3, "0");
-  const needsInvoice = b.invoiceType !== "Sin Factura";
   const client = {
     id: clientId, name: String(b.localName).trim(), address: String(b.address).trim(), phone: String(b.phone).trim(),
     email: String(b.email).trim(), billingEmail: String(b.billingEmail || "").trim(), contactName: "",
