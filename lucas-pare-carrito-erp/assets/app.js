@@ -280,7 +280,9 @@
     remitosLinkedClientId: "all",
     transferClientId: "all",
     providerProductId: "",
-    importType: "purchases"
+    importType: "purchases",
+    syncWarning: "",
+    lastOverwrite: null
   };
 
   let afterRender = [];
@@ -767,7 +769,8 @@
     const exampleOrders = Array.isArray(loaded.exampleOrders) && loaded.exampleOrders.length ? loaded.exampleOrders : defaultExampleOrders(products);
     const employeeReimbursements = Array.isArray(loaded.employeeReimbursements) ? loaded.employeeReimbursements : [];
     const clientTransfers = Array.isArray(loaded.clientTransfers) ? loaded.clientTransfers : [];
-    const normalized = { ...loaded, users, clients, products, providers, saldos, caja, cashBoxes, exampleOrders, employeeReimbursements, clientTransfers, appSettings: { ...defaultAppSettings(), ...(loaded.appSettings || {}) } };
+    const deletedOrders = Array.isArray(loaded.deletedOrders) ? loaded.deletedOrders.slice() : [];
+    const normalized = { ...loaded, users, clients, products, providers, saldos, caja, cashBoxes, exampleOrders, employeeReimbursements, clientTransfers, deletedOrders, appSettings: { ...defaultAppSettings(), ...(loaded.appSettings || {}) } };
     ensureUserCashBoxes(normalized);
     return normalized;
   }
@@ -1209,9 +1212,43 @@
       });
       return Array.from(map.values());
     };
+    const unionByKeyPreferNewest = (a, b, keyFn, updatedAtFn) => {
+      const map = new Map();
+      (Array.isArray(a) ? a : []).forEach((item) => {
+        if (item) map.set(keyFn(item), item);
+      });
+      (Array.isArray(b) ? b : []).forEach((item) => {
+        if (!item) return;
+        const key = keyFn(item);
+        const existing = map.get(key);
+        if (!existing) {
+          map.set(key, item);
+          return;
+        }
+        const existingTime = new Date(existing[updatedAtFn] || existing.createdAt || 0).getTime();
+        const itemTime = new Date(item[updatedAtFn] || item.createdAt || 0).getTime();
+        if (itemTime > existingTime) map.set(key, item);
+      });
+      return Array.from(map.values());
+    };
     const byId = (item) => String(item.id);
+    merged.orders = unionByKeyPreferNewest(remote.orders, local.orders, byId, "updatedAt");
+    merged.deletedOrders = unionByKeyPreferNewest(remote.deletedOrders, local.deletedOrders, byId, "updatedAt");
+    if (Array.isArray(merged.orders) && Array.isArray(merged.deletedOrders)) {
+      const newestTime = (item) => new Date(item.updatedAt || item.deletedAt || item.createdAt || 0).getTime();
+      merged.orders = merged.orders.filter((order) => {
+        const del = merged.deletedOrders.find((d) => d.id === order.id);
+        if (!del) return true;
+        return newestTime(order) >= newestTime(del);
+      });
+      merged.deletedOrders = merged.deletedOrders.filter((del) => {
+        const order = merged.orders.find((o) => o.id === del.id);
+        if (!order) return true;
+        return newestTime(del) > newestTime(order);
+      });
+    }
     [
-      "orders", "exampleOrders", "remitos", "saldos", "purchases", "payments", "caja",
+      "exampleOrders", "remitos", "saldos", "purchases", "payments", "caja",
       "providerLedger", "providerPayments", "clientTransfers", "vendorLedger",
       "attendance", "employeePayments", "employeeReimbursements", "performanceAdjustments",
       "clients", "products", "providers", "vehicles", "users", "cashBoxes"
@@ -1309,8 +1346,9 @@
           .filter((k) => local[k] !== remote[k])
           .map((k) => `${k}: local ${local[k]} vs nube ${remote[k]}`)
           .join(", ");
+        const msg = `Sincronizacion bloqueada: los datos locales tienen mas informacion (${details}). Use 'Subir datos ahora' para enviarlos, o 'Descargar datos ahora' si esta seguro de reemplazarlos.`;
+        ui.syncWarning = msg;
         if (!manual) {
-          const msg = `Sincronizacion bloqueada: los datos locales tienen mas informacion (${details}). Use 'Subir datos ahora' para enviarlos, o 'Descargar datos ahora' si esta seguro de reemplazarlos.`;
           console.warn(msg);
           config.lastError = msg;
           saveCloudSyncConfig(config);
@@ -1318,14 +1356,24 @@
           return;
         }
         if (!confirm(`ADVERTENCIA: los datos locales tienen mas informacion que la nube (${details}). Reemplazar los datos locales con la nube?`)) return;
+      } else {
+        ui.syncWarning = "";
       }
       backupLocalState("antes de descarga de nube");
+      const backupIndexBeforeOverwrite = 0; // backupLocalState inserts at index 0
+      const localOrdersBefore = Array.isArray(state.orders) ? state.orders.length : 0;
       state = normalizeLoadedState({ ...seedState(), ...payload.data }, seedState());
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
       config.lastSync = remoteUpdated || new Date().toISOString();
       config.lastError = "";
       saveCloudSyncConfig(config);
       currentUser = loadCurrentUser();
+      const remoteOrdersAfter = Array.isArray(state.orders) ? state.orders.length : 0;
+      if (remoteOrdersAfter < localOrdersBefore) {
+        ui.lastOverwrite = { at: Date.now(), backupIndex: backupIndexBeforeOverwrite, ordersBefore: localOrdersBefore, ordersAfter: remoteOrdersAfter };
+      } else {
+        ui.lastOverwrite = null;
+      }
       render();
       if (manual) alert("Datos descargados de la nube correctamente.");
     } catch (error) {
@@ -1888,11 +1936,34 @@
     return (pages[route.base] || renderDashboard)();
   }
 
+  function renderSyncBanners() {
+    let html = "";
+    if (ui.syncWarning) {
+      html += `<div class="alert" style="margin-bottom:14px"><strong>Atencion sincronizacion:</strong> ${escapeHtml(ui.syncWarning)}</div>`;
+    }
+    if (ui.lastOverwrite) {
+      const elapsed = Math.floor((Date.now() - ui.lastOverwrite.at) / 1000);
+      const remaining = 120 - elapsed;
+      if (remaining > 0) {
+        html += `
+          <div class="alert warn" style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+            <span>La ultima descarga de la nube redujo los pedidos de ${ui.lastOverwrite.ordersBefore} a ${ui.lastOverwrite.ordersAfter}. Se puede deshacer durante ${remaining}s.</span>
+            <button class="btn small primary" type="button" data-undo-last-overwrite>Deshacer</button>
+          </div>
+        `;
+      } else {
+        ui.lastOverwrite = null;
+      }
+    }
+    return html;
+  }
+
   function pageShell(title, subtitle, actions, body, routeName) {
     const toolbar = toolbarRoutes.has(routeName) ? renderToolbar() : "";
     return `
       <section class="page">
         ${toolbar}
+        ${renderSyncBanners()}
         <div class="page-header">
           <div>
             <h1 class="page-title">${escapeHtml(title)}</h1>
@@ -2923,7 +2994,7 @@
       const date = document.getElementById("order-date").value || todayISO();
       if (isCustomerOrder && date < getCustomerMinOrderDate()) return alert("Seleccione una fecha permitida para el pedido.");
       const order = {
-        id: currentUser.role === "example" ? nextDatedId("EJ", state.exampleOrders || []) : nextDatedId("ORD", state.orders),
+        id: currentUser.role === "example" ? nextDatedId("EJ", state.exampleOrders || []) : nextDatedId("ORD", (state.orders || []).concat(state.deletedOrders || [])),
         userId: currentUser.id,
         exampleOnly: currentUser.role === "example",
         date,
@@ -2940,7 +3011,8 @@
         paymentStatus: "pending",
         remitoPrinted: false,
         notes: document.getElementById("order-notes").value.trim(),
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
       };
       if (ui.pendingHandwritten) {
         order.handwrittenImage = { name: fileDate(date) + " Pedido " + client.name + " " + order.id, data: ui.pendingHandwritten };
@@ -3087,28 +3159,37 @@
 
   function renderOrders() {
     if (isClientLikeRole(currentUser.role)) return renderCustomerOrders();
-    const showAnnulledTab = ["manager", "admin"].includes(currentUser.role);
-    const annulledView = showAnnulledTab && ui.ordersTab === "anulados";
-    let baseOrders = annulledView
-      ? state.orders.filter((order) => order.status === "anulado")
-      : visibleOrders().filter((order) => order.status !== "anulado");
-    baseOrders = baseOrders.filter((order) => isDateInRange(order.date, ui.ordersFrom, ui.ordersTo));
+    const showTrashTabs = ["manager", "admin"].includes(currentUser.role);
+    const annulledView = showTrashTabs && ui.ordersTab === "anulados";
+    const deletedView = showTrashTabs && ui.ordersTab === "eliminados";
+    let baseOrders;
+    if (deletedView) {
+      baseOrders = (state.deletedOrders || []).slice();
+      baseOrders = baseOrders.filter((order) => isDateInRange(order.deletedAt || order.date, ui.ordersFrom, ui.ordersTo));
+    } else {
+      baseOrders = annulledView
+        ? state.orders.filter((order) => order.status === "anulado")
+        : visibleOrders().filter((order) => order.status !== "anulado");
+      baseOrders = baseOrders.filter((order) => isDateInRange(order.date, ui.ordersFrom, ui.ordersTo));
+    }
     const orders = baseOrders.slice().sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
-    const canEditStatus = ["manager", "admin"].includes(currentUser.role) && !annulledView;
+    const canEditStatus = ["manager", "admin"].includes(currentUser.role) && !annulledView && !deletedView;
     const showActions = currentUser.role !== "customer";
     const rows = orders.map((order) => {
       const client = getClient(order.clientId);
       const vehicle = getVehicle(order.deliveryVehicleId);
       const paid = order.paymentReceived || 0;
       const creator = getUser(order.userId);
-      const metaLine = `<br><small class="muted order-meta">${escapeHtml(creator ? creator.name : "")}${creator && order.createdAt ? " - " : ""}${formatTimestampShort(order.createdAt)}</small>`;
+      const metaLine = deletedView
+        ? `<br><small class="muted order-meta">Eliminado ${formatTimestampShort(order.deletedAt)} por ${escapeHtml(order.deletedBy || "-")}</small>`
+        : `<br><small class="muted order-meta">${escapeHtml(creator ? creator.name : "")}${creator && order.createdAt ? " - " : ""}${formatTimestampShort(order.createdAt)}</small>`;
       return `
         <tr>
           <td><strong>${escapeHtml(order.id)}</strong> <span class="muted">${formatDateShort(order.date)}</span>${metaLine}</td>
           <td><strong>${escapeHtml(order.clientId)} - ${escapeHtml(client ? client.name : order.clientId)}</strong> <span class="muted">${escapeHtml(vehicle ? vehicle.name : order.deliveryVehicleId)}</span></td>
           <td>${renderOrderInlineDetails(order, { summary: order.items.length + " productos" })}</td>
           <td class="num">${formatMoney(order.totalAmount)}</td>
-          ${canEditStatus ? "" : `<td class="num">${formatMoney(paid)}</td>
+          ${canEditStatus || deletedView ? "" : `<td class="num">${formatMoney(paid)}</td>
           <td><span class="status ${statusClass(order.status)}">${statusLabel(order.status)}</span></td>`}
           ${canEditStatus ? `<td>
             <select data-order-status="${order.id}">
@@ -3116,11 +3197,14 @@
             </select>
           </td>` : ""}
           ${showActions ? `<td class="page-actions">
+            ${deletedView ? `${["manager", "admin"].includes(currentUser.role) ? `<button class="btn small primary" data-restore-deleted-order="${order.id}">Restaurar</button>` : ""}` : `
             ${["manager", "admin", "employee"].includes(currentUser.role) ? `<button class="btn small ghost" data-edit-order="${order.id}">Editar</button>` : ""}
             ${["manager", "admin", "employee"].includes(currentUser.role) ? `<button class="btn small ghost" data-print-order-remito="${order.id}" title="Imprimir" aria-label="Imprimir">&#128424;</button>` : ""}
             ${order.handwrittenImage ? `<button class="btn small ghost" data-view-handwritten="${order.id}" title="Ver pedido manuscrito" aria-label="Pedido manuscrito">&#128196;</button>` : ""}
             ${["manager", "admin"].includes(currentUser.role) ? (annulledView ? `<button class="btn small primary" data-restore-order="${order.id}">Restaurar</button>` : `<button class="btn small danger" data-annul-order="${order.id}" title="Anular pedido" aria-label="Anular">X</button>`) : ""}
+            ${["manager", "admin"].includes(currentUser.role) ? `<button class="btn small danger" data-delete-order="${order.id}" title="Eliminar pedido" aria-label="Eliminar">&#128465;</button>` : ""}
             ${currentUser.role === "employee" ? `<button class="btn small ghost" data-route="vehiculos">Vehiculo</button>` : ""}
+            `}
           </td>` : ""}
         </tr>
       `;
@@ -3135,7 +3219,7 @@
         ? `<button class="btn primary" data-route="nuevo-pedido">Nuevo pedido</button>`
         : currentUser.role === "employee" ? `<button class="btn primary" data-route="nuevo-pedido">Nuevo Pedido</button><button class="btn blue" data-route="pagos">Registrar pago</button>` : "",
       `
-      ${showAnnulledTab ? `<div class="tabs"><button class="tab ${!annulledView ? "active" : ""}" data-orders-tab="activos">Pedidos</button><button class="tab ${annulledView ? "active" : ""}" data-orders-tab="anulados">Anulados (papelera)</button></div>` : ""}
+      ${showTrashTabs ? `<div class="tabs"><button class="tab ${!annulledView && !deletedView ? "active" : ""}" data-orders-tab="activos">Pedidos</button><button class="tab ${annulledView ? "active" : ""}" data-orders-tab="anulados">Anulados</button><button class="tab ${deletedView ? "active" : ""}" data-orders-tab="eliminados">Eliminados</button></div>` : ""}
       <div class="panel" style="margin-bottom:14px">
         <div class="form-grid balance-date-grid orders-date-grid">
           <div class="field balance-date-field"><label>Desde</label><input type="date" id="orders-from" value="${ui.ordersFrom}" /></div>
@@ -3152,7 +3236,7 @@
           </div>
         </div>
       </div>
-      ${["manager", "admin"].includes(currentUser.role) && !annulledView ? `<div class="panel" style="margin-bottom:14px"><div class="form-grid"><div class="field"><label>Estado masivo</label><select id="bulk-order-status">${["pendiente", "preparando", "listo", "entregado", "cancelado"].map((status) => `<option value="${status}">${statusLabel(status)}</option>`).join("")}</select></div><div class="field"><label>&nbsp;</label><button class="btn ghost" id="apply-bulk-order-status" type="button">Actualizar pedidos visibles</button></div></div></div>` : ""}
+      ${["manager", "admin"].includes(currentUser.role) && !annulledView && !deletedView ? `<div class="panel" style="margin-bottom:14px"><div class="form-grid"><div class="field"><label>Estado masivo</label><select id="bulk-order-status">${["pendiente", "preparando", "listo", "entregado", "cancelado"].map((status) => `<option value="${status}">${statusLabel(status)}</option>`).join("")}</select></div><div class="field"><label>&nbsp;</label><button class="btn ghost" id="apply-bulk-order-status" type="button">Actualizar pedidos visibles</button></div></div></div>` : ""}
       <div class="panel">
         <div class="table-wrap orders-table">
           <table>
@@ -3233,6 +3317,24 @@
         if (!order) return;
         if (!confirm("Restaurar el pedido " + order.id + "? Volvera a sumar en saldos y registros.")) return;
         restoreOrder(order);
+        saveState();
+        render();
+      });
+    });
+    document.querySelectorAll("[data-delete-order]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const order = getOrder(button.dataset.deleteOrder);
+        if (!order) return;
+        if (!confirm("Eliminar el pedido " + order.id + "? Se movera a la papelera de eliminados y se podra restaurar.")) return;
+        deleteOrder(order.id);
+        saveState();
+        render();
+      });
+    });
+    document.querySelectorAll("[data-restore-deleted-order]").forEach((button) => {
+      button.addEventListener("click", () => {
+        if (!confirm("Restaurar el pedido eliminado " + button.dataset.restoreDeletedOrder + "?")) return;
+        restoreDeletedOrder(button.dataset.restoreDeletedOrder);
         saveState();
         render();
       });
@@ -8711,7 +8813,7 @@
     if (quantity <= 0 || unitPrice <= 0) return false;
     const item = buildImportedOrderItem(product, client, quantity, unitPrice, row.notes || "");
     const order = {
-      id: nextDatedId(prefix || "IMP", state.orders),
+      id: nextDatedId(prefix || "IMP", (state.orders || []).concat(state.deletedOrders || [])),
       date: row.date || todayISO(),
       clientId: client.id,
       deliveryVehicleId: client.vehicleId,
@@ -8726,7 +8828,8 @@
       paymentStatus: "pending",
       remitoPrinted: false,
       notes: row.notes || "Importacion masiva",
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
     };
     state.orders.push(order);
     addSaldoEntry({ clientId: client.id, type: "pedido", description: "Importacion pedido " + order.id, amount: order.totalAmount, relatedEntityId: order.id, relatedEntityType: "order", notes: order.notes });
@@ -9839,6 +9942,7 @@
             item.totalWithIva = item.subtotal + item.ivaAmount;
           });
           recalcOrderTotals(order);
+          order.updatedAt = new Date().toISOString();
           if (!order.exampleOnly) updateOrderAccounting(order);
           saveState();
           closeModal();
@@ -10179,6 +10283,17 @@
       });
     });
     document.querySelectorAll("[data-print]").forEach((button) => button.addEventListener("click", () => window.print()));
+    document.querySelectorAll("[data-undo-last-overwrite]").forEach((button) => button.addEventListener("click", () => {
+      if (!ui.lastOverwrite) return;
+      if (!confirm(`Deshacer la ultima descarga? Volvera a ${ui.lastOverwrite.ordersBefore} pedidos.`)) return;
+      if (restoreLocalBackup(ui.lastOverwrite.backupIndex)) {
+        ui.lastOverwrite = null;
+        ui.syncWarning = "";
+        cloudPush(true);
+      } else {
+        alert("No se pudo deshacer.");
+      }
+    }));
 
     // Mobile drawer toggle
     document.querySelectorAll("[data-mobile-menu-toggle]").forEach((button) => {
@@ -12191,6 +12306,7 @@
     order.status = "anulado";
     order.annulledAt = new Date().toISOString();
     order.annulledBy = currentUser ? currentUser.name : "";
+    order.updatedAt = order.annulledAt;
     addSaldoEntry({
       clientId: order.clientId,
       type: "anulacion",
@@ -12207,6 +12323,7 @@
     order.status = "pendiente";
     delete order.annulledAt;
     delete order.annulledBy;
+    order.updatedAt = new Date().toISOString();
     state.saldos = state.saldos.filter((entry) => !(entry.relatedEntityType === "order_annul" && entry.relatedEntityId === order.id));
     recomputeClientSaldoBalances(order.clientId);
   }
@@ -12214,15 +12331,45 @@
   function deleteOrder(orderId) {
     const order = getOrder(orderId);
     if (!order || order.exampleOnly) return;
-    const relatedPaymentIds = state.payments
-      .filter((payment) => payment.orderId === orderId || (Array.isArray(payment.orderIds) && payment.orderIds.includes(orderId)))
-      .map((payment) => payment.id);
+    const now = new Date().toISOString();
+    const relatedPayments = state.payments.filter((payment) => payment.orderId === orderId || (Array.isArray(payment.orderIds) && payment.orderIds.includes(orderId)));
+    const relatedPaymentIds = relatedPayments.map((payment) => payment.id);
+    const relatedRemitos = state.remitos.filter((item) => item.orderId === orderId);
+    const relatedSaldos = state.saldos.filter((entry) => {
+      if (entry.relatedEntityType === "order" && entry.relatedEntityId === orderId) return true;
+      if (entry.relatedEntityType === "payment" && relatedPaymentIds.includes(entry.relatedEntityId)) return true;
+      if (entry.relatedEntityType === "order_annul" && entry.relatedEntityId === orderId) return true;
+      return false;
+    });
+    const relatedCaja = state.caja.filter((entry) => {
+      if (entry.relatedEntityType === "order" && entry.relatedEntityId === orderId) return true;
+      if (entry.relatedEntityType === "payment" && relatedPaymentIds.includes(entry.relatedEntityId)) return true;
+      return false;
+    });
+    order.deletedAt = now;
+    order.updatedAt = now;
+    order.deletedBy = currentUser ? currentUser.name : "";
+    order._deletedSnapshot = {
+      deletedAt: now,
+      deletedBy: order.deletedBy,
+      relatedPaymentIds,
+      relatedRemitoIds: relatedRemitos.map((r) => r.id),
+      payments: JSON.parse(JSON.stringify(relatedPayments)),
+      remitos: JSON.parse(JSON.stringify(relatedRemitos)),
+      saldos: JSON.parse(JSON.stringify(relatedSaldos)),
+      caja: JSON.parse(JSON.stringify(relatedCaja))
+    };
+    state.deletedOrders = state.deletedOrders || [];
+    if (!state.deletedOrders.find((o) => o.id === order.id)) {
+      state.deletedOrders.push(order);
+    }
     state.orders = state.orders.filter((item) => item.id !== orderId);
     state.remitos = state.remitos.filter((item) => item.orderId !== orderId);
     state.payments = state.payments.filter((payment) => !relatedPaymentIds.includes(payment.id));
     state.saldos = state.saldos.filter((entry) => {
       if (entry.relatedEntityType === "order" && entry.relatedEntityId === orderId) return false;
       if (entry.relatedEntityType === "payment" && relatedPaymentIds.includes(entry.relatedEntityId)) return false;
+      if (entry.relatedEntityType === "order_annul" && entry.relatedEntityId === orderId) return false;
       return true;
     });
     state.caja = state.caja.filter((entry) => {
@@ -12231,6 +12378,37 @@
       return true;
     });
     recomputeClientSaldoBalances(order.clientId);
+  }
+
+  function restoreDeletedOrder(orderId) {
+    if (!Array.isArray(state.deletedOrders)) return;
+    const idx = state.deletedOrders.findIndex((o) => o.id === orderId);
+    if (idx === -1) return;
+    const order = state.deletedOrders[idx];
+    const snap = order._deletedSnapshot || {};
+    (snap.payments || []).forEach((payment) => {
+      if (!state.payments.find((p) => p.id === payment.id)) state.payments.push(payment);
+    });
+    (snap.remitos || []).forEach((remito) => {
+      if (!state.remitos.find((r) => r.id === remito.id)) state.remitos.push(remito);
+    });
+    (snap.saldos || []).forEach((entry) => {
+      if (!state.saldos.find((s) => s.id === entry.id)) state.saldos.push(entry);
+    });
+    (snap.caja || []).forEach((entry) => {
+      if (!state.caja.find((c) => c.id === entry.id)) state.caja.push(entry);
+    });
+    delete order.deletedAt;
+    delete order.deletedBy;
+    delete order._deletedSnapshot;
+    order.updatedAt = new Date().toISOString();
+    if (!Array.isArray(state.orders)) state.orders = [];
+    if (!state.orders.find((o) => o.id === order.id)) {
+      state.orders.push(order);
+    }
+    state.deletedOrders.splice(idx, 1);
+    recalcOrderTotals(order);
+    updateOrderAccounting(order);
   }
 
   function recomputeClientSaldoBalances(clientId) {

@@ -19,7 +19,7 @@ const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || "*";
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, "..", "uploads");
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "gerente";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "gerente123";
-const STATE_HISTORY_KEEP = Number(process.env.STATE_HISTORY_KEEP || 50);
+const STATE_HISTORY_KEEP = Number(process.env.STATE_HISTORY_KEEP || 200);
 
 if (!JWT_SECRET) {
   console.error("FALTA JWT_SECRET en las variables de entorno. Genere uno con: openssl rand -hex 32");
@@ -292,7 +292,13 @@ app.put("/state", authenticate, requireRole(...SYNC_ROLES), async (req, res) => 
   const clientDb = await pool.connect();
   try {
     await clientDb.query("BEGIN");
-    const current = await clientDb.query("SELECT updated_at FROM app_state WHERE id = 'main' FOR UPDATE");
+    const current = await clientDb.query("SELECT updated_at, data FROM app_state WHERE id = 'main' FOR UPDATE");
+    const beforeData = current.rows.length ? current.rows[0].data : {};
+    const beforeCounts = {
+      orders: Array.isArray(beforeData.orders) ? beforeData.orders.length : 0,
+      clients: Array.isArray(beforeData.clients) ? beforeData.clients.length : 0,
+      products: Array.isArray(beforeData.products) ? beforeData.products.length : 0
+    };
     if (current.rows.length) {
       if (body.baseUpdatedAt === undefined || body.baseUpdatedAt === null) {
         await clientDb.query("ROLLBACK");
@@ -317,6 +323,15 @@ app.put("/state", authenticate, requireRole(...SYNC_ROLES), async (req, res) => 
     );
     await mirrorStateToTables(clientDb, body.data);
     await syncUsersFromState(clientDb, body.data);
+    const afterCounts = {
+      orders: Array.isArray(body.data.orders) ? body.data.orders.length : 0,
+      clients: Array.isArray(body.data.clients) ? body.data.clients.length : 0,
+      products: Array.isArray(body.data.products) ? body.data.products.length : 0
+    };
+    await clientDb.query(
+      "INSERT INTO state_writes (updated_by, orders_before, orders_after, clients_before, clients_after, products_before, products_after, diff_orders) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+      [req.user.username, beforeCounts.orders, afterCounts.orders, beforeCounts.clients, afterCounts.clients, beforeCounts.products, afterCounts.products, afterCounts.orders - beforeCounts.orders]
+    );
     await clientDb.query("COMMIT");
     res.json({ ok: true, updatedAt: saved.rows[0].updated_at.toISOString() });
   } catch (error) {

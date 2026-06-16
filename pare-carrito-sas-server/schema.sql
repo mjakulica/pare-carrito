@@ -129,3 +129,16 @@ CREATE TABLE IF NOT EXISTS password_resets (
   used BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS state_writes (
+  id BIGSERIAL PRIMARY KEY,
+  wrote_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_by TEXT,
+  orders_before INT NOT NULL DEFAULT 0,
+  orders_after INT NOT NULL DEFAULT 0,
+  clients_before INT NOT NULL DEFAULT 0,
+  clients_after INT NOT NULL DEFAULT 0,
+  products_before INT NOT NULL DEFAULT 0,
+  products_after INT NOT NULL DEFAULT 0,
+  diff_orders INT NOT NULL DEFAULT 0
+);
