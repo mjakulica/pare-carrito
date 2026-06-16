@@ -357,7 +357,10 @@
     const banner = document.getElementById("offline-banner");
     if (banner) banner.style.display = "none";
     const cloudConfig = getCloudSyncConfig();
-    if (cloudSyncReady(cloudConfig) && cloudConfig.auto !== false) cloudPull(false);
+    if (cloudSyncReady(cloudConfig) && cloudConfig.auto !== false) {
+      cloudPush(false);
+      cloudPull(false);
+    }
   });
   window.addEventListener("offline", () => {
     const banner = document.getElementById("offline-banner");
@@ -938,7 +941,8 @@
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     const config = getCloudSyncConfig();
     if (cloudSyncReady(config) && config.auto !== false) {
-      flushCloudPush();
+      const ok = flushCloudPush();
+      if (!ok) scheduleCloudPush();
     } else {
       scheduleCloudPush();
     }
