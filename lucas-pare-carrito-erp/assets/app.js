@@ -7296,19 +7296,26 @@
         <td><button class="btn small ghost" data-edit-cash-box="${box.id}">Editar</button></td>
       </tr>
     `).join("") : "";
-    const rows = selectedEntries.slice().sort((a, b) => String(b.timestamp || b.date).localeCompare(String(a.timestamp || a.date))).map((entry) => `
-      <tr>
-        <td>${formatDate(entry.date)}<br><span class="muted">${escapeHtml(String(entry.timestamp || "").slice(11, 19))}</span></td>
-        <td>${escapeHtml(getCashBoxName(resolveCajaEntryCashBoxId(entry)))}</td>
-        <td>${escapeHtml(entry.type)}</td>
-        <td>${escapeHtml(entry.concept)}</td>
-        <td class="num">${entry.expectedAmount ? formatMoney(entry.expectedAmount) : "-"}</td>
-        <td class="num">${formatMoney(entry.amountIngreso || 0)}</td>
-        <td class="num">${formatMoney(entry.amountEgreso || 0)}</td>
-        <td class="num">${formatMoney(balanceById[entry.id] || 0)}</td>
-        <td>${escapeHtml(entry.recordedBy || "")}</td>
-      </tr>
-    `).join("");
+    const isManager = currentUser.role === "manager";
+    const rows = selectedEntries.slice().sort((a, b) => String(b.timestamp || b.date).localeCompare(String(a.timestamp || a.date))).map((entry) => {
+      const isAnnulled = entry.status === "anulado";
+      const annulButton = isManager && !isAnnulled ? `<button class="btn small danger" data-annul-caja="${entry.id}" title="Anular movimiento">X</button>` : "";
+      const annulledLabel = isAnnulled ? `<span class="pill gray">Anulado</span>` : "";
+      return `
+        <tr style="${isAnnulled ? "text-decoration:line-through;opacity:0.6" : ""}">
+          <td>${formatDate(entry.date)}<br><span class="muted">${escapeHtml(String(entry.timestamp || "").slice(11, 19))}</span></td>
+          <td>${escapeHtml(getCashBoxName(resolveCajaEntryCashBoxId(entry)))}</td>
+          <td>${escapeHtml(entry.type)}</td>
+          <td>${escapeHtml(entry.concept)}</td>
+          <td class="num">${entry.expectedAmount ? formatMoney(entry.expectedAmount) : "-"}</td>
+          <td class="num">${formatMoney(entry.amountIngreso || 0)}</td>
+          <td class="num">${formatMoney(entry.amountEgreso || 0)}</td>
+          <td class="num">${formatMoney(balanceById[entry.id] || 0)}</td>
+          <td>${escapeHtml(entry.recordedBy || "")}</td>
+          <td>${annulButton}${annulledLabel}</td>
+        </tr>
+      `;
+    }).join("");
     afterRender.push(bindCaja);
     return pageShell(
       "Caja / Rendicion",
@@ -7354,7 +7361,7 @@
       <div class="panel" style="margin-top:14px">
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Fecha</th><th>Caja</th><th>Tipo</th><th>Concepto</th><th>Esperado</th><th>Ingreso</th><th>Egreso</th><th>Balance</th><th>Usuario</th></tr></thead>
+            <thead><tr><th>Fecha</th><th>Caja</th><th>Tipo</th><th>Concepto</th><th>Esperado</th><th>Ingreso</th><th>Egreso</th><th>Balance</th><th>Usuario</th><th>Acciones</th></tr></thead>
             <tbody>${rows || emptyRow(9, "Caja sin movimientos.")}</tbody>
           </table>
         </div>
@@ -7386,6 +7393,14 @@
       saveState();
       render();
     }));
+    document.querySelectorAll("[data-annul-caja]").forEach((button) => button.addEventListener("click", () => {
+      const entry = state.caja.find((item) => item.id === button.dataset.annulCaja);
+      if (!entry) return;
+      if (!confirm("¿Anular el movimiento de caja " + entry.id + "? Se revertira su impacto en caja, saldos o proveedores segun corresponda.")) return;
+      annulCajaEntry(entry);
+      saveState();
+      render();
+    }));
   }
 
   function renderProviders() {
@@ -7397,6 +7412,7 @@
       ? providers.reduce((sum, provider) => sum + Math.max(0, getProviderBalance(provider.id)), 0)
       : selectedProvider ? getProviderBalance(selectedProvider.id) : 0;
     const providerMovements = getProviderMovements(isAllProviders ? providers.map((provider) => provider.id) : ui.providerSelectedId, ui.providerFrom, ui.providerTo);
+    const isManager = currentUser.role === "manager";
     if (ui.providerProductId && !getProduct(ui.providerProductId)) ui.providerProductId = "";
     const providerProductHistory = ui.providerProductId ? getProviderProductHistory(ui.providerProductId) : [];
     const providerProductRows = providerProductHistory.map((entry) => `
@@ -7445,6 +7461,14 @@
       });
       document.querySelectorAll("[data-pay-provider]").forEach((button) => button.addEventListener("click", () => openProviderQuickPayment(button.dataset.payProvider)));
       document.querySelectorAll("[data-edit-provider]").forEach((button) => button.addEventListener("click", () => openProviderForm(button.dataset.editProvider)));
+      document.querySelectorAll("[data-annul-provider-ledger]").forEach((button) => button.addEventListener("click", () => {
+        const entry = state.providerLedger.find((item) => item.id === button.dataset.annulProviderLedger);
+        if (!entry) return;
+        if (!confirm("¿Anular el movimiento de proveedor " + entry.id + "? Se revertira su impacto en caja y saldos.")) return;
+        annulProviderLedgerEntry(entry);
+        saveState();
+        render();
+      }));
       document.querySelectorAll("[data-toggle-provider]").forEach((button) => button.addEventListener("click", () => {
         const provider = getProvider(button.dataset.toggleProvider);
         if (!provider) return;
@@ -7470,8 +7494,13 @@
         </div>
         <div class="table-wrap" style="margin-top:10px">
           <table>
-            <thead><tr><th>Fecha</th><th>Proveedor</th><th>Tipo</th><th>Descripcion</th><th>Monto</th><th>Saldo</th><th>Notas</th></tr></thead>
-            <tbody>${providerMovements.map((entry) => `<tr><td>${formatDate(entry.date)}</td><td>${escapeHtml(entry.providerName || "")}</td><td>${escapeHtml(entry.type)}</td><td>${escapeHtml(entry.description)}</td><td class="num">${formatMoney(entry.amount)}</td><td class="num">${formatMoney(entry.balance || 0)}</td><td>${escapeHtml(entry.notes || "")}</td></tr>`).join("") || emptyRow(7, "Sin movimientos para este rango.")}</tbody>
+            <thead><tr><th>Fecha</th><th>Proveedor</th><th>Tipo</th><th>Descripcion</th><th>Monto</th><th>Saldo</th><th>Notas</th><th>Acciones</th></tr></thead>
+            <tbody>${providerMovements.map((entry) => {
+              const isAnnulled = entry.status === "anulado";
+              const annulButton = isManager && !isAnnulled ? `<button class="btn small danger" data-annul-provider-ledger="${entry.id}" title="Anular movimiento">X</button>` : "";
+              const annulledLabel = isAnnulled ? `<span class="pill gray">Anulado</span>` : "";
+              return `<tr style="${isAnnulled ? "text-decoration:line-through;opacity:0.6" : ""}"><td>${formatDate(entry.date)}</td><td>${escapeHtml(entry.providerName || "")}</td><td>${escapeHtml(entry.type)}</td><td>${escapeHtml(entry.description)}</td><td class="num">${formatMoney(entry.amount)}</td><td class="num">${formatMoney(entry.balance || 0)}</td><td>${escapeHtml(entry.notes || "")}</td><td>${annulButton}${annulledLabel}</td></tr>`;
+            }).join("") || emptyRow(8, "Sin movimientos para este rango.")}</tbody>
           </table>
         </div>
       </div>
@@ -12477,6 +12506,73 @@
         .reduce((sum, p) => sum + Number(p.amount || 0), 0);
       order.paymentReceived = totalPaid;
       order.paymentStatus = order.paymentReceived >= order.totalAmount ? "paid" : (order.paymentReceived > 0 ? "partial" : "pending");
+    });
+  }
+
+  function annulCajaEntry(entry) {
+    if (entry.status === "anulado") return;
+
+    // Si el movimiento tiene entidad origen, anular la entidad origen (revertira caja, saldos y proveedores)
+    if (entry.relatedEntityType === "payment" && entry.relatedEntityId) {
+      const payment = state.payments.find((p) => p.id === entry.relatedEntityId);
+      if (payment) return annulPayment(payment);
+    }
+    if (["purchase", "provider_payment", "cash_movement"].includes(entry.relatedEntityType) && entry.relatedEntityId) {
+      const purchase = state.purchases.find((p) => p.id === entry.relatedEntityId);
+      if (purchase) return annulPurchase(purchase);
+    }
+
+    // Movimiento suelto: compensar directamente en caja
+    const amountIngreso = Number(entry.amountIngreso || 0);
+    const amountEgreso = Number(entry.amountEgreso || 0);
+    if (!amountIngreso && !amountEgreso) return;
+    entry.status = "anulado";
+    entry.annulledAt = new Date().toISOString();
+    entry.annulledBy = currentUser ? currentUser.name : "";
+    addCajaEntry({
+      date: entry.date,
+      type: "caja_annul",
+      concept: "Anulacion movimiento de caja " + entry.id,
+      relatedEntityId: entry.id,
+      relatedEntityType: "caja_annul",
+      amountIngreso: amountEgreso,
+      amountEgreso: amountIngreso,
+      cashBoxId: resolveCajaEntryCashBoxId(entry),
+      notes: "Movimiento de caja anulado."
+    });
+  }
+
+  function annulProviderLedgerEntry(entry) {
+    if (entry.status === "anulado") return;
+
+    // Si tiene entidad origen, anular la entidad origen
+    if (entry.relatedEntityType === "purchase" && entry.relatedEntityId) {
+      const purchase = state.purchases.find((p) => p.id === entry.relatedEntityId);
+      if (purchase) return annulPurchase(purchase);
+    }
+    if (entry.relatedEntityType === "provider_payment" && entry.relatedEntityId) {
+      const providerPayment = (state.providerPayments || []).find((p) => p.id === entry.relatedEntityId);
+      if (providerPayment) {
+        const purchase = state.purchases.find((p) => p.providerPaymentId === providerPayment.id);
+        if (purchase) return annulPurchase(purchase);
+      }
+    }
+
+    // Fallback: compensar directamente en providerLedger
+    const amount = Number(entry.amount || 0);
+    if (!amount) return;
+    entry.status = "anulado";
+    entry.annulledAt = new Date().toISOString();
+    entry.annulledBy = currentUser ? currentUser.name : "";
+    addProviderLedgerEntry({
+      providerId: entry.providerId,
+      date: entry.date,
+      type: "anulacion",
+      description: "Anulacion movimiento " + entry.id,
+      amount: -amount,
+      relatedEntityId: entry.id,
+      relatedEntityType: "provider_ledger_annul",
+      notes: "Movimiento anulado."
     });
   }
 
