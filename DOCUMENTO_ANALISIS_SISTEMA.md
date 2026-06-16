@@ -52,7 +52,7 @@ Es una **Single Page Application (SPA)** desarrollada en JavaScript vanilla, con
 | Backend | Node.js, Express, pg (PostgreSQL) |
 | Base de datos | PostgreSQL 16, JSONB para estado operativo |
 | Auth | JWT + bcrypt, rate limiting login |
-| Facturación | TusFacturasAPP (opcional) |
+| Facturación | TusFacturasAPP (opcional), `decimal.js` para precisión decimal |
 | Deploy | Docker Compose (Caddy + API + PostgreSQL) |
 
 ---
@@ -137,7 +137,7 @@ El ERP guarda el estado operativo en un único JSONB. Los arrays/colecciones pri
 | `caja` | Movimientos de caja | `id`, `date`, `type`, `concept`, `amountIngreso`, `amountEgreso`, `cashBoxId`, `relatedEntityId`, `relatedEntityType` |
 | `providerLedger` | Cuenta corriente proveedor | movimientos de deuda/pago con proveedores |
 | `clientTransfers` | Transferencias de clientes | `id`, `clientId`, `amount`, `status`, `createdByUserId`, `timestamp`, `reviewedBy` |
-| `billingLog` | Facturación | `id`, `clientId`, `invoiceType`, `from`, `to`, `total`, `iva`, `cae`, `numero`, `status` |
+| `billingLog` | Facturación | `id`, `clientId`, `clientName`, `invoiceType`, `freq`, `from`, `to`, `total`, `iva`, `neto`, `orders`, `cae`, `numero`, `pdf`, `externalReference`, `partials`, `status`, `detail`, `emittedAt` |
 | `attendance` | Asistencia | `id`, `userId`, `date`, `checkIn`, `checkOut`, `hours` |
 | `employeePayments` | Pagos a empleados | `id`, `userId`, `date`, `amount`, `concept` |
 | `employeeReimbursements` | Reintegros | `id`, `userId`, `date`, `amount`, `concept` |
@@ -211,11 +211,14 @@ Tablas adicionales:
 
 ### 6.6 Facturación Automática
 
-1. Scheduler interno cada 5 minutos.
+1. Scheduler interno cada 5 minutos. La fecha de última ejecución se persiste en `app_state.data.billingLastRunDate` para sobrevivir reinicios.
 2. A las 23:00 hora Argentina verifica clientes con `invoiceFrequency` (`diaria`, `semanal`, `mensual`).
-3. Agrupa pedidos facturables (`needsInvoice`) del período.
-4. Envía a TusFacturasAPP (o simula si faltan credenciales).
-5. Registra resultado en `state.billingLog`.
+3. Agrupa pedidos facturables (`needsInvoice`) del período y recalcula neto, IVA y total a partir de los ítems agrupados (precio + alícuota + cantidad) usando `decimal.js`.
+4. Valida CUIT/CUIL del cliente (longitud, prefijo y dígito verificador) antes de emitir.
+5. Si el período supera los 130 ítems permitidos por TusFacturas, divide el comprobante en múltiples facturas con `external_reference` idempotente (`PC-{clientId}-{from}-{to}` y sufijo `(X/Y)`).
+6. Envía a TusFacturasAPP con timeout de 30s y hasta 3 reintentos con backoff exponencial (o simula si faltan credenciales).
+7. Si un comprobante de un período falla, se detiene el procesamiento de ese período para evitar estados inconsistentes; los períodos anteriores exitosos quedan registrados.
+8. Registra resultado en `state.billingLog`, incluyendo `cae`, `numero`, `pdf`, `externalReference` y, en caso de división, el array `partials`.
 
 ---
 
@@ -302,7 +305,7 @@ El frontend es estático; basta copiar los archivos actualizados a `lucas-pare-c
 - El estado completo en un solo JSONB simplifica el desarrollo pero puede crecer; vigilar tamaño y tiempos de sync.
 - El control de conflictos (`baseUpdatedAt`) requiere que los usuarios recarguen ante un 409.
 - Las contraseñas en `state.users` son texto plano dentro del JSON; el backend las hashea en la tabla `users` al sincronizar.
-- La facturación con TusFacturas requiere credenciales válidas; sin ellas opera en modo simulación.
+- La facturación con TusFacturas requiere credenciales válidas; sin ellas opera en modo simulación. Se valida CUIT, se usa precisión decimal (`decimal.js`), se reintentan llamadas con timeout y se soporta división en múltiples comprobantes cuando el período supera 130 ítems.
 - Cualquier cambio en `src/server.js` requiere rebuild de la imagen Docker del backend.
 
 ---

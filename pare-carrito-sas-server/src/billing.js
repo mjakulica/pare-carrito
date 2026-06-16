@@ -3,7 +3,12 @@
 // Periodicidad: diaria (cada dia 23:00), semanal (sabados 23:00 con corte
 // adicional el ultimo dia del mes), mensual (ultimo dia del mes 23:00).
 
+const Decimal = require("decimal.js");
+
 const TF_URL = "https://www.tusfacturas.app/app/api/v2/facturacion/nuevo";
+const TF_ITEMS_PER_INVOICE = 130;
+const TF_TIMEOUT_MS = 30000;
+const TF_RETRIES = 3;
 
 function billingConfig(env = process.env) {
   const cfg = {
@@ -41,13 +46,16 @@ function firstOfMonth(iso) {
   return iso.slice(0, 8) + "01";
 }
 
+function endOfMonthISO(iso) {
+  const d = new Date(iso.slice(0, 8) + "01T12:00:00Z");
+  d.setUTCMonth(d.getUTCMonth() + 1);
+  d.setUTCDate(0);
+  return d.toISOString().slice(0, 10);
+}
+
 function ddmmyyyy(iso) {
   const [y, m, d] = iso.split("-");
   return `${d}/${m}/${y}`;
-}
-
-function round2(n) {
-  return Math.round(Number(n || 0) * 100) / 100;
 }
 
 function normalizeFrequency(value) {
@@ -58,12 +66,105 @@ function normalizeFrequency(value) {
   return "mensual";
 }
 
+// --- Precision decimal (BILL-001) ---
+
+function d(n) {
+  return new Decimal(n == null ? 0 : n);
+}
+
+function round2(n) {
+  return d(n).toDecimalPlaces(2).toNumber();
+}
+
+function sumDecimals(values) {
+  return values.reduce((acc, val) => acc.plus(d(val)), d(0));
+}
+
+// --- Validacion CUIT/CUIL (BILL-002) ---
+
+function cleanCuit(value) {
+  return String(value || "").replace(/\D/g, "");
+}
+
+function validateCuit(value) {
+  const cuit = cleanCuit(value);
+  if (cuit.length !== 11) return { ok: false, reason: "El CUIT debe tener 11 digitos" };
+  const prefix = cuit.slice(0, 2);
+  if (!["20", "23", "24", "27", "30", "33", "34"].includes(prefix)) {
+    return { ok: false, reason: "Prefijo de CUIT/CUIL invalido" };
+  }
+  const base = cuit.slice(0, 10);
+  const check = cuit.slice(10, 11);
+  const multipliers = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2];
+  let sum = 0;
+  for (let i = 0; i < 10; i++) sum += Number(base[i]) * multipliers[i];
+  const mod = 11 - (sum % 11);
+  const expected = mod === 11 ? "0" : mod === 10 ? "9" : String(mod);
+  if (check !== expected) return { ok: false, reason: "Digito verificador de CUIT incorrecto" };
+  return { ok: true, cuit };
+}
+
+// --- Utilidades de facturacion ---
+
 function lastCutFor(state, clientId) {
   let last = "";
   for (const log of state.billingLog || []) {
     if (log.clientId === clientId && ["ok", "simulada"].includes(log.status) && log.to > last) last = log.to;
   }
   return last;
+}
+
+function buildGroupedItems(orders) {
+  const items = new Map();
+  for (const order of orders) {
+    for (const it of order.items || []) {
+      const productId = String(it.productId || "");
+      const unitPrice = round2(it.unitPrice || 0);
+      const ivaRate = round2(it.ivaRate || 0);
+      const key = `${productId}|${unitPrice}|${ivaRate}`;
+      const prev = items.get(key) || {
+        descripcion: it.productName || "Producto",
+        cantidad: d(0),
+        precio: d(unitPrice),
+        alicuota: d(ivaRate),
+        codigo: productId
+      };
+      prev.cantidad = prev.cantidad.plus(d(it.quantity || 0));
+      items.set(key, prev);
+    }
+  }
+  return Array.from(items.values()).map((it) => ({
+    descripcion: it.descripcion,
+    cantidad: it.cantidad,
+    precio: it.precio,
+    alicuota: it.alicuota,
+    codigo: it.codigo,
+    // subtotal sin iva = precio * cantidad
+    neto: it.precio.times(it.cantidad),
+    iva: it.precio.times(it.cantidad).times(it.alicuota).dividedBy(100)
+  }));
+}
+
+function buildPeriod(state, client, freq, from, to) {
+  if (from > to) return null;
+  const orders = (state.orders || []).filter((o) =>
+    o.clientId === client.id && o.date >= from && o.date <= to && !["cancelado", "anulado"].includes(o.status));
+  const grouped = buildGroupedItems(orders);
+  const neto = sumDecimals(grouped.map((it) => it.neto));
+  const iva = sumDecimals(grouped.map((it) => it.iva));
+  const total = neto.plus(iva);
+  return {
+    clientId: client.id,
+    client,
+    freq,
+    from,
+    to,
+    total: round2(total),
+    iva: round2(iva),
+    neto: round2(neto),
+    items: grouped,
+    orders: orders.length
+  };
 }
 
 // Devuelve la lista de facturas a emitir "ahora" segun la hora ART
@@ -97,77 +198,45 @@ function computeDueInvoices(state, art, force = false) {
   return due.filter((d) => d && d.total > 0);
 }
 
-function endOfMonthISO(iso) {
-  const d = new Date(iso.slice(0, 8) + "01T12:00:00Z");
-  d.setUTCMonth(d.getUTCMonth() + 1);
-  d.setUTCDate(0);
-  return d.toISOString().slice(0, 10);
-}
+// --- Construccion de payload (BILL-004, BILL-005, BILL-007) ---
 
-function buildPeriod(state, client, freq, from, to) {
-  if (from > to) return null;
-  const orders = (state.orders || []).filter((o) =>
-    o.clientId === client.id && o.date >= from && o.date <= to && !["cancelado", "anulado"].includes(o.status));
-  let total = 0;
-  let iva = 0;
-  const items = new Map();
-  for (const order of orders) {
-    total += Number(order.totalAmount || 0);
-    iva += Number(order.ivaAmount || 0);
-    for (const it of order.items || []) {
-      const key = it.productId + "|" + Number(it.unitPrice || 0) + "|" + Number(it.ivaRate || 0);
-      const prev = items.get(key) || { descripcion: it.productName, cantidad: 0, precio: Number(it.unitPrice || 0), alicuota: Number(it.ivaRate || 0), codigo: it.productId };
-      prev.cantidad += Number(it.quantity || 0);
-      items.set(key, prev);
-    }
-  }
-  return { clientId: client.id, client, freq, from, to, total: round2(total), iva: round2(iva), items: Array.from(items.values()), orders: orders.length };
-}
-
-function buildInvoicePayload(invoice, cfg) {
+function buildInvoicePayload(invoice, cfg, options = {}) {
   const client = invoice.client;
   const email = String(client.billingEmail || client.email || "").trim();
-  let detalle;
-  if (invoice.items.length > 0 && invoice.items.length <= 130) {
-    detalle = invoice.items.map((it) => ({
-      cantidad: String(round2(it.cantidad)),
-      afecta_stock: "N",
-      bonificacion_porcentaje: "0",
-      producto: {
-        descripcion: String(it.descripcion || "Producto").slice(0, 255),
-        codigo: String(it.codigo || ""),
-        precio_unitario_sin_iva: String(round2(it.precio)),
-        alicuota: String(it.alicuota || 0),
-        impuestos_internos_alicuota: 0,
-        unidad_medida: "7",
-        unidad_bulto: 1
-      }
-    }));
-  } else {
-    const neto = round2(invoice.total - invoice.iva);
-    const alicuota = invoice.iva > 0 ? round2((invoice.iva / neto) * 100) : 0;
-    detalle = [{
-      cantidad: "1",
-      afecta_stock: "N",
-      bonificacion_porcentaje: "0",
-      producto: {
-        descripcion: "Insumos frescos - periodo " + ddmmyyyy(invoice.from) + " al " + ddmmyyyy(invoice.to),
-        codigo: "PERIODO",
-        precio_unitario_sin_iva: String(neto),
-        alicuota: String(alicuota),
-        impuestos_internos_alicuota: 0,
-        unidad_medida: "7",
-        unidad_bulto: 1
-      }
-    }];
+  const cuitValidation = validateCuit(client.cuit);
+  if (!cuitValidation.ok) {
+    throw new Error(`CUIT invalido para cliente ${client.id}: ${cuitValidation.reason}`);
   }
+
+  const batchNumber = options.batchNumber || 1;
+  const batchTotal = options.batchTotal || 1;
+  const batchItems = options.items || invoice.items;
+
+  const detalle = batchItems.map((it) => ({
+    cantidad: String(round2(it.cantidad)),
+    afecta_stock: "N",
+    bonificacion_porcentaje: "0",
+    producto: {
+      descripcion: String(it.descripcion || "Producto").slice(0, 255),
+      codigo: String(it.codigo || ""),
+      precio_unitario_sin_iva: String(round2(it.precio)),
+      alicuota: String(round2(it.alicuota)),
+      impuestos_internos_alicuota: 0,
+      unidad_medida: "7",
+      unidad_bulto: 1
+    }
+  }));
+
+  const suffix = batchTotal > 1 ? ` (${batchNumber}/${batchTotal})` : "";
+  const externalReference = `PC-${invoice.clientId}-${invoice.from}-${invoice.to}${suffix}`;
+
   return {
     apikey: cfg.apikey,
     apitoken: cfg.apitoken,
     usertoken: cfg.usertoken,
     cliente: {
       documento_tipo: "CUIT",
-      documento_nro: String(client.cuit || "").replace(/\D/g, ""),
+      documento_nro: cuitValidation.cuit,
       razon_social: String(client.legalName || client.name || "").slice(0, 255),
       email,
       domicilio: String(client.address || "-").slice(0, 255),
@@ -193,22 +262,72 @@ function buildInvoicePayload(invoice, cfg) {
       rubro_grupo_contable: cfg.rubro,
       detalle,
       bonificacion: "0",
-      leyenda_gral: "Periodo facturado: " + ddmmyyyy(invoice.from) + " al " + ddmmyyyy(invoice.to),
-      external_reference: "PC-" + invoice.clientId + "-" + invoice.to,
-      total: String(round2(invoice.total))
+      leyenda_gral: "Periodo facturado: " + ddmmyyyy(invoice.from) + " al " + ddmmyyyy(invoice.to) + suffix,
+      external_reference: externalReference,
+      total: String(round2(sumDecimals(batchItems.map((it) => it.neto.plus(it.iva)))))
     }
   };
 }
 
+function splitPeriodIntoInvoices(invoice) {
+  const items = invoice.items || [];
+  if (items.length <= TF_ITEMS_PER_INVOICE) return [{ ...invoice }];
+  const batches = [];
+  for (let i = 0; i < items.length; i += TF_ITEMS_PER_INVOICE) {
+    batches.push(items.slice(i, i + TF_ITEMS_PER_INVOICE));
+  }
+  return batches.map((batch, idx) => ({
+    ...invoice,
+    items: batch,
+    batchNumber: idx + 1,
+    batchTotal: batches.length,
+    partialTotal: round2(sumDecimals(batch.map((it) => it.neto.plus(it.iva)))),
+    partialIva: round2(sumDecimals(batch.map((it) => it.iva)))
+  }));
+}
+
+// --- Llamada a TusFacturas con timeout y reintentos (BILL-003) ---
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchWithRetry(url, options, fetchImpl = fetch) {
+  let lastError;
+  for (let attempt = 1; attempt <= TF_RETRIES; attempt++) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), TF_TIMEOUT_MS);
+    try {
+      const response = await fetchImpl(url, { ...options, signal: controller.signal });
+      clearTimeout(timeout);
+      return response;
+    } catch (error) {
+      clearTimeout(timeout);
+      lastError = error;
+      if (error.name === "AbortError") lastError = new Error("Timeout al contactar TusFacturas");
+      if (attempt < TF_RETRIES) {
+        const delay = Math.min(1000 * Math.pow(2, attempt - 1), 8000);
+        console.warn(`[TusFacturas] intento ${attempt} fallido, reintentando en ${delay}ms...`);
+        await sleep(delay);
+      }
+    }
+  }
+  throw lastError;
+}
+
 async function emitInvoice(invoice, cfg, fetchImpl = fetch) {
-  const payload = buildInvoicePayload(invoice, cfg);
+  const payload = buildInvoicePayload(invoice, cfg, {
+    items: invoice.items,
+    batchNumber: invoice.batchNumber,
+    batchTotal: invoice.batchTotal
+  });
   console.log("[TusFacturas payload] cliente:", JSON.stringify(payload.cliente));
   console.log("[TusFacturas payload] comprobante:", JSON.stringify(payload.comprobante));
-  const response = await fetchImpl(TF_URL, {
+  const response = await fetchWithRetry(TF_URL, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload)
-  });
+  }, fetchImpl);
   const body = await response.json().catch(() => ({ error: "S", errores: ["respuesta invalida de TusFacturas"] }));
   if (body.error === "S") {
     return { ok: false, errors: (body.errores || []).filter(Boolean) };
@@ -219,12 +338,88 @@ async function emitInvoice(invoice, cfg, fetchImpl = fetch) {
     numero: body.comprobante_nro || "",
     tipo: body.comprobante_tipo || "",
     pdf: body.comprobante_pdf_url || "",
-    rta: body.rta || ""
+    rta: body.rta || "",
+    externalReference: payload.comprobante.external_reference
+  };
+}
+
+async function emitPeriodInvoices(invoice, cfg, fetchImpl = fetch) {
+  const parts = splitPeriodIntoInvoices(invoice);
+  const results = [];
+  for (const part of parts) {
+    const result = await emitInvoice(part, cfg, fetchImpl);
+    results.push(result);
+    if (!result.ok) {
+      // BILL-006: rollback/compensacion. Si una parte falla, detenemos el resto del periodo.
+      return { ok: false, results, stoppedAt: part.batchNumber || 1 };
+    }
+  }
+  return { ok: true, results };
+}
+
+function buildBillingEntry(invoice, emittedAt, periodResult, simulate, cfg) {
+  const base = {
+    clientId: invoice.clientId,
+    clientName: invoice.client.name,
+    invoiceType: invoice.client.invoiceType,
+    freq: invoice.freq,
+    from: invoice.from,
+    to: invoice.to,
+    total: invoice.total,
+    iva: invoice.iva,
+    neto: invoice.neto,
+    orders: invoice.orders,
+    emittedAt: emittedAt.toISOString()
+  };
+  if (simulate) {
+    return {
+      ...base,
+      status: "simulada",
+      detail: cfg.enabled ? "simulacion manual" : "credenciales de TusFacturas no configuradas"
+    };
+  }
+  if (!periodResult.ok) {
+    const failed = periodResult.results.find((r) => !r.ok);
+    return {
+      ...base,
+      status: "error",
+      detail: failed ? failed.errors.join(" | ") : "fallo parcial en comprobantes del periodo",
+      partials: periodResult.results.map((r) => ({
+        ok: r.ok,
+        numero: r.numero || "",
+        cae: r.cae || "",
+        externalReference: r.externalReference || ""
+      }))
+    };
+  }
+  if (periodResult.results.length === 1) {
+    const r = periodResult.results[0];
+    return {
+      ...base,
+      status: "ok",
+      cae: r.cae,
+      numero: r.numero,
+      pdf: r.pdf,
+      detail: r.rta,
+      externalReference: r.externalReference
+    };
+  }
+  return {
+    ...base,
+    status: "ok",
+    detail: `Periodo dividido en ${periodResult.results.length} comprobantes`,
+    partials: periodResult.results.map((r) => ({
+      numero: r.numero,
+      cae: r.cae,
+      pdf: r.pdf,
+      externalReference: r.externalReference
+    }))
   };
 }
 
 // Corre la facturacion sobre el estado central, registra resultados en billingLog
-async function runBilling({ pool, force = false, simulate = false, onlyClientId = "", fetchImpl = fetch, now = new Date() }) {
+// Retorna { ran, simulate, count, results, lastRunDate }
+async function runBilling({ pool, force = false, simulate = false, onlyClientId = "", fetchImpl = fetch, now = new Date(), lastRunDate = "" }) {
   const cfg = billingConfig();
   if (!cfg.enabled) simulate = true;
   const stateRow = await pool.query("SELECT data FROM app_state WHERE id = 'main'");
@@ -234,49 +429,51 @@ async function runBilling({ pool, force = false, simulate = false, onlyClientId 
   const art = nowArt(now);
   let due = computeDueInvoices(data, art, force);
   if (onlyClientId) due = due.filter((d) => d.clientId === onlyClientId);
+
   const results = [];
+  const emittedAt = new Date();
+  let newLastRunDate = lastRunDate;
+
   for (const invoice of due) {
-    const entry = {
-      id: "FAC-" + Date.now() + "-" + invoice.clientId,
-      clientId: invoice.clientId,
-      clientName: invoice.client.name,
-      invoiceType: invoice.client.invoiceType,
-      freq: invoice.freq,
-      from: invoice.from,
-      to: invoice.to,
-      total: invoice.total,
-      iva: invoice.iva,
-      orders: invoice.orders,
-      emittedAt: new Date().toISOString()
-    };
-    if (simulate) {
-      entry.status = "simulada";
-      entry.detail = cfg.enabled ? "simulacion manual" : "credenciales de TusFacturas no configuradas";
-    } else {
+    let periodResult = { ok: true, results: [] };
+    if (!simulate) {
       try {
-        const result = await emitInvoice(invoice, cfg, fetchImpl);
-        if (result.ok) {
-          entry.status = "ok";
-          entry.cae = result.cae;
-          entry.numero = result.numero;
-          entry.pdf = result.pdf;
-          entry.detail = result.rta;
-        } else {
-          entry.status = "error";
-          entry.detail = result.errors.join(" | ");
-        }
+        periodResult = await emitPeriodInvoices(invoice, cfg, fetchImpl);
       } catch (error) {
-        entry.status = "error";
-        entry.detail = error.message;
+        periodResult = { ok: false, results: [{ ok: false, errors: [error.message] }] };
       }
     }
+
+    const entry = buildBillingEntry(invoice, emittedAt, periodResult, simulate, cfg);
+    entry.id = `FAC-${Date.now()}-${invoice.clientId}${periodResult.results.length > 1 ? "-M" : ""}`;
     data.billingLog.push(entry);
     results.push(entry);
+
+    // BILL-006: si falla un periodo, detenemos el batch para evitar estado inconsistente.
+    if (!simulate && !periodResult.ok) {
+      break;
+    }
+
+    // Actualizamos la fecha de ultima ejecucion solo si se proceso al menos un periodo correctamente.
+    newLastRunDate = art.dateISO;
   }
+
   if (results.length) {
     await pool.query("UPDATE app_state SET data = $1, updated_at = now(), updated_by = 'facturacion-automatica' WHERE id = 'main'", [data]);
   }
-  return { ran: true, simulate, count: results.length, results };
+  return { ran: true, simulate, count: results.length, results, lastRunDate: newLastRunDate };
 }
 
-module.exports = { billingConfig, nowArt, computeDueInvoices, buildInvoicePayload, emitInvoice, runBilling, endOfMonthISO, nextDayISO };
+module.exports = {
+  billingConfig,
+  nowArt,
+  computeDueInvoices,
+  buildInvoicePayload,
+  emitInvoice,
+  emitPeriodInvoices,
+  runBilling,
+  endOfMonthISO,
+  nextDayISO,
+  validateCuit,
+  cleanCuit
+};

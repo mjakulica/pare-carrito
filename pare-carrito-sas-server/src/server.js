@@ -733,14 +733,41 @@ app.post("/external/transfers/:id/:action", externalAuth, async (req, res) => {
   }
 });
 
+async function loadBillingLastRunDate() {
+  try {
+    const { rows } = await pool.query("SELECT data->>'billingLastRunDate' AS d FROM app_state WHERE id = 'main'");
+    return rows[0]?.d || "";
+  } catch (error) {
+    console.warn("No se pudo cargar billingLastRunDate:", error.message);
+    return "";
+  }
+}
+
+async function saveBillingLastRunDate(value) {
+  if (!value) return;
+  try {
+    await pool.query("UPDATE app_state SET data = jsonb_set(COALESCE(data, '{}'), '{billingLastRunDate}', to_jsonb($1::text)), updated_at = now(), updated_by = 'facturacion-automatica' WHERE id = 'main'", [value]);
+  } catch (error) {
+    console.warn("No se pudo guardar billingLastRunDate:", error.message);
+  }
+}
+
 let billingLastRunDate = "";
+async function initBillingScheduler() {
+  billingLastRunDate = await loadBillingLastRunDate();
+  startBillingScheduler();
+}
+
 function startBillingScheduler() {
   setInterval(async () => {
     try {
       const art = nowArt();
       if (art.hour >= 23 && billingLastRunDate !== art.dateISO) {
-        billingLastRunDate = art.dateISO;
-        const result = await runBilling({ pool });
+        const result = await runBilling({ pool, lastRunDate: billingLastRunDate });
+        if (result.lastRunDate) {
+          billingLastRunDate = result.lastRunDate;
+          await saveBillingLastRunDate(billingLastRunDate);
+        }
         if (result.count) console.log("Facturacion automatica:", result.count, "comprobante(s) procesado(s)", result.simulate ? "(simulada)" : "");
       }
     } catch (error) {
@@ -775,7 +802,7 @@ async function bootstrap() {
 if (require.main === module) {
   bootstrap()
     .then(() => {
-      startBillingScheduler();
+      initBillingScheduler();
       return app.listen(PORT, () => console.log("Pare Carrito SAS API escuchando en puerto " + PORT));
     })
     .catch((error) => {
