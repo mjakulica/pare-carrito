@@ -244,7 +244,8 @@ function buildInvoicePayload(invoice, cfg, options = {}) {
       envia_por_mail: email ? "S" : "N",
       condicion_pago: cfg.condicionPago,
       condicion_iva: client.invoiceType === "Factura A" ? "RI" : "CF",
-      codigo: String(client.id),
+      // No enviamos 'codigo' para evitar conflictos cuando el cliente ya existe en
+      // TusFacturas con otro codigo interno. La API identifica al cliente por CUIT.
       rg5329: "N"
     },
     comprobante: {
