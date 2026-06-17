@@ -1,5 +1,24 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.8.1 — Consulta de datos del contribuyente en ARCA (2026-06-16)
+
+### Backend / Facturación (`pare-carrito-sas-server/src/billing.js`)
+
+- **BILL-009 — Obtener datos del cliente desde ARCA**
+  - Antes de emitir un comprobante, se consulta el endpoint `POST /app/api/v2/clientes/afip-info` de TusFacturas.app.
+  - Se obtienen de ARCA: razón social, domicilio, provincia y condición impositiva.
+  - Los datos oficiales se usan en el payload del cliente, con fallback a los datos del ERP si la consulta falla o no está habilitada.
+  - Se mapea la condición impositiva de ARCA a los códigos de TusFacturas (`RI`, `MT`, `EX`, `CF`, `NR`, `SE`).
+  - Se mapea el nombre de provincia de ARCA al código numérico requerido por la API de facturación.
+
+### Frontend / Clientes (`lucas-pare-carrito-erp/assets/app.js`)
+
+- **CLIENT-001 — Permitir factura A/B sin depender de `priceTier` `con_factura`**
+  - El formulario de edición de cliente ya no fuerza `invoiceType = Sin Factura` ni `needsInvoice = false` cuando el `priceTier` no es `con_factura`.
+  - El usuario puede seleccionar manualmente el tipo de factura y el sistema lo respeta.
+
+---
+
 ## v12.8 — Correcciones de facturación TusFacturasAPP (2026-06-16)
 
 ### Backend / Facturación (`pare-carrito-sas-server/src/billing.js`)
@@ -29,8 +48,6 @@
 
 - **BILL-007 — Cálculo de IVA desde ítems**
   - El neto, IVA y total del período se recalculan desde los ítems agrupados (producto + precio unitario + alícuota + cantidad) en lugar de sumar los totales de las órdenes.
-
-### Backend / Scheduler (`pare-carrito-sas-server/src/server.js`)
 
 - **BILL-008 — Scheduler persistente**
   - La fecha de última ejecución (`billingLastRunDate`) se lee y guarda en `app_state.data.billingLastRunDate`.

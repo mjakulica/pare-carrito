@@ -6,9 +6,49 @@
 const Decimal = require("decimal.js");
 
 const TF_URL = "https://www.tusfacturas.app/app/api/v2/facturacion/nuevo";
+const TF_AFIP_INFO_URL = "https://www.tusfacturas.app/app/api/v2/clientes/afip-info";
 const TF_ITEMS_PER_INVOICE = 130;
 const TF_TIMEOUT_MS = 30000;
 const TF_RETRIES = 3;
+
+const PROVINCIA_MAP = {
+  "CAPITAL FEDERAL": "1",
+  "CABA": "1",
+  "BUENOS AIRES": "2",
+  "CATAMARCA": "3",
+  "CORDOBA": "4",
+  "CORRIENTES": "5",
+  "ENTRE RIOS": "6",
+  "JUJUY": "7",
+  "MENDOZA": "8",
+  "LA RIOJA": "9",
+  "SALTA": "10",
+  "SAN JUAN": "11",
+  "SAN LUIS": "12",
+  "SANTA FE": "13",
+  "SANTIAGO DEL ESTERO": "14",
+  "TUCUMAN": "15",
+  "CHACO": "16",
+  "CHUBUT": "17",
+  "FORMOSA": "18",
+  "MISIONES": "19",
+  "NEUQUEN": "20",
+  "LA PAMPA": "21",
+  "RIO NEGRO": "22",
+  "SANTA CRUZ": "23",
+  "TIERRA DEL FUEGO": "24"
+};
+
+function mapCondicionIva(condicion) {
+  const c = String(condicion || "").toUpperCase().trim();
+  if (c.includes("RESPONSABLE INSCRIPTO")) return "RI";
+  if (c.includes("MONOTRIBUTO")) return "MT";
+  if (c.includes("EXENTO")) return "EX";
+  if (c.includes("CONSUMIDOR FINAL")) return "CF";
+  if (c.includes("NO RESPONSABLE")) return "NR";
+  if (c.includes("SUJETO EXENTO")) return "SE";
+  return "";
+}
 
 function billingConfig(env = process.env) {
   const cfg = {
@@ -208,6 +248,12 @@ function buildInvoicePayload(invoice, cfg, options = {}) {
     throw new Error(`CUIT invalido para cliente ${client.id}: ${cuitValidation.reason}`);
   }
 
+  const contributor = options.contributorData || {};
+  const razonSocial = contributor.razonSocial || client.legalName || client.name || "";
+  const domicilio = contributor.domicilio || client.address || "-";
+  const provinciaCodigo = PROVINCIA_MAP[String(contributor.provinciaTexto || "").toUpperCase().trim()] || cfg.provincia;
+  const condicionIva = contributor.condicionIva || (client.invoiceType === "Factura A" ? "RI" : "CF");
+
   const batchNumber = options.batchNumber || 1;
   const batchTotal = options.batchTotal || 1;
   const batchItems = options.items || invoice.items;
@@ -237,13 +283,13 @@ function buildInvoicePayload(invoice, cfg, options = {}) {
     cliente: {
       documento_tipo: "CUIT",
       documento_nro: cuitValidation.cuit,
-      razon_social: String(client.legalName || client.name || "").slice(0, 255),
+      razon_social: String(razonSocial).slice(0, 255),
       email,
-      domicilio: String(client.address || "-").slice(0, 255),
-      provincia: cfg.provincia,
+      domicilio: String(domicilio).slice(0, 255),
+      provincia: provinciaCodigo,
       envia_por_mail: email ? "S" : "N",
       condicion_pago: cfg.condicionPago,
-      condicion_iva: client.invoiceType === "Factura A" ? "RI" : "CF",
+      condicion_iva: condicionIva,
       // No enviamos 'codigo' para evitar conflictos cuando el cliente ya existe en
       // TusFacturas con otro codigo interno. La API identifica al cliente por CUIT.
       rg5329: "N"
@@ -316,11 +362,45 @@ async function fetchWithRetry(url, options, fetchImpl = fetch) {
   throw lastError;
 }
 
+async function fetchContributorData(cuit, cfg, fetchImpl = fetch) {
+  try {
+    const response = await fetchWithRetry(TF_AFIP_INFO_URL, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        apikey: cfg.apikey,
+        apitoken: cfg.apitoken,
+        usertoken: cfg.usertoken,
+        cliente: {
+          documento_tipo: "CUIT",
+          documento_nro: cleanCuit(cuit)
+        }
+      })
+    }, fetchImpl);
+    const body = await response.json().catch(() => ({ error: "S" }));
+    if (body.error === "N") {
+      return {
+        razonSocial: body.razon_social || "",
+        domicilio: body.direccion || "",
+        provinciaTexto: body.provincia || "",
+        condicionIva: mapCondicionIva(body.condicion_impositiva)
+      };
+    }
+  } catch (error) {
+    console.warn("[TusFacturas afip-info] no se pudo obtener datos del contribuyente:", error.message);
+  }
+  return null;
+}
+
 async function emitInvoice(invoice, cfg, fetchImpl = fetch) {
+  const contributorData = cfg.enabled
+    ? await fetchContributorData(invoice.client.cuit, cfg, fetchImpl)
+    : null;
   const payload = buildInvoicePayload(invoice, cfg, {
     items: invoice.items,
     batchNumber: invoice.batchNumber,
-    batchTotal: invoice.batchTotal
+    batchTotal: invoice.batchTotal,
+    contributorData
   });
   console.log("[TusFacturas payload] cliente:", JSON.stringify(payload.cliente));
   console.log("[TusFacturas payload] comprobante:", JSON.stringify(payload.comprobante));
@@ -473,6 +553,7 @@ module.exports = {
   emitInvoice,
   emitPeriodInvoices,
   runBilling,
+  fetchContributorData,
   endOfMonthISO,
   nextDayISO,
   validateCuit,
