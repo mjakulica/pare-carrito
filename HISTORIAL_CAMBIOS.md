@@ -1,5 +1,16 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.8.3 — Merge con origin/master (2026-06-17)
+
+### Backend / Frontend
+
+- Se integraron los cambios de `origin/master` (auth/welcome, anulaciones de pagos/egresos/caja, banner de usuarios inactivos, ajustes en registro).
+- Se re-aplicaron los fixes locales:
+  - Scheduler persistente de facturación (`BILL-008`).
+  - Formulario de cliente permitiendo Factura A/B sin depender de `priceTier` `con_factura` (`CLIENT-001`).
+
+---
+
 ## v12.8.2 — Script de deployment seguro para VPS (2026-06-17)
 
 ### DevOps / Deployment
