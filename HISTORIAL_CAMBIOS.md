@@ -1,5 +1,22 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.8.2 — Script de deployment seguro para VPS (2026-06-17)
+
+### DevOps / Deployment
+
+- **DEPLOY-001 — Script `deploy-vps.sh`**
+  - Se agregó `deploy-vps.sh` en la raíz del repositorio.
+  - Realiza backup previo de PostgreSQL, código fuente y `app_state`.
+  - Ejecuta `git pull`, `npm ci` y `docker compose up -d --build`.
+  - Verifica que el API responda antes de finalizar.
+  - Muestra logs del contenedor al terminar.
+
+### Backup local
+
+- Se generó backup local del repositorio en `C:\Users\mauri\backups-pare-carrito\`.
+
+---
+
 ## v12.8.1 — Consulta de datos del contribuyente en ARCA (2026-06-16)
 
 ### Backend / Facturación (`pare-carrito-sas-server/src/billing.js`)
