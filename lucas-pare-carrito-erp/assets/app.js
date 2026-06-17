@@ -1506,13 +1506,13 @@
     if (view === "register") {
       body = `
         <h2 style="margin:0 0 8px;font-size:18px">Registro de cliente</h2>
-        <div class="alert" style="margin-bottom:12px">Con Factura se cobrara el IVA</div>
+        <div class="alert" style="margin-bottom:12px;display:none" id="reg-invoice-alert">Con Factura se cobrara el IVA</div>
         <form id="register-form" class="form-grid register-grid">
           <div class="field span-2"><label>Nombre de usuario *</label><input id="reg-username" autocomplete="off" /></div>
           <div class="field span-2"><label>Contrasena * (minimo 6)</label><input id="reg-password" type="password" autocomplete="new-password" /></div>
           <div class="field span-2"><label>Nombre del local *</label><input id="reg-local" /></div>
           <div class="field span-2"><label>Direccion *</label><input id="reg-address" /></div>
-          <div class="field span-2"><label>CUIT *</label><input id="reg-cuit" placeholder="30-12345678-9" /></div>
+          <div class="field span-2"><label id="reg-cuit-label">CUIT</label><input id="reg-cuit" placeholder="30-12345678-9" /></div>
           <div class="field span-2"><label>Correo electronico *</label><input id="reg-email" type="email" /></div>
           <div class="field"><label>Apertura del local *</label><input id="reg-opening" type="time" /></div>
           <div class="field"><label>Horario maximo de entrega *</label><input id="reg-delivery" type="time" /></div>
@@ -1616,6 +1616,17 @@
       if (String(location.hash || "").startsWith("#/restablecer/")) location.hash = "";
       render();
     });
+    const regInvoice = document.getElementById("reg-invoice");
+    if (regInvoice) {
+      regInvoice.addEventListener("change", () => {
+        const needsInvoice = regInvoice.value !== "Sin Factura";
+        const invoiceAlert = document.getElementById("reg-invoice-alert");
+        if (invoiceAlert) invoiceAlert.style.display = needsInvoice ? "block" : "none";
+        const cuitLabel = document.getElementById("reg-cuit-label");
+        if (cuitLabel) cuitLabel.textContent = needsInvoice ? "CUIT *" : "CUIT";
+      });
+      regInvoice.dispatchEvent(new Event("change"));
+    }
     const registerForm = document.getElementById("register-form");
     if (registerForm) registerForm.addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -1635,7 +1646,8 @@
         billingEmail: get("reg-billing-email"),
         notes: get("reg-notes")
       };
-      const requiredOk = payload.username && payload.password && payload.localName && payload.address && payload.cuit && payload.email && payload.openingTime && payload.maxDeliveryTime && payload.phone && payload.zone;
+      const needsInvoice = payload.invoiceType !== "Sin Factura";
+      const requiredOk = payload.username && payload.password && payload.localName && payload.address && (!needsInvoice || payload.cuit) && payload.email && payload.openingTime && payload.maxDeliveryTime && payload.phone && payload.zone;
       if (!requiredOk) return alert("Complete todos los campos obligatorios (*).");
       if (payload.password.length < 6) return alert("La contrasena debe tener al menos 6 caracteres.");
       const base = await findServerBase();
@@ -2012,6 +2024,7 @@
        <button class="btn blue" data-route="pagos">Registrar pago</button>`,
       `
       ${renderPendingTransfersBanner()}
+      ${renderPendingUsersBanner()}
       <div class="grid four dash-metrics-grid">
         ${metricCard("Pedidos de hoy", todaysOrders.length, "Pedidos activos cargados")}
         ${metricCard("Caja", formatMoney(cajaBalance), "Ingresos menos egresos")}
@@ -2530,6 +2543,19 @@
       <a class="pending-transfers-banner" data-route="comprobar-transferencias" title="Comprobar transferencias pendientes">
         <span class="pending-transfers-count">${count}</span>
         <span class="pending-transfers-label">Comp pend.</span>
+      </a>
+    `;
+  }
+
+  function renderPendingUsersBanner() {
+    if (!["manager", "admin"].includes(currentUser.role)) return "";
+    const canSeeManagers = currentUser.role === "manager";
+    const count = (state.users || []).filter((user) => user.isActive === false && (canSeeManagers || user.role !== "manager")).length;
+    if (!count) return "";
+    return `
+      <a class="pending-transfers-banner pending-users-banner" data-route="usuarios" title="Usuarios inactivos pendientes de activacion">
+        <span class="pending-transfers-count">${count}</span>
+        <span class="pending-transfers-label">Usuarios inactivos</span>
       </a>
     `;
   }
@@ -4415,12 +4441,16 @@
     const visiblePurchases = currentUser.role === "employee"
       ? state.purchases.filter((purchase) => purchase.userRole === "employee" || purchase.recordedBy === currentUser.name)
       : state.purchases;
+    const isManager = currentUser.role === "manager";
     const rows = visiblePurchases.slice().reverse().map((purchase) => {
       const provider = getProvider(purchase.providerId);
       const origin = provider ? provider.name : purchase.providerName || (purchase.expenseType === "other_expense" ? "Gasto general" : "Gasto producto");
       const itemText = purchaseItemsSummary(purchase);
+      const isAnnulled = purchase.status === "anulado";
+      const annulButton = isManager && !isAnnulled ? `<button class="btn small danger" data-annul-purchase="${purchase.id}" title="Anular egreso">X</button>` : "";
+      const annulledLabel = isAnnulled ? `<span class="pill gray">Anulado</span>` : "";
       return `
-        <tr>
+        <tr style="${isAnnulled ? "text-decoration:line-through;opacity:0.6" : ""}">
           <td>${formatDate(purchase.date)}</td>
           <td>${escapeHtml(expenseTypeLabel(purchase.expenseType || "purchase"))}</td>
           <td>${escapeHtml(origin)}</td>
@@ -4430,6 +4460,7 @@
           <td class="num">${formatMoney(purchase.totalCost)}</td>
           <td>${escapeHtml(purchase.recordedBy || "")}</td>
           <td>${escapeHtml(purchase.notes || "")}</td>
+          <td>${annulButton}${annulledLabel}</td>
         </tr>
       `;
     }).join("");
@@ -4460,7 +4491,7 @@
           <div class="table-scroll-box">
             <div class="table-wrap">
               <table>
-                <thead><tr><th>Fecha</th><th>Tipo</th><th>Origen</th><th>Productos/Detalle</th><th>Estado</th><th>Caja</th><th>Total</th><th>Usuario</th><th>Notas</th></tr></thead>
+                <thead><tr><th>Fecha</th><th>Tipo</th><th>Origen</th><th>Productos/Detalle</th><th>Estado</th><th>Caja</th><th>Total</th><th>Usuario</th><th>Notas</th><th>Acciones</th></tr></thead>
                 <tbody>${rows || emptyRow(9, "Todavia no hay egresos.")}</tbody>
               </table>
             </div>
@@ -5144,6 +5175,14 @@
       saveState();
       render();
     });
+    document.querySelectorAll("[data-annul-purchase]").forEach((button) => button.addEventListener("click", () => {
+      const purchase = state.purchases.find((item) => item.id === button.dataset.annulPurchase);
+      if (!purchase) return;
+      if (!confirm("¿Anular el egreso " + purchase.id + "? Se revertira su impacto en caja y saldos.")) return;
+      annulPurchase(purchase);
+      saveState();
+      render();
+    }));
   }
 
   function bindPurchaseTabs() {
@@ -6522,10 +6561,14 @@
 
   function renderPayments() {
     const methods = ["efectivo", "transferencia", "cheque"];
+    const isManager = currentUser.role === "manager";
     const paymentRows = state.payments.slice().reverse().map((payment) => {
       const client = getClient(payment.clientId);
+      const isAnnulled = payment.status === "anulado";
+      const annulButton = isManager && !isAnnulled ? `<button class="btn small danger" data-annul-payment="${payment.id}" title="Anular pago">X</button>` : "";
+      const annulledLabel = isAnnulled ? `<span class="pill gray">Anulado</span>` : "";
       return `
-        <tr>
+        <tr style="${isAnnulled ? "text-decoration:line-through;opacity:0.6" : ""}">
           <td>${formatDate(payment.date)}<br><span class="muted">${escapeHtml(payment.recordedBy || "")}</span></td>
           <td>${escapeHtml(client ? client.name : payment.clientId)}</td>
           <td>${escapeHtml(payment.receivedByName || payment.recordedBy || "")}</td>
@@ -6534,6 +6577,7 @@
           <td class="num">${formatMoney(payment.amount)}</td>
           <td>${payment.transferProofFile ? `<span class="pill green">Con comprobante</span>` : payment.method === "transferencia" ? `<span class="pill amber">Sin comprobante</span>` : `<span class="pill gray">No aplica</span>`}</td>
           <td>${Number(payment.pendingDifference || 0) > 0 ? `<span class="pill amber">Pendiente ${formatMoney(payment.pendingDifference)}</span><br>` : ""}${escapeHtml(payment.notes || "")}</td>
+          <td>${annulButton}${annulledLabel}</td>
         </tr>
       `;
     }).join("");
@@ -6592,7 +6636,7 @@
         <div class="panel payment-history-wrap">
           <div class="table-wrap">
             <table>
-              <thead><tr><th>Fecha</th><th>Cliente</th><th>Recibio</th><th>Metodo</th><th>Caja</th><th>Monto</th><th>Comprobante</th><th>Notas</th></tr></thead>
+              <thead><tr><th>Fecha</th><th>Cliente</th><th>Recibio</th><th>Metodo</th><th>Caja</th><th>Monto</th><th>Comprobante</th><th>Notas</th><th>Acciones</th></tr></thead>
               <tbody>${paymentRows || emptyRow(8, "Todavia no hay pagos.")}</tbody>
             </table>
           </div>
@@ -6701,6 +6745,14 @@
       alert("Pago registrado.");
       render();
     });
+    document.querySelectorAll("[data-annul-payment]").forEach((button) => button.addEventListener("click", () => {
+      const payment = state.payments.find((item) => item.id === button.dataset.annulPayment);
+      if (!payment) return;
+      if (!confirm("¿Anular el pago " + payment.id + "? Se revertira su impacto en caja, saldos y pedidos.")) return;
+      annulPayment(payment);
+      saveState();
+      render();
+    }));
   }
 
   function renderBalances() {
@@ -7258,19 +7310,26 @@
         <td><button class="btn small ghost" data-edit-cash-box="${box.id}">Editar</button></td>
       </tr>
     `).join("") : "";
-    const rows = selectedEntries.slice().sort((a, b) => String(b.timestamp || b.date).localeCompare(String(a.timestamp || a.date))).map((entry) => `
-      <tr>
-        <td>${formatDate(entry.date)}<br><span class="muted">${escapeHtml(String(entry.timestamp || "").slice(11, 19))}</span></td>
-        <td>${escapeHtml(getCashBoxName(resolveCajaEntryCashBoxId(entry)))}</td>
-        <td>${escapeHtml(entry.type)}</td>
-        <td>${escapeHtml(entry.concept)}</td>
-        <td class="num">${entry.expectedAmount ? formatMoney(entry.expectedAmount) : "-"}</td>
-        <td class="num">${formatMoney(entry.amountIngreso || 0)}</td>
-        <td class="num">${formatMoney(entry.amountEgreso || 0)}</td>
-        <td class="num">${formatMoney(balanceById[entry.id] || 0)}</td>
-        <td>${escapeHtml(entry.recordedBy || "")}</td>
-      </tr>
-    `).join("");
+    const isManager = currentUser.role === "manager";
+    const rows = selectedEntries.slice().sort((a, b) => String(b.timestamp || b.date).localeCompare(String(a.timestamp || a.date))).map((entry) => {
+      const isAnnulled = entry.status === "anulado";
+      const annulButton = isManager && !isAnnulled ? `<button class="btn small danger" data-annul-caja="${entry.id}" title="Anular movimiento">X</button>` : "";
+      const annulledLabel = isAnnulled ? `<span class="pill gray">Anulado</span>` : "";
+      return `
+        <tr style="${isAnnulled ? "text-decoration:line-through;opacity:0.6" : ""}">
+          <td>${formatDate(entry.date)}<br><span class="muted">${escapeHtml(String(entry.timestamp || "").slice(11, 19))}</span></td>
+          <td>${escapeHtml(getCashBoxName(resolveCajaEntryCashBoxId(entry)))}</td>
+          <td>${escapeHtml(entry.type)}</td>
+          <td>${escapeHtml(entry.concept)}</td>
+          <td class="num">${entry.expectedAmount ? formatMoney(entry.expectedAmount) : "-"}</td>
+          <td class="num">${formatMoney(entry.amountIngreso || 0)}</td>
+          <td class="num">${formatMoney(entry.amountEgreso || 0)}</td>
+          <td class="num">${formatMoney(balanceById[entry.id] || 0)}</td>
+          <td>${escapeHtml(entry.recordedBy || "")}</td>
+          <td>${annulButton}${annulledLabel}</td>
+        </tr>
+      `;
+    }).join("");
     afterRender.push(bindCaja);
     return pageShell(
       "Caja / Rendicion",
@@ -7316,7 +7375,7 @@
       <div class="panel" style="margin-top:14px">
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Fecha</th><th>Caja</th><th>Tipo</th><th>Concepto</th><th>Esperado</th><th>Ingreso</th><th>Egreso</th><th>Balance</th><th>Usuario</th></tr></thead>
+            <thead><tr><th>Fecha</th><th>Caja</th><th>Tipo</th><th>Concepto</th><th>Esperado</th><th>Ingreso</th><th>Egreso</th><th>Balance</th><th>Usuario</th><th>Acciones</th></tr></thead>
             <tbody>${rows || emptyRow(9, "Caja sin movimientos.")}</tbody>
           </table>
         </div>
@@ -7348,6 +7407,14 @@
       saveState();
       render();
     }));
+    document.querySelectorAll("[data-annul-caja]").forEach((button) => button.addEventListener("click", () => {
+      const entry = state.caja.find((item) => item.id === button.dataset.annulCaja);
+      if (!entry) return;
+      if (!confirm("¿Anular el movimiento de caja " + entry.id + "? Se revertira su impacto en caja, saldos o proveedores segun corresponda.")) return;
+      annulCajaEntry(entry);
+      saveState();
+      render();
+    }));
   }
 
   function renderProviders() {
@@ -7359,6 +7426,7 @@
       ? providers.reduce((sum, provider) => sum + Math.max(0, getProviderBalance(provider.id)), 0)
       : selectedProvider ? getProviderBalance(selectedProvider.id) : 0;
     const providerMovements = getProviderMovements(isAllProviders ? providers.map((provider) => provider.id) : ui.providerSelectedId, ui.providerFrom, ui.providerTo);
+    const isManager = currentUser.role === "manager";
     if (ui.providerProductId && !getProduct(ui.providerProductId)) ui.providerProductId = "";
     const providerProductHistory = ui.providerProductId ? getProviderProductHistory(ui.providerProductId) : [];
     const providerProductRows = providerProductHistory.map((entry) => `
@@ -7407,6 +7475,14 @@
       });
       document.querySelectorAll("[data-pay-provider]").forEach((button) => button.addEventListener("click", () => openProviderQuickPayment(button.dataset.payProvider)));
       document.querySelectorAll("[data-edit-provider]").forEach((button) => button.addEventListener("click", () => openProviderForm(button.dataset.editProvider)));
+      document.querySelectorAll("[data-annul-provider-ledger]").forEach((button) => button.addEventListener("click", () => {
+        const entry = state.providerLedger.find((item) => item.id === button.dataset.annulProviderLedger);
+        if (!entry) return;
+        if (!confirm("¿Anular el movimiento de proveedor " + entry.id + "? Se revertira su impacto en caja y saldos.")) return;
+        annulProviderLedgerEntry(entry);
+        saveState();
+        render();
+      }));
       document.querySelectorAll("[data-toggle-provider]").forEach((button) => button.addEventListener("click", () => {
         const provider = getProvider(button.dataset.toggleProvider);
         if (!provider) return;
@@ -7432,8 +7508,13 @@
         </div>
         <div class="table-wrap" style="margin-top:10px">
           <table>
-            <thead><tr><th>Fecha</th><th>Proveedor</th><th>Tipo</th><th>Descripcion</th><th>Monto</th><th>Saldo</th><th>Notas</th></tr></thead>
-            <tbody>${providerMovements.map((entry) => `<tr><td>${formatDate(entry.date)}</td><td>${escapeHtml(entry.providerName || "")}</td><td>${escapeHtml(entry.type)}</td><td>${escapeHtml(entry.description)}</td><td class="num">${formatMoney(entry.amount)}</td><td class="num">${formatMoney(entry.balance || 0)}</td><td>${escapeHtml(entry.notes || "")}</td></tr>`).join("") || emptyRow(7, "Sin movimientos para este rango.")}</tbody>
+            <thead><tr><th>Fecha</th><th>Proveedor</th><th>Tipo</th><th>Descripcion</th><th>Monto</th><th>Saldo</th><th>Notas</th><th>Acciones</th></tr></thead>
+            <tbody>${providerMovements.map((entry) => {
+              const isAnnulled = entry.status === "anulado";
+              const annulButton = isManager && !isAnnulled ? `<button class="btn small danger" data-annul-provider-ledger="${entry.id}" title="Anular movimiento">X</button>` : "";
+              const annulledLabel = isAnnulled ? `<span class="pill gray">Anulado</span>` : "";
+              return `<tr style="${isAnnulled ? "text-decoration:line-through;opacity:0.6" : ""}"><td>${formatDate(entry.date)}</td><td>${escapeHtml(entry.providerName || "")}</td><td>${escapeHtml(entry.type)}</td><td>${escapeHtml(entry.description)}</td><td class="num">${formatMoney(entry.amount)}</td><td class="num">${formatMoney(entry.balance || 0)}</td><td>${escapeHtml(entry.notes || "")}</td><td>${annulButton}${annulledLabel}</td></tr>`;
+            }).join("") || emptyRow(8, "Sin movimientos para este rango.")}</tbody>
           </table>
         </div>
       </div>
@@ -8014,15 +8095,16 @@
     );
   }
 
-  function getBillingPendingForClient(client) {
+  function getBillingPendingForClient(client, from, to) {
     let lastCut = "";
     for (const log of state.billingLog || []) {
       if (log.clientId === client.id && ["ok", "simulada"].includes(log.status) && log.to > lastCut) lastCut = log.to;
     }
-    const from = lastCut ? addDaysISO(lastCut, 1) : todayISO().slice(0, 8) + "01";
-    const orders = state.orders.filter((order) => order.clientId === client.id && order.date >= from && order.date <= todayISO() && !["cancelado", "anulado"].includes(order.status));
+    const fromDate = from || (lastCut ? addDaysISO(lastCut, 1) : todayISO().slice(0, 8) + "01");
+    const toDate = to || todayISO();
+    const orders = state.orders.filter((order) => order.clientId === client.id && order.date >= fromDate && order.date <= toDate && !["cancelado", "anulado"].includes(order.status));
     return {
-      from,
+      from: fromDate,
       total: orders.reduce((sum, order) => sum + Number(order.totalAmount || 0), 0),
       iva: orders.reduce((sum, order) => sum + Number(order.ivaAmount || 0), 0),
       orders: orders.length
@@ -8030,9 +8112,17 @@
   }
 
   function renderFacturacion() {
+    const today = todayISO();
+    const defaultFrom = getMonthStartISO(today);
+    const from = ui.billingFrom || defaultFrom;
+    const to = ui.billingTo || today;
     const clients = activeClients().filter((client) => client.needsInvoice && ["Factura A", "Factura B"].includes(client.invoiceType));
+    let ivaTotal = 0;
+    let totalAcumulado = 0;
     const rows = clients.map((client) => {
-      const pending = getBillingPendingForClient(client);
+      const pending = getBillingPendingForClient(client, from, to);
+      ivaTotal += pending.iva;
+      totalAcumulado += pending.total;
       return `
         <tr>
           <td><strong>${escapeHtml(client.id)} - ${escapeHtml(client.name)}</strong><br><span class="muted">${escapeHtml(client.legalName || "")}</span></td>
@@ -8071,6 +8161,28 @@
       } else if (statusNode) {
         statusNode.innerHTML = `<span class="pill gray">Requiere el servidor propio (Opcion F) para emitir</span>`;
       }
+      const fromInput = document.getElementById("billing-from");
+      const toInput = document.getElementById("billing-to");
+      if (fromInput) fromInput.addEventListener("change", () => {
+        ui.billingFrom = fromInput.value;
+        render();
+      });
+      if (toInput) toInput.addEventListener("change", () => {
+        ui.billingTo = toInput.value;
+        render();
+      });
+      document.querySelectorAll("[data-billing-range]").forEach((button) => button.addEventListener("click", () => {
+        const range = button.dataset.billingRange;
+        if (range === "this-month") {
+          ui.billingFrom = getMonthStartISO(todayISO());
+          ui.billingTo = todayISO();
+        } else if (range === "last-month") {
+          const lastDay = addDaysISO(getMonthStartISO(todayISO()), -1);
+          ui.billingFrom = getMonthStartISO(lastDay);
+          ui.billingTo = lastDay;
+        }
+        render();
+      }));
       document.querySelectorAll("[data-billing-run]").forEach((button) => button.addEventListener("click", async () => {
         const simulate = button.dataset.billingRun === "simulate";
         const cfg = getCloudSyncConfig();
@@ -8102,6 +8214,20 @@
         <p class="muted">Las credenciales (apikey, apitoken, usertoken) se configuran en el archivo .env del servidor. Sin credenciales, la emision corre en modo simulacion para que pruebe los periodos sin facturar de verdad.</p>
       </div>
       <div class="panel" style="margin-bottom:14px">
+        <h2 class="page-title" style="font-size:18px">Rango de facturacion</h2>
+        <div class="form-grid billing-range-grid" style="margin-top:10px;align-items:end">
+          <div class="field"><label>Desde</label><input type="date" id="billing-from" value="${from}" /></div>
+          <div class="field"><label>Hasta</label><input type="date" id="billing-to" value="${to}" /></div>
+          <div class="field"><label>&nbsp;</label><button class="btn ghost full" type="button" data-billing-range="this-month">Este mes</button></div>
+          <div class="field"><label>&nbsp;</label><button class="btn ghost full" type="button" data-billing-range="last-month">Mes pasado</button></div>
+        </div>
+      </div>
+      <div class="grid three" style="margin-bottom:14px">
+        ${metricCard("IVA acumulado", formatMoney(ivaTotal), `Clientes con factura (${formatDate(from)} - ${formatDate(to)})`)}
+        ${metricCard("Total acumulado", formatMoney(totalAcumulado), "Base + IVA")}
+        ${metricCard("Clientes", String(clients.length), "Con factura A o B")}
+      </div>
+      <div class="panel" style="margin-bottom:14px">
         <h2 class="page-title" style="font-size:18px">Clientes con factura</h2>
         <div class="table-wrap" style="margin-top:10px">
           <table>
@@ -8125,7 +8251,8 @@
   }
 
   function renderUsers() {
-    const rows = state.users.map((user) => {
+    const canSeeManagers = currentUser.role === "manager";
+    const rows = (state.users || []).filter((user) => canSeeManagers || user.role !== "manager").map((user) => {
       const client = user.clientId ? getClient(user.clientId) : null;
       return `
         <tr>
@@ -10037,9 +10164,34 @@
     );
   }
 
+  async function notifyNewUser(payload) {
+    if (!payload.email) return;
+    const base = await findServerBase();
+    if (!base) return;
+    try {
+      await fetch(base + "/auth/welcome", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          email: payload.email,
+          name: payload.name,
+          username: payload.username,
+          password: payload.password,
+          isActive: payload.isActive === true
+        })
+      });
+    } catch (error) {
+      console.warn("No se pudo enviar mail de bienvenida:", error.message);
+    }
+  }
+
   function openUserForm(id) {
     const user = id ? getUser(id) : null;
     const clientOptions = activeClients().map((client) => `<option value="${client.id}" ${user && user.clientId === client.id ? "selected" : ""}>${escapeHtml(client.id)} - ${escapeHtml(client.name)}</option>`).join("");
+    const roleOptions = (currentUser.role === "admin"
+      ? ["admin", "employee", "customer", "contador", "example"]
+      : ["manager", "admin", "employee", "customer", "contador", "example"]
+    ).map((role) => `<option value="${role}" ${user && user.role === role ? "selected" : ""}>${escapeHtml(roleLabel(role))}</option>`).join("");
     showModal(
       user ? "Editar usuario" : "Agregar usuario",
       `
@@ -10047,7 +10199,7 @@
         <div class="field span-2"><label>Nombre</label><input id="user-name" value="${escapeAttr(user ? user.name : "")}" required /></div>
         <div class="field"><label>Usuario</label><input id="user-username" value="${escapeAttr(user ? user.username : "")}" required /></div>
         <div class="field"><label>Contrasena</label><input id="user-password" value="${escapeAttr(user ? user.password : generatePassword())}" required /></div>
-        <div class="field"><label>Rol</label><select id="user-role">${["manager", "admin", "employee", "customer", "contador", "example"].map((role) => `<option value="${role}" ${user && user.role === role ? "selected" : ""}>${escapeHtml(roleLabel(role))}</option>`).join("")}</select></div>
+        <div class="field"><label>Rol</label><select id="user-role">${roleOptions}</select></div>
         <div class="field span-2"><label>Correo</label><input id="user-email" type="email" value="${escapeAttr(user ? user.email || "" : "")}" /></div>
         <div class="field"><label>Telefono</label><input id="user-phone" value="${escapeAttr(user ? user.phone || "" : "")}" /></div>
         <div class="field"><label>Valor hora</label><input id="user-hourly-rate" inputmode="decimal" value="${formatAmountInput(user ? user.hourlyRate || 0 : 0)}" /></div>
@@ -10099,7 +10251,10 @@
             isActive: document.getElementById("user-active").checked
           };
           if (user) Object.assign(user, payload);
-          else state.users.push(payload);
+          else {
+            state.users.push(payload);
+            notifyNewUser(payload);
+          }
           ensureUserCashBoxes();
           saveState();
           closeModal();
@@ -12325,6 +12480,187 @@
     order.updatedAt = new Date().toISOString();
     state.saldos = state.saldos.filter((entry) => !(entry.relatedEntityType === "order_annul" && entry.relatedEntityId === order.id));
     recomputeClientSaldoBalances(order.clientId);
+  }
+
+  function annulPurchase(purchase) {
+    if (purchase.status === "anulado") return;
+    const expenseType = purchase.expenseType || "purchase";
+    const amount = Number(purchase.totalCost || 0);
+    if (!amount) return;
+    purchase.status = "anulado";
+    purchase.annulledAt = new Date().toISOString();
+    purchase.annulledBy = currentUser ? currentUser.name : "";
+
+    // Revertir deuda con proveedor para compras en cuenta corriente
+    if (purchase.paymentStatus === "account_current" && purchase.providerId) {
+      addProviderLedgerEntry({
+        providerId: purchase.providerId,
+        date: purchase.date,
+        type: "anulacion",
+        description: "Anulacion egreso " + purchase.id,
+        amount: -amount,
+        relatedEntityId: purchase.id,
+        relatedEntityType: "purchase_annul",
+        notes: "Egreso anulado: se descuenta de la deuda con el proveedor."
+      });
+    }
+
+    // Revertir caja para egresos pagados (incluye pago a proveedor)
+    if (!["prepared", "market_price"].includes(expenseType) && purchase.paymentStatus !== "account_current") {
+      const concept = expenseType === "provider_payment" ? "Anulacion pago proveedor " + purchase.id : "Anulacion egreso " + purchase.id;
+      addCajaEntry({
+        date: purchase.date,
+        type: "purchase_annul",
+        concept,
+        relatedEntityId: purchase.id,
+        relatedEntityType: "purchase_annul",
+        amountIngreso: amount,
+        amountEgreso: 0,
+        cashBoxId: getPurchaseCashBoxId(purchase),
+        notes: "Egreso anulado: se devuelve el importe a la caja."
+      });
+    }
+
+    // Revertir ambos lados de un movimiento de caja
+    if (expenseType === "cash_movement" && purchase.targetCashBoxId) {
+      addCajaEntry({
+        date: purchase.date,
+        type: "cash_movement_annul_in",
+        concept: "Anulacion movimiento de caja " + purchase.id,
+        relatedEntityId: purchase.id,
+        relatedEntityType: "purchase_annul",
+        amountIngreso: amount,
+        amountEgreso: 0,
+        cashBoxId: purchase.cashBoxId,
+        notes: "Movimiento anulado: se revierte el egreso de caja origen."
+      });
+      addCajaEntry({
+        date: purchase.date,
+        type: "cash_movement_annul_out",
+        concept: "Anulacion movimiento de caja " + purchase.id,
+        relatedEntityId: purchase.id,
+        relatedEntityType: "purchase_annul",
+        amountIngreso: 0,
+        amountEgreso: amount,
+        cashBoxId: purchase.targetCashBoxId,
+        notes: "Movimiento anulado: se revierte el ingreso de caja destino."
+      });
+    }
+  }
+
+  function annulPayment(payment) {
+    if (payment.status === "anulado") return;
+    const amount = Number(payment.amount || 0);
+    if (!amount) return;
+    payment.status = "anulado";
+    payment.annulledAt = new Date().toISOString();
+    payment.annulledBy = currentUser ? currentUser.name : "";
+    const client = getClient(payment.clientId);
+
+    // Revertir saldo del cliente
+    addSaldoEntry({
+      clientId: payment.clientId,
+      type: "anulacion",
+      description: "Anulacion pago " + payment.id,
+      amount: amount,
+      relatedEntityId: payment.id,
+      relatedEntityType: "payment_annul",
+      notes: "Pago anulado: se revierte el saldo a favor del cliente."
+    });
+    recomputeClientSaldoBalances(payment.clientId);
+
+    // Revertir ingreso en caja
+    addCajaEntry({
+      date: payment.date,
+      type: "payment_annul",
+      concept: "Anulacion pago " + payment.id + " - " + (client ? client.name : payment.clientId),
+      relatedEntityId: payment.id,
+      relatedEntityType: "payment_annul",
+      amountIngreso: 0,
+      amountEgreso: amount,
+      cashBoxId: payment.cashBoxId || getPaymentCashBoxId(payment, getUser(payment.receivedByUserId)),
+      notes: "Pago anulado: se devuelve el importe de la caja."
+    });
+
+    // Recalcular pagos recibidos de los pedidos afectados
+    const orderIds = Array.isArray(payment.orderIds) ? payment.orderIds : [payment.orderId].filter(Boolean);
+    const affectedOrderIds = new Set(orderIds);
+    affectedOrderIds.forEach((orderId) => {
+      const order = getOrder(orderId);
+      if (!order) return;
+      const totalPaid = state.payments
+        .filter((p) => p.status !== "anulado" && (p.orderId === orderId || (Array.isArray(p.orderIds) && p.orderIds.includes(orderId))))
+        .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+      order.paymentReceived = totalPaid;
+      order.paymentStatus = order.paymentReceived >= order.totalAmount ? "paid" : (order.paymentReceived > 0 ? "partial" : "pending");
+    });
+  }
+
+  function annulCajaEntry(entry) {
+    if (entry.status === "anulado") return;
+
+    // Si el movimiento tiene entidad origen, anular la entidad origen (revertira caja, saldos y proveedores)
+    if (entry.relatedEntityType === "payment" && entry.relatedEntityId) {
+      const payment = state.payments.find((p) => p.id === entry.relatedEntityId);
+      if (payment) return annulPayment(payment);
+    }
+    if (["purchase", "provider_payment", "cash_movement"].includes(entry.relatedEntityType) && entry.relatedEntityId) {
+      const purchase = state.purchases.find((p) => p.id === entry.relatedEntityId);
+      if (purchase) return annulPurchase(purchase);
+    }
+
+    // Movimiento suelto: compensar directamente en caja
+    const amountIngreso = Number(entry.amountIngreso || 0);
+    const amountEgreso = Number(entry.amountEgreso || 0);
+    if (!amountIngreso && !amountEgreso) return;
+    entry.status = "anulado";
+    entry.annulledAt = new Date().toISOString();
+    entry.annulledBy = currentUser ? currentUser.name : "";
+    addCajaEntry({
+      date: entry.date,
+      type: "caja_annul",
+      concept: "Anulacion movimiento de caja " + entry.id,
+      relatedEntityId: entry.id,
+      relatedEntityType: "caja_annul",
+      amountIngreso: amountEgreso,
+      amountEgreso: amountIngreso,
+      cashBoxId: resolveCajaEntryCashBoxId(entry),
+      notes: "Movimiento de caja anulado."
+    });
+  }
+
+  function annulProviderLedgerEntry(entry) {
+    if (entry.status === "anulado") return;
+
+    // Si tiene entidad origen, anular la entidad origen
+    if (entry.relatedEntityType === "purchase" && entry.relatedEntityId) {
+      const purchase = state.purchases.find((p) => p.id === entry.relatedEntityId);
+      if (purchase) return annulPurchase(purchase);
+    }
+    if (entry.relatedEntityType === "provider_payment" && entry.relatedEntityId) {
+      const providerPayment = (state.providerPayments || []).find((p) => p.id === entry.relatedEntityId);
+      if (providerPayment) {
+        const purchase = state.purchases.find((p) => p.providerPaymentId === providerPayment.id);
+        if (purchase) return annulPurchase(purchase);
+      }
+    }
+
+    // Fallback: compensar directamente en providerLedger
+    const amount = Number(entry.amount || 0);
+    if (!amount) return;
+    entry.status = "anulado";
+    entry.annulledAt = new Date().toISOString();
+    entry.annulledBy = currentUser ? currentUser.name : "";
+    addProviderLedgerEntry({
+      providerId: entry.providerId,
+      date: entry.date,
+      type: "anulacion",
+      description: "Anulacion movimiento " + entry.id,
+      amount: -amount,
+      relatedEntityId: entry.id,
+      relatedEntityType: "provider_ledger_annul",
+      notes: "Movimiento anulado."
+    });
   }
 
   function deleteOrder(orderId) {
