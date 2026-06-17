@@ -9488,19 +9488,18 @@
           if (tierSelect.value === "con_factura") {
             needsInvoice.checked = true;
             if (invoiceType.value === "Sin Factura") invoiceType.value = "Factura A";
-          } else {
-            needsInvoice.checked = false;
-            invoiceType.value = "Sin Factura";
           }
+          // Si no es "con_factura" no forzamos nada: el usuario decide si necesita factura y de que tipo.
         };
         tierSelect.addEventListener("change", syncInvoiceDefaults);
         document.getElementById("modal-save").addEventListener("click", () => {
           const idValue = client ? client.id : document.getElementById("client-id").value.trim();
           if (!idValue || !document.getElementById("client-name").value.trim()) return alert("Complete ID y nombre.");
           const priceTierValue = document.getElementById("client-tier").value;
-          const invoiceTypeValue = priceTierValue === "con_factura"
-            ? (document.getElementById("client-invoice-type").value === "Sin Factura" ? "Factura A" : document.getElementById("client-invoice-type").value)
-            : "Sin Factura";
+          const needsInvoiceValue = document.getElementById("client-needs-invoice").checked;
+          let invoiceTypeValue = document.getElementById("client-invoice-type").value;
+          // Si marca que necesita factura pero dejo Sin Factura, corregimos a Factura A por defecto.
+          if (needsInvoiceValue && invoiceTypeValue === "Sin Factura") invoiceTypeValue = "Factura A";
           const payload = {
             id: idValue,
             name: document.getElementById("client-name").value.trim(),
@@ -9515,7 +9514,7 @@
             paymentType: document.getElementById("client-payment").value,
             priceTier: priceTierValue,
             priceAdjustmentPct: parseAmount(document.getElementById("client-adjustment").value),
-            needsInvoice: priceTierValue === "con_factura" || document.getElementById("client-needs-invoice").checked,
+            needsInvoice: needsInvoiceValue,
             cuit: document.getElementById("client-cuit").value.trim(),
             legalName: document.getElementById("client-legal-name").value.trim(),
             invoiceType: invoiceTypeValue,
