@@ -1,5 +1,19 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.8.5 - Importacion historial de pedidos CSV (2026-06-19)
+
+### Datos / Pedidos historicos
+
+- Se proceso el archivo Sin arreglar - Historial.csv con historial de 7 meses, desde 2025-11-03 hasta 2026-06-17.
+- Se importaron al VPS productivo 2.276 pedidos historicos validados, con 19.830 items, marcados con importSource = historial_csv_20260619.
+- Los pedidos importados quedaron como entregado, paymentStatus = paid y paymentReceived = totalAmount para no generar deuda pendiente ni movimientos de caja/pagos inexistentes.
+- Se dejaron fuera de la importacion 1.075 pedidos con dudas por productos no existentes en catalogo, celdas sueltas sin cantidad/precio, totales faltantes, clientes no encontrados o diferencias de total relevantes.
+- Backups VPS: pre-import 20260619_070300 y post-import 20260619_070625 con codigo, dump PostgreSQL y pp_state.
+- Backup PC: uditoria\import_historial_20260619_preimport y uditoria\import_historial_20260619_postimport.
+- Reportes generados: pedidos_con_dudas_validacion.csv, productos_csv_no_encontrados.csv, clientes_csv_no_encontrados.csv, pedidos_importados_resumen.csv y pedidos_importados_ids.csv.
+- No se registraron credenciales en documentacion ni reportes.
+
+---
 ## v12.8.4 - Deploy productivo en VPS (2026-06-19)
 
 ### DevOps / Deployment
