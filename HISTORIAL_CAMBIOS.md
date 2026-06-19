@@ -1,5 +1,18 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.8.4 - Deploy productivo en VPS (2026-06-19)
+
+### DevOps / Deployment
+
+- Se desplego en el VPS productivo el commit 273b4b360a7c4df019582ec8996ff2de62efc9be de master.
+- Se sincronizaron pare-carrito-sas-server y lucas-pare-carrito-erp sobre /opt/pare-carrito, preservando .env, backups internos y assets de productos.
+- Se reconstruyo el contenedor pi con Docker Compose y quedaron activos pi, caddy y db.
+- Verificacion posterior: https://sistema.parecarrito.com.ar/, https://sistema.parecarrito.com.ar/api/health y https://api.parecarrito.com.ar/health respondieron HTTP 200.
+- Backups generados en VPS: pre-deploy 20260619_061708, post-sync 20260619_061822 y post-deploy 20260619_062344.
+- Backup generado en PC: ackups-repo\repo-backup-20260619-062415.
+- No se registraron credenciales en documentacion ni historial.
+
+---
 ## v12.8.3 — Merge con origin/master (2026-06-17)
 
 ### Backend / Frontend

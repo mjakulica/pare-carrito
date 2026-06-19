@@ -312,3 +312,26 @@ El frontend es estático; basta copiar los archivos actualizados a `lucas-pare-c
 ---
 
 *Documento generado automáticamente a partir del análisis del código fuente de Pare Carrito SAS ERP.*
+---
+
+## 11. Ultimo Cambio y Version
+
+**Version operativa:** 12.8.4  
+**Fecha:** 2026-06-19  
+**Commit GitHub desplegado:** $deployCommit  
+**Entorno actualizado:** VPS productivo /opt/pare-carrito con Docker Compose (pi, caddy, db).
+
+### Detalle del ultimo cambio
+
+- Se desplegaron en produccion los ultimos commits pendientes de master hasta 273b4b3.
+- Se actualizaron backend, frontend y documentacion desde el repositorio mjakulica/pare-carrito.
+- El backend fue reconstruido con Docker para incorporar los cambios de facturacion, usuarios/clientes y dependencia decimal.js.
+- Se verifico salud del API con /health y respuesta publica HTTPS 200 en sistema.parecarrito.com.ar y pi.parecarrito.com.ar.
+- No se registraron credenciales en este documento ni en el historial.
+
+### Backups asociados
+
+- VPS pre-deploy: /root/backups-pare-carrito/pare-carrito-opt-predeploy_20260619_061708.tar.gz, dump DB y pp_state del mismo timestamp.
+- VPS post-sync: /root/backups-pare-carrito/pare-carrito-opt-postsync_20260619_061822.tar.gz.
+- VPS post-deploy: /root/backups-pare-carrito/pare-carrito-opt-postdeploy_20260619_062344.tar.gz, dump DB y pp_state del mismo timestamp.
+- PC: C:\Users\mauri\OneDrive\Escritorio\Pare Carrito\sistema y pagina\backups-repo\repo-backup-20260619-062415.
