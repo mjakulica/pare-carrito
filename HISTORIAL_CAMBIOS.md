@@ -1,5 +1,21 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.8.7 - Impacto de rendicion Lucas en saldos de clientes (2026-06-19)
+
+### Datos / Pagos y saldos
+
+- Se actualizaron los cobros de clientes de `Lucas Pare Carrito - Rendición.csv` para que descuenten saldo de cuenta corriente.
+- Se mantuvo el mismo rango validado de pedidos historicos: `2025-11-03` a `2026-06-17`.
+- Se generaron 2.276 saldos de pedidos historicos por `$169.822.370` cuando no existian como movimientos de cuenta corriente.
+- Se registraron 1.298 pagos de clientes recibidos por Lucas por `$164.045.260` en `payments`.
+- Se generaron 1.298 movimientos de saldo tipo `pago` por `-$164.045.260`, relacionados con esos pagos.
+- No se importaron pagos de clientes no encontrados; dentro del rango hubo 0 exclusiones por cliente inexistente.
+- Los pagos quedaron marcados con `importSource = rendicion_lucas_saldos_20260619` y los saldos de pedidos historicos con `importSource = historial_csv_saldos_20260619`.
+- Backups VPS: pre-import `20260619_111439` y post-import `20260619_111448` con codigo, dump PostgreSQL y `app_state`.
+- Reporte generado: `rendicion_lucas_saldos_por_cliente.csv`.
+- No se registraron credenciales en documentacion ni reportes.
+
+---
 ## v12.8.6 - Importacion rendicion efectivo Lucas (2026-06-19)
 
 ### Datos / Caja
@@ -138,3 +154,4 @@
 ## v12.7 y anteriores
 
 Ver `DOCUMENTO_ANALISIS_SISTEMA.md` para el detalle de funcionalidades hasta la versión `v12.7`.
+
