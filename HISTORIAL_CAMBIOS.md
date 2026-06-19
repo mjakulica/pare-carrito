@@ -1,5 +1,17 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.8.11 - Importacion de compras Lucas con egreso de caja (2026-06-19)
+
+### Datos / Compras y caja
+
+- Se importo el archivo `Lucas Pare Carrito - Compras Hoy (1).csv` como historico de compras y gastos pagados por Lucas.
+- Se crearon 94 compras de productos con 2.994 items y 193 gastos identificados.
+- Cada registro importado genero su egreso correspondiente en `Efectivo - Lucas`, por un total de $75.632.839.
+- El bloque actual del 2026-06-19 cerro contra `G1`: $423.050 en productos y $109.500 en gastos, total $532.550.
+- Se dejaron sin importar 186 renglones con dudas por productos/gastos no identificados o datos insuficientes; quedaron reportados en `lucas_compras_con_dudas_preview.csv`.
+- No se registraron credenciales en documentacion ni reportes.
+
+---
 ## v12.8.10 - Importacion historica de compras a proveedores (2026-06-19)
 
 ### Datos / Compras
