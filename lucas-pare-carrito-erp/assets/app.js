@@ -236,7 +236,7 @@
     orderProductFilter: "",
     orderSelectedCategories: [],
     orderWholesaleFilter: ["mayor", "menor"],
-    balanceFrom: todayISO(),
+    balanceFrom: "",
     balanceTo: todayISO(),
     balanceAccounts: null,
     divideAssignees: null,
@@ -6757,6 +6757,7 @@
 
   function renderBalances() {
     if (isClientLikeRole(currentUser.role)) return renderCustomerBalances();
+    ensureBalanceRangeDefaults();
     const balances = getClientBalances().filter((item) => {
       if (["manager", "admin", "employee"].includes(currentUser.role)) return true;
       return getCustomerVisibleClientIds().includes(item.clientId);
@@ -6778,7 +6779,7 @@
       const fromInput = document.getElementById("balance-from");
       const toInput = document.getElementById("balance-to");
       if (fromInput) fromInput.addEventListener("change", () => {
-        ui.balanceFrom = fromInput.value || todayISO();
+        ui.balanceFrom = fromInput.value || "";
       });
       if (toInput) toInput.addEventListener("change", () => {
         ui.balanceTo = toInput.value || todayISO();
@@ -6839,6 +6840,7 @@
   }
 
   function renderCustomerBalances() {
+    ensureBalanceRangeDefaults();
     const clientIds = getCustomerVisibleClientIds();
     if (!Array.isArray(ui.balanceAccounts)) ui.balanceAccounts = clientIds.slice();
     ui.balanceAccounts = ui.balanceAccounts.filter((id) => clientIds.includes(id));
@@ -6879,7 +6881,7 @@
       const fromInput = document.getElementById("balance-from");
       const toInput = document.getElementById("balance-to");
       if (fromInput) fromInput.addEventListener("change", () => {
-        ui.balanceFrom = fromInput.value || todayISO();
+        ui.balanceFrom = fromInput.value || "";
         render();
       });
       if (toInput) toInput.addEventListener("change", () => {
@@ -12755,6 +12757,15 @@
         balance += Number(entry.amount || 0);
         entry.balance = balance;
       });
+  }
+
+  function ensureBalanceRangeDefaults() {
+    const dates = (state.saldos || [])
+      .map((entry) => String(entry.date || "").slice(0, 10))
+      .filter(Boolean)
+      .sort();
+    if (!ui.balanceFrom && dates.length) ui.balanceFrom = dates[0];
+    if (!ui.balanceTo) ui.balanceTo = dates.length ? dates[dates.length - 1] : todayISO();
   }
 
   function getSaldoMovements(clientId, from, to) {

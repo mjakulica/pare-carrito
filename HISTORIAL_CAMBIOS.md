@@ -1,5 +1,15 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.8.8 - Rango historico visible en saldos (2026-06-19)
+
+### Frontend / Saldos
+
+- Se corrigio el rango inicial de la pantalla `Saldos` para que `Desde` tome la primera fecha real de movimientos de cuenta corriente.
+- El detalle `Ver movimientos` ahora incluye por defecto los pagos historicos importados de Lucas, en lugar de quedar limitado a la fecha del dia.
+- Se permite dejar `Desde` vacio para consultar todo el historial disponible.
+- No se registraron credenciales en documentacion ni reportes.
+
+---
 ## v12.8.7 - Impacto de rendicion Lucas en saldos de clientes (2026-06-19)
 
 ### Datos / Pagos y saldos
