@@ -2187,13 +2187,21 @@ tr:last-child td {
   stroke-width: 3px;
 }
 
-.chart-point:hover text {
+.chart-point:hover text,
+.chart-point:focus text,
+.chart-point:focus-visible text {
   display: block;
 }
 
-.chart-point:hover circle:last-of-type {
+.chart-point:hover circle:last-of-type,
+.chart-point:focus circle:last-of-type,
+.chart-point:focus-visible circle:last-of-type {
   stroke: #fff;
   stroke-width: 2;
+}
+
+.chart-point:focus {
+  outline: none;
 }
 
 @media (max-width: 1240px) {

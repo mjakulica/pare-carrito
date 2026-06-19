@@ -1,5 +1,15 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.8.9 - Fecha visible en puntos de tendencias (2026-06-19)
+
+### Frontend / Inicio
+
+- En los graficos de `Tendencias` de la pagina de inicio para roles gerente y admin, cada punto ahora muestra fecha y valor al pasar el mouse.
+- El tooltip accesible de cada punto incluye dia de semana, fecha completa y valor.
+- En mobile, los puntos pueden recibir foco/tap para mostrar la misma etiqueta de fecha y valor.
+- No se registraron credenciales en documentacion ni reportes.
+
+---
 ## v12.8.8 - Rango historico visible en saldos (2026-06-19)
 
 ### Frontend / Saldos

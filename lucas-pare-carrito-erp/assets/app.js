@@ -2187,12 +2187,15 @@
       const y = pointY(value);
       const labelX = Math.min(Math.max(x, padLeft + 26), width - padRight - 26);
       const labelY = y - 9 < padTop ? y + 16 : y - 9;
+      const date = dates[position] || "";
+      const valueLabel = formatValue(value);
+      const pointLabel = chartPointTooltipLabel(date, valueLabel);
       return `
-        <g class="chart-point">
+        <g class="chart-point" tabindex="0" role="img" aria-label="${escapeAttr(pointLabel)}">
+          <title>${escapeHtml(pointLabel)}</title>
           <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="8" fill="transparent" />
           <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" fill="${color}" />
-          <text x="${labelX.toFixed(1)}" y="${labelY.toFixed(1)}" text-anchor="middle">${escapeHtml(formatValue(value))}</text>
-          <title>${escapeHtml(formatDateShort(dates[position] || ""))}: ${escapeHtml(formatValue(value))}</title>
+          <text x="${labelX.toFixed(1)}" y="${labelY.toFixed(1)}" text-anchor="middle">${escapeHtml(formatDateShort(date) + " " + valueLabel)}</text>
         </g>
       `;
     }).join("");
@@ -13077,6 +13080,14 @@
     if (!value) return "";
     const [, month, day] = String(value).slice(0, 10).split("-");
     return `${day}/${month}`;
+  }
+
+  function chartPointTooltipLabel(dateISO, valueLabel) {
+    if (!dateISO) return valueLabel || "";
+    const [year, month, day] = String(dateISO).slice(0, 10).split("-").map(Number);
+    const date = new Date(year, month - 1, day);
+    const days = ["Domingo", "Lunes", "Martes", "Miercoles", "Jueves", "Viernes", "Sabado"];
+    return `${days[date.getDay()]} ${formatDate(dateISO)}: ${valueLabel}`;
   }
 
   function formatMoney(value) {
