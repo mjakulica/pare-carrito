@@ -1,5 +1,22 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.8.10 - Importacion historica de compras a proveedores (2026-06-19)
+
+### Datos / Compras
+
+- Se proceso `Pedidos a proveedores - Compras Hoy (1).csv` para reconstruir compras de productos con proveedor generico.
+- Se importaron 572 compras agrupadas entre `2022-08-03` y `2026-06-19`.
+- Se importaron 9.516 items de compra por un total de `$223.832.194,60`.
+- Se creo el proveedor `Proveedor Generico` (`PROV-GENERICO`) para estas compras historicas.
+- Las compras se registraron como `paymentStatus = paid` y no generaron movimientos de caja ni deuda de proveedor, para no alterar saldos financieros actuales.
+- Se excluyeron 197 lineas dudosas por producto no encontrado o precio faltante.
+- El detalle por cliente de la planilla se uso solo para validar cantidades y no se guardo en las compras.
+- Los movimientos quedaron marcados con `importSource = compras_proveedores_csv_20260619`.
+- Backups VPS: pre-import `20260619_203505` y post-import `20260619_203518` con codigo, dump PostgreSQL y `app_state`.
+- Reportes generados: `compras_productos_importables_preview.csv`, `compras_productos_con_dudas_preview.csv` y `compras_importables_resumen_preview.csv`.
+- No se registraron credenciales en documentacion ni reportes.
+
+---
 ## v12.8.9 - Fecha visible en puntos de tendencias (2026-06-19)
 
 ### Frontend / Inicio
