@@ -4,26 +4,27 @@
 
 ### Datos / Pedidos historicos
 
-- Se proceso el archivo Sin arreglar - Historial.csv con historial de 7 meses, desde 2025-11-03 hasta 2026-06-17.
-- Se importaron al VPS productivo 2.276 pedidos historicos validados, con 19.830 items, marcados con importSource = historial_csv_20260619.
-- Los pedidos importados quedaron como entregado, paymentStatus = paid y paymentReceived = totalAmount para no generar deuda pendiente ni movimientos de caja/pagos inexistentes.
+- Se proceso el archivo `Sin arreglar - Historial.csv` con historial de 7 meses, desde `2025-11-03` hasta `2026-06-17`.
+- Se importaron al VPS productivo 2.276 pedidos historicos validados, con 19.830 items, marcados con `importSource = historial_csv_20260619`.
+- Los pedidos importados quedaron como `entregado`, `paymentStatus = paid` y `paymentReceived = totalAmount` para no generar deuda pendiente ni movimientos de caja/pagos inexistentes.
 - Se dejaron fuera de la importacion 1.075 pedidos con dudas por productos no existentes en catalogo, celdas sueltas sin cantidad/precio, totales faltantes, clientes no encontrados o diferencias de total relevantes.
-- Backups VPS: pre-import 20260619_070300 y post-import 20260619_070625 con codigo, dump PostgreSQL y pp_state.
-- Backup PC: uditoria\import_historial_20260619_preimport y uditoria\import_historial_20260619_postimport.
-- Reportes generados: pedidos_con_dudas_validacion.csv, productos_csv_no_encontrados.csv, clientes_csv_no_encontrados.csv, pedidos_importados_resumen.csv y pedidos_importados_ids.csv.
+- Backups VPS: pre-import `20260619_070300` y post-import `20260619_070625` con codigo, dump PostgreSQL y `app_state`.
+- Backup PC: `auditoria/import_historial_20260619_preimport` y `auditoria/import_historial_20260619_postimport`.
+- Reportes generados: `pedidos_con_dudas_validacion.csv`, `productos_csv_no_encontrados.csv`, `clientes_csv_no_encontrados.csv`, `pedidos_importados_resumen.csv` y `pedidos_importados_ids.csv`.
 - No se registraron credenciales en documentacion ni reportes.
 
 ---
+
 ## v12.8.4 - Deploy productivo en VPS (2026-06-19)
 
 ### DevOps / Deployment
 
-- Se desplego en el VPS productivo el commit 273b4b360a7c4df019582ec8996ff2de62efc9be de master.
-- Se sincronizaron pare-carrito-sas-server y lucas-pare-carrito-erp sobre /opt/pare-carrito, preservando .env, backups internos y assets de productos.
-- Se reconstruyo el contenedor pi con Docker Compose y quedaron activos pi, caddy y db.
-- Verificacion posterior: https://sistema.parecarrito.com.ar/, https://sistema.parecarrito.com.ar/api/health y https://api.parecarrito.com.ar/health respondieron HTTP 200.
-- Backups generados en VPS: pre-deploy 20260619_061708, post-sync 20260619_061822 y post-deploy 20260619_062344.
-- Backup generado en PC: ackups-repo\repo-backup-20260619-062415.
+- Se desplego en el VPS productivo el commit `273b4b360a7c4df019582ec8996ff2de62efc9be` de `master`.
+- Se sincronizaron `pare-carrito-sas-server` y `lucas-pare-carrito-erp` sobre `/opt/pare-carrito`, preservando `.env`, backups internos y assets de productos.
+- Se reconstruyo el contenedor `api` con Docker Compose y quedaron activos `api`, `caddy` y `db`.
+- Verificacion posterior: `https://sistema.parecarrito.com.ar/`, `https://sistema.parecarrito.com.ar/api/health` y `https://api.parecarrito.com.ar/health` respondieron HTTP 200.
+- Backups generados en VPS: pre-deploy `20260619_061708`, post-sync `20260619_061822`, post-deploy `20260619_062344` y post-documentacion `20260619_062949`.
+- Backup generado en PC: `backups-repo/repo-backup-20260619-063020-final`.
 - No se registraron credenciales en documentacion ni historial.
 
 ---
