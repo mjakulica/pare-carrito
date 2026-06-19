@@ -1,5 +1,21 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.8.6 - Importacion rendicion efectivo Lucas (2026-06-19)
+
+### Datos / Caja
+
+- Se proceso `Lucas Pare Carrito - Rendición.csv` y se importo solo el rango coincidente con pedidos historicos: `2025-11-03` a `2026-06-17`.
+- Se importaron 1.298 ingresos de clientes a `Efectivo - Lucas` por un total de `$164.045.260`.
+- Se importaron 19 movimientos `Jose -> Lucas` por `$9.146.690`, representados como egreso en `Efectivo - Jose Luis` e ingreso en `Efectivo - Lucas`.
+- Total neto agregado a caja Lucas por la rendicion: `$173.191.950`.
+- Se excluyeron pagos de clientes no encontrados; dentro del rango importado no hubo exclusiones por cliente inexistente.
+- Los movimientos se registraron con `importSource = rendicion_lucas_20260619`.
+- Backups VPS: pre-import `20260619_073230` y post-import `20260619_073423` con codigo, dump PostgreSQL y `app_state`.
+- Backup PC: `auditoria/import_rendicion_lucas_20260619_preimport` y `auditoria/import_rendicion_lucas_20260619_postimport`.
+- Reportes generados: `rendicion_importados_rango_historico.csv`, `rendicion_excluidos_rango_historico.csv`, `rendicion_dudas.csv`, `rendicion_pagos_clientes_parseados.csv` y `rendicion_movimientos_jose_lucas_parseados.csv`.
+- No se registraron credenciales en documentacion ni reportes.
+
+---
 ## v12.8.5 - Importacion historial de pedidos CSV (2026-06-19)
 
 ### Datos / Pedidos historicos
