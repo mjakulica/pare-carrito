@@ -8,6 +8,9 @@
 - Si `localStorage` rechaza el estado grande, el sistema ya no corta el flujo de guardado: continua con la sincronizacion al servidor.
 - El modal de edicion puede cerrar correctamente despues de guardar, y los cambios quedan persistidos en el VPS.
 - Tambien se protegieron escrituras locales durante descarga/merge de nube, login remoto y restauracion de backups locales.
+- Commit funcional desplegado: `651c4026bf2e07a7d0cd75071392844810506736`.
+- Backups VPS: pre-fix `20260620_081032`; post-fix `20260620_081211`.
+- Backup PC post-fix: `auditoria/repo-backup-20260620-0814-postfix-client-save-quota.zip`.
 - No se registraron credenciales en documentacion ni reportes.
 
 ---

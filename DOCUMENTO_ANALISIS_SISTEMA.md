@@ -349,7 +349,7 @@ Si un rango no tiene historiales canonicos cargados, la pantalla conserva el com
 
 **Version operativa:** 12.8.14  
 **Fecha:** 2026-06-20  
-**Commit GitHub del cambio funcional:** pendiente al momento de esta edicion documental  
+**Commit GitHub del cambio funcional:** 651c4026bf2e07a7d0cd75071392844810506736  
 **Entorno actualizado:** VPS productivo `/opt/pare-carrito` con Docker Compose (`api`, `caddy`, `db`).
 
 ### Detalle del ultimo cambio
@@ -363,6 +363,6 @@ Si un rango no tiene historiales canonicos cargados, la pantalla conserva el com
 
 ### Backups asociados
 
-- VPS pre-fix guardado clientes: pendiente hasta finalizar despliegue.
-- VPS post-fix guardado clientes: pendiente hasta finalizar despliegue.
-- PC post-fix guardado clientes: pendiente hasta finalizar commit/despliegue.
+- VPS pre-fix guardado clientes: dump PostgreSQL, `app_state` y tar de `/opt/pare-carrito` generados con timestamp `20260620_081032`.
+- VPS post-fix guardado clientes: dump PostgreSQL, `app_state` y tar de `/opt/pare-carrito` generados con timestamp `20260620_081211`.
+- PC post-fix guardado clientes: `auditoria/repo-backup-20260620-0814-postfix-client-save-quota.zip`.
