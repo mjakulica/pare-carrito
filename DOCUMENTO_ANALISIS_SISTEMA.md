@@ -314,24 +314,57 @@ El frontend es estático; basta copiar los archivos actualizados a `lucas-pare-c
 *Documento generado automáticamente a partir del análisis del código fuente de Pare Carrito SAS ERP.*
 ---
 
-## 11. Ultimo Cambio y Version
+## 11. Historiales canonicos de productos
 
-**Version operativa:** 12.8.4  
+Desde la version 12.8.12 el sistema separa la informacion historica de productos de la informacion transaccional de pedidos, saldos y caja.
+
+### 11.1 Ventas
+
+La pantalla `Historiales` usa `productListPriceHistory` como fuente de precio historico de lista por producto/dia y `productSalesQuantityHistory` como fuente de cantidad vendida por producto/dia.
+
+Esto significa que:
+
+- El precio mostrado en `Historiales` para ventas es el precio de lista historico.
+- La cantidad mostrada en `Historiales` para ventas es la cantidad total historica vendida por producto/dia.
+- Los pedidos de cada cliente conservan su precio real cobrado en `order.items[].unitPrice`, sus subtotales y sus saldos.
+- La conciliacion no inventa pedidos ni clientes para cerrar diferencias.
+
+### 11.2 Compras
+
+La pantalla `Historiales` usa `productPurchaseHistory` como fuente canonica para cantidad comprada y precio de compra por producto/dia.
+
+Esto significa que:
+
+- Las compras historicas canonicas sirven para analisis de productos, precios y cantidades.
+- Los movimientos de caja, pagos, deuda de proveedores y compras transaccionales existentes quedan separados.
+- Cualquier reemplazo o reversa de compras con impacto financiero requiere decision explicita y backup previo.
+
+### 11.3 Fallback operativo
+
+Si un rango no tiene historiales canonicos cargados, la pantalla conserva el comportamiento anterior y arma la matriz desde `orders` y `purchases`.
+
+---
+
+## 12. Ultimo Cambio y Version
+
+**Version operativa:** 12.8.12  
 **Fecha:** 2026-06-19  
-**Commit GitHub desplegado:** $deployCommit  
-**Entorno actualizado:** VPS productivo /opt/pare-carrito con Docker Compose (pi, caddy, db).
+**Commit GitHub desplegado:** pendiente al momento de esta edicion documental  
+**Entorno actualizado:** VPS productivo `/opt/pare-carrito` con Docker Compose (`api`, `caddy`, `db`).
 
 ### Detalle del ultimo cambio
 
-- Se desplegaron en produccion los ultimos commits pendientes de master hasta 273b4b3.
-- Se actualizaron backend, frontend y documentacion desde el repositorio mjakulica/pare-carrito.
-- El backend fue reconstruido con Docker para incorporar los cambios de facturacion, usuarios/clientes y dependencia decimal.js.
-- Se verifico salud del API con /health y respuesta publica HTTPS 200 en sistema.parecarrito.com.ar y pi.parecarrito.com.ar.
+- Se agregaron las claves `productListPriceHistory`, `productSalesQuantityHistory` y `productPurchaseHistory` al estado global.
+- Se importo `Sin arreglar - Hist Ventas.csv` como fuente canonica de precios historicos de lista y cantidades vendidas por producto/dia.
+- Se importo `Sin arreglar - Hist Comp.csv` como fuente canonica de cantidades compradas y precios de compra por producto/dia.
+- Se actualizo la pagina `Historiales` para priorizar esas fuentes canonicas.
+- Los historiales de pedidos por cliente mantienen el precio real cobrado y no fueron reemplazados por precios de lista.
+- La conciliacion no modifico caja, saldos, pagos, pedidos ni compras transaccionales.
 - No se registraron credenciales en este documento ni en el historial.
 
 ### Backups asociados
 
-- VPS pre-deploy: /root/backups-pare-carrito/pare-carrito-opt-predeploy_20260619_061708.tar.gz, dump DB y pp_state del mismo timestamp.
-- VPS post-sync: /root/backups-pare-carrito/pare-carrito-opt-postsync_20260619_061822.tar.gz.
-- VPS post-deploy: /root/backups-pare-carrito/pare-carrito-opt-postdeploy_20260619_062344.tar.gz, dump DB y pp_state del mismo timestamp.
-- PC: C:\Users\mauri\OneDrive\Escritorio\Pare Carrito\sistema y pagina\backups-repo\repo-backup-20260619-062415.
+- VPS pre-conciliacion: dump PostgreSQL, `app_state` y tar de `/opt/pare-carrito` generados el 2026-06-19 antes de importar la capa canonica.
+- PC pre-conciliacion: `auditoria/repo-backup-20260619-2207-preconciliacion-historiales.zip`.
+- VPS post-conciliacion: pendiente hasta finalizar despliegue y verificacion.
+- PC post-conciliacion: pendiente hasta finalizar commit/despliegue.

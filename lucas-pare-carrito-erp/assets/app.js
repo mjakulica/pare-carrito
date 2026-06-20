@@ -584,6 +584,9 @@
       remitos: [],
       saldos: [],
       purchases: [],
+      productListPriceHistory: [],
+      productSalesQuantityHistory: [],
+      productPurchaseHistory: [],
       costRelations: [],
       productRelations: [],
       vendorLedger: [],
@@ -629,6 +632,9 @@
         remitos: parsed.remitos || [],
         saldos: parsed.saldos || [],
         purchases: parsed.purchases || [],
+        productListPriceHistory: parsed.productListPriceHistory || [],
+        productSalesQuantityHistory: parsed.productSalesQuantityHistory || [],
+        productPurchaseHistory: parsed.productPurchaseHistory || [],
         providerLedger: parsed.providerLedger || [],
         providerPayments: parsed.providerPayments || [],
         clientTransfers: parsed.clientTransfers || [],
@@ -1249,6 +1255,7 @@
     }
     [
       "exampleOrders", "remitos", "saldos", "purchases", "payments", "caja",
+      "productListPriceHistory", "productSalesQuantityHistory", "productPurchaseHistory",
       "providerLedger", "providerPayments", "clientTransfers", "vendorLedger",
       "attendance", "employeePayments", "employeeReimbursements", "performanceAdjustments",
       "clients", "products", "providers", "vehicles", "users", "cashBoxes"
@@ -1271,6 +1278,7 @@
   function stateHasOperationalData(data) {
     return [
       "orders", "purchases", "saldos", "caja", "payments", "remitos",
+      "productListPriceHistory", "productSalesQuantityHistory", "productPurchaseHistory",
       "providerLedger", "providerPayments", "clientTransfers", "attendance",
       "employeePayments", "employeeReimbursements", "billingLog", "vendorLedger"
     ].some((key) => Array.isArray(data[key]) && data[key].length);
@@ -4081,7 +4089,45 @@
     `;
   }
 
+  function hasCanonicalHistory(records, from, to) {
+    return Array.isArray(records) && records.some((record) => isDateInRange(record.date, from, to));
+  }
+
+  function ensureHistoryRow(rows, record, product) {
+    const key = record.productId || record.productName;
+    if (!rows[key]) rows[key] = {
+      productId: record.productId,
+      productName: record.productName || (product ? product.name : key),
+      category: product ? product.category : (record.category || "OTROS"),
+      unitType: record.unitType || (product ? product.unitType : ""),
+      totalQuantity: 0,
+      totalAmount: 0,
+      days: {}
+    };
+    return rows[key];
+  }
+
   function buildPurchaseHistoryMatrix(from, to) {
+    if (hasCanonicalHistory(state.productPurchaseHistory, from, to)) {
+      const rows = {};
+      state.productPurchaseHistory
+        .filter((record) => isDateInRange(record.date, from, to))
+        .forEach((record) => {
+          const date = String(record.date || "").slice(0, 10);
+          const product = getProduct(record.productId);
+          const row = ensureHistoryRow(rows, record, product);
+          if (!row.days[date]) row.days[date] = { quantity: 0, amount: 0, price: 0 };
+          const quantity = Number(record.quantity || 0);
+          const price = Number(record.unitCost || record.price || 0);
+          const amount = Number(record.totalCost || quantity * price);
+          row.totalQuantity += quantity;
+          row.totalAmount += amount;
+          row.days[date].quantity += quantity;
+          row.days[date].amount += amount;
+          row.days[date].price = Math.max(row.days[date].price, price);
+        });
+      return Object.values(rows).sort((a, b) => String(a.category).localeCompare(String(b.category)) || String(a.productName).localeCompare(String(b.productName)));
+    }
     const rows = {};
     state.purchases
       .filter((purchase) => isProductPurchaseExpense(purchase) && isDateInRange(purchase.date, from, to))
@@ -4113,6 +4159,30 @@
   }
 
   function buildSalesHistoryMatrix(from, to) {
+    if (hasCanonicalHistory(state.productSalesQuantityHistory, from, to)) {
+      const priceByProductDate = {};
+      (state.productListPriceHistory || []).forEach((record) => {
+        priceByProductDate[record.productId + "|" + String(record.date || "").slice(0, 10)] = Number(record.price || 0);
+      });
+      const rows = {};
+      state.productSalesQuantityHistory
+        .filter((record) => isDateInRange(record.date, from, to))
+        .forEach((record) => {
+          const date = String(record.date || "").slice(0, 10);
+          const product = getProduct(record.productId);
+          const row = ensureHistoryRow(rows, record, product);
+          if (!row.days[date]) row.days[date] = { quantity: 0, amount: 0, price: 0 };
+          const quantity = Number(record.quantity || 0);
+          const price = Number(record.listPrice || record.price || priceByProductDate[record.productId + "|" + date] || 0);
+          const amount = quantity * price;
+          row.totalQuantity += quantity;
+          row.totalAmount += amount;
+          row.days[date].quantity += quantity;
+          row.days[date].amount += amount;
+          row.days[date].price = price;
+        });
+      return Object.values(rows).sort((a, b) => String(a.category).localeCompare(String(b.category)) || String(a.productName).localeCompare(String(b.productName)));
+    }
     const rows = {};
     state.orders
       .filter((order) => !["cancelado", "anulado"].includes(order.status) && isDateInRange(order.date, from, to))

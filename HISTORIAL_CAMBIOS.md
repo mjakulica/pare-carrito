@@ -1,5 +1,19 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.8.12 - Conciliacion canonica de historiales de productos (2026-06-19)
+
+### Datos / Historiales
+
+- Se agrego una capa canonica de historiales de productos separada de pedidos, saldos y caja.
+- `Hist Ventas` se importo como fuente fiel para precio historico de lista y cantidad vendida por producto/dia.
+- `Hist Comp` se importo como fuente fiel para cantidad comprada y precio de compra por producto/dia.
+- La pagina `Historiales` ahora prioriza esos historiales canonicos; los pedidos de cada cliente conservan el precio real cobrado en sus items.
+- Se cargaron 55.082 registros de precios de lista, 25.475 registros de cantidades vendidas y 15.118 registros de compras historicas.
+- La conciliacion no genero impacto financiero: no modifico caja, saldos, pagos, pedidos ni compras transaccionales.
+- Se dejaron reportes de productos sin match y valores invalidos en el directorio `comparacion`.
+- No se registraron credenciales en documentacion ni reportes.
+
+---
 ## v12.8.11 - Importacion de compras Lucas con egreso de caja (2026-06-19)
 
 ### Datos / Compras y caja
