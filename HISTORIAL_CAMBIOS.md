@@ -1,5 +1,22 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.8.13 - Recuperacion de pedidos historicos 2026-06-08 a 2026-06-18 (2026-06-19)
+
+### Datos / Pedidos y saldos
+
+- Se reproceso el tramo de pedidos historicos entre `2026-06-08` y `2026-06-18`.
+- Se recuperaron 105 pedidos que habian quedado afuera por advertencias de `celdas_sueltas`.
+- Se importaron 1.065 items por un total de `$8.306.220`.
+- Por cada pedido recuperado se genero su movimiento de saldo tipo `pedido`, y se recalcularon los balances de los 23 clientes afectados.
+- No se modificaron caja, pagos, compras ni movimientos de proveedores.
+- Quedaron 8 pedidos pendientes sin importar por productos no encontrados: `Jengibre Kg` (7) y `Romero fresco atado` (1).
+- Reportes generados: `pedidos_tramo_20260608_18_importados.csv`, `pedidos_tramo_20260608_18_pendientes.csv` y `pedidos_tramo_20260608_18_resumen.json`.
+- Backups VPS: pre-import `20260619_225932`; post-import `20260619_231345`.
+- Backup PC pre-import: `auditoria/repo-backup-20260619-2259-preimport-pedidos-20260608-18.zip`.
+- Backup PC post-import: `auditoria/repo-backup-20260619-2318-postimport-pedidos-20260608-18.zip`.
+- No se registraron credenciales en documentacion ni reportes.
+
+---
 ## v12.8.12 - Conciliacion canonica de historiales de productos (2026-06-19)
 
 ### Datos / Historiales

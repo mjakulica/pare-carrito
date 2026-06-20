@@ -347,24 +347,24 @@ Si un rango no tiene historiales canonicos cargados, la pantalla conserva el com
 
 ## 12. Ultimo Cambio y Version
 
-**Version operativa:** 12.8.12  
+**Version operativa:** 12.8.13  
 **Fecha:** 2026-06-19  
-**Commit GitHub del cambio funcional:** f4c1808f4d83b7df7d6ee4dce9e7f96bc306b5f0  
+**Commit GitHub del cambio funcional:** pendiente al momento de esta edicion documental  
 **Entorno actualizado:** VPS productivo `/opt/pare-carrito` con Docker Compose (`api`, `caddy`, `db`).
 
 ### Detalle del ultimo cambio
 
-- Se agregaron las claves `productListPriceHistory`, `productSalesQuantityHistory` y `productPurchaseHistory` al estado global.
-- Se importo `Sin arreglar - Hist Ventas.csv` como fuente canonica de precios historicos de lista y cantidades vendidas por producto/dia.
-- Se importo `Sin arreglar - Hist Comp.csv` como fuente canonica de cantidades compradas y precios de compra por producto/dia.
-- Se actualizo la pagina `Historiales` para priorizar esas fuentes canonicas.
-- Los historiales de pedidos por cliente mantienen el precio real cobrado y no fueron reemplazados por precios de lista.
-- La conciliacion no modifico caja, saldos, pagos, pedidos ni compras transaccionales.
+- Se reproceso el tramo de pedidos historicos `2026-06-08` a `2026-06-18`.
+- Se importaron 105 pedidos recuperados que habian quedado fuera por advertencias de `celdas_sueltas`.
+- Se agregaron 1.065 items por un total de `$8.306.220`.
+- Por cada pedido se genero un movimiento de saldo tipo `pedido` y se recalcularon los balances de los 23 clientes afectados.
+- No se modificaron caja, pagos, compras ni movimientos de proveedores.
+- Quedaron pendientes 8 pedidos por productos no encontrados: `Jengibre Kg` y `Romero fresco atado`.
 - No se registraron credenciales en este documento ni en el historial.
 
 ### Backups asociados
 
-- VPS pre-conciliacion: dump PostgreSQL, `app_state` y tar de `/opt/pare-carrito` generados con timestamp `20260619_220702`.
-- PC pre-conciliacion: `auditoria/repo-backup-20260619-2207-preconciliacion-historiales.zip`.
-- VPS post-conciliacion: dump PostgreSQL, `app_state` y tar de `/opt/pare-carrito` generados con timestamp `20260619_222149`.
-- PC post-conciliacion: `auditoria/repo-backup-20260619-2225-postconciliacion-historiales.zip`.
+- VPS pre-import pedidos tramo: dump PostgreSQL, `app_state` y tar de `/opt/pare-carrito` generados con timestamp `20260619_225932`.
+- PC pre-import pedidos tramo: `auditoria/repo-backup-20260619-2259-preimport-pedidos-20260608-18.zip`.
+- VPS post-import pedidos tramo: dump PostgreSQL, `app_state` y tar de `/opt/pare-carrito` generados con timestamp `20260619_231345`.
+- PC post-import pedidos tramo: `auditoria/repo-backup-20260619-2318-postimport-pedidos-20260608-18.zip`.
