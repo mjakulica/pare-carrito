@@ -349,7 +349,7 @@ Si un rango no tiene historiales canonicos cargados, la pantalla conserva el com
 
 **Version operativa:** 12.8.12  
 **Fecha:** 2026-06-19  
-**Commit GitHub desplegado:** pendiente al momento de esta edicion documental  
+**Commit GitHub del cambio funcional:** f4c1808f4d83b7df7d6ee4dce9e7f96bc306b5f0  
 **Entorno actualizado:** VPS productivo `/opt/pare-carrito` con Docker Compose (`api`, `caddy`, `db`).
 
 ### Detalle del ultimo cambio
@@ -364,7 +364,7 @@ Si un rango no tiene historiales canonicos cargados, la pantalla conserva el com
 
 ### Backups asociados
 
-- VPS pre-conciliacion: dump PostgreSQL, `app_state` y tar de `/opt/pare-carrito` generados el 2026-06-19 antes de importar la capa canonica.
+- VPS pre-conciliacion: dump PostgreSQL, `app_state` y tar de `/opt/pare-carrito` generados con timestamp `20260619_220702`.
 - PC pre-conciliacion: `auditoria/repo-backup-20260619-2207-preconciliacion-historiales.zip`.
-- VPS post-conciliacion: pendiente hasta finalizar despliegue y verificacion.
-- PC post-conciliacion: pendiente hasta finalizar commit/despliegue.
+- VPS post-conciliacion: dump PostgreSQL, `app_state` y tar de `/opt/pare-carrito` generados con timestamp `20260619_222149`.
+- PC post-conciliacion: `auditoria/repo-backup-20260619-2225-postconciliacion-historiales.zip`.

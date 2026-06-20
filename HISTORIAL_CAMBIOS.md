@@ -11,6 +11,9 @@
 - Se cargaron 55.082 registros de precios de lista, 25.475 registros de cantidades vendidas y 15.118 registros de compras historicas.
 - La conciliacion no genero impacto financiero: no modifico caja, saldos, pagos, pedidos ni compras transaccionales.
 - Se dejaron reportes de productos sin match y valores invalidos en el directorio `comparacion`.
+- Commit funcional desplegado: `f4c1808f4d83b7df7d6ee4dce9e7f96bc306b5f0`.
+- Backups VPS: pre-conciliacion `20260619_220702` y post-conciliacion `20260619_222149`.
+- Backup PC post-conciliacion: `auditoria/repo-backup-20260619-2225-postconciliacion-historiales.zip`.
 - No se registraron credenciales en documentacion ni reportes.
 
 ---
