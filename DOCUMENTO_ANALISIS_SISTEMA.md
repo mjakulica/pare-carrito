@@ -360,7 +360,7 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 
 **Version operativa:** 12.8.16  
 **Fecha:** 2026-06-20  
-**Commit GitHub del cambio funcional:** pendiente hasta finalizar deploy  
+**Commit GitHub del cambio funcional:** `072685ac3f38c14797b33dc83303f095dab8978d`  
 **Entorno actualizado:** VPS productivo `/opt/pare-carrito` con Docker Compose (`api`, `caddy`, `db`).
 
 ### Detalle del ultimo cambio
@@ -378,5 +378,5 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 
 - VPS pre-cambio UI/historiales/facturacion: dump PostgreSQL, `app_state` y tar de `/opt/pare-carrito` generados con timestamp `20260620_143543`.
 - PC pre-cambio UI/historiales/facturacion: `auditoria/repo-backup-20260620-1436-pre-ui-historiales-facturacion.zip`.
-- VPS post-cambio UI/historiales/facturacion: pendiente hasta finalizar despliegue y verificacion.
-- PC post-cambio UI/historiales/facturacion: pendiente hasta finalizar commit/despliegue.
+- VPS post-cambio UI/historiales/facturacion: dump PostgreSQL, `app_state` y tar de `/opt/pare-carrito` generados con timestamp `20260620_144815`.
+- PC post-cambio UI/historiales/facturacion: `auditoria/repo-backup-20260620-1450-post-ui-historiales-facturacion.zip`.

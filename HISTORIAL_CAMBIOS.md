@@ -13,10 +13,10 @@
 - En `Inicio`, los recuadros de comprobantes pendientes y usuarios inactivos se compactaron al tamano de botones de accion.
 - En `Nuevo Pedido`, al seleccionar cliente se recalculan precios y preferencias al instante.
 - El selector de cliente permite volver a hacer click para desplegar opciones sin tener que borrar con X.
-- Commit funcional desplegado: pendiente hasta finalizar deploy.
-- Backups VPS: pre-cambio `20260620_143543`; post-cambio pendiente.
+- Commit funcional desplegado: `072685ac3f38c14797b33dc83303f095dab8978d`.
+- Backups VPS: pre-cambio `20260620_143543`; post-cambio `20260620_144815`.
 - Backup PC pre-cambio: `auditoria/repo-backup-20260620-1436-pre-ui-historiales-facturacion.zip`.
-- Backup PC post-cambio: pendiente.
+- Backup PC post-cambio: `auditoria/repo-backup-20260620-1450-post-ui-historiales-facturacion.zip`.
 - No se registraron credenciales en documentacion ni reportes.
 
 ---
