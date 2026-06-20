@@ -282,11 +282,18 @@
     providerProductId: "",
     importType: "purchases",
     syncWarning: "",
+    syncStatus: "",
+    historyData: null,
+    historyLoading: false,
+    historyError: "",
     lastOverwrite: null
   };
 
   let afterRender = [];
   let state = loadState();
+  let lastSyncedState = null;
+  let pendingPatchBaseState = null;
+  let pendingPatchBaseUpdatedAt = "";
   migrateProductImages();
   let currentUser = loadCurrentUser();
 
@@ -360,8 +367,7 @@
     if (banner) banner.style.display = "none";
     const cloudConfig = getCloudSyncConfig();
     if (cloudSyncReady(cloudConfig) && cloudConfig.auto !== false) {
-      cloudPush(false);
-      cloudPull(false);
+      flushPatchQueue(false).then(() => cloudPull(false));
     }
   });
   window.addEventListener("offline", () => {
@@ -373,8 +379,11 @@
     const cloudConfig = getCloudSyncConfig();
     if (cloudSyncReady(cloudConfig) && cloudConfig.auto !== false) cloudPull(false);
   });
-  window.addEventListener("beforeunload", () => {
-    flushCloudPush();
+  window.addEventListener("beforeunload", (event) => {
+    if (loadPatchQueue().length) {
+      event.preventDefault();
+      event.returnValue = "Hay cambios pendientes de sincronizar.";
+    }
   });
 
   function seedState() {
@@ -584,9 +593,6 @@
       remitos: [],
       saldos: [],
       purchases: [],
-      productListPriceHistory: [],
-      productSalesQuantityHistory: [],
-      productPurchaseHistory: [],
       costRelations: [],
       productRelations: [],
       vendorLedger: [],
@@ -632,9 +638,6 @@
         remitos: parsed.remitos || [],
         saldos: parsed.saldos || [],
         purchases: parsed.purchases || [],
-        productListPriceHistory: parsed.productListPriceHistory || [],
-        productSalesQuantityHistory: parsed.productSalesQuantityHistory || [],
-        productPurchaseHistory: parsed.productPurchaseHistory || [],
         providerLedger: parsed.providerLedger || [],
         providerPayments: parsed.providerPayments || [],
         clientTransfers: parsed.clientTransfers || [],
@@ -960,10 +963,8 @@
     writeLocalStateSnapshot(state, "No se pudo guardar el estado completo en localStorage; se intentara sincronizar con el servidor.");
     const config = getCloudSyncConfig();
     if (cloudSyncReady(config) && config.auto !== false) {
-      const ok = flushCloudPush();
-      if (!ok) scheduleCloudPush();
-    } else {
-      scheduleCloudPush();
+      if (!queueCurrentStatePatch()) scheduleCloudPush();
+      else schedulePatchFlush();
     }
   }
 
@@ -1011,7 +1012,126 @@
   }
 
   const SYNC_KEY = "lpc_cloud_sync_v1";
+  const PATCH_QUEUE_KEY = "lpc_offline_patch_queue_v1";
+  const PATCH_ARRAY_KEYS = [
+    "orders", "deletedOrders", "exampleOrders", "remitos", "saldos", "purchases", "payments", "caja",
+    "providerLedger", "providerPayments", "clientTransfers", "vendorLedger",
+    "attendance", "employeePayments", "employeeReimbursements", "performanceAdjustments",
+    "clients", "products", "providers", "vehicles", "users", "cashBoxes",
+    "preferences", "productAliases", "clientProductAliases", "quantityAliases", "clientQuantityAliases",
+    "costRelations", "productRelations", "billingLog"
+  ];
+  const PATCH_OBJECT_KEYS = ["prices", "appSettings"];
+  const HISTORY_STATE_KEYS = ["productListPriceHistory", "productSalesQuantityHistory", "productPurchaseHistory"];
   let cloudPushTimer = null;
+
+  function stripHistoryForSync(data) {
+    const clean = { ...(data || {}) };
+    HISTORY_STATE_KEYS.forEach((key) => delete clean[key]);
+    return clean;
+  }
+
+  function cloneSyncState(data) {
+    return JSON.parse(JSON.stringify(stripHistoryForSync(data || {})));
+  }
+
+  function patchKeyForItem(key, item) {
+    if (!item) return "";
+    if (key === "preferences") return String(item.clientId || "") + "|" + String(item.productId || "");
+    if (key === "productAliases") return String(item.productId || "") + "|" + String(item.alias || "");
+    if (key === "clientProductAliases") return String(item.clientId || "") + "|" + String(item.productId || "") + "|" + String(item.alias || "");
+    if (key === "quantityAliases") return String(item.alias || "");
+    if (key === "clientQuantityAliases") return String(item.clientId || "") + "|" + String(item.alias || "");
+    if (key === "costRelations") return item.id || JSON.stringify([item.sourceProductId, item.targetProductId, item.productId]);
+    if (key === "productRelations") return item.id || String(item.retailProductId || "") + "|" + String(item.wholesaleProductId || "");
+    return String(item.id || "");
+  }
+
+  function buildStatePatch(baseData, nextData) {
+    const base = stripHistoryForSync(baseData || {});
+    const next = stripHistoryForSync(nextData || {});
+    const patch = { arrays: {}, objects: {}, scalars: {} };
+    PATCH_ARRAY_KEYS.forEach((key) => {
+      const baseMap = new Map();
+      (Array.isArray(base[key]) ? base[key] : []).forEach((item) => {
+        const id = patchKeyForItem(key, item);
+        if (id) baseMap.set(id, JSON.stringify(item));
+      });
+      const nextMap = new Map();
+      (Array.isArray(next[key]) ? next[key] : []).forEach((item) => {
+        const id = patchKeyForItem(key, item);
+        if (id) nextMap.set(id, item);
+      });
+      const upsert = [];
+      const deleted = [];
+      nextMap.forEach((item, id) => {
+        if (baseMap.get(id) !== JSON.stringify(item)) upsert.push(item);
+      });
+      baseMap.forEach((_, id) => {
+        if (!nextMap.has(id)) deleted.push(id);
+      });
+      if (upsert.length || deleted.length) patch.arrays[key] = { upsert, delete: deleted };
+    });
+    PATCH_OBJECT_KEYS.forEach((key) => {
+      const changes = {};
+      const baseObj = base[key] || {};
+      const nextObj = next[key] || {};
+      Object.keys(nextObj).forEach((entryKey) => {
+        if (JSON.stringify(baseObj[entryKey]) !== JSON.stringify(nextObj[entryKey])) changes[entryKey] = nextObj[entryKey];
+      });
+      if (Object.keys(changes).length) patch.objects[key] = changes;
+    });
+    Object.keys(next).forEach((key) => {
+      if (PATCH_ARRAY_KEYS.includes(key) || PATCH_OBJECT_KEYS.includes(key) || HISTORY_STATE_KEYS.includes(key)) return;
+      if (JSON.stringify(base[key]) !== JSON.stringify(next[key])) patch.scalars[key] = next[key];
+    });
+    return patch;
+  }
+
+  function patchHasChanges(patch) {
+    return !!(patch && (
+      Object.keys(patch.arrays || {}).length ||
+      Object.keys(patch.objects || {}).length ||
+      Object.keys(patch.scalars || {}).length
+    ));
+  }
+
+  function loadPatchQueue() {
+    try {
+      return JSON.parse(localStorage.getItem(PATCH_QUEUE_KEY) || "[]");
+    } catch {
+      return [];
+    }
+  }
+
+  function savePatchQueue(queue) {
+    try {
+      localStorage.setItem(PATCH_QUEUE_KEY, JSON.stringify(queue || []));
+    } catch (error) {
+      console.warn("No se pudo guardar la cola offline.", error);
+    }
+  }
+
+  function queueCurrentStatePatch() {
+    const config = getCloudSyncConfig();
+    if (!config.lastSync || !lastSyncedState) return false;
+    if (!pendingPatchBaseState) {
+      const existing = loadPatchQueue()[0];
+      pendingPatchBaseState = lastSyncedState;
+      pendingPatchBaseUpdatedAt = existing ? existing.baseUpdatedAt : config.lastSync;
+    }
+    const patch = buildStatePatch(pendingPatchBaseState, state);
+    if (!patchHasChanges(patch)) return false;
+    savePatchQueue([{
+      operationId: "op-" + Date.now() + "-" + Math.random().toString(36).slice(2, 10),
+      operationType: "patch",
+      baseUpdatedAt: pendingPatchBaseUpdatedAt || config.lastSync,
+      patch,
+      createdAt: new Date().toISOString()
+    }]);
+    ui.syncStatus = navigator.onLine === false ? "Cambios pendientes sin conexion" : "Cambios pendientes por sincronizar";
+    return true;
+  }
 
   function getCloudSyncConfig() {
     try {
@@ -1084,6 +1204,71 @@
     }, 500);
   }
 
+  function schedulePatchFlush(delay) {
+    const config = getCloudSyncConfig();
+    if (!cloudSyncReady(config) || config.auto === false) return;
+    clearTimeout(cloudPushTimer);
+    cloudPushTimer = setTimeout(() => {
+      cloudPushTimer = null;
+      flushPatchQueue(false);
+    }, delay || 500);
+  }
+
+  async function flushPatchQueue(manual) {
+    const config = getCloudSyncConfig();
+    const queue = loadPatchQueue();
+    if (!queue.length) {
+      if (manual) alert("No hay cambios pendientes.");
+      return true;
+    }
+    if (!cloudSyncReady(config)) {
+      if (manual) alert("Configure la sincronizacion antes de subir cambios.");
+      return false;
+    }
+    if (navigator.onLine === false) {
+      ui.syncStatus = queue.length + " cambio(s) pendiente(s) sin conexion";
+      schedulePatchFlush(5000);
+      return false;
+    }
+    const op = queue[0];
+    try {
+      ui.syncStatus = "Sincronizando cambios pendientes...";
+      const response = await cloudRequest(config, "/state/patch", {
+        method: "POST",
+        body: JSON.stringify(op)
+      });
+      if (response.status === 409) {
+        const detail = await readCloudErrorDetail(response);
+        config.lastError = "Conflicto al sincronizar cambio pendiente" + detail + ". Descargue datos antes de reintentar.";
+        saveCloudSyncConfig(config);
+        ui.syncStatus = "Conflicto de sincronizacion";
+        if (manual) alert(config.lastError);
+        render();
+        return false;
+      }
+      if (!response.ok) throw new Error("HTTP " + response.status + (await readCloudErrorDetail(response)));
+      const payload = await response.json();
+      savePatchQueue([]);
+      pendingPatchBaseState = null;
+      pendingPatchBaseUpdatedAt = "";
+      config.lastSync = payload.updatedAt || new Date().toISOString();
+      config.lastError = "";
+      saveCloudSyncConfig(config);
+      lastSyncedState = cloneSyncState(state);
+      ui.syncStatus = "Guardado";
+      if (manual) alert("Cambios pendientes sincronizados.");
+      return true;
+    } catch (error) {
+      config.lastError = "Subida pendiente fallida " + formatTimestampShort(new Date().toISOString()) + ": " + error.message;
+      saveCloudSyncConfig(config);
+      ui.syncStatus = "Sincronizacion pendiente";
+      console.warn("Sincronizacion pendiente:", error.message);
+      schedulePatchFlush(5000);
+      if (manual) alert("No se pudo sincronizar todavia: " + error.message);
+      return false;
+    }
+  }
+
   function flushCloudPush() {
     if (cloudPushTimer) {
       clearTimeout(cloudPushTimer);
@@ -1141,6 +1326,10 @@
 
   async function cloudPush(manual, isRetry) {
     const config = getCloudSyncConfig();
+    if (loadPatchQueue().length) {
+      const ok = await flushPatchQueue(manual);
+      if (ok || manual) return;
+    }
     if (!cloudSyncReady(config)) {
       if (manual) alert("Configure la URL y el token del backend en este panel.");
       return;
@@ -1191,6 +1380,7 @@
       config.lastSync = payload.updatedAt || new Date().toISOString();
       config.lastError = "";
       saveCloudSyncConfig(config);
+      lastSyncedState = cloneSyncState(state);
       if (manual) {
         alert("Datos subidos a la nube correctamente.");
         render();
@@ -1269,7 +1459,6 @@
     }
     [
       "exampleOrders", "remitos", "saldos", "purchases", "payments", "caja",
-      "productListPriceHistory", "productSalesQuantityHistory", "productPurchaseHistory",
       "providerLedger", "providerPayments", "clientTransfers", "vendorLedger",
       "attendance", "employeePayments", "employeeReimbursements", "performanceAdjustments",
       "clients", "products", "providers", "vehicles", "users", "cashBoxes"
@@ -1292,7 +1481,6 @@
   function stateHasOperationalData(data) {
     return [
       "orders", "purchases", "saldos", "caja", "payments", "remitos",
-      "productListPriceHistory", "productSalesQuantityHistory", "productPurchaseHistory",
       "providerLedger", "providerPayments", "clientTransfers", "attendance",
       "employeePayments", "employeeReimbursements", "billingLog", "vendorLedger"
     ].some((key) => Array.isArray(data[key]) && data[key].length);
@@ -1389,6 +1577,9 @@
       config.lastSync = remoteUpdated || new Date().toISOString();
       config.lastError = "";
       saveCloudSyncConfig(config);
+      lastSyncedState = cloneSyncState(state);
+      pendingPatchBaseState = null;
+      pendingPatchBaseUpdatedAt = "";
       currentUser = loadCurrentUser();
       const remoteOrdersAfter = Array.isArray(state.orders) ? state.orders.length : 0;
       if (remoteOrdersAfter < localOrdersBefore) {
@@ -1974,6 +2165,11 @@
     let html = "";
     if (ui.syncWarning) {
       html += `<div class="alert" style="margin-bottom:14px"><strong>Atencion sincronizacion:</strong> ${escapeHtml(ui.syncWarning)}</div>`;
+    }
+    if (ui.syncStatus || loadPatchQueue().length) {
+      const pending = loadPatchQueue().length;
+      const label = ui.syncStatus || (pending ? pending + " cambio(s) pendiente(s)" : "");
+      html += `<div class="alert ${pending ? "warn" : ""}" style="margin-bottom:14px"><strong>Sincronizacion:</strong> ${escapeHtml(label)}</div>`;
     }
     if (ui.lastOverwrite) {
       const elapsed = Math.floor((Date.now() - ui.lastOverwrite.at) / 1000);
@@ -4028,9 +4224,13 @@
     const from = ui.historyFrom || todayISO();
     const to = ui.historyTo || from;
     const dates = buildDateRange(from, to);
-    const purchaseRows = buildPurchaseHistoryMatrix(from, to);
-    const salesRows = buildSalesHistoryMatrix(from, to);
-    afterRender.push(bindHistories);
+    const historyReady = ui.historyData && ui.historyData.from === from && ui.historyData.to === to;
+    const purchaseRows = historyReady ? buildPurchaseHistoryMatrix(from, to, ui.historyData.purchaseHistory || []) : [];
+    const salesRows = historyReady ? buildSalesHistoryMatrix(from, to, ui.historyData.salesQuantityHistory || [], ui.historyData.listPriceHistory || []) : [];
+    afterRender.push(() => {
+      bindHistories();
+      ensureHistoryRangeLoaded(from, to);
+    });
     return pageShell(
       "Historiales",
       "Compras y ventas por rango, con una columna por dia.",
@@ -4045,12 +4245,12 @@
       <div class="panel">
         <h2 class="page-title" style="font-size:18px">Precios de compras</h2>
         <p class="muted">Cada dia muestra el precio mas alto pagado y la cantidad total comprada.</p>
-        ${renderHistoryMatrixTable(purchaseRows, dates, "purchase")}
+        ${ui.historyLoading && !historyReady ? `<div class="empty compact">Cargando historiales...</div>` : ui.historyError ? `<div class="alert">${escapeHtml(ui.historyError)}</div>` : renderHistoryMatrixTable(purchaseRows, dates, "purchase")}
       </div>
       <div class="panel" style="margin-top:14px">
         <h2 class="page-title" style="font-size:18px">Historial de ventas</h2>
         <p class="muted">Cada dia muestra el precio de lista y la cantidad total vendida.</p>
-        ${renderHistoryMatrixTable(salesRows, dates, "sales")}
+        ${ui.historyLoading && !historyReady ? `<div class="empty compact">Cargando historiales...</div>` : ui.historyError ? `<div class="alert">${escapeHtml(ui.historyError)}</div>` : renderHistoryMatrixTable(salesRows, dates, "sales")}
       </div>
       `,
       "historiales"
@@ -4107,6 +4307,36 @@
     return Array.isArray(records) && records.some((record) => isDateInRange(record.date, from, to));
   }
 
+  async function ensureHistoryRangeLoaded(from, to) {
+    if (ui.historyLoading) return;
+    if (ui.historyData && ui.historyData.from === from && ui.historyData.to === to) return;
+    const config = getCloudSyncConfig();
+    if (!cloudSyncReady(config)) {
+      ui.historyError = "No hay conexion configurada al servidor para cargar historiales.";
+      return;
+    }
+    ui.historyLoading = true;
+    ui.historyError = "";
+    try {
+      const response = await cloudRequest(config, "/product-history?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to), { method: "GET" });
+      if (!response.ok) throw new Error("HTTP " + response.status + (await readCloudErrorDetail(response)));
+      const payload = await response.json();
+      ui.historyData = {
+        from,
+        to,
+        listPriceHistory: payload.listPriceHistory || [],
+        salesQuantityHistory: payload.salesQuantityHistory || [],
+        purchaseHistory: payload.purchaseHistory || [],
+        updatedAt: payload.updatedAt || ""
+      };
+    } catch (error) {
+      ui.historyError = "No se pudieron cargar los historiales: " + error.message;
+    } finally {
+      ui.historyLoading = false;
+      if (route.base === "historiales") render();
+    }
+  }
+
   function ensureHistoryRow(rows, record, product) {
     const key = record.productId || record.productName;
     if (!rows[key]) rows[key] = {
@@ -4121,10 +4351,10 @@
     return rows[key];
   }
 
-  function buildPurchaseHistoryMatrix(from, to) {
-    if (hasCanonicalHistory(state.productPurchaseHistory, from, to)) {
+  function buildPurchaseHistoryMatrix(from, to, canonicalRecords) {
+    if (hasCanonicalHistory(canonicalRecords, from, to)) {
       const rows = {};
-      state.productPurchaseHistory
+      canonicalRecords
         .filter((record) => isDateInRange(record.date, from, to))
         .forEach((record) => {
           const date = String(record.date || "").slice(0, 10);
@@ -4172,14 +4402,14 @@
     return Object.values(rows).sort((a, b) => String(a.category).localeCompare(String(b.category)) || String(a.productName).localeCompare(String(b.productName)));
   }
 
-  function buildSalesHistoryMatrix(from, to) {
-    if (hasCanonicalHistory(state.productSalesQuantityHistory, from, to)) {
+  function buildSalesHistoryMatrix(from, to, canonicalSalesRecords, canonicalPriceRecords) {
+    if (hasCanonicalHistory(canonicalSalesRecords, from, to)) {
       const priceByProductDate = {};
-      (state.productListPriceHistory || []).forEach((record) => {
+      (canonicalPriceRecords || []).forEach((record) => {
         priceByProductDate[record.productId + "|" + String(record.date || "").slice(0, 10)] = Number(record.price || 0);
       });
       const rows = {};
-      state.productSalesQuantityHistory
+      canonicalSalesRecords
         .filter((record) => isDateInRange(record.date, from, to))
         .forEach((record) => {
           const date = String(record.date || "").slice(0, 10);

@@ -309,11 +309,128 @@ app.post("/auth/reset", async (req, res) => {
 
 // ---------- Estado del ERP (sincronizacion) ----------
 const SYNC_ROLES = ["manager", "admin", "employee", "contador"];
+const HISTORY_KEYS = ["productListPriceHistory", "productSalesQuantityHistory", "productPurchaseHistory"];
+const ARRAY_PATCH_KEYS = [
+  "orders", "deletedOrders", "exampleOrders", "remitos", "saldos", "purchases", "payments", "caja",
+  "providerLedger", "providerPayments", "clientTransfers", "vendorLedger",
+  "attendance", "employeePayments", "employeeReimbursements", "performanceAdjustments",
+  "clients", "products", "providers", "vehicles", "users", "cashBoxes",
+  "preferences", "productAliases", "clientProductAliases", "quantityAliases", "clientQuantityAliases",
+  "costRelations", "productRelations", "billingLog"
+];
+const OBJECT_PATCH_KEYS = ["prices", "appSettings"];
+
+function stripHistoryFromState(data) {
+  const clean = { ...(data || {}) };
+  HISTORY_KEYS.forEach((key) => delete clean[key]);
+  return clean;
+}
+
+function historyPayloadFromState(data) {
+  const source = data || {};
+  return {
+    listPriceHistory: Array.isArray(source.productListPriceHistory) ? source.productListPriceHistory : [],
+    salesQuantityHistory: Array.isArray(source.productSalesQuantityHistory) ? source.productSalesQuantityHistory : [],
+    purchaseHistory: Array.isArray(source.productPurchaseHistory) ? source.productPurchaseHistory : []
+  };
+}
+
+async function upsertProductHistoryState(db, data, updatedBy) {
+  const history = historyPayloadFromState(data);
+  if (!history.listPriceHistory.length && !history.salesQuantityHistory.length && !history.purchaseHistory.length) return;
+  await db.query(
+    `INSERT INTO product_history_state (id, list_price_history, sales_quantity_history, purchase_history, updated_at, updated_by)
+     VALUES ('main', $1, $2, $3, now(), $4)
+     ON CONFLICT (id) DO UPDATE SET
+       list_price_history = EXCLUDED.list_price_history,
+       sales_quantity_history = EXCLUDED.sales_quantity_history,
+       purchase_history = EXCLUDED.purchase_history,
+       updated_at = EXCLUDED.updated_at,
+       updated_by = EXCLUDED.updated_by`,
+    [history.listPriceHistory, history.salesQuantityHistory, history.purchaseHistory, updatedBy]
+  );
+}
+
+async function loadProductHistoryState(db) {
+  const { rows } = await db.query("SELECT list_price_history, sales_quantity_history, purchase_history, updated_at FROM product_history_state WHERE id = 'main'");
+  if (!rows.length) return { listPriceHistory: [], salesQuantityHistory: [], purchaseHistory: [], updatedAt: null };
+  return {
+    listPriceHistory: Array.isArray(rows[0].list_price_history) ? rows[0].list_price_history : [],
+    salesQuantityHistory: Array.isArray(rows[0].sales_quantity_history) ? rows[0].sales_quantity_history : [],
+    purchaseHistory: Array.isArray(rows[0].purchase_history) ? rows[0].purchase_history : [],
+    updatedAt: rows[0].updated_at ? rows[0].updated_at.toISOString() : null
+  };
+}
+
+function filterHistoryByRange(records, from, to) {
+  const start = String(from || "0000-01-01").slice(0, 10);
+  const end = String(to || "9999-12-31").slice(0, 10);
+  return (Array.isArray(records) ? records : []).filter((record) => {
+    const date = String(record && record.date || "").slice(0, 10);
+    return date && date >= start && date <= end;
+  });
+}
+
+function patchKeyForItem(key, item) {
+  if (!item) return "";
+  if (key === "preferences") return String(item.clientId || "") + "|" + String(item.productId || "");
+  if (key === "productAliases") return String(item.productId || "") + "|" + String(item.alias || "");
+  if (key === "clientProductAliases") return String(item.clientId || "") + "|" + String(item.productId || "") + "|" + String(item.alias || "");
+  if (key === "quantityAliases") return String(item.alias || "");
+  if (key === "clientQuantityAliases") return String(item.clientId || "") + "|" + String(item.alias || "");
+  if (key === "costRelations") return item.id || JSON.stringify([item.sourceProductId, item.targetProductId, item.productId]);
+  if (key === "productRelations") return item.id || String(item.retailProductId || "") + "|" + String(item.wholesaleProductId || "");
+  return String(item.id || "");
+}
+
+function applyArrayPatch(target, key, changes) {
+  const current = Array.isArray(target[key]) ? target[key] : [];
+  const map = new Map();
+  current.forEach((item) => {
+    const id = patchKeyForItem(key, item);
+    if (id) map.set(id, item);
+  });
+  (Array.isArray(changes && changes.delete) ? changes.delete : []).forEach((id) => map.delete(String(id)));
+  (Array.isArray(changes && changes.upsert) ? changes.upsert : []).forEach((item) => {
+    const id = patchKeyForItem(key, item);
+    if (id) map.set(id, item);
+  });
+  target[key] = Array.from(map.values());
+}
+
+function applyStatePatch(data, patch) {
+  const next = stripHistoryFromState(data || {});
+  const arrays = patch && patch.arrays && typeof patch.arrays === "object" ? patch.arrays : {};
+  ARRAY_PATCH_KEYS.forEach((key) => {
+    if (arrays[key]) applyArrayPatch(next, key, arrays[key]);
+  });
+  const objects = patch && patch.objects && typeof patch.objects === "object" ? patch.objects : {};
+  OBJECT_PATCH_KEYS.forEach((key) => {
+    if (objects[key] && typeof objects[key] === "object") {
+      next[key] = { ...(next[key] || {}), ...objects[key] };
+    }
+  });
+  const scalars = patch && patch.scalars && typeof patch.scalars === "object" ? patch.scalars : {};
+  Object.keys(scalars).forEach((key) => {
+    if (!HISTORY_KEYS.includes(key)) next[key] = scalars[key];
+  });
+  return next;
+}
 
 app.get("/state", authenticate, requireRole(...SYNC_ROLES), async (req, res) => {
   const { rows } = await pool.query("SELECT data, updated_at FROM app_state WHERE id = 'main'");
   if (!rows.length) return res.status(404).json({ error: "Sin datos guardados todavia." });
-  res.json({ data: rows[0].data, updatedAt: rows[0].updated_at.toISOString() });
+  res.json({ data: stripHistoryFromState(rows[0].data), updatedAt: rows[0].updated_at.toISOString() });
+});
+
+app.get("/product-history", authenticate, requireRole("manager", "admin"), async (req, res) => {
+  const history = await loadProductHistoryState(pool);
+  res.json({
+    listPriceHistory: filterHistoryByRange(history.listPriceHistory, req.query.from, req.query.to),
+    salesQuantityHistory: filterHistoryByRange(history.salesQuantityHistory, req.query.from, req.query.to),
+    purchaseHistory: filterHistoryByRange(history.purchaseHistory, req.query.from, req.query.to),
+    updatedAt: history.updatedAt
+  });
 });
 
 app.put("/state", authenticate, requireRole(...SYNC_ROLES), async (req, res) => {
@@ -342,23 +459,25 @@ app.put("/state", authenticate, requireRole(...SYNC_ROLES), async (req, res) => 
         return res.status(409).json({ error: "conflicto: el servidor tiene una version mas nueva", updatedAt: storedIso });
       }
     }
+    await upsertProductHistoryState(clientDb, body.data, req.user.username);
+    const cleanData = stripHistoryFromState(body.data);
     const saved = await clientDb.query(
       `INSERT INTO app_state (id, data, updated_at, updated_by) VALUES ('main', $1, now(), $2)
        ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, updated_at = EXCLUDED.updated_at, updated_by = EXCLUDED.updated_by
        RETURNING updated_at`,
-      [body.data, req.user.username]
+      [cleanData, req.user.username]
     );
-    await clientDb.query("INSERT INTO state_history (data, updated_by) VALUES ($1, $2)", [body.data, req.user.username]);
+    await clientDb.query("INSERT INTO state_history (data, updated_by) VALUES ($1, $2)", [cleanData, req.user.username]);
     await clientDb.query(
       "DELETE FROM state_history WHERE id NOT IN (SELECT id FROM state_history ORDER BY id DESC LIMIT $1)",
       [STATE_HISTORY_KEEP]
     );
-    await mirrorStateToTables(clientDb, body.data);
-    await syncUsersFromState(clientDb, body.data);
+    await mirrorStateToTables(clientDb, cleanData);
+    await syncUsersFromState(clientDb, cleanData);
     const afterCounts = {
-      orders: Array.isArray(body.data.orders) ? body.data.orders.length : 0,
-      clients: Array.isArray(body.data.clients) ? body.data.clients.length : 0,
-      products: Array.isArray(body.data.products) ? body.data.products.length : 0
+      orders: Array.isArray(cleanData.orders) ? cleanData.orders.length : 0,
+      clients: Array.isArray(cleanData.clients) ? cleanData.clients.length : 0,
+      products: Array.isArray(cleanData.products) ? cleanData.products.length : 0
     };
     await clientDb.query(
       "INSERT INTO state_writes (updated_by, orders_before, orders_after, clients_before, clients_after, products_before, products_after, diff_orders) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
@@ -370,6 +489,56 @@ app.put("/state", authenticate, requireRole(...SYNC_ROLES), async (req, res) => 
     await clientDb.query("ROLLBACK").catch(() => {});
     console.error("PUT /state:", error);
     res.status(500).json({ error: "No se pudo guardar el estado: " + error.message });
+  } finally {
+    clientDb.release();
+  }
+});
+
+app.post("/state/patch", authenticate, requireRole(...SYNC_ROLES), async (req, res) => {
+  const body = req.body || {};
+  if (!body.operationId || !body.patch || typeof body.patch !== "object") {
+    return res.status(400).json({ error: "Cuerpo invalido: se espera { operationId, baseUpdatedAt, patch }." });
+  }
+  const clientDb = await pool.connect();
+  try {
+    await clientDb.query("BEGIN");
+    const existingOp = await clientDb.query("SELECT applied_at FROM state_operations WHERE operation_id = $1", [String(body.operationId)]);
+    if (existingOp.rows.length) {
+      const current = await clientDb.query("SELECT updated_at FROM app_state WHERE id = 'main'");
+      await clientDb.query("COMMIT");
+      return res.json({ ok: true, duplicate: true, updatedAt: current.rows[0] ? current.rows[0].updated_at.toISOString() : null });
+    }
+    const current = await clientDb.query("SELECT updated_at, data FROM app_state WHERE id = 'main' FOR UPDATE");
+    if (!current.rows.length) {
+      await clientDb.query("ROLLBACK");
+      return res.status(404).json({ error: "Sin datos guardados todavia." });
+    }
+    if (body.baseUpdatedAt === undefined || body.baseUpdatedAt === null) {
+      await clientDb.query("ROLLBACK");
+      return res.status(409).json({ error: "conflicto: operacion sin version base. Descargue primero.", updatedAt: current.rows[0].updated_at.toISOString() });
+    }
+    const storedIso = current.rows[0].updated_at.toISOString();
+    if (storedIso !== String(body.baseUpdatedAt)) {
+      await clientDb.query("ROLLBACK");
+      return res.status(409).json({ error: "conflicto: el servidor tiene una version mas nueva", updatedAt: storedIso });
+    }
+    const beforeData = current.rows[0].data || {};
+    const nextData = applyStatePatch(beforeData, body.patch);
+    const saved = await clientDb.query(
+      "UPDATE app_state SET data = $1, updated_at = now(), updated_by = $2 WHERE id = 'main' RETURNING updated_at",
+      [nextData, req.user.username]
+    );
+    await clientDb.query("INSERT INTO state_operations (operation_id, operation_type, base_updated_at, applied_by, patch) VALUES ($1,$2,$3,$4,$5)", [String(body.operationId), String(body.operationType || "patch"), body.baseUpdatedAt, req.user.username, body.patch]);
+    await clientDb.query("INSERT INTO state_history (data, updated_by) VALUES ($1, $2)", [nextData, req.user.username]);
+    await clientDb.query("DELETE FROM state_history WHERE id NOT IN (SELECT id FROM state_history ORDER BY id DESC LIMIT $1)", [STATE_HISTORY_KEEP]);
+    await mirrorStateToTables(clientDb, nextData);
+    await syncUsersFromState(clientDb, nextData);
+    await clientDb.query("COMMIT");
+    res.json({ ok: true, updatedAt: saved.rows[0].updated_at.toISOString() });
+  } catch (error) {
+    await clientDb.query("ROLLBACK").catch(() => {});
+    console.error("POST /state/patch:", error);
+    res.status(500).json({ error: "No se pudo aplicar la operacion: " + error.message });
   } finally {
     clientDb.release();
   }
@@ -596,8 +765,19 @@ app.get("/exports/orders.csv", authenticate, requireRole(...REPORT_ROLES), async
 app.get("/exports/backup.json", authenticate, requireRole("manager"), async (req, res) => {
   const { rows } = await pool.query("SELECT data, updated_at FROM app_state WHERE id = 'main'");
   if (!rows.length) return res.status(404).json({ error: "Sin datos guardados todavia." });
+  const history = await loadProductHistoryState(pool);
   res.set("content-disposition", `attachment; filename="pare-carrito-backup-${new Date().toISOString().slice(0, 10)}.json"`);
-  res.json({ exportedAt: new Date().toISOString(), updatedAt: rows[0].updated_at, data: rows[0].data });
+  res.json({
+    exportedAt: new Date().toISOString(),
+    updatedAt: rows[0].updated_at,
+    data: rows[0].data,
+    productHistory: {
+      listPriceHistory: history.listPriceHistory,
+      salesQuantityHistory: history.salesQuantityHistory,
+      purchaseHistory: history.purchaseHistory,
+      updatedAt: history.updatedAt
+    }
+  });
 });
 
 // ---------- Facturacion automatica (TusFacturasAPP) ----------

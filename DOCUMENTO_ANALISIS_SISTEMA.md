@@ -316,11 +316,11 @@ El frontend es estático; basta copiar los archivos actualizados a `lucas-pare-c
 
 ## 11. Historiales canonicos de productos
 
-Desde la version 12.8.12 el sistema separa la informacion historica de productos de la informacion transaccional de pedidos, saldos y caja.
+Desde la version 12.8.15 el sistema separa la informacion historica de productos de la informacion transaccional de pedidos, saldos y caja tambien a nivel de almacenamiento.
 
 ### 11.1 Ventas
 
-La pantalla `Historiales` usa `productListPriceHistory` como fuente de precio historico de lista por producto/dia y `productSalesQuantityHistory` como fuente de cantidad vendida por producto/dia.
+La pantalla `Historiales` usa el endpoint `/product-history` como fuente de precio historico de lista por producto/dia y cantidad vendida por producto/dia.
 
 Esto significa que:
 
@@ -331,7 +331,7 @@ Esto significa que:
 
 ### 11.2 Compras
 
-La pantalla `Historiales` usa `productPurchaseHistory` como fuente canonica para cantidad comprada y precio de compra por producto/dia.
+La pantalla `Historiales` usa `product_history_state.purchase_history` como fuente canonica para cantidad comprada y precio de compra por producto/dia.
 
 Esto significa que:
 
@@ -339,30 +339,44 @@ Esto significa que:
 - Los movimientos de caja, pagos, deuda de proveedores y compras transaccionales existentes quedan separados.
 - Cualquier reemplazo o reversa de compras con impacto financiero requiere decision explicita y backup previo.
 
-### 11.3 Fallback operativo
+### 11.3 Almacenamiento
 
-Si un rango no tiene historiales canonicos cargados, la pantalla conserva el comportamiento anterior y arma la matriz desde `orders` y `purchases`.
+Los historiales canonicos viven en la tabla `product_history_state`, fuera del JSON principal `app_state`.
+
+Esto reduce el peso de cada operacion diaria, porque editar clientes, crear pedidos o registrar pagos ya no transporta decenas de miles de registros historicos.
+
+### 11.4 Sincronizacion offline
+
+El frontend mantiene una cola local de parches pendientes. Cada parche incluye `operationId`, `baseUpdatedAt` y los registros modificados.
+
+- Si no hay conexion, el cambio queda pendiente y se reintenta al volver internet.
+- Si el servidor tiene una version distinta, responde conflicto y el cliente no pisa datos silenciosamente.
+- Si se reintenta una operacion ya aplicada, `state_operations.operation_id` evita duplicados.
+- El servidor sigue siendo la fuente de verdad.
 
 ---
 
 ## 12. Ultimo Cambio y Version
 
-**Version operativa:** 12.8.14  
+**Version operativa:** 12.8.15  
 **Fecha:** 2026-06-20  
-**Commit GitHub del cambio funcional:** 651c4026bf2e07a7d0cd75071392844810506736  
+**Commit GitHub del cambio funcional:** pendiente al momento de esta edicion documental  
 **Entorno actualizado:** VPS productivo `/opt/pare-carrito` con Docker Compose (`api`, `caddy`, `db`).
 
 ### Detalle del ultimo cambio
 
-- Se corrigio el flujo de guardado cuando el estado completo excede la cuota de `localStorage`.
-- `saveState()` ahora continua con la sincronizacion al servidor aunque el navegador no pueda guardar la copia local completa.
-- Esto corrige el caso en que al editar un cliente el modal no cerraba, los cambios se veian temporalmente y se perdian al refrescar.
-- Se protegieron tambien escrituras locales durante merge/descarga de nube, login remoto y restauracion de backup local.
-- No se modificaron datos productivos, tablas, pedidos, saldos, caja ni compras.
+- Se migro el historial canonico de productos a la tabla `product_history_state`.
+- Se agrego el endpoint `/product-history` para cargar historiales por rango.
+- Se agrego el endpoint `/state/patch` para aplicar operaciones chicas con idempotencia.
+- Se agrego la tabla `state_operations` para registrar operaciones aplicadas y evitar duplicados en reintentos offline.
+- El frontend ya no transporta historiales grandes dentro del estado operativo.
+- El guardado normal usa cola local de parches pendientes y reintento al volver la conexion.
+- El backup JSON del servidor incluye `productHistory` ademas de `app_state`.
 - No se registraron credenciales en este documento ni en el historial.
 
 ### Backups asociados
 
-- VPS pre-fix guardado clientes: dump PostgreSQL, `app_state` y tar de `/opt/pare-carrito` generados con timestamp `20260620_081032`.
-- VPS post-fix guardado clientes: dump PostgreSQL, `app_state` y tar de `/opt/pare-carrito` generados con timestamp `20260620_081211`.
-- PC post-fix guardado clientes: `auditoria/repo-backup-20260620-0814-postfix-client-save-quota.zip`.
+- VPS pre-migracion historiales/offline: dump PostgreSQL, `app_state` y tar de `/opt/pare-carrito` generados con timestamp `20260620_093128`.
+- PC pre-migracion historiales/offline: `auditoria/repo-backup-20260620-0931-premigracion-historiales-offline.zip`.
+- VPS post-migracion historiales/offline: pendiente hasta finalizar despliegue y verificacion.
+- PC post-migracion historiales/offline: pendiente hasta finalizar commit/despliegue.

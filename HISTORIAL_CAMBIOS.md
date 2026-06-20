@@ -1,5 +1,19 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.8.15 - Historiales fuera del estado operativo y cola offline (2026-06-20)
+
+### Arquitectura / Sincronizacion
+
+- Se agrego la tabla `product_history_state` para guardar historiales canonicos de productos fuera del `app_state` operativo.
+- Se agrego el endpoint `/product-history` para que la pagina `Historiales` cargue solo el rango consultado.
+- Se agrego la tabla `state_operations` y el endpoint `/state/patch` para aplicar operaciones chicas con `operationId` idempotente y `baseUpdatedAt`.
+- El frontend deja de transportar historiales grandes en cada guardado y usa una cola local de parches pendientes para operar offline y reintentar al volver la conexion.
+- La cola pendiente se compacta contra la ultima version conocida del servidor y no pisa el VPS si hay conflicto de version.
+- `app_state` queda reducido al estado operativo: clientes, pedidos, pagos, saldos, caja, compras, usuarios y configuracion.
+- El backup JSON del servidor incluye tanto `app_state` como `productHistory`.
+- No se registraron credenciales en documentacion ni reportes.
+
+---
 ## v12.8.14 - Guardado robusto con estado grande en navegador (2026-06-20)
 
 ### Frontend / Sincronizacion

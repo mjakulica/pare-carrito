@@ -31,6 +31,26 @@ CREATE TABLE IF NOT EXISTS state_history (
   updated_by TEXT
 );
 
+-- Historiales canonicos de productos fuera del app_state operativo.
+CREATE TABLE IF NOT EXISTS product_history_state (
+  id TEXT PRIMARY KEY,
+  list_price_history JSONB NOT NULL DEFAULT '[]',
+  sales_quantity_history JSONB NOT NULL DEFAULT '[]',
+  purchase_history JSONB NOT NULL DEFAULT '[]',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_by TEXT
+);
+
+-- Operaciones chicas aplicadas al estado, con idempotencia para reintentos offline.
+CREATE TABLE IF NOT EXISTS state_operations (
+  operation_id TEXT PRIMARY KEY,
+  operation_type TEXT NOT NULL DEFAULT 'patch',
+  base_updated_at TIMESTAMPTZ,
+  applied_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  applied_by TEXT,
+  patch JSONB NOT NULL DEFAULT '{}'
+);
+
 -- Espejo relacional (se refresca en cada subida de estado; consultas y reportes pesados)
 CREATE TABLE IF NOT EXISTS clients (
   id TEXT PRIMARY KEY,
