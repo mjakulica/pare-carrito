@@ -1,5 +1,16 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.8.14 - Guardado robusto con estado grande en navegador (2026-06-20)
+
+### Frontend / Sincronizacion
+
+- Se corrigio un error al editar clientes cuando el estado completo supera la cuota de `localStorage` del navegador.
+- Si `localStorage` rechaza el estado grande, el sistema ya no corta el flujo de guardado: continua con la sincronizacion al servidor.
+- El modal de edicion puede cerrar correctamente despues de guardar, y los cambios quedan persistidos en el VPS.
+- Tambien se protegieron escrituras locales durante descarga/merge de nube, login remoto y restauracion de backups locales.
+- No se registraron credenciales en documentacion ni reportes.
+
+---
 ## v12.8.13 - Recuperacion de pedidos historicos 2026-06-08 a 2026-06-18 (2026-06-19)
 
 ### Datos / Pedidos y saldos

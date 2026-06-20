@@ -660,7 +660,7 @@
       if (shouldPurgeOperationalRecords) {
         purgeOperationalRecords(normalized);
         normalized.appSettings.operationalResetVersion = OPERATIONAL_RESET_VERSION;
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
+        writeLocalStateSnapshot(normalized, "No se pudo persistir el estado normalizado en localStorage.");
       }
       return normalized;
     } catch (error) {
@@ -946,8 +946,18 @@
     return aliases.map((alias) => ({ alias: alias.alias, quantity: Number(alias.quantity || 0) })).filter((alias) => alias.alias && alias.quantity > 0);
   }
 
+  function writeLocalStateSnapshot(data, warningMessage) {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      return true;
+    } catch (error) {
+      console.warn(warningMessage || "No se pudo guardar el estado completo en localStorage.", error);
+      return false;
+    }
+  }
+
   function saveState() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    writeLocalStateSnapshot(state, "No se pudo guardar el estado completo en localStorage; se intentara sincronizar con el servidor.");
     const config = getCloudSyncConfig();
     if (cloudSyncReady(config) && config.auto !== false) {
       const ok = flushCloudPush();
@@ -990,7 +1000,7 @@
       const parsed = JSON.parse(backup.stateRaw);
       if (!parsed.clients || !parsed.products) return false;
       state = normalizeLoadedState({ ...seedState(), ...parsed }, seedState());
-      localStorage.setItem(STORAGE_KEY, backup.stateRaw);
+      writeLocalStateSnapshot(parsed, "No se pudo persistir el backup restaurado en localStorage.");
       currentUser = loadCurrentUser();
       render();
       return true;
@@ -1012,7 +1022,11 @@
   }
 
   function saveCloudSyncConfig(config) {
-    localStorage.setItem(SYNC_KEY, JSON.stringify(config || {}));
+    try {
+      localStorage.setItem(SYNC_KEY, JSON.stringify(config || {}));
+    } catch (error) {
+      console.warn("No se pudo guardar la configuracion de sincronizacion local.", error);
+    }
   }
 
   function cloudSyncReady(config) {
@@ -1164,7 +1178,7 @@
           const remote = await remoteResponse.json();
           const merged = mergeCloudStates(remote.data, state);
           state = normalizeLoadedState({ ...seedState(), ...merged }, seedState());
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+          writeLocalStateSnapshot(state, "No se pudo guardar el estado combinado en localStorage.");
           config.lastSync = String(remote.updatedAt || "");
           saveCloudSyncConfig(config);
           currentUser = loadCurrentUser();
@@ -1371,7 +1385,7 @@
       const backupIndexBeforeOverwrite = 0; // backupLocalState inserts at index 0
       const localOrdersBefore = Array.isArray(state.orders) ? state.orders.length : 0;
       state = normalizeLoadedState({ ...seedState(), ...payload.data }, seedState());
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      writeLocalStateSnapshot(state, "No se pudo guardar la descarga de nube en localStorage.");
       config.lastSync = remoteUpdated || new Date().toISOString();
       config.lastError = "";
       saveCloudSyncConfig(config);
@@ -1753,7 +1767,7 @@
           if (!user) {
             user = { id: "USR-REMOTE-" + Date.now(), username, name: serverResult.payload.name || username, role: serverResult.payload.role, password, isActive: true };
             state.users.push(user);
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+            writeLocalStateSnapshot(state, "No se pudo guardar el usuario remoto en localStorage.");
           }
           setCurrentUser(user);
           navigate(roleHome(), true);

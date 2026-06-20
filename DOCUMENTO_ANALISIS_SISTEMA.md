@@ -347,24 +347,22 @@ Si un rango no tiene historiales canonicos cargados, la pantalla conserva el com
 
 ## 12. Ultimo Cambio y Version
 
-**Version operativa:** 12.8.13  
-**Fecha:** 2026-06-19  
+**Version operativa:** 12.8.14  
+**Fecha:** 2026-06-20  
 **Commit GitHub del cambio funcional:** pendiente al momento de esta edicion documental  
 **Entorno actualizado:** VPS productivo `/opt/pare-carrito` con Docker Compose (`api`, `caddy`, `db`).
 
 ### Detalle del ultimo cambio
 
-- Se reproceso el tramo de pedidos historicos `2026-06-08` a `2026-06-18`.
-- Se importaron 105 pedidos recuperados que habian quedado fuera por advertencias de `celdas_sueltas`.
-- Se agregaron 1.065 items por un total de `$8.306.220`.
-- Por cada pedido se genero un movimiento de saldo tipo `pedido` y se recalcularon los balances de los 23 clientes afectados.
-- No se modificaron caja, pagos, compras ni movimientos de proveedores.
-- Quedaron pendientes 8 pedidos por productos no encontrados: `Jengibre Kg` y `Romero fresco atado`.
+- Se corrigio el flujo de guardado cuando el estado completo excede la cuota de `localStorage`.
+- `saveState()` ahora continua con la sincronizacion al servidor aunque el navegador no pueda guardar la copia local completa.
+- Esto corrige el caso en que al editar un cliente el modal no cerraba, los cambios se veian temporalmente y se perdian al refrescar.
+- Se protegieron tambien escrituras locales durante merge/descarga de nube, login remoto y restauracion de backup local.
+- No se modificaron datos productivos, tablas, pedidos, saldos, caja ni compras.
 - No se registraron credenciales en este documento ni en el historial.
 
 ### Backups asociados
 
-- VPS pre-import pedidos tramo: dump PostgreSQL, `app_state` y tar de `/opt/pare-carrito` generados con timestamp `20260619_225932`.
-- PC pre-import pedidos tramo: `auditoria/repo-backup-20260619-2259-preimport-pedidos-20260608-18.zip`.
-- VPS post-import pedidos tramo: dump PostgreSQL, `app_state` y tar de `/opt/pare-carrito` generados con timestamp `20260619_231345`.
-- PC post-import pedidos tramo: `auditoria/repo-backup-20260619-2318-postimport-pedidos-20260608-18.zip`.
+- VPS pre-fix guardado clientes: pendiente hasta finalizar despliegue.
+- VPS post-fix guardado clientes: pendiente hasta finalizar despliegue.
+- PC post-fix guardado clientes: pendiente hasta finalizar commit/despliegue.
