@@ -796,10 +796,13 @@ app.get("/billing/status", authenticate, requireRole("manager", "admin", "contad
   });
 });
 
-app.post("/billing/run", authenticate, requireRole("manager"), async (req, res) => {
+app.post("/billing/run", authenticate, requireRole("manager", "admin", "contador"), async (req, res) => {
   const body = req.body || {};
   try {
-    const result = await runBilling({ pool, force: true, simulate: body.simulate === true, onlyClientId: String(body.clientId || "") });
+    const clientIds = Array.isArray(body.clientIds)
+      ? body.clientIds.map((id) => String(id || "").trim()).filter(Boolean)
+      : [];
+    const result = await runBilling({ pool, force: true, simulate: body.simulate === true, onlyClientId: String(body.clientId || ""), onlyClientIds: clientIds });
     res.json(result);
   } catch (error) {
     res.status(500).json({ error: "Fallo la facturacion: " + error.message });

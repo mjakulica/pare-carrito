@@ -358,27 +358,25 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 
 ## 12. Ultimo Cambio y Version
 
-**Version operativa:** 12.8.15  
+**Version operativa:** 12.8.16  
 **Fecha:** 2026-06-20  
-**Commit GitHub del cambio funcional:** `53874e2243af24753304a6745d742f2c3108a73a`  
+**Commit GitHub del cambio funcional:** pendiente hasta finalizar deploy  
 **Entorno actualizado:** VPS productivo `/opt/pare-carrito` con Docker Compose (`api`, `caddy`, `db`).
 
 ### Detalle del ultimo cambio
 
-- Se migro el historial canonico de productos a la tabla `product_history_state`.
-- Se agrego el endpoint `/product-history` para cargar historiales por rango.
-- Se agrego el endpoint `/state/patch` para aplicar operaciones chicas con idempotencia.
-- Se agrego la tabla `state_operations` para registrar operaciones aplicadas y evitar duplicados en reintentos offline.
-- El frontend ya no transporta historiales grandes dentro del estado operativo.
-- El guardado normal usa cola local de parches pendientes y reintento al volver la conexion.
-- El backup JSON del servidor incluye `productHistory` ademas de `app_state`.
-- La migracion productiva dejo `product_history_state` con precios de lista `55.082`, cantidades vendidas `25.475` y compras `15.118`.
-- El `app_state` productivo quedo sin claves de historiales y reducido a `15.639.270` bytes en PostgreSQL.
+- La pagina `Historiales` de admin/gerente carga el rango seleccionado de forma inmediata desde `/product-history` y evita mostrar "Sin datos" durante la espera.
+- `Historiales` incorpora botones rapidos `7 dias`, `30 dias`, `3 meses`, `6 meses` e impresion directa de compras, ventas o ambos recuadros.
+- `Dividir Compras` simplifica los botones de WhatsApp a icono + `Todos` y `Seleccionado`.
+- `Facturacion` en admin, gerente y contador permite seleccionar clientes con checkbox, seleccionar/deseleccionar todos y emitir/simular solo los seleccionados.
+- El backend `/billing/run` acepta `clientIds` y queda habilitado para roles `manager`, `admin` y `contador`.
+- En `Inicio` de admin/gerente, las tendencias excluyen dias sin pedidos de todos los graficos y los avisos de comprobantes/usuarios pendientes se compactan.
+- En `Nuevo Pedido`, el cambio de cliente recalcula precios/preferencias en el momento y el selector permite volver a desplegar clientes sin usar la X.
 - No se registraron credenciales en este documento ni en el historial.
 
 ### Backups asociados
 
-- VPS pre-migracion historiales/offline: dump PostgreSQL, `app_state` y tar de `/opt/pare-carrito` generados con timestamp `20260620_093128`.
-- PC pre-migracion historiales/offline: `auditoria/repo-backup-20260620-0931-premigracion-historiales-offline.zip`.
-- VPS post-migracion historiales/offline: dump PostgreSQL, `app_state` y tar de `/opt/pare-carrito` generados con timestamp `20260620_094729`.
-- PC post-migracion historiales/offline: `auditoria/repo-backup-20260620-0955-postmigracion-historiales-offline.zip`.
+- VPS pre-cambio UI/historiales/facturacion: dump PostgreSQL, `app_state` y tar de `/opt/pare-carrito` generados con timestamp `20260620_143543`.
+- PC pre-cambio UI/historiales/facturacion: `auditoria/repo-backup-20260620-1436-pre-ui-historiales-facturacion.zip`.
+- VPS post-cambio UI/historiales/facturacion: pendiente hasta finalizar despliegue y verificacion.
+- PC post-cambio UI/historiales/facturacion: pendiente hasta finalizar commit/despliegue.

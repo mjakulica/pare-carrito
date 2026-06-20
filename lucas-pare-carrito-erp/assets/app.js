@@ -286,6 +286,7 @@
     historyData: null,
     historyLoading: false,
     historyError: "",
+    billingSelectedClients: null,
     lastOverwrite: null
   };
 
@@ -2434,22 +2435,25 @@
     const from = ui.dashFrom || addDaysISO(todayISO(), -29);
     const to = ui.dashTo || todayISO();
     const series = buildDashboardSeries(from, to);
+    const activeDateIndexes = series.orders.map((value, index) => Number(value || 0) > 0 ? index : -1).filter((index) => index >= 0);
+    const chartDates = activeDateIndexes.map((index) => series.dates[index]);
+    const filterActiveDates = (values) => activeDateIndexes.map((index) => values[index] || 0);
     const isManager = currentUser.role === "manager";
     const formatCount = (value) => formatNumber(value);
     const formatKg = (value) => formatNumber(value) + " kg";
     const charts = [
-      { title: "Cantidad de pedidos por dia", values: series.orders, color: "#2457a6", format: formatCount },
-      { title: "Gastos totales por dia", values: series.expenses, color: "#b42318", format: formatMoney },
-      { title: "Kgs vendidos por dia", values: series.kgs, color: "#0f7a5d", format: formatKg }
+      { title: "Cantidad de pedidos por dia", values: filterActiveDates(series.orders), color: "#2457a6", format: formatCount },
+      { title: "Gastos totales por dia", values: filterActiveDates(series.expenses), color: "#b42318", format: formatMoney },
+      { title: "Kgs vendidos por dia", values: filterActiveDates(series.kgs), color: "#0f7a5d", format: formatKg }
     ];
     if (isManager) {
-      charts.push({ title: "Ventas totales por dia", values: series.sales, color: "#7a3bd0", format: formatMoney });
-      charts.push({ title: "Resultado (ventas - gastos) por dia", values: series.result, color: "#a36300", format: formatMoney });
+      charts.push({ title: "Ventas totales por dia", values: filterActiveDates(series.sales), color: "#7a3bd0", format: formatMoney });
+      charts.push({ title: "Resultado (ventas - gastos) por dia", values: filterActiveDates(series.result), color: "#a36300", format: formatMoney });
     }
     const extra = buildDashboardExtraSeries(series.dates, ui.dashCashBox || "all");
-    charts.push({ title: "Caja (" + (ui.dashCashBox === "all" || !ui.dashCashBox ? "todas las cajas" : getCashBoxName(ui.dashCashBox)) + ")", values: extra.cash, color: "#087a83", format: formatMoney, cashSelector: true });
-    charts.push({ title: "Saldos de clientes (a cobrar)", values: extra.clientBalances, color: "#2156a8", format: formatMoney });
-    charts.push({ title: "Saldos de proveedores (a pagar)", values: extra.providerBalances, color: "#b42318", format: formatMoney });
+    charts.push({ title: "Caja (" + (ui.dashCashBox === "all" || !ui.dashCashBox ? "todas las cajas" : getCashBoxName(ui.dashCashBox)) + ")", values: filterActiveDates(extra.cash), color: "#087a83", format: formatMoney, cashSelector: true });
+    charts.push({ title: "Saldos de clientes (a cobrar)", values: filterActiveDates(extra.clientBalances), color: "#2156a8", format: formatMoney });
+    charts.push({ title: "Saldos de proveedores (a pagar)", values: filterActiveDates(extra.providerBalances), color: "#b42318", format: formatMoney });
     afterRender.push(() => {
       const fromInput = document.getElementById("dash-from");
       const toInput = document.getElementById("dash-to");
@@ -2499,7 +2503,7 @@
                 <button class="btn small ${!ui.dashCashBox || ui.dashCashBox === "all" ? "blue" : "ghost"}" type="button" data-dash-cashbox="all">Todas</button>
                 ${activeCashBoxesForRole(currentUser.role).map((box) => `<button class="btn small ${ui.dashCashBox === box.id ? "blue" : "ghost"}" type="button" data-dash-cashbox="${escapeAttr(box.id)}">${escapeHtml(box.name)}</button>`).join("")}
               </div>` : ""}
-              ${renderLineChartSvg(series.dates, chart.values, chart.color, chart.format)}
+              ${chartDates.length ? renderLineChartSvg(chartDates, chart.values, chart.color, chart.format) : `<div class="empty compact">Sin dias con pedidos en el rango.</div>`}
             </div>
           `).join("")}
         </div>
@@ -3032,6 +3036,17 @@
       });
       updateOrderProductCount();
     };
+    const updateOrderPricesForClient = (client) => {
+      document.querySelectorAll("[data-product-row]").forEach((row) => {
+        const product = getProduct(row.dataset.productRow);
+        if (!product) return;
+        const pref = getPreference(client ? client.id : "", product.id);
+        const priceInput = row.querySelector("[data-price]");
+        const unitInput = row.querySelector("[data-unit]");
+        if (priceInput) priceInput.value = formatAmountInput(getAdjustedProductPrice(product, client));
+        if (unitInput) unitInput.value = pref ? pref.preferredUnitType : product.unitType;
+      });
+    };
     searchInput.addEventListener("input", () => {
       ui.orderProductFilter = searchInput.value.trim();
       applyOrderFilters();
@@ -3083,22 +3098,49 @@
       const client = getClient(clientId);
       const vehicleSelect = document.getElementById("order-vehicle");
       if (client && vehicleSelect) vehicleSelect.value = client.vehicleId;
+      updateOrderPricesForClient(client);
       if (shouldRender) render();
       else recalc();
     };
     const clientSearch = document.getElementById("order-client-search");
     if (clientSearch) {
+      const currentClientLabel = () => {
+        const selected = getClient(clientSelect.value);
+        return selected ? selected.id + " - " + selected.name : "";
+      };
+      const isCompleteClientSearch = (value, found) => {
+        const clean = String(value || "").trim().toLowerCase();
+        if (!found || !clean) return false;
+        const id = String(found.id || "").toLowerCase();
+        const name = String(found.name || "").toLowerCase();
+        return clean === id || clean === name || clean === `${id} - ${name}` || clean.startsWith(id + " - ");
+      };
       const commitClientSearch = () => {
         const found = findClientByInput(clientSearch.value);
-        if (!found) return false;
+        if (!found) {
+          clientSearch.value = currentClientLabel();
+          return false;
+        }
         const changed = found.id !== clientSelect.value;
         clientSearch.value = found.id + " - " + found.name;
         applySelectedClient(found.id, changed);
         return true;
       };
+      clientSearch.addEventListener("focus", () => {
+        clientSearch.dataset.previousLabel = currentClientLabel();
+        clientSearch.value = "";
+      });
+      clientSearch.addEventListener("click", () => {
+        if (document.activeElement === clientSearch && clientSearch.value === currentClientLabel()) clientSearch.value = "";
+      });
       clientSearch.addEventListener("input", () => {
         const found = findClientByInput(clientSearch.value);
-        if (found) clientSelect.value = found.id;
+        if (!found) return;
+        clientSelect.value = found.id;
+        if (isCompleteClientSearch(clientSearch.value, found)) {
+          clientSearch.value = found.id + " - " + found.name;
+          applySelectedClient(found.id, true);
+        }
       });
       clientSearch.addEventListener("change", commitClientSearch);
       clientSearch.addEventListener("blur", commitClientSearch);
@@ -4227,6 +4269,11 @@
     const historyReady = ui.historyData && ui.historyData.from === from && ui.historyData.to === to;
     const purchaseRows = historyReady ? buildPurchaseHistoryMatrix(from, to, ui.historyData.purchaseHistory || []) : [];
     const salesRows = historyReady ? buildSalesHistoryMatrix(from, to, ui.historyData.salesQuantityHistory || [], ui.historyData.listPriceHistory || []) : [];
+    const historyBody = (rows, type) => {
+      if (ui.historyError) return `<div class="alert">${escapeHtml(ui.historyError)}</div>`;
+      if (!historyReady || ui.historyLoading) return `<div class="empty compact">Cargando historiales...</div>`;
+      return renderHistoryMatrixTable(rows, dates, type);
+    };
     afterRender.push(() => {
       bindHistories();
       ensureHistoryRangeLoaded(from, to);
@@ -4237,20 +4284,36 @@
       "",
       `
       <div class="panel" style="margin-bottom:14px">
-        <div class="form-grid">
+        <div class="form-grid history-range-grid">
           <div class="field"><label>Desde</label><input type="date" id="history-from" value="${from}" /></div>
           <div class="field"><label>Hasta</label><input type="date" id="history-to" value="${to}" /></div>
+          <div class="field span-2 history-range-actions">
+            <label>&nbsp;</label>
+            <div class="page-actions history-buttons-row">
+              <button class="btn small ghost" type="button" data-history-range="7">7 dias</button>
+              <button class="btn small ghost" type="button" data-history-range="30">30 dias</button>
+              <button class="btn small ghost" type="button" data-history-range="3m">3 meses</button>
+              <button class="btn small ghost" type="button" data-history-range="6m">6 meses</button>
+              <button class="btn small blue history-print-btn" type="button" data-print-history="all" title="Imprimir compras y ventas" aria-label="Imprimir compras y ventas">&#128424;</button>
+            </div>
+          </div>
         </div>
       </div>
-      <div class="panel">
-        <h2 class="page-title" style="font-size:18px">Precios de compras</h2>
+      <div class="panel" data-history-panel="purchase">
+        <div class="history-panel-head">
+          <h2 class="page-title" style="font-size:18px">Precios de compras</h2>
+          <button class="btn small ghost history-print-btn" type="button" data-print-history="purchase" title="Imprimir compras" aria-label="Imprimir compras">&#128424;</button>
+        </div>
         <p class="muted">Cada dia muestra el precio mas alto pagado y la cantidad total comprada.</p>
-        ${ui.historyLoading && !historyReady ? `<div class="empty compact">Cargando historiales...</div>` : ui.historyError ? `<div class="alert">${escapeHtml(ui.historyError)}</div>` : renderHistoryMatrixTable(purchaseRows, dates, "purchase")}
+        ${historyBody(purchaseRows, "purchase")}
       </div>
-      <div class="panel" style="margin-top:14px">
-        <h2 class="page-title" style="font-size:18px">Historial de ventas</h2>
+      <div class="panel" style="margin-top:14px" data-history-panel="sales">
+        <div class="history-panel-head">
+          <h2 class="page-title" style="font-size:18px">Historial de ventas</h2>
+          <button class="btn small ghost history-print-btn" type="button" data-print-history="sales" title="Imprimir ventas" aria-label="Imprimir ventas">&#128424;</button>
+        </div>
         <p class="muted">Cada dia muestra el precio de lista y la cantidad total vendida.</p>
-        ${ui.historyLoading && !historyReady ? `<div class="empty compact">Cargando historiales...</div>` : ui.historyError ? `<div class="alert">${escapeHtml(ui.historyError)}</div>` : renderHistoryMatrixTable(salesRows, dates, "sales")}
+        ${historyBody(salesRows, "sales")}
       </div>
       `,
       "historiales"
@@ -4270,6 +4333,39 @@
       if (ui.historyTo < ui.historyFrom) ui.historyFrom = ui.historyTo;
       render();
     });
+    document.querySelectorAll("[data-history-range]").forEach((button) => button.addEventListener("click", () => {
+      const anchor = to && to.value ? to.value : (ui.historyTo || todayISO());
+      ui.historyTo = anchor;
+      if (button.dataset.historyRange === "7") ui.historyFrom = addDaysISO(anchor, -6);
+      else if (button.dataset.historyRange === "30") ui.historyFrom = addDaysISO(anchor, -29);
+      else if (button.dataset.historyRange === "3m") ui.historyFrom = addMonthsISO(anchor, -3);
+      else if (button.dataset.historyRange === "6m") ui.historyFrom = addMonthsISO(anchor, -6);
+      render();
+    }));
+    document.querySelectorAll("[data-print-history]").forEach((button) => button.addEventListener("click", async () => {
+      const scope = button.dataset.printHistory || "all";
+      const currentFrom = ui.historyFrom || todayISO();
+      const currentTo = ui.historyTo || currentFrom;
+      await ensureHistoryRangeLoaded(currentFrom, currentTo, { forceRender: false });
+      if (ui.historyError) return alert(ui.historyError);
+      printHistoryRange(scope, currentFrom, currentTo);
+    }));
+  }
+
+  function printHistoryRange(scope, from, to) {
+    const historyReady = ui.historyData && ui.historyData.from === from && ui.historyData.to === to;
+    if (!historyReady) return alert("Todavia se estan cargando los historiales del rango.");
+    const dates = buildDateRange(from, to);
+    const sections = [];
+    if (scope === "all" || scope === "purchase") {
+      const rows = buildPurchaseHistoryMatrix(from, to, ui.historyData.purchaseHistory || []);
+      sections.push(`<section class="print-sheet"><h1>Precios de compras</h1><p>Rango: ${formatDate(from)} - ${formatDate(to)}</p>${renderHistoryMatrixTable(rows, dates, "purchase")}</section>`);
+    }
+    if (scope === "all" || scope === "sales") {
+      const rows = buildSalesHistoryMatrix(from, to, ui.historyData.salesQuantityHistory || [], ui.historyData.listPriceHistory || []);
+      sections.push(`<section class="print-sheet"><h1>Historial de ventas</h1><p>Rango: ${formatDate(from)} - ${formatDate(to)}</p>${renderHistoryMatrixTable(rows, dates, "sales")}</section>`);
+    }
+    printHtmlDocument("Historiales " + formatDate(from) + " - " + formatDate(to), `<section class="print-page history-print-page">${sections.join("")}</section>`);
   }
 
   function renderHistoryMatrixTable(rows, dates, type) {
@@ -4307,7 +4403,7 @@
     return Array.isArray(records) && records.some((record) => isDateInRange(record.date, from, to));
   }
 
-  async function ensureHistoryRangeLoaded(from, to) {
+  async function ensureHistoryRangeLoaded(from, to, options = {}) {
     if (ui.historyLoading) return;
     if (ui.historyData && ui.historyData.from === from && ui.historyData.to === to) return;
     const config = getCloudSyncConfig();
@@ -4333,7 +4429,7 @@
       ui.historyError = "No se pudieron cargar los historiales: " + error.message;
     } finally {
       ui.historyLoading = false;
-      if (route.base === "historiales") render();
+      if (route.base === "historiales" && options.forceRender !== false) render();
     }
   }
 
@@ -5870,8 +5966,8 @@
          <button class="btn ghost" data-print-divide="${escapeAttr(selected.join(","))}">PDF seleccionado</button>
        </div>
        <div class="divide-page-actions divide-whatsapp-actions">
-         <button class="btn ghost" data-copy-divide="all">${WHATSAPP_SVG} WhatsApp todos</button>
-         <button class="btn ghost" data-copy-divide="${escapeAttr(selected.join(","))}">${WHATSAPP_SVG} WhatsApp seleccionado</button>
+         <button class="btn ghost" data-copy-divide="all">${WHATSAPP_SVG} Todos</button>
+         <button class="btn ghost" data-copy-divide="${escapeAttr(selected.join(","))}">${WHATSAPP_SVG} Seleccionado</button>
        </div>`,
       `
       <div class="panel" style="margin-bottom:14px">
@@ -8436,6 +8532,11 @@
     const from = ui.billingFrom || defaultFrom;
     const to = ui.billingTo || today;
     const clients = activeClients().filter((client) => client.needsInvoice && ["Factura A", "Factura B"].includes(client.invoiceType));
+    const clientIds = clients.map((client) => client.id);
+    if (!Array.isArray(ui.billingSelectedClients)) ui.billingSelectedClients = clientIds.slice();
+    ui.billingSelectedClients = ui.billingSelectedClients.filter((id) => clientIds.includes(id));
+    const selectedBillingIds = ui.billingSelectedClients;
+    const allBillingSelected = clientIds.length > 0 && clientIds.every((id) => selectedBillingIds.includes(id));
     let ivaTotal = 0;
     let totalAcumulado = 0;
     const rows = clients.map((client) => {
@@ -8444,6 +8545,7 @@
       totalAcumulado += pending.total;
       return `
         <tr>
+          <td class="num"><input type="checkbox" data-billing-client="${escapeAttr(client.id)}" ${selectedBillingIds.includes(client.id) ? "checked" : ""} aria-label="Seleccionar ${escapeAttr(client.name)}" /></td>
           <td><strong>${escapeHtml(client.id)} - ${escapeHtml(client.name)}</strong><br><span class="muted">${escapeHtml(client.legalName || "")}</span></td>
           <td>${escapeHtml(client.cuit || "")}<br><span class="muted">${escapeHtml(client.invoiceType)}</span></td>
           <td>${escapeHtml(client.invoiceFrequency || "mensual")}</td>
@@ -8490,6 +8592,19 @@
         ui.billingTo = toInput.value;
         render();
       });
+      const toggleAll = document.getElementById("billing-select-all");
+      if (toggleAll) toggleAll.addEventListener("change", () => {
+        ui.billingSelectedClients = toggleAll.checked ? clientIds.slice() : [];
+        render();
+      });
+      document.querySelectorAll("[data-billing-client]").forEach((checkbox) => checkbox.addEventListener("change", () => {
+        const id = checkbox.dataset.billingClient;
+        const current = Array.isArray(ui.billingSelectedClients) ? ui.billingSelectedClients : [];
+        ui.billingSelectedClients = checkbox.checked
+          ? Array.from(new Set([...current, id]))
+          : current.filter((item) => item !== id);
+        render();
+      }));
       document.querySelectorAll("[data-billing-range]").forEach((button) => button.addEventListener("click", () => {
         const range = button.dataset.billingRange;
         if (range === "this-month") {
@@ -8505,10 +8620,12 @@
       document.querySelectorAll("[data-billing-run]").forEach((button) => button.addEventListener("click", async () => {
         const simulate = button.dataset.billingRun === "simulate";
         const cfg = getCloudSyncConfig();
+        const selectedIds = (Array.isArray(ui.billingSelectedClients) ? ui.billingSelectedClients : []).filter((id) => clientIds.includes(id));
         if (!cfg.username || !cloudSyncReady(cfg)) return alert("La emision corre en el servidor propio (Opcion F). Configure el ingreso con usuario y contrasena.");
-        if (!confirm(simulate ? "Simular la emision de las facturas pendientes? (no emite nada real)" : "Emitir AHORA las facturas pendientes via TusFacturas?")) return;
+        if (!selectedIds.length) return alert("Seleccione al menos un cliente para facturar.");
+        if (!confirm(simulate ? "Simular la emision de las facturas pendientes para " + selectedIds.length + " cliente(s)? (no emite nada real)" : "Emitir AHORA las facturas pendientes via TusFacturas para " + selectedIds.length + " cliente(s)?")) return;
         try {
-          const response = await cloudRequest(cfg, "/billing/run", { method: "POST", body: JSON.stringify({ simulate }) });
+          const response = await cloudRequest(cfg, "/billing/run", { method: "POST", body: JSON.stringify({ simulate, clientIds: selectedIds }) });
           const result = await response.json().catch(() => ({}));
           if (!response.ok) throw new Error(result.error || "HTTP " + response.status);
           alert("Proceso terminado: " + (result.count || 0) + " comprobante(s) procesado(s)" + (result.simulate ? " en modo simulacion." : "."));
@@ -8522,7 +8639,7 @@
     return pageShell(
       "Facturacion",
       "Clientes con factura, acumulados del periodo y emision automatica via TusFacturasAPP (diaria 23hs, semanal sabados 23hs con corte de fin de mes, mensual ultimo dia 23hs).",
-      currentUser.role === "manager" ? `<button class="btn ghost" data-billing-run="simulate">Simular emision</button>
+      ["manager", "admin", "contador"].includes(currentUser.role) ? `<button class="btn ghost" data-billing-run="simulate">Simular emision</button>
        <button class="btn primary" data-billing-run="real">Emitir pendientes ahora</button>` : "",
       `
       <div class="panel" style="margin-bottom:14px">
@@ -8544,14 +8661,14 @@
       <div class="grid three" style="margin-bottom:14px">
         ${metricCard("IVA acumulado", formatMoney(ivaTotal), `Clientes con factura (${formatDate(from)} - ${formatDate(to)})`)}
         ${metricCard("Total acumulado", formatMoney(totalAcumulado), "Base + IVA")}
-        ${metricCard("Clientes", String(clients.length), "Con factura A o B")}
+        ${metricCard("Clientes", String(selectedBillingIds.length) + " / " + String(clients.length), "Seleccionados / con factura A o B")}
       </div>
       <div class="panel" style="margin-bottom:14px">
         <h2 class="page-title" style="font-size:18px">Clientes con factura</h2>
         <div class="table-wrap" style="margin-top:10px">
           <table>
-            <thead><tr><th>Cliente</th><th>CUIT / Tipo</th><th>Periodicidad</th><th>Correo de facturacion</th><th>Acumula desde</th><th>Total acumulado</th><th>IVA acumulado</th></tr></thead>
-            <tbody>${rows || emptyRow(7, "No hay clientes marcados con factura A o B.")}</tbody>
+            <thead><tr><th class="num"><input type="checkbox" id="billing-select-all" ${allBillingSelected ? "checked" : ""} aria-label="Seleccionar todos los clientes" /></th><th>Cliente</th><th>CUIT / Tipo</th><th>Periodicidad</th><th>Correo de facturacion</th><th>Acumula desde</th><th>Total acumulado</th><th>IVA acumulado</th></tr></thead>
+            <tbody>${rows || emptyRow(8, "No hay clientes marcados con factura A o B.")}</tbody>
           </table>
         </div>
       </div>
@@ -13879,6 +13996,15 @@
       table{width:100%;border-collapse:collapse}
       th,td{padding:4px 6px;text-align:left}
       .num{text-align:right}
+      .history-print-page .print-sheet{break-inside:auto;page-break-inside:auto}
+      .history-print-page h1{margin:0 0 4px;font-size:16px}
+      .history-print-page p{margin:0 0 8px;font-size:10px}
+      .history-print-page .muted{color:#555;font-size:9px}
+      .history-print-page .table-wrap{overflow:visible}
+      .history-print-page table{font-size:8.5px;min-width:0}
+      .history-print-page th,.history-print-page td{border:1px solid #ddd;padding:2px 3px;white-space:nowrap}
+      .history-print-page th{background:#f3f4f6}
+      .history-print-page .history-category-row td{background:#e5e7eb;font-weight:700}
       .assigned-group{break-inside:avoid;page-break-inside:avoid;border:0;padding:2px 0;margin:0 0 4px}
       .assigned-group span{color:#475467}
       .divide-client-spacer{height:8px}

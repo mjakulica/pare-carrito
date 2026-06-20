@@ -1,5 +1,26 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.8.16 - Refresco de historiales, seleccion de facturacion y ajustes de inicio (2026-06-20)
+
+### Frontend / Historiales, pedidos, inicio y facturacion
+
+- La pagina `Historiales` ya no muestra "Sin datos" mientras espera la carga del rango: muestra carga y refresca al recibir `/product-history`.
+- Se agregaron accesos rapidos `7 dias`, `30 dias`, `3 meses` y `6 meses` para modificar `Desde/Hasta`.
+- Se agregaron botones de impresion directa para imprimir compras y ventas juntas o cada recuadro por separado.
+- En `Dividir Compras`, los botones de WhatsApp ahora muestran solo el icono con `Todos` y `Seleccionado`.
+- En `Facturacion`, admin, gerente y contador pueden seleccionar clientes con checkbox, seleccionar/deseleccionar todos y emitir/simular solo los seleccionados.
+- En `Inicio`, las tendencias de admin/gerente excluyen dias sin pedidos de todos los graficos.
+- En `Inicio`, los recuadros de comprobantes pendientes y usuarios inactivos se compactaron al tamano de botones de accion.
+- En `Nuevo Pedido`, al seleccionar cliente se recalculan precios y preferencias al instante.
+- El selector de cliente permite volver a hacer click para desplegar opciones sin tener que borrar con X.
+- Commit funcional desplegado: pendiente hasta finalizar deploy.
+- Backups VPS: pre-cambio `20260620_143543`; post-cambio pendiente.
+- Backup PC pre-cambio: `auditoria/repo-backup-20260620-1436-pre-ui-historiales-facturacion.zip`.
+- Backup PC post-cambio: pendiente.
+- No se registraron credenciales en documentacion ni reportes.
+
+---
+
 ## v12.8.15 - Historiales fuera del estado operativo y cola offline (2026-06-20)
 
 ### Arquitectura / Sincronizacion

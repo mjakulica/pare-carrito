@@ -500,7 +500,7 @@ function buildBillingEntry(invoice, emittedAt, periodResult, simulate, cfg) {
 
 // Corre la facturacion sobre el estado central, registra resultados en billingLog
 // Retorna { ran, simulate, count, results, lastRunDate }
-async function runBilling({ pool, force = false, simulate = false, onlyClientId = "", fetchImpl = fetch, now = new Date(), lastRunDate = "" }) {
+async function runBilling({ pool, force = false, simulate = false, onlyClientId = "", onlyClientIds = null, fetchImpl = fetch, now = new Date(), lastRunDate = "" }) {
   const cfg = billingConfig();
   if (!cfg.enabled) simulate = true;
   const stateRow = await pool.query("SELECT data FROM app_state WHERE id = 'main'");
@@ -509,7 +509,11 @@ async function runBilling({ pool, force = false, simulate = false, onlyClientId 
   data.billingLog = Array.isArray(data.billingLog) ? data.billingLog : [];
   const art = nowArt(now);
   let due = computeDueInvoices(data, art, force);
-  if (onlyClientId) due = due.filter((d) => d.clientId === onlyClientId);
+  const selectedClientIds = Array.isArray(onlyClientIds)
+    ? new Set(onlyClientIds.map((id) => String(id || "").trim()).filter(Boolean))
+    : new Set();
+  if (onlyClientId) selectedClientIds.add(String(onlyClientId || "").trim());
+  if (selectedClientIds.size) due = due.filter((d) => selectedClientIds.has(d.clientId));
 
   const results = [];
   const emittedAt = new Date();
