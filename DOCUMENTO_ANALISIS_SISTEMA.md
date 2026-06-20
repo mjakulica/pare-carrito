@@ -360,7 +360,7 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 
 **Version operativa:** 12.8.15  
 **Fecha:** 2026-06-20  
-**Commit GitHub del cambio funcional:** pendiente al momento de esta edicion documental  
+**Commit GitHub del cambio funcional:** `53874e2243af24753304a6745d742f2c3108a73a`  
 **Entorno actualizado:** VPS productivo `/opt/pare-carrito` con Docker Compose (`api`, `caddy`, `db`).
 
 ### Detalle del ultimo cambio
@@ -372,11 +372,13 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 - El frontend ya no transporta historiales grandes dentro del estado operativo.
 - El guardado normal usa cola local de parches pendientes y reintento al volver la conexion.
 - El backup JSON del servidor incluye `productHistory` ademas de `app_state`.
+- La migracion productiva dejo `product_history_state` con precios de lista `55.082`, cantidades vendidas `25.475` y compras `15.118`.
+- El `app_state` productivo quedo sin claves de historiales y reducido a `15.639.270` bytes en PostgreSQL.
 - No se registraron credenciales en este documento ni en el historial.
 
 ### Backups asociados
 
 - VPS pre-migracion historiales/offline: dump PostgreSQL, `app_state` y tar de `/opt/pare-carrito` generados con timestamp `20260620_093128`.
 - PC pre-migracion historiales/offline: `auditoria/repo-backup-20260620-0931-premigracion-historiales-offline.zip`.
-- VPS post-migracion historiales/offline: pendiente hasta finalizar despliegue y verificacion.
-- PC post-migracion historiales/offline: pendiente hasta finalizar commit/despliegue.
+- VPS post-migracion historiales/offline: dump PostgreSQL, `app_state` y tar de `/opt/pare-carrito` generados con timestamp `20260620_094729`.
+- PC post-migracion historiales/offline: `auditoria/repo-backup-20260620-0955-postmigracion-historiales-offline.zip`.

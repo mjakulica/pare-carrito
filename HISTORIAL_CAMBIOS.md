@@ -11,6 +11,12 @@
 - La cola pendiente se compacta contra la ultima version conocida del servidor y no pisa el VPS si hay conflicto de version.
 - `app_state` queda reducido al estado operativo: clientes, pedidos, pagos, saldos, caja, compras, usuarios y configuracion.
 - El backup JSON del servidor incluye tanto `app_state` como `productHistory`.
+- Commit funcional desplegado: `53874e2243af24753304a6745d742f2c3108a73a`.
+- Migracion verificada en VPS: `app_state` bajo a `15.639.270` bytes en PostgreSQL y el endpoint `/state` devuelve `14.371.885` bytes sin claves de historiales.
+- Conteos migrados a `product_history_state`: precios de lista `55.082`, cantidades vendidas `25.475`, compras `15.118`.
+- Backups VPS: pre-migracion `20260620_093128`; post-migracion `20260620_094729`.
+- Backup PC pre-migracion: `auditoria/repo-backup-20260620-0931-premigracion-historiales-offline.zip`.
+- Backup PC post-migracion: `auditoria/repo-backup-20260620-0955-postmigracion-historiales-offline.zip`.
 - No se registraron credenciales en documentacion ni reportes.
 
 ---
