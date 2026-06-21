@@ -234,7 +234,7 @@
     purchaseAssigneeFilter: "all",
     orderView: "grid",
     orderProductFilter: "",
-    orderSelectedCategories: [],
+    orderSelectedCategories: null,
     orderWholesaleFilter: ["mayor", "menor"],
     balanceFrom: "",
     balanceTo: todayISO(),
@@ -285,6 +285,7 @@
     syncStatus: "",
     historyData: null,
     historyLoading: false,
+    historyLoadingKey: "",
     historyError: "",
     billingSelectedClients: null,
     billingIvaOverrides: {},
@@ -293,11 +294,11 @@
 
   let afterRender = [];
   let state = loadState();
+  let currentUser = loadCurrentUser();
   let lastSyncedState = null;
   let pendingPatchBaseState = null;
   let pendingPatchBaseUpdatedAt = "";
   migrateProductImages();
-  let currentUser = loadCurrentUser();
 
   const menu = [
     { id: "dashboard", label: "Inicio", icon: "IN", roles: ["manager", "admin", "employee", "customer", "contador", "example"] },
@@ -358,19 +359,21 @@
   window.addEventListener("hashchange", render);
   window.addEventListener("DOMContentLoaded", async () => {
     const cloudConfig = getCloudSyncConfig();
-    if (cloudSyncReady(cloudConfig) && cloudConfig.auto !== false) {
+    if (canUseFullCloudSync() && cloudSyncReady(cloudConfig) && cloudConfig.auto !== false) {
       await cloudPull(false, true);
     }
     render();
     startCloudAutoSync();
+    flushClientWriteQueue(false);
   });
   window.addEventListener("online", () => {
     const banner = document.getElementById("offline-banner");
     if (banner) banner.style.display = "none";
     const cloudConfig = getCloudSyncConfig();
-    if (cloudSyncReady(cloudConfig) && cloudConfig.auto !== false) {
+    if (canUseFullCloudSync() && cloudSyncReady(cloudConfig) && cloudConfig.auto !== false) {
       flushPatchQueue(false).then(() => cloudPull(false));
     }
+    flushClientWriteQueue(false);
   });
   window.addEventListener("offline", () => {
     const banner = document.getElementById("offline-banner");
@@ -379,10 +382,11 @@
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState !== "visible") return;
     const cloudConfig = getCloudSyncConfig();
-    if (cloudSyncReady(cloudConfig) && cloudConfig.auto !== false) cloudPull(false);
+    if (canUseFullCloudSync() && cloudSyncReady(cloudConfig) && cloudConfig.auto !== false) cloudPull(false);
+    flushClientWriteQueue(false);
   });
   window.addEventListener("beforeunload", (event) => {
-    if (loadPatchQueue().length) {
+    if (loadPatchQueue().length || loadClientWriteQueue().length) {
       event.preventDefault();
       event.returnValue = "Hay cambios pendientes de sincronizar.";
     }
@@ -964,7 +968,7 @@
   function saveState() {
     writeLocalStateSnapshot(state, "No se pudo guardar el estado completo en localStorage; se intentara sincronizar con el servidor.");
     const config = getCloudSyncConfig();
-    if (cloudSyncReady(config) && config.auto !== false) {
+    if (canUseFullCloudSync() && cloudSyncReady(config) && config.auto !== false) {
       if (!queueCurrentStatePatch()) scheduleCloudPush();
       else schedulePatchFlush();
     }
@@ -1155,6 +1159,10 @@
     return !!(config && config.url && (config.token || (config.username && config.password)));
   }
 
+  function canUseFullCloudSync() {
+    return !currentUser || !isClientLikeRole(currentUser.role);
+  }
+
   function cloudBaseUrl(config) {
     return String(config.url || "").trim().replace(/\/+$/, "");
   }
@@ -1198,7 +1206,7 @@
 
   function scheduleCloudPush() {
     const config = getCloudSyncConfig();
-    if (!cloudSyncReady(config) || config.auto === false) return;
+    if (!canUseFullCloudSync() || !cloudSyncReady(config) || config.auto === false) return;
     clearTimeout(cloudPushTimer);
     cloudPushTimer = setTimeout(() => {
       cloudPushTimer = null;
@@ -1208,7 +1216,7 @@
 
   function schedulePatchFlush(delay) {
     const config = getCloudSyncConfig();
-    if (!cloudSyncReady(config) || config.auto === false) return;
+    if (!canUseFullCloudSync() || !cloudSyncReady(config) || config.auto === false) return;
     clearTimeout(cloudPushTimer);
     cloudPushTimer = setTimeout(() => {
       cloudPushTimer = null;
@@ -1218,6 +1226,10 @@
 
   async function flushPatchQueue(manual) {
     const config = getCloudSyncConfig();
+    if (!canUseFullCloudSync()) {
+      if (manual) alert("El rol Cliente no usa sincronizacion completa. Sus pedidos y transferencias se envian por separado.");
+      return true;
+    }
     const queue = loadPatchQueue();
     if (!queue.length) {
       if (manual) alert("No hay cambios pendientes.");
@@ -1277,7 +1289,7 @@
       cloudPushTimer = null;
     }
     const config = getCloudSyncConfig();
-    if (!cloudSyncReady(config) || config.auto === false) return false;
+    if (!canUseFullCloudSync() || !cloudSyncReady(config) || config.auto === false) return false;
     try {
       const xhr = new XMLHttpRequest();
       xhr.open("PUT", cloudBaseUrl(config) + "/state", false);
@@ -1311,7 +1323,7 @@
   function startCloudAutoSync() {
     clearInterval(cloudPollTimer);
     const config = getCloudSyncConfig();
-    if (!cloudSyncReady(config) || config.auto === false) return;
+    if (!canUseFullCloudSync() || !cloudSyncReady(config) || config.auto === false) return;
     cloudPollTimer = setInterval(() => {
       cloudPull(false);
     }, 25000);
@@ -1328,6 +1340,10 @@
 
   async function cloudPush(manual, isRetry) {
     const config = getCloudSyncConfig();
+    if (!canUseFullCloudSync()) {
+      if (manual) alert("El rol Cliente no puede subir el estado completo. Use las acciones permitidas: enviar pedidos o registrar transferencias.");
+      return;
+    }
     if (loadPatchQueue().length) {
       const ok = await flushPatchQueue(manual);
       if (ok || manual) return;
@@ -1397,7 +1413,8 @@
 
   async function syncClientTransferToCloud(transfer) {
     const config = getCloudSyncConfig();
-    if (!cloudSyncReady(config)) return;
+    if (!cloudSyncReady(config)) throw new Error("sin conexion configurada");
+    if (navigator.onLine === false) throw new Error("sin conexion");
     try {
       const response = await cloudRequest(config, "/transfers", {
         method: "POST",
@@ -1408,6 +1425,91 @@
       console.warn("Sincronizacion de transferencia fallida:", error.message);
       throw error;
     }
+  }
+
+  const CLIENT_WRITE_QUEUE_KEY = "lpc_client_write_queue_v1";
+  let clientWriteTimer = null;
+
+  function loadClientWriteQueue() {
+    try {
+      return JSON.parse(localStorage.getItem(CLIENT_WRITE_QUEUE_KEY) || "[]");
+    } catch {
+      return [];
+    }
+  }
+
+  function saveClientWriteQueue(queue) {
+    try {
+      localStorage.setItem(CLIENT_WRITE_QUEUE_KEY, JSON.stringify(queue || []));
+    } catch (error) {
+      console.warn("No se pudo guardar la cola de cliente.", error);
+    }
+  }
+
+  function queueClientWrite(type, payload) {
+    const queue = loadClientWriteQueue();
+    const duplicate = queue.some((op) => op && op.type === type && JSON.stringify(op.payload) === JSON.stringify(payload));
+    if (!duplicate) {
+      queue.push({
+        id: "cw-" + Date.now() + "-" + Math.random().toString(36).slice(2, 10),
+        type,
+        payload,
+        createdAt: new Date().toISOString()
+      });
+      saveClientWriteQueue(queue);
+    }
+    scheduleClientWriteFlush();
+  }
+
+  function scheduleClientWriteFlush(delay) {
+    clearTimeout(clientWriteTimer);
+    clientWriteTimer = setTimeout(() => {
+      clientWriteTimer = null;
+      flushClientWriteQueue(false);
+    }, delay || 5000);
+  }
+
+  async function sendClientWrite(op) {
+    if (!op || op.type === "transfer") return syncClientTransferToCloud(op && op.payload && op.payload.transfer);
+    if (op.type === "order") return syncCustomerOrderToCloud(op.payload && op.payload.order);
+    return true;
+  }
+
+  async function flushClientWriteQueue(manual) {
+    if (!currentUser || !isClientLikeRole(currentUser.role)) return true;
+    const config = getCloudSyncConfig();
+    if (!cloudSyncReady(config) || navigator.onLine === false) {
+      if (loadClientWriteQueue().length) scheduleClientWriteFlush(8000);
+      return false;
+    }
+    const queue = loadClientWriteQueue();
+    if (!queue.length) return true;
+    while (queue.length) {
+      try {
+        await sendClientWrite(queue[0]);
+        queue.shift();
+        saveClientWriteQueue(queue);
+      } catch (error) {
+        console.warn("Escritura de cliente pendiente:", error.message);
+        saveClientWriteQueue(queue);
+        scheduleClientWriteFlush(8000);
+        if (manual) alert("Quedan cambios pendientes por sincronizar: " + error.message);
+        return false;
+      }
+    }
+    return true;
+  }
+
+  async function syncCustomerOrderToCloud(order) {
+    const config = getCloudSyncConfig();
+    if (!cloudSyncReady(config)) throw new Error("sin conexion configurada");
+    if (navigator.onLine === false) throw new Error("sin conexion");
+    const response = await cloudRequest(config, "/orders/customer", {
+      method: "POST",
+      body: JSON.stringify({ order })
+    });
+    if (!response.ok) throw new Error("HTTP " + response.status + (await readCloudErrorDetail(response)));
+    return response.json();
   }
 
   function mergeCloudStates(remoteData, localData) {
@@ -1523,6 +1625,10 @@
 
   async function cloudPull(manual, isLogin) {
     const config = getCloudSyncConfig();
+    if (!canUseFullCloudSync()) {
+      if (manual) alert("El rol Cliente no descarga el estado completo. La informacion se actualiza por las pantallas permitidas.");
+      return;
+    }
     if (!cloudSyncReady(config)) {
       if (manual) alert("Configure la URL y el token del backend en este panel.");
       return;
@@ -1955,7 +2061,9 @@
           if (["manager", "admin", "employee", "contador"].includes(serverResult.payload.role)) {
             await cloudPull(false, true);
           }
-          startCloudAutoSync();
+          if (["manager", "admin", "employee", "contador"].includes(serverResult.payload.role)) {
+            startCloudAutoSync();
+          }
           let user = state.users.find((item) => item.isActive !== false && (item.username.toLowerCase() === username || String(item.email || "").toLowerCase() === username));
           if (!user) {
             user = { id: "USR-REMOTE-" + Date.now(), username, name: serverResult.payload.name || username, role: serverResult.payload.role, password, isActive: true };
@@ -2815,7 +2923,7 @@
     const showCustomerLateWarning = currentUser.role === "customer" && isTimeBetween("05:30", "11:00");
     const products = sortProductsForClient(client ? client.id : "");
     const categories = getProductCategories();
-    if (!isCustomerOrder && (!Array.isArray(ui.orderSelectedCategories) || ui.orderSelectedCategories.length === 0)) {
+    if (!isCustomerOrder && !Array.isArray(ui.orderSelectedCategories)) {
       ui.orderSelectedCategories = categories.slice();
     }
     const selectedCategories = Array.isArray(ui.orderSelectedCategories) ? ui.orderSelectedCategories : [];
@@ -2972,9 +3080,8 @@
             <div id="order-cart" class="cart-list"><div class="empty compact">Sin productos agregados.</div></div>
             ${hideOrderPrices ? "" : `<h2 class="page-title" style="font-size:18px">Total</h2>
             <div class="metric-note" id="order-net-total">Subtotal $0</div>
-            <div class="metric-note" id="order-vat-total">IVA $0</div>
+            ${client && shouldApplyInvoiceVat(client) ? `<div class="metric-note" id="order-vat-total">IVA $0</div>` : ""}
             <div class="metric-value" id="order-total">$0</div>`}
-            <p class="muted">Los productos con cantidad mayor a cero se agregan al pedido.</p>
             <button class="btn primary full" type="submit">Enviar Pedido</button>
           </aside>
         </div>
@@ -3340,6 +3447,12 @@
         notes: "Registro de accountability. No suma caja hasta cobrar."
       });
       saveState();
+      if (isCustomerOrder) {
+        syncCustomerOrderToCloud(order).catch((error) => {
+          console.warn("Pedido de cliente pendiente:", error.message);
+          queueClientWrite("order", { order });
+        });
+      }
       ui.selectedClientId = "";
       ui.orderProductFilter = "";
       alert("Pedido guardado: " + order.id);
@@ -3414,9 +3527,9 @@
     const showPrices = !options || options.showPrices !== false;
     if (!items.length) return `<div class="empty compact">Sin productos agregados.</div>`;
     return items.map((item) => `
-      <div class="cart-line">
+      <div class="cart-line ${showPrices ? "with-price" : "no-price"}">
         <span>${escapeHtml(item.productName)}${item.note ? `<br><small>${escapeHtml(item.note)}</small>` : ""}</span>
-        <strong>${formatNumber(item.quantity)} ${escapeHtml(item.unitType)}</strong>
+        <strong>${formatNumber(item.quantity)}</strong>
         ${showPrices ? `<b>${formatMoney(item.subtotal)}</b>` : ""}
         <button class="btn icon danger" type="button" data-remove-cart-item="${escapeAttr(item.productId)}" title="Quitar">X</button>
       </div>
@@ -4268,11 +4381,13 @@
     const to = ui.historyTo || from;
     const dates = buildDateRange(from, to);
     const historyReady = ui.historyData && ui.historyData.from === from && ui.historyData.to === to;
+    const historyKey = from + "|" + to;
+    const loadingThisRange = ui.historyLoading && ui.historyLoadingKey === historyKey;
     const purchaseRows = historyReady ? buildPurchaseHistoryMatrix(from, to, ui.historyData.purchaseHistory || []) : [];
     const salesRows = historyReady ? buildSalesHistoryMatrix(from, to, ui.historyData.salesQuantityHistory || [], ui.historyData.listPriceHistory || []) : [];
     const historyBody = (rows, type) => {
       if (ui.historyError) return `<div class="alert">${escapeHtml(ui.historyError)}</div>`;
-      if (!historyReady || ui.historyLoading) return `<div class="empty compact">Cargando historiales...</div>`;
+      if (!historyReady || loadingThisRange) return `<div class="empty compact">Cargando historiales...</div>`;
       return renderHistoryMatrixTable(rows, dates, type);
     };
     afterRender.push(() => {
@@ -4347,13 +4462,17 @@
       const scope = button.dataset.printHistory || "all";
       const currentFrom = ui.historyFrom || todayISO();
       const currentTo = ui.historyTo || currentFrom;
+      const printWindow = window.open("", "_blank");
       await ensureHistoryRangeLoaded(currentFrom, currentTo, { forceRender: false });
-      if (ui.historyError) return alert(ui.historyError);
-      printHistoryRange(scope, currentFrom, currentTo);
+      if (ui.historyError) {
+        if (printWindow) printWindow.close();
+        return alert(ui.historyError);
+      }
+      printHistoryRange(scope, currentFrom, currentTo, printWindow);
     }));
   }
 
-  function printHistoryRange(scope, from, to) {
+  function printHistoryRange(scope, from, to, printWindow) {
     const historyReady = ui.historyData && ui.historyData.from === from && ui.historyData.to === to;
     if (!historyReady) return alert("Todavia se estan cargando los historiales del rango.");
     const dates = buildDateRange(from, to);
@@ -4366,7 +4485,7 @@
       const rows = buildSalesHistoryMatrix(from, to, ui.historyData.salesQuantityHistory || [], ui.historyData.listPriceHistory || []);
       sections.push(`<section class="print-sheet history-print-sheet">${renderHistoryPrintTitle("Historial de ventas", from, to)}${renderHistoryMatrixTable(rows, dates, "sales")}</section>`);
     }
-    printHtmlDocument("Historiales " + formatDate(from) + " - " + formatDate(to), `<section class="history-print-page">${sections.join("")}</section>`, { landscape: true, margin: "4mm" });
+    printHtmlDocument("Historiales " + formatDate(from) + " - " + formatDate(to), `<section class="history-print-page">${sections.join("")}</section>`, { landscape: true, margin: "4mm", useWindow: true, printWindow });
   }
 
   function renderHistoryPrintTitle(title, from, to) {
@@ -4409,7 +4528,14 @@
   }
 
   async function ensureHistoryRangeLoaded(from, to, options = {}) {
-    if (ui.historyLoading) return;
+    const requestKey = from + "|" + to;
+    if (ui.historyLoading && ui.historyLoadingKey === requestKey) {
+      const startedAt = Date.now();
+      while (ui.historyLoading && ui.historyLoadingKey === requestKey && Date.now() - startedAt < 19000) {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      }
+      return;
+    }
     if (ui.historyData && ui.historyData.from === from && ui.historyData.to === to) return;
     const config = getCloudSyncConfig();
     if (!cloudSyncReady(config)) {
@@ -4417,11 +4543,15 @@
       return;
     }
     ui.historyLoading = true;
+    ui.historyLoadingKey = requestKey;
     ui.historyError = "";
+    const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+    const timeout = controller ? setTimeout(() => controller.abort(), 18000) : null;
     try {
-      const response = await cloudRequest(config, "/product-history?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to), { method: "GET" });
+      const response = await cloudRequest(config, "/product-history?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to), { method: "GET", signal: controller ? controller.signal : undefined });
       if (!response.ok) throw new Error("HTTP " + response.status + (await readCloudErrorDetail(response)));
       const payload = await response.json();
+      if (ui.historyLoadingKey !== requestKey) return;
       ui.historyData = {
         from,
         to,
@@ -4431,9 +4561,15 @@
         updatedAt: payload.updatedAt || ""
       };
     } catch (error) {
-      ui.historyError = "No se pudieron cargar los historiales: " + error.message;
+      if (ui.historyLoadingKey === requestKey) {
+        ui.historyError = "No se pudieron cargar los historiales: " + (error.name === "AbortError" ? "tiempo de espera agotado" : error.message);
+      }
     } finally {
-      ui.historyLoading = false;
+      if (timeout) clearTimeout(timeout);
+      if (ui.historyLoadingKey === requestKey) {
+        ui.historyLoading = false;
+        ui.historyLoadingKey = "";
+      }
       if (route.base === "historiales" && options.forceRender !== false) render();
     }
   }
@@ -7553,7 +7689,10 @@
       state.clientTransfers.push(newTransfer);
       saveState();
       if (isClientLikeRole(currentUser.role)) {
-        syncClientTransferToCloud(newTransfer).catch(() => {});
+        syncClientTransferToCloud(newTransfer).catch((error) => {
+          console.warn("Transferencia de cliente pendiente:", error.message);
+          queueClientWrite("transfer", { transfer: newTransfer });
+        });
       }
       alert("Los datos de trasferencia han sido enviados, una vez comprobada, se descontara de su saldo");
       render();
@@ -14071,6 +14210,19 @@
   function printHtmlDocument(title, body, options = {}) {
     const previousTitle = document.title;
     document.title = title;
+    if (options.useWindow) {
+      const printWindow = options.printWindow || window.open("", "_blank");
+      if (printWindow) {
+        const baseHref = location.origin + location.pathname.replace(/[^/]*$/, "");
+        printWindow.document.open();
+        printWindow.document.write(`<!doctype html><html><head><base href="${escapeAttr(baseHref)}"><title>${escapeHtml(title)}</title><style>${printDocumentStyles(options)}</style></head><body>${body}<script>window.addEventListener("load",function(){setTimeout(function(){window.focus();window.print();setTimeout(function(){window.close();},300);},120);});<\/script></body></html>`);
+        printWindow.document.close();
+        setTimeout(() => {
+          document.title = previousTitle;
+        }, 800);
+        return;
+      }
+    }
     const frame = document.createElement("iframe");
     frame.style.position = "fixed";
     frame.style.right = "0";

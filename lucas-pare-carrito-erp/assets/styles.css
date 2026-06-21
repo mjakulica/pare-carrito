@@ -796,11 +796,11 @@ tr:last-child td {
   margin: 10px 0 4px;
 }
 
-.order-category-filters .btn.small {
-  min-height: 32px;
-  padding: 0 10px;
-  font-size: 12px;
-}
+  .order-category-filters .btn.small {
+    min-height: var(--tap);
+    padding: 0 10px;
+    font-size: 12px;
+  }
 
 .order-wholesale-filters {
   display: flex;
@@ -809,11 +809,11 @@ tr:last-child td {
   margin: 10px 0 4px;
 }
 
-.order-wholesale-filters .btn.small {
-  min-height: 32px;
-  padding: 0 10px;
-  font-size: 12px;
-}
+  .order-wholesale-filters .btn.small {
+    min-height: var(--tap);
+    padding: 0 10px;
+    font-size: 12px;
+  }
 
 .wholesale-filter-btn.blue {
   background: var(--blue);
@@ -2348,6 +2348,8 @@ tr:last-child td {
 
   .main {
     padding-top: 56px;
+    min-width: 0;
+    max-width: 100%;
   }
 
   .sidebar {
@@ -2413,6 +2415,13 @@ tr:last-child td {
     gap: 6px;
   }
 
+  .topbar .btn,
+  .topbar-back,
+  .mobile-menu-toggle {
+    min-width: var(--tap);
+    min-height: var(--tap);
+  }
+
   /* Mobile first: evitar zoom de iOS y mejorar el tacto */
   input,
   select,
@@ -2426,11 +2435,14 @@ tr:last-child td {
   }
 
   .btn.small {
-    min-height: 38px;
+    min-height: var(--tap);
+    padding: 0 12px;
   }
 
   .panel {
     padding: 12px;
+    min-width: 0;
+    max-width: 100%;
   }
 
   .page-title {
@@ -2478,7 +2490,7 @@ tr:last-child td {
   }
 
   .order-whatsapp-actions .btn {
-    min-height: 34px;
+    min-height: var(--tap);
     padding: 0 4px;
     font-size: 11px;
     line-height: 1.1;
@@ -2542,6 +2554,9 @@ tr:last-child td {
 
   .page {
     padding: 14px 12px 36px;
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: hidden;
   }
 
   .topbar {
@@ -2557,6 +2572,28 @@ tr:last-child td {
 
   .topbar-back {
     padding: 0 6px;
+  }
+
+  .app-shell,
+  .main,
+  .grid,
+  .form-grid,
+  .card,
+  .table-wrap {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .table-wrap {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .table-wrap table {
+    width: max-content;
+    min-width: 620px;
+    max-width: none;
   }
 
   .page-header {
@@ -2623,7 +2660,7 @@ tr:last-child td {
   .admin-order-form .order-form-grid input,
   .admin-order-form .order-form-grid select,
   .admin-order-form .order-form-grid textarea {
-    min-height: 34px;
+    min-height: var(--tap);
     padding: 5px 7px;
     font-size: 12px;
   }
@@ -2635,7 +2672,7 @@ tr:last-child td {
 
   .admin-order-form .order-search-line .order-quick-qty-field input,
   .admin-order-form .order-search-line #clear-order-search {
-    min-height: 34px;
+    min-height: var(--tap);
   }
 
   .payment-form-grid {
@@ -2659,7 +2696,7 @@ tr:last-child td {
   .payment-form-grid .field.payment-client-field select {
     font-size: 12px;
     padding: 4px 6px;
-    min-height: 30px;
+    min-height: var(--tap);
   }
 
   .payment-form-grid label {
@@ -2669,13 +2706,13 @@ tr:last-child td {
 
   .payment-form-grid input,
   .payment-form-grid select {
-    min-height: 28px;
+    min-height: var(--tap);
     padding: 3px 5px;
     font-size: 12px;
   }
 
   .payment-form-grid .page-actions .btn {
-    min-height: 32px;
+    min-height: var(--tap);
     padding: 0 8px;
     font-size: 12px;
   }
@@ -2686,14 +2723,14 @@ tr:last-child td {
   }
 
   .payment-order-line select {
-    min-height: 26px;
+    min-height: var(--tap);
     padding: 2px 4px;
     font-size: 11px;
     min-width: 0;
   }
 
   .payment-order-line .btn.small.ghost {
-    min-height: 26px;
+    min-height: var(--tap);
     padding: 0 5px;
     font-size: 11px;
   }
@@ -2709,7 +2746,7 @@ tr:last-child td {
   }
 
   .payment-history-wrap .table-wrap {
-    min-width: 680px;
+    min-width: 0;
   }
 
   .customer-order-form .order-notes-field {
@@ -2737,7 +2774,7 @@ tr:last-child td {
   }
 
   .balance-date-grid .balance-date-field input {
-    min-height: 38px;
+    min-height: var(--tap);
     padding: 5px 7px;
     font-size: 13px;
   }
@@ -2755,7 +2792,7 @@ tr:last-child td {
   .balance-date-grid .balance-range-buttons .btn,
   .balance-date-grid .balance-range-buttons .balance-range-btn {
     width: 100%;
-    min-height: 34px;
+    min-height: var(--tap);
     padding: 0 4px;
     font-size: 11px;
     line-height: 1.1;
@@ -2803,14 +2840,14 @@ tr:last-child td {
 
   .attendance-form-grid input,
   .attendance-form-grid select {
-    min-height: 34px;
+    min-height: var(--tap);
     padding: 5px 6px;
     font-size: 12px;
   }
 
   .attendance-form-actions .btn {
     width: 100%;
-    min-height: 40px;
+    min-height: var(--tap);
   }
 
   .grid.two.attendance-top-grid {
@@ -2846,13 +2883,13 @@ tr:last-child td {
 
   .grid.two.attendance-middle-grid input,
   .grid.two.attendance-middle-grid select {
-    min-height: 34px;
+    min-height: var(--tap);
     padding: 5px 6px;
     font-size: 12px;
   }
 
   .grid.two.attendance-middle-grid .btn {
-    min-height: 36px;
+    min-height: var(--tap);
     font-size: 12px;
     padding: 0 10px;
   }
@@ -2864,7 +2901,7 @@ tr:last-child td {
 
   .order-search-line .order-quick-qty-field input,
   .order-search-line #clear-order-search {
-    min-height: 40px;
+    min-height: var(--tap);
   }
 
   .order-search-line .order-quick-qty-field label {
@@ -2877,7 +2914,7 @@ tr:last-child td {
   }
 
   .order-category-filters .btn.small {
-    min-height: 30px;
+    min-height: var(--tap);
     padding: 0 8px;
     font-size: 11px;
   }
@@ -2888,7 +2925,7 @@ tr:last-child td {
   }
 
   .order-wholesale-filters .btn.small {
-    min-height: 30px;
+    min-height: var(--tap);
     padding: 0 8px;
     font-size: 11px;
   }
@@ -3049,7 +3086,7 @@ tr:last-child td {
 
   .purchase-line input,
   .purchase-line select {
-    min-height: 34px;
+    min-height: var(--tap);
     padding: 4px 5px;
     font-size: 12px;
   }
@@ -3119,7 +3156,7 @@ tr:last-child td {
     grid-row: 1;
     justify-self: stretch;
     align-self: end;
-    min-height: 34px;
+    min-height: var(--tap);
     padding: 0 4px;
     font-size: 11px;
   }
@@ -3158,7 +3195,7 @@ tr:last-child td {
   .divide-page-actions .btn {
     font-size: 11px;
     padding: 0 5px;
-    min-height: 38px;
+    min-height: var(--tap);
     line-height: 1.1;
     overflow-wrap: break-word;
     hyphens: auto;
@@ -3175,7 +3212,7 @@ tr:last-child td {
   }
 
   .divide-assignee-checklist .btn.small {
-    min-height: 34px;
+    min-height: var(--tap);
     padding: 0 8px;
     font-size: 12px;
   }
@@ -3196,7 +3233,7 @@ tr:last-child td {
   }
 
   .vehicle-page-actions .vehicle-date-field input {
-    min-height: 38px;
+    min-height: var(--tap);
     font-size: 12px;
     padding: 5px;
   }
@@ -3204,7 +3241,7 @@ tr:last-child td {
   .vehicle-page-actions .btn {
     font-size: 11px;
     padding: 0 4px;
-    min-height: 38px;
+    min-height: var(--tap);
     gap: 4px;
   }
 
@@ -3244,7 +3281,7 @@ tr:last-child td {
 
   #purchase-form > .form-grid.purchase-form-grid input,
   #purchase-form > .form-grid.purchase-form-grid select {
-    min-height: 30px;
+    min-height: var(--tap);
     padding: 3px 5px;
     font-size: 11px;
   }
@@ -3263,7 +3300,7 @@ tr:last-child td {
   }
 
   #purchase-form > .form-grid.purchase-form-grid #purchase-notes-wrap input {
-    min-height: 30px;
+    min-height: var(--tap);
   }
 
   #purchase-form > .form-grid.purchase-form-grid .input-with-button {
@@ -3271,14 +3308,63 @@ tr:last-child td {
   }
 
   #purchase-form > .form-grid.purchase-form-grid .input-with-button .btn.small.ghost {
-    min-height: 30px;
+    min-height: var(--tap);
     padding: 0 6px;
     font-size: 11px;
   }
 
-  .order-edit-line,
-  .cart-line {
+  .order-edit-line {
     grid-template-columns: 1fr;
+  }
+
+  .order-main-layout {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .order-cart-panel {
+    position: sticky;
+    top: auto;
+    bottom: 0;
+    z-index: 30;
+    max-height: 42vh;
+    overflow: auto;
+    padding: 10px 12px;
+    margin: 0 -12px -8px;
+    border-radius: var(--radius) var(--radius) 0 0;
+  }
+
+  .order-cart-panel .page-title {
+    margin-bottom: 6px;
+    font-size: 16px !important;
+  }
+
+  .cart-list {
+    gap: 5px;
+  }
+
+  .cart-line {
+    grid-template-columns: minmax(0, 1fr) auto minmax(76px, auto) var(--tap);
+    gap: 6px;
+    padding: 6px 8px;
+    align-items: center;
+  }
+
+  .cart-line.no-price {
+    grid-template-columns: minmax(0, 1fr) auto var(--tap);
+  }
+
+  .cart-line span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .cart-line strong,
+  .cart-line b {
+    white-space: nowrap;
+    font-size: 12px;
   }
 
   .payment-order-line {
@@ -3292,11 +3378,11 @@ tr:last-child td {
     min-width: 0;
     font-size: 11px;
     padding: 3px 5px;
-    min-height: 34px;
+    min-height: var(--tap);
   }
 
   .payment-order-line .btn.small.ghost {
-    min-height: 34px;
+    min-height: var(--tap);
     padding: 0 8px;
     font-size: 12px;
   }
@@ -3304,6 +3390,8 @@ tr:last-child td {
   .cart-line .btn.icon {
     grid-column: auto;
     justify-self: end;
+    min-width: var(--tap);
+    min-height: var(--tap);
   }
 
   .order-grid-cards {
@@ -3356,7 +3444,7 @@ tr:last-child td {
   }
 
   .dash-actions .btn {
-    min-height: 38px;
+    min-height: var(--tap);
     padding: 0 8px;
     font-size: 12px;
   }
@@ -3391,9 +3479,9 @@ tr:last-child td {
   }
 
   .history-buttons-row .btn.small {
-    min-height: 34px;
-    padding: 0 5px;
-    font-size: 11.5px;
+    min-height: var(--tap);
+    padding: 0 6px;
+    font-size: 12px;
   }
 
   /* Scrollboxes horizontales para tablas en dashboards y gastos */
@@ -3405,6 +3493,10 @@ tr:last-child td {
   }
 
   .table-scroll-box .table-wrap {
+    min-width: 0;
+  }
+
+  .table-scroll-box .table-wrap table {
     min-width: 620px;
   }
 
@@ -3437,7 +3529,7 @@ tr:last-child td {
 
   .cashbox-selector .btn.small {
     width: 100%;
-    min-height: 34px;
+    min-height: var(--tap);
     font-size: 11px;
     padding: 0 4px;
   }
@@ -3455,9 +3547,23 @@ tr:last-child td {
 
   .trend-range-buttons.compact .btn {
     width: 100%;
-    min-height: 34px;
+    min-height: var(--tap);
     font-size: 11px;
     padding: 0 4px;
+  }
+
+  button,
+  .btn,
+  .tab,
+  input,
+  select,
+  textarea {
+    min-height: var(--tap);
+  }
+
+  .btn.icon,
+  button[aria-label] {
+    min-width: var(--tap);
   }
 }
 

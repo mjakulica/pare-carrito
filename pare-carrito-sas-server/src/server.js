@@ -544,6 +544,119 @@ app.post("/state/patch", authenticate, requireRole(...SYNC_ROLES), async (req, r
   }
 });
 
+// ---------- Pedidos enviados por clientes ----------
+function parseLinkedClientIds(value) {
+  if (Array.isArray(value)) return value.filter(Boolean).map(String);
+  if (!value) return [];
+  try {
+    const parsed = typeof value === "string" ? JSON.parse(value) : value;
+    return Array.isArray(parsed) ? parsed.filter(Boolean).map(String) : [];
+  } catch {
+    return [];
+  }
+}
+
+function nextStateId(prefix, records) {
+  const suffix = Date.now().toString(36) + "-" + crypto.randomBytes(3).toString("hex");
+  const id = prefix + "-" + suffix;
+  return (Array.isArray(records) && records.some((item) => item && item.id === id)) ? prefix + "-" + suffix + "-2" : id;
+}
+
+app.post("/orders/customer", authenticate, requireRole("customer"), async (req, res) => {
+  const body = req.body || {};
+  if (!body.order || typeof body.order !== "object") {
+    return res.status(400).json({ error: "Cuerpo invalido: se espera { order: { ... } }." });
+  }
+  const clientDb = await pool.connect();
+  try {
+    await clientDb.query("BEGIN");
+    const userRow = await clientDb.query("SELECT client_id, linked_client_ids FROM users WHERE id = $1 OR username = $2 LIMIT 1", [req.user.sub, req.user.username]);
+    const userRecord = userRow.rows[0] || {};
+    const allowedClientIds = new Set([String(userRecord.client_id || ""), ...parseLinkedClientIds(userRecord.linked_client_ids)].filter(Boolean));
+    const orderClientId = String(body.order.clientId || "");
+    if (!allowedClientIds.has(orderClientId)) {
+      await clientDb.query("ROLLBACK");
+      return res.status(403).json({ error: "El cliente del pedido no esta vinculado a este usuario." });
+    }
+    const row = await clientDb.query("SELECT data FROM app_state WHERE id = 'main' FOR UPDATE");
+    if (!row.rows.length) {
+      await clientDb.query("ROLLBACK");
+      return res.status(404).json({ error: "Sin datos." });
+    }
+    const num = (value) => (Number.isFinite(Number(value)) ? Number(value) : 0);
+    const data = row.rows[0].data || {};
+    data.orders = Array.isArray(data.orders) ? data.orders : [];
+    data.saldos = Array.isArray(data.saldos) ? data.saldos : [];
+    data.caja = Array.isArray(data.caja) ? data.caja : [];
+    const order = {
+      ...body.order,
+      id: body.order.id || nextStateId("ORD", data.orders),
+      userId: req.user.sub,
+      clientId: orderClientId,
+      exampleOnly: false,
+      status: body.order.status || "pendiente",
+      paymentReceived: num(body.order.paymentReceived),
+      paymentStatus: body.order.paymentStatus || "pending",
+      createdAt: body.order.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    if (data.orders.some((existing) => existing && existing.id === order.id)) {
+      await clientDb.query("COMMIT");
+      return res.json({ ok: true, duplicate: true, order });
+    }
+    const client = (Array.isArray(data.clients) ? data.clients : []).find((item) => item && String(item.id) === orderClientId);
+    data.orders.push(order);
+    const total = num(order.totalAmount);
+    const balance = data.saldos.filter((entry) => entry && String(entry.clientId) === orderClientId).reduce((sum, entry) => sum + num(entry.amount), 0) + total;
+    data.saldos.push({
+      id: nextStateId("SAL", data.saldos),
+      date: order.date || new Date().toISOString().slice(0, 10),
+      clientId: orderClientId,
+      type: "pedido",
+      description: "Pedido " + order.id,
+      amount: total,
+      balance,
+      relatedEntityId: order.id,
+      relatedEntityType: "order",
+      paymentMethod: "",
+      notes: "Deuda generada por pedido."
+    });
+    data.caja.push({
+      id: nextStateId("TRX", data.caja),
+      date: order.date || new Date().toISOString().slice(0, 10),
+      timestamp: new Date().toISOString(),
+      type: "order_created",
+      concept: "Pedido creado - " + (client ? client.name : orderClientId) + " - " + order.id,
+      relatedEntityId: order.id,
+      relatedEntityType: "order",
+      expectedAmount: total,
+      amountIngreso: 0,
+      amountEgreso: 0,
+      balance: data.caja.reduce((sum, entry) => sum + num(entry.amountIngreso) - num(entry.amountEgreso), 0),
+      cashBoxId: "",
+      cashBoxName: "",
+      paymentMethod: "",
+      paymentStatus: "pending",
+      recordedBy: req.user.name || req.user.username,
+      userRole: req.user.role,
+      transferProofFile: "",
+      notes: "Registro de accountability. No suma caja hasta cobrar."
+    });
+    const saved = await clientDb.query("UPDATE app_state SET data = $1, updated_at = now(), updated_by = $2 WHERE id = 'main' RETURNING updated_at", [data, req.user.username]);
+    await clientDb.query("INSERT INTO state_history (data, updated_by) VALUES ($1, $2)", [data, req.user.username]);
+    await clientDb.query("DELETE FROM state_history WHERE id NOT IN (SELECT id FROM state_history ORDER BY id DESC LIMIT $1)", [STATE_HISTORY_KEEP]);
+    await mirrorStateToTables(clientDb, data);
+    await clientDb.query("COMMIT");
+    res.json({ ok: true, order, updatedAt: saved.rows[0].updated_at.toISOString() });
+  } catch (error) {
+    await clientDb.query("ROLLBACK").catch(() => {});
+    console.error("POST /orders/customer:", error);
+    res.status(500).json({ error: "No se pudo guardar el pedido: " + error.message });
+  } finally {
+    clientDb.release();
+  }
+});
+
 // ---------- Transferencias enviadas por clientes ----------
 app.post("/transfers", authenticate, requireRole("customer", "example"), async (req, res) => {
   const body = req.body || {};
@@ -553,6 +666,16 @@ app.post("/transfers", authenticate, requireRole("customer", "example"), async (
   const clientDb = await pool.connect();
   try {
     await clientDb.query("BEGIN");
+    if (req.user.role === "customer") {
+      const userRow = await clientDb.query("SELECT client_id, linked_client_ids FROM users WHERE id = $1 OR username = $2 LIMIT 1", [req.user.sub, req.user.username]);
+      const userRecord = userRow.rows[0] || {};
+      const allowedClientIds = new Set([String(userRecord.client_id || ""), ...parseLinkedClientIds(userRecord.linked_client_ids)].filter(Boolean));
+      const transferClientIds = (Array.isArray(body.transfer.clientIds) ? body.transfer.clientIds : [body.transfer.clientId]).filter(Boolean).map(String);
+      if (!transferClientIds.length || transferClientIds.some((id) => !allowedClientIds.has(id))) {
+        await clientDb.query("ROLLBACK");
+        return res.status(403).json({ error: "La transferencia contiene clientes no vinculados a este usuario." });
+      }
+    }
     const row = await clientDb.query("SELECT data FROM app_state WHERE id = 'main' FOR UPDATE");
     if (!row.rows.length) {
       await clientDb.query("ROLLBACK");
@@ -568,6 +691,10 @@ app.post("/transfers", authenticate, requireRole("customer", "example"), async (
       timestamp: new Date().toISOString()
     };
     data.clientTransfers = data.clientTransfers || [];
+    if (data.clientTransfers.some((existing) => existing && existing.id === transfer.id)) {
+      await clientDb.query("COMMIT");
+      return res.json({ ok: true, duplicate: true, transfer });
+    }
     data.clientTransfers.push(transfer);
     await clientDb.query("UPDATE app_state SET data = $1, updated_at = now(), updated_by = $2 WHERE id = 'main'", [data, req.user.username]);
     await clientDb.query("COMMIT");
