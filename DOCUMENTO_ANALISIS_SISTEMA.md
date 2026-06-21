@@ -345,6 +345,8 @@ Los historiales canonicos viven en la tabla `product_history_state`, fuera del J
 
 Esto reduce el peso de cada operacion diaria, porque editar clientes, crear pedidos o registrar pagos ya no transporta decenas de miles de registros historicos.
 
+Desde la version 12.8.19, la pantalla `Historiales` solicita `/product-history?mode=matrix`. En ese modo, el backend devuelve filas agregadas por producto/dia para compras y ventas, evitando que el navegador tenga que procesar todo el historial crudo del rango.
+
 ### 11.4 Sincronizacion offline
 
 El frontend mantiene una cola local de parches pendientes. Cada parche incluye `operationId`, `baseUpdatedAt` y los registros modificados.
@@ -360,29 +362,27 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 
 ## 12. Ultimo Cambio y Version
 
-**Version operativa:** 12.8.18  
+**Version operativa:** 12.8.19  
 **Fecha:** 2026-06-21  
-**Commit GitHub del cambio funcional:** `e7f89bdbeae185e01b95508bff361c0bdcc64e6e`  
+**Commit GitHub del cambio funcional:** `5194050c009ada03336bf010ac99f65fedf77443`  
 **Entorno actualizado:** VPS productivo `/opt/pare-carrito` con Docker Compose (`api`, `caddy`, `db`).
 
 ### Detalle del ultimo cambio
 
-- En `Historiales`, la carga de datos por rango queda asociada al rango consultado y tiene timeout; esto evita estados infinitos de "Cargando historiales...".
-- La impresion de `Historiales` usa documento/ventana temporal directa para que mobile imprima solo compras, solo ventas o ambos cuadros, sin arrastrar el resto de la pagina.
-- Los botones compactos y controles mobile respetan area tactil minima de 44px; las tablas hacen scroll dentro de su contenedor para no ensanchar dashboards.
-- En `Nuevo Pedido` mobile, el carrito queda sticky y compacto; cada item muestra producto, cantidad, subtotal y quitar en una misma fila, sin unidad ni leyenda auxiliar.
-- El carrito oculta la linea de IVA cuando el cliente seleccionado no corresponde a IVA.
-- El boton `Todos` de categorias puede desmarcar todas las categorias sin que el render reactive la seleccion completa.
-- El rol Cliente deja de ejecutar sincronizacion completa contra `/state` y `/state/patch`, evitando 403 repetidos.
-- Pedidos y transferencias de clientes se guardan por endpoints especificos y quedan en cola local de reintento cuando no hay conexion.
-- El backend agrega `/orders/customer`, valida clientes vinculados y registra pedido, saldo y caja de forma transaccional.
-- El backend valida transferencias de cliente contra sus clientes vinculados y evita duplicados al reintentar operaciones.
-- Verificacion productiva: API del VPS respondio health OK desde el contenedor luego del rebuild.
+- `Nuevo Pedido` renderiza productos por lotes de 80 y carga mas al acercarse al final del listado, reduciendo el costo inicial de la pantalla.
+- El borrador local de `Nuevo Pedido` conserva cantidades, notas, precios y unidades aunque el producto no este renderizado por la virtualizacion.
+- El carrito mobile queda sticky y compacto para todos los roles; `Total` queda a la izquierda y el importe a la derecha.
+- Si el cliente no tiene IVA, no se muestra subtotal; si tiene IVA, se muestran subtotal e IVA como detalle.
+- Los botones `X` del carrito mobile se achicaron visualmente y las filas se compactaron.
+- La etiqueta de preferencias de producto ahora muestra `ultima compra`.
+- `Historiales` usa el modo agregado del backend (`/product-history?mode=matrix`) para recibir filas ya consolidadas de compras y ventas.
+- Los botones `7 dias`, `30 dias`, `3 meses` y `6 meses` tienen ancho minimo legible en mobile y desktop.
+- Verificacion productiva: API del VPS respondio health OK desde el contenedor luego del rebuild; frontend desplegado.
 - No se registraron credenciales en este documento ni en el historial.
 
 ### Backups asociados
 
-- VPS pre-cambio mobile/historiales/sync cliente: dump PostgreSQL, `app_state` y tar de `/opt/pare-carrito` generados con timestamp `20260621_123029`.
-- PC pre-cambio mobile/historiales/sync cliente: `auditoria/repo-backup-20260621-1230-pre-mobile-history-sync.zip`.
-- VPS post-cambio mobile/historiales/sync cliente: dump PostgreSQL, `app_state` y tar de `/opt/pare-carrito` generados con timestamp `20260621_125146`.
-- PC post-cambio mobile/historiales/sync cliente: `auditoria/repo-backup-20260621-1252-post-mobile-history-sync.zip`.
+- VPS pre-cambio virtualizacion/historiales: dump PostgreSQL, `app_state` y tar de `/opt/pare-carrito` generados con timestamp `20260621_170034`.
+- PC pre-cambio virtualizacion/historiales: `auditoria/repo-backup-20260621-1700-pre-virtual-history-order.zip`.
+- VPS post-cambio virtualizacion/historiales: dump PostgreSQL, `app_state` y tar de `/opt/pare-carrito` generados con timestamp `20260621_171221`.
+- PC post-cambio virtualizacion/historiales: `auditoria/repo-backup-20260621-1712-post-virtual-history-order.zip`.

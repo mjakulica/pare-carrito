@@ -1,5 +1,26 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.8.19 - Virtualizacion de Nuevo Pedido e historiales agregados (2026-06-21)
+
+### Frontend / Nuevo Pedido, Historiales y mobile
+
+- `Nuevo Pedido` ahora renderiza productos por lotes de 80 y carga mas al acercarse al final del listado, reduciendo el peso inicial de la pantalla.
+- Se agrego un borrador local de pedido para conservar cantidades, notas, precios y unidades aunque el producto no este renderizado por la virtualizacion.
+- El carrito mobile queda sticky y compacto para todos los roles; la fila de total muestra `Total` a la izquierda y el importe a la derecha.
+- Si el cliente no tiene IVA, el carrito no muestra subtotal; si tiene IVA, muestra subtotal e IVA como detalle.
+- Los botones `X` del carrito mobile se redujeron visualmente y las filas del carrito se compactaron al mismo alto.
+- El texto de preferencia de producto en `Nuevo Pedido` cambia de `Favorito: ultima unidad` a `ultima compra`.
+- La pagina `Historiales` pide al backend matrices agregadas (`mode=matrix`) para compras y ventas, evitando agrupar historiales grandes en el navegador.
+- Los botones `7 dias`, `30 dias`, `3 meses` y `6 meses` de `Historiales` tienen ancho minimo legible en mobile y desktop.
+- Commit funcional desplegado: `5194050c009ada03336bf010ac99f65fedf77443`.
+- Verificacion: `node --check` en frontend/backend; prueba local mobile 375px sin errores de consola ni overflow inicial; API en VPS `HEALTH ok`.
+- Backups VPS: pre-cambio `20260621_170034`; post-cambio `20260621_171221`.
+- Backup PC pre-cambio: `auditoria/repo-backup-20260621-1700-pre-virtual-history-order.zip`.
+- Backup PC post-cambio: `auditoria/repo-backup-20260621-1712-post-virtual-history-order.zip`.
+- No se registraron credenciales en documentacion ni reportes.
+
+---
+
 ## v12.8.18 - Historiales robustos, mobile y sync cliente (2026-06-21)
 
 ### Frontend / Historiales, Nuevo Pedido, mobile y sincronizacion
