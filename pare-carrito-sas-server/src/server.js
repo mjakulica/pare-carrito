@@ -371,6 +371,80 @@ function filterHistoryByRange(records, from, to) {
   });
 }
 
+function productLookupFromState(data) {
+  const map = new Map();
+  for (const product of Array.isArray(data && data.products) ? data.products : []) {
+    if (product && product.id) map.set(String(product.id), product);
+  }
+  return map;
+}
+
+function ensureHistoryMatrixRow(rows, record, product) {
+  const key = String(record.productId || record.productName || "");
+  if (!key) return null;
+  if (!rows[key]) rows[key] = {
+    productId: record.productId || "",
+    productName: record.productName || (product ? product.name : key),
+    category: product ? product.category : (record.category || "OTROS"),
+    unitType: record.unitType || (product ? product.unitType : ""),
+    totalQuantity: 0,
+    totalAmount: 0,
+    days: {}
+  };
+  return rows[key];
+}
+
+function sortHistoryMatrixRows(rows) {
+  return Object.values(rows).sort((a, b) => String(a.category || "").localeCompare(String(b.category || "")) || String(a.productName || "").localeCompare(String(b.productName || "")));
+}
+
+function buildPurchaseHistoryMatrix(records, productMap) {
+  const rows = {};
+  for (const record of Array.isArray(records) ? records : []) {
+    const date = String(record && record.date || "").slice(0, 10);
+    if (!date) continue;
+    const product = productMap.get(String(record.productId || ""));
+    const row = ensureHistoryMatrixRow(rows, record, product);
+    if (!row) continue;
+    if (!row.days[date]) row.days[date] = { quantity: 0, amount: 0, price: 0 };
+    const quantity = Number(record.quantity || 0);
+    const price = Number(record.unitCost || record.price || 0);
+    const amount = Number(record.totalCost || quantity * price);
+    row.totalQuantity += quantity;
+    row.totalAmount += amount;
+    row.days[date].quantity += quantity;
+    row.days[date].amount += amount;
+    row.days[date].price = Math.max(row.days[date].price, price);
+  }
+  return sortHistoryMatrixRows(rows);
+}
+
+function buildSalesHistoryMatrix(salesRecords, priceRecords, productMap) {
+  const priceByProductDate = {};
+  for (const record of Array.isArray(priceRecords) ? priceRecords : []) {
+    const date = String(record && record.date || "").slice(0, 10);
+    if (record && record.productId && date) priceByProductDate[String(record.productId) + "|" + date] = Number(record.price || 0);
+  }
+  const rows = {};
+  for (const record of Array.isArray(salesRecords) ? salesRecords : []) {
+    const date = String(record && record.date || "").slice(0, 10);
+    if (!date) continue;
+    const product = productMap.get(String(record.productId || ""));
+    const row = ensureHistoryMatrixRow(rows, record, product);
+    if (!row) continue;
+    if (!row.days[date]) row.days[date] = { quantity: 0, amount: 0, price: 0 };
+    const quantity = Number(record.quantity || 0);
+    const price = Number(record.listPrice || record.price || priceByProductDate[String(record.productId || "") + "|" + date] || 0);
+    const amount = quantity * price;
+    row.totalQuantity += quantity;
+    row.totalAmount += amount;
+    row.days[date].quantity += quantity;
+    row.days[date].amount += amount;
+    row.days[date].price = price;
+  }
+  return sortHistoryMatrixRows(rows);
+}
+
 function patchKeyForItem(key, item) {
   if (!item) return "";
   if (key === "preferences") return String(item.clientId || "") + "|" + String(item.productId || "");
@@ -425,10 +499,22 @@ app.get("/state", authenticate, requireRole(...SYNC_ROLES), async (req, res) => 
 
 app.get("/product-history", authenticate, requireRole("manager", "admin"), async (req, res) => {
   const history = await loadProductHistoryState(pool);
+  const listPriceHistory = filterHistoryByRange(history.listPriceHistory, req.query.from, req.query.to);
+  const salesQuantityHistory = filterHistoryByRange(history.salesQuantityHistory, req.query.from, req.query.to);
+  const purchaseHistory = filterHistoryByRange(history.purchaseHistory, req.query.from, req.query.to);
+  if (String(req.query.mode || "") === "matrix") {
+    const stateRow = await pool.query("SELECT data FROM app_state WHERE id = 'main'");
+    const productMap = productLookupFromState(stateRow.rows[0] ? stateRow.rows[0].data : {});
+    return res.json({
+      purchaseRows: buildPurchaseHistoryMatrix(purchaseHistory, productMap),
+      salesRows: buildSalesHistoryMatrix(salesQuantityHistory, listPriceHistory, productMap),
+      updatedAt: history.updatedAt
+    });
+  }
   res.json({
-    listPriceHistory: filterHistoryByRange(history.listPriceHistory, req.query.from, req.query.to),
-    salesQuantityHistory: filterHistoryByRange(history.salesQuantityHistory, req.query.from, req.query.to),
-    purchaseHistory: filterHistoryByRange(history.purchaseHistory, req.query.from, req.query.to),
+    listPriceHistory,
+    salesQuantityHistory,
+    purchaseHistory,
     updatedAt: history.updatedAt
   });
 });

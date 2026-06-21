@@ -22,6 +22,7 @@
     { name: "bandeja", wholesale: false, weight: 1 }
   ];
   const CATEGORIES = ["FRUTAS", "VERDURAS", "HUEVOS", "HOJAS", "CONDIMENTOS", "LEGUMBRES", "FRUTOS SECOS", "CONGELADOS", "OTROS"];
+  const ORDER_PRODUCT_BATCH_SIZE = 80;
       const PRODUCT_IMAGE_FILES = [
     "Queso criollo horma.jpg",
     "acelga.jpg",
@@ -234,6 +235,8 @@
     purchaseAssigneeFilter: "all",
     orderView: "grid",
     orderProductFilter: "",
+    orderRenderedLimit: ORDER_PRODUCT_BATCH_SIZE,
+    orderDraft: {},
     orderSelectedCategories: null,
     orderWholesaleFilter: ["mayor", "menor"],
     balanceFrom: "",
@@ -2894,6 +2897,39 @@
     `;
   }
 
+  function renderOrderProductRow(product, client, options = {}) {
+    const pref = getPreference(client ? client.id : "", product.id);
+    const draft = (ui.orderDraft && ui.orderDraft[product.id]) || {};
+    const price = draft.price !== undefined && draft.price !== "" ? Number(draft.price || 0) : getAdjustedProductPrice(product, client);
+    const unit = draft.unitType || (pref ? pref.preferredUnitType : product.unitType);
+    const integerQty = options.isCustomerOrder && product.unitType === "unidad";
+    const favoriteText = pref ? `&uacute;ltima compra ${escapeHtml(pref.preferredUnitType)}${pref.lastQuantity ? `, ${formatNumber(pref.lastQuantity)}` : ""}` : "";
+    return `
+      <div class="order-row ${ui.orderView === "grid" ? "compact" : ""}" data-product-row="${product.id}">
+        <div class="order-product-title">
+          <div class="product-name">${escapeHtml(product.name)}</div>
+          ${pref ? `<div class="favorite-mark">${favoriteText}</div>` : ""}
+        </div>
+        <div class="field order-qty-field">
+          <label>Cantidad</label>
+          <input data-qty value="${escapeAttr(draft.quantity ? formatAmountInput(draft.quantity) : "")}" ${integerQty ? `type="number" step="1" inputmode="numeric" data-integer-qty` : `inputmode="decimal"`} placeholder="0" />
+          <input type="hidden" data-unit value="${escapeAttr(unit)}" />
+        </div>
+        <div class="order-thumb-field">
+          <img class="order-product-thumb" src="${productThumb(product)}" alt="" loading="lazy" decoding="async" />
+        </div>
+        <div class="field order-note-field">
+          <label>Nota</label>
+          <input data-note placeholder="comentarios?" value="${escapeAttr(draft.note || "")}" />
+        </div>
+        ${options.hideOrderPrices ? `<input type="hidden" data-price value="${formatAmountInput(price)}" />` : `<div class="field order-price-field">
+          <label>Precio unitario</label>
+          <input data-price value="${formatAmountInput(price)}" inputmode="decimal" />
+        </div>`}
+      </div>
+    `;
+  }
+
   function renderNewOrder() {
     const isCustomerOrder = isClientLikeRole(currentUser.role);
     const hideOrderPrices = isCustomerOrder || currentUser.role === "employee";
@@ -2958,42 +2994,16 @@
       if (!ui.orderProductFilter) return true;
       return product.name.toLowerCase().includes(ui.orderProductFilter.toLowerCase());
     };
-    const productRows = products.map((product) => {
-      const pref = getPreference(client ? client.id : "", product.id);
-      const price = getAdjustedProductPrice(product, client);
-      const unit = pref ? pref.preferredUnitType : product.unitType;
-      const hidden = !productMatches(product) || !nameMatches(product);
-      const integerQty = isCustomerOrder && product.unitType === "unidad";
-      return `
-        <div class="order-row ${ui.orderView === "grid" ? "compact" : ""}" data-product-row="${product.id}" ${hidden ? `style="display:none"` : ""}>
-          <div class="order-product-title">
-            <div class="product-name">${escapeHtml(product.name)}</div>
-            ${pref ? `<div class="favorite-mark">Favorito: ultima unidad ${escapeHtml(pref.preferredUnitType)}${pref.lastQuantity ? `, ${formatNumber(pref.lastQuantity)}` : ""}</div>` : ""}
-          </div>
-          <div class="field order-qty-field">
-            <label>Cantidad</label>
-            <input data-qty value="" ${integerQty ? `type="number" step="1" inputmode="numeric" data-integer-qty` : `inputmode="decimal"`} placeholder="0" />
-            <input type="hidden" data-unit value="${escapeAttr(unit)}" />
-          </div>
-          <div class="order-thumb-field">
-            <img class="order-product-thumb" src="${productThumb(product)}" alt="" />
-          </div>
-          <div class="field order-note-field">
-            <label>Nota</label>
-            <input data-note placeholder="comentarios?" />
-          </div>
-          ${hideOrderPrices ? `<input type="hidden" data-price value="${formatAmountInput(price)}" />` : `<div class="field order-price-field">
-            <label>Precio unitario</label>
-            <input data-price value="${formatAmountInput(price)}" inputmode="decimal" />
-          </div>`}
-        </div>
-      `;
-    }).join("");
+    const filteredProducts = products.filter((product) => productMatches(product) && nameMatches(product));
+    if (!Number.isFinite(Number(ui.orderRenderedLimit)) || Number(ui.orderRenderedLimit) < ORDER_PRODUCT_BATCH_SIZE) ui.orderRenderedLimit = ORDER_PRODUCT_BATCH_SIZE;
+    const renderedProducts = filteredProducts.slice(0, Number(ui.orderRenderedLimit));
+    const productRows = renderedProducts.map((product) => renderOrderProductRow(product, client, { hideOrderPrices, isCustomerOrder })).join("");
     const wholesaleFilterButtons = `<div class="order-wholesale-filters">
         <button type="button" class="btn small wholesale-filter-btn ${wholesaleFilter.includes("mayor") ? "blue" : "ghost"}" data-order-wholesale="mayor">Por Mayor</button>
         <button type="button" class="btn small wholesale-filter-btn ${wholesaleFilter.includes("menor") ? "blue" : "ghost"}" data-order-wholesale="menor">Por Menor</button>
       </div>`;
-    const visibleProductCount = products.filter((product) => productMatches(product) && nameMatches(product)).length;
+    const visibleProductCount = filteredProducts.length;
+    const renderedProductCount = renderedProducts.length;
     const categoryFilterButtons = categories.length
       ? `<div class="order-category-filters">
           <button type="button" class="btn small ${allCategoriesSelected ? "primary" : "ghost"}" data-order-category="all">Todos</button>
@@ -3078,17 +3088,18 @@
           <aside class="panel order-cart-panel">
             <h2 class="page-title" style="font-size:18px">Carrito</h2>
             <div id="order-cart" class="cart-list"><div class="empty compact">Sin productos agregados.</div></div>
-            ${hideOrderPrices ? "" : `<h2 class="page-title" style="font-size:18px">Total</h2>
-            <div class="metric-note" id="order-net-total">Subtotal $0</div>
-            ${client && shouldApplyInvoiceVat(client) ? `<div class="metric-note" id="order-vat-total">IVA $0</div>` : ""}
-            <div class="metric-value" id="order-total">$0</div>`}
+            ${hideOrderPrices ? "" : `<div class="order-total-summary">
+              <div class="order-total-main"><span>Total</span><strong id="order-total">$0</strong></div>
+              ${client && shouldApplyInvoiceVat(client) ? `<div class="metric-note" id="order-net-total">Subtotal $0</div><div class="metric-note" id="order-vat-total">IVA $0</div>` : ""}
+            </div>`}
             <button class="btn primary full" type="submit">Enviar Pedido</button>
           </aside>
         </div>
         ${wholesaleFilterButtons}
         ${categoryFilterButtons}
-        <div class="order-product-count" id="order-product-count">${visibleProductCount} producto${visibleProductCount === 1 ? "" : "s"}</div>
+        <div class="order-product-count" id="order-product-count">Mostrando ${renderedProductCount} de ${visibleProductCount} producto${visibleProductCount === 1 ? "" : "s"}</div>
         <div class="order-grid ${ui.orderView === "grid" ? "order-grid-cards" : ""}">${productRows}</div>
+        <div class="order-load-more-wrap" id="order-load-more-wrap">${renderedProductCount < visibleProductCount ? `<button class="btn ghost small" id="load-more-order-products" type="button">Cargar mas</button>` : ""}</div>
       </form>
       `,
       "nuevo-pedido"
@@ -3105,18 +3116,75 @@
     const warningBox = document.getElementById("order-parse-warning");
     const isCustomerOrder = isClientLikeRole(currentUser.role);
     const hideOrderPrices = isCustomerOrder || currentUser.role === "employee";
+    ui.orderDraft = ui.orderDraft && typeof ui.orderDraft === "object" ? ui.orderDraft : {};
+    const syncOrderDraftFromDom = () => {
+      document.querySelectorAll("[data-product-row]").forEach((row) => {
+        const productId = row.dataset.productRow;
+        if (!productId) return;
+        const qty = parseAmount(row.querySelector("[data-qty]") ? row.querySelector("[data-qty]").value : "");
+        const note = row.querySelector("[data-note]") ? row.querySelector("[data-note]").value.trim() : "";
+        const price = row.querySelector("[data-price]") ? parseAmount(row.querySelector("[data-price]").value) : 0;
+        const unitType = row.querySelector("[data-unit]") ? row.querySelector("[data-unit]").value : "";
+        if (qty > 0 || note) {
+          ui.orderDraft[productId] = { productId, quantity: qty, note, price, unitType };
+        } else if (ui.orderDraft[productId]) {
+          delete ui.orderDraft[productId];
+        }
+      });
+    };
     const recalc = () => {
+      syncOrderDraftFromDom();
       const client = getClient(clientSelect.value);
       const items = collectOrderDraftItems(client, false);
       const subtotalTotal = items.reduce((sum, item) => sum + item.subtotal, 0);
       const vatTotal = items.reduce((sum, item) => sum + item.ivaAmount, 0);
-      document.getElementById("order-cart").innerHTML = renderOrderCart(items, { showPrices: !hideOrderPrices });
+      document.getElementById("order-cart").innerHTML = renderOrderCart(items, { showPrices: !hideOrderPrices, showIva: client && shouldApplyInvoiceVat(client) });
       const netTotal = document.getElementById("order-net-total");
       const vatTotalNode = document.getElementById("order-vat-total");
       const orderTotal = document.getElementById("order-total");
       if (netTotal) netTotal.textContent = "Subtotal " + formatMoney(subtotalTotal);
       if (vatTotalNode) vatTotalNode.textContent = "IVA " + formatMoney(vatTotal);
       if (orderTotal) orderTotal.textContent = formatMoney(subtotalTotal + vatTotal);
+    };
+    const currentFilteredProducts = () => sortProductsForClient(clientSelect.value).filter((product) => filterMatches(product));
+    const bindDraftInputs = () => {
+      document.querySelectorAll("[data-qty],[data-price],[data-note]").forEach((input) => input.addEventListener("input", recalc));
+    };
+    const updateLoadMoreButton = (filteredProducts) => {
+      const wrap = document.getElementById("order-load-more-wrap");
+      if (!wrap) return;
+      const rendered = Math.min(Number(ui.orderRenderedLimit || ORDER_PRODUCT_BATCH_SIZE), filteredProducts.length);
+      wrap.innerHTML = rendered < filteredProducts.length ? `<button class="btn ghost small" id="load-more-order-products" type="button">Cargar mas</button>` : "";
+      const button = document.getElementById("load-more-order-products");
+      if (button) {
+        button.addEventListener("click", () => renderProductWindow(false));
+        if ("IntersectionObserver" in window) {
+          const observer = new IntersectionObserver((entries) => {
+            if (!entries.some((entry) => entry.isIntersecting)) return;
+            observer.disconnect();
+            button.click();
+          }, { rootMargin: "240px" });
+          observer.observe(button);
+        }
+      }
+    };
+    const renderProductWindow = (resetLimit) => {
+      syncOrderDraftFromDom();
+      if (resetLimit) ui.orderRenderedLimit = ORDER_PRODUCT_BATCH_SIZE;
+      else ui.orderRenderedLimit = Number(ui.orderRenderedLimit || ORDER_PRODUCT_BATCH_SIZE) + ORDER_PRODUCT_BATCH_SIZE;
+      const client = getClient(clientSelect.value);
+      const filteredProducts = currentFilteredProducts();
+      const renderedLimit = Math.min(Number(ui.orderRenderedLimit || ORDER_PRODUCT_BATCH_SIZE), filteredProducts.length);
+      const renderedProducts = filteredProducts.slice(0, renderedLimit);
+      const grid = document.querySelector(".order-grid");
+      if (grid) {
+        grid.innerHTML = renderedProducts.map((product) => renderOrderProductRow(product, client, { hideOrderPrices, isCustomerOrder })).join("");
+      }
+      const countNode = document.getElementById("order-product-count");
+      if (countNode) countNode.textContent = "Mostrando " + renderedProducts.length + " de " + filteredProducts.length + " producto" + (filteredProducts.length === 1 ? "" : "s");
+      updateLoadMoreButton(filteredProducts);
+      bindDraftInputs();
+      recalc();
     };
     const filterMatches = (product) => {
       if (!product) return false;
@@ -3134,15 +3202,12 @@
     const updateOrderProductCount = () => {
       const countNode = document.getElementById("order-product-count");
       if (!countNode) return;
-      const count = Array.from(document.querySelectorAll("[data-product-row]")).filter((row) => row.style.display !== "none").length;
-      countNode.textContent = count + " producto" + (count === 1 ? "" : "s");
+      const filteredProducts = currentFilteredProducts();
+      const rendered = Math.min(Number(ui.orderRenderedLimit || ORDER_PRODUCT_BATCH_SIZE), filteredProducts.length);
+      countNode.textContent = "Mostrando " + rendered + " de " + filteredProducts.length + " producto" + (filteredProducts.length === 1 ? "" : "s");
     };
     const applyOrderFilters = () => {
-      document.querySelectorAll("[data-product-row]").forEach((row) => {
-        const product = getProduct(row.dataset.productRow);
-        row.style.display = filterMatches(product) ? "" : "none";
-      });
-      updateOrderProductCount();
+      renderProductWindow(true);
     };
     const updateOrderPricesForClient = (client) => {
       document.querySelectorAll("[data-product-row]").forEach((row) => {
@@ -3176,6 +3241,7 @@
           selected = selected.includes(value) ? selected.filter((cat) => cat !== value) : [...selected, value];
         }
         ui.orderSelectedCategories = selected;
+        ui.orderRenderedLimit = ORDER_PRODUCT_BATCH_SIZE;
         render();
       });
     });
@@ -3186,6 +3252,7 @@
         selected = selected.includes(value) ? selected.filter((item) => item !== value) : [...selected, value];
         if (selected.length === 0) selected = ["mayor", "menor"];
         ui.orderWholesaleFilter = selected;
+        ui.orderRenderedLimit = ORDER_PRODUCT_BATCH_SIZE;
         render();
       });
     });
@@ -3203,6 +3270,10 @@
     const applySelectedClient = (clientId, shouldRender) => {
       clientSelect.value = clientId;
       ui.selectedClientId = clientId;
+      if (shouldRender) {
+        ui.orderDraft = {};
+        ui.orderRenderedLimit = ORDER_PRODUCT_BATCH_SIZE;
+      }
       const client = getClient(clientId);
       const vehicleSelect = document.getElementById("order-vehicle");
       if (client && vehicleSelect) vehicleSelect.value = client.vehicleId;
@@ -3293,7 +3364,8 @@
     });
     dateInput.addEventListener("change", handleDateChange);
     dateInput.addEventListener("blur", handleDateChange);
-    document.querySelectorAll("[data-qty],[data-price]").forEach((input) => input.addEventListener("input", recalc));
+    bindDraftInputs();
+    updateLoadMoreButton(currentFilteredProducts());
     const orderGrid = document.querySelector(".order-grid");
     if (orderGrid) {
       orderGrid.addEventListener("input", (event) => {
@@ -3311,10 +3383,12 @@
     document.getElementById("order-cart").addEventListener("click", (event) => {
       const button = event.target.closest("[data-remove-cart-item]");
       if (!button) return;
+      delete ui.orderDraft[button.dataset.removeCartItem];
       const row = document.querySelector(`[data-product-row="${cssEscape(button.dataset.removeCartItem)}"]`);
-      if (!row) return;
-      row.querySelector("[data-qty]").value = "";
-      row.querySelector("[data-note]").value = "";
+      if (row) {
+        row.querySelector("[data-qty]").value = "";
+        row.querySelector("[data-note]").value = "";
+      }
       recalc();
     });
     document.getElementById("add-order-products").addEventListener("click", () => {
@@ -3323,6 +3397,15 @@
       const typedProduct = findProductByInput(searchInput.value);
       const quantity = quickQty ? parseAmount(quickQty.value) : 0;
       if (typedProduct && quantity > 0) {
+        const client = getClient(clientSelect.value);
+        const pref = getPreference(client ? client.id : "", typedProduct.id);
+        ui.orderDraft[typedProduct.id] = {
+          productId: typedProduct.id,
+          quantity,
+          note: quickNote ? quickNote.value.trim() : "",
+          price: getAdjustedProductPrice(typedProduct, client),
+          unitType: pref ? pref.preferredUnitType : typedProduct.unitType
+        };
         const row = document.querySelector(`[data-product-row="${cssEscape(typedProduct.id)}"]`);
         if (row) {
           row.querySelector("[data-qty]").value = formatAmountInput(quantity);
@@ -3421,6 +3504,8 @@
         saveState();
         ui.selectedClientId = "";
         ui.orderProductFilter = "";
+        ui.orderDraft = {};
+        ui.orderRenderedLimit = ORDER_PRODUCT_BATCH_SIZE;
         alert("Pedido guardado: " + order.id);
         render();
         return;
@@ -3455,6 +3540,8 @@
       }
       ui.selectedClientId = "";
       ui.orderProductFilter = "";
+      ui.orderDraft = {};
+      ui.orderRenderedLimit = ORDER_PRODUCT_BATCH_SIZE;
       alert("Pedido guardado: " + order.id);
       render();
     });
@@ -3465,7 +3552,16 @@
     document.querySelectorAll("[data-product-row]").forEach((row) => {
       row.querySelector("[data-qty]").value = "";
     });
+    ui.orderDraft = {};
     parsed.items.forEach((entry) => {
+      const client = getClient(ui.selectedClientId);
+      ui.orderDraft[entry.product.id] = {
+        productId: entry.product.id,
+        quantity: entry.quantity,
+        note: entry.note || "",
+        price: getAdjustedProductPrice(entry.product, client),
+        unitType: entry.unitType
+      };
       const row = document.querySelector(`[data-product-row="${cssEscape(entry.product.id)}"]`);
       if (!row) return;
       row.querySelector("[data-qty]").value = formatAmountInput(entry.quantity);
@@ -3491,6 +3587,41 @@
 
   function collectOrderDraftItems(client, withIds) {
     const items = [];
+    const draftEntries = ui.orderDraft && typeof ui.orderDraft === "object"
+      ? Object.values(ui.orderDraft)
+      : [];
+    if (draftEntries.length) {
+      draftEntries.forEach((entry) => {
+        const productId = entry.productId;
+        const qty = parseAmount(entry.quantity);
+        if (qty <= 0) return;
+        const product = getProduct(productId);
+        const unitPrice = parseAmount(entry.price);
+        const unitType = entry.unitType || (product ? product.unitType : "");
+        const note = String(entry.note || "").trim();
+        const subtotal = qty * unitPrice;
+        const ivaRate = shouldApplyInvoiceVat(client) ? getIvaRate(product && product.ivaType) : 0;
+        const ivaAmount = subtotal * (ivaRate / 100);
+        if (withIds && client) upsertPreference(client.id, productId, unitType, qty);
+        items.push({
+          id: withIds ? nextItemId() : productId,
+          productId,
+          productName: product ? product.name : productId,
+          quantity: qty,
+          unitType,
+          unitPrice,
+          subtotal,
+          ivaRate,
+          ivaAmount,
+          totalWithIva: subtotal + ivaAmount,
+          note,
+          assignedProviderId: "",
+          assignedToType: "",
+          assignedToId: ""
+        });
+      });
+      return items;
+    }
     document.querySelectorAll("[data-product-row]").forEach((row) => {
       const productId = row.dataset.productRow;
       const qty = parseAmount(row.querySelector("[data-qty]").value);
@@ -3531,7 +3662,7 @@
         <span>${escapeHtml(item.productName)}${item.note ? `<br><small>${escapeHtml(item.note)}</small>` : ""}</span>
         <strong>${formatNumber(item.quantity)}</strong>
         ${showPrices ? `<b>${formatMoney(item.subtotal)}</b>` : ""}
-        <button class="btn icon danger" type="button" data-remove-cart-item="${escapeAttr(item.productId)}" title="Quitar">X</button>
+        <button class="btn icon danger cart-remove-btn" type="button" data-remove-cart-item="${escapeAttr(item.productId)}" title="Quitar">X</button>
       </div>
     `).join("");
   }
@@ -4383,8 +4514,8 @@
     const historyReady = ui.historyData && ui.historyData.from === from && ui.historyData.to === to;
     const historyKey = from + "|" + to;
     const loadingThisRange = ui.historyLoading && ui.historyLoadingKey === historyKey;
-    const purchaseRows = historyReady ? buildPurchaseHistoryMatrix(from, to, ui.historyData.purchaseHistory || []) : [];
-    const salesRows = historyReady ? buildSalesHistoryMatrix(from, to, ui.historyData.salesQuantityHistory || [], ui.historyData.listPriceHistory || []) : [];
+    const purchaseRows = historyReady ? (ui.historyData.purchaseRows || buildPurchaseHistoryMatrix(from, to, ui.historyData.purchaseHistory || [])) : [];
+    const salesRows = historyReady ? (ui.historyData.salesRows || buildSalesHistoryMatrix(from, to, ui.historyData.salesQuantityHistory || [], ui.historyData.listPriceHistory || [])) : [];
     const historyBody = (rows, type) => {
       if (ui.historyError) return `<div class="alert">${escapeHtml(ui.historyError)}</div>`;
       if (!historyReady || loadingThisRange) return `<div class="empty compact">Cargando historiales...</div>`;
@@ -4478,11 +4609,11 @@
     const dates = buildDateRange(from, to);
     const sections = [];
     if (scope === "all" || scope === "purchase") {
-      const rows = buildPurchaseHistoryMatrix(from, to, ui.historyData.purchaseHistory || []);
+      const rows = ui.historyData.purchaseRows || buildPurchaseHistoryMatrix(from, to, ui.historyData.purchaseHistory || []);
       sections.push(`<section class="print-sheet history-print-sheet">${renderHistoryPrintTitle("Precios de compras", from, to)}${renderHistoryMatrixTable(rows, dates, "purchase")}</section>`);
     }
     if (scope === "all" || scope === "sales") {
-      const rows = buildSalesHistoryMatrix(from, to, ui.historyData.salesQuantityHistory || [], ui.historyData.listPriceHistory || []);
+      const rows = ui.historyData.salesRows || buildSalesHistoryMatrix(from, to, ui.historyData.salesQuantityHistory || [], ui.historyData.listPriceHistory || []);
       sections.push(`<section class="print-sheet history-print-sheet">${renderHistoryPrintTitle("Historial de ventas", from, to)}${renderHistoryMatrixTable(rows, dates, "sales")}</section>`);
     }
     printHtmlDocument("Historiales " + formatDate(from) + " - " + formatDate(to), `<section class="history-print-page">${sections.join("")}</section>`, { landscape: true, margin: "4mm", useWindow: true, printWindow });
@@ -4548,13 +4679,15 @@
     const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
     const timeout = controller ? setTimeout(() => controller.abort(), 18000) : null;
     try {
-      const response = await cloudRequest(config, "/product-history?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to), { method: "GET", signal: controller ? controller.signal : undefined });
+      const response = await cloudRequest(config, "/product-history?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to) + "&mode=matrix", { method: "GET", signal: controller ? controller.signal : undefined });
       if (!response.ok) throw new Error("HTTP " + response.status + (await readCloudErrorDetail(response)));
       const payload = await response.json();
       if (ui.historyLoadingKey !== requestKey) return;
       ui.historyData = {
         from,
         to,
+        purchaseRows: payload.purchaseRows || null,
+        salesRows: payload.salesRows || null,
         listPriceHistory: payload.listPriceHistory || [],
         salesQuantityHistory: payload.salesQuantityHistory || [],
         purchaseHistory: payload.purchaseHistory || [],
