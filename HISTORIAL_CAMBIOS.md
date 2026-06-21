@@ -12,10 +12,11 @@
 - El backend `/billing/run` acepta `ivaOverrides` por cliente y registra `manualIvaOverride` en el log.
 - En `Proveedores`, `PDF / Imprimir proveedor` imprime solo la cuenta del proveedor/rango seleccionado.
 - En `Proveedores`, los movimientos ahora combinan cuenta corriente de proveedor con compras/pagos asociados en `purchases`, evitando duplicados cuando ya existe asiento en `providerLedger`.
-- Commit funcional desplegado: pendiente hasta finalizar deploy.
-- Backups VPS: pre-cambio `20260621_115714`; post-cambio pendiente.
+- Commit funcional desplegado: `c4095ad28c73b082d9f450de115946922f9d33e2`.
+- Verificacion VPS: API `HEALTH=200`; `Proveedor Generico` tiene `666` compras asociadas en `purchases` y `0` asientos en `providerLedger`, por eso antes no se mostraban movimientos.
+- Backups VPS: pre-cambio `20260621_115714`; post-cambio `20260621_120443`.
 - Backup PC pre-cambio: `auditoria/repo-backup-20260621-1157-pre-print-billing-providers.zip`.
-- Backup PC post-cambio: pendiente.
+- Backup PC post-cambio: `auditoria/repo-backup-20260621-1206-post-print-billing-providers.zip`.
 - No se registraron credenciales en documentacion ni reportes.
 
 ---

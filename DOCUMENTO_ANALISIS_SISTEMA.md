@@ -360,7 +360,7 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 
 **Version operativa:** 12.8.17  
 **Fecha:** 2026-06-21  
-**Commit GitHub del cambio funcional:** pendiente hasta finalizar deploy  
+**Commit GitHub del cambio funcional:** `c4095ad28c73b082d9f450de115946922f9d33e2`  
 **Entorno actualizado:** VPS productivo `/opt/pare-carrito` con Docker Compose (`api`, `caddy`, `db`).
 
 ### Detalle del ultimo cambio
@@ -373,11 +373,12 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 - El backend `/billing/run` acepta `ivaOverrides` por cliente, recalcula la alicuota efectiva y registra `manualIvaOverride` en `billingLog`.
 - En `Proveedores`, `PDF / Imprimir proveedor` genera impresion directa solo del recuadro de cuenta proveedor.
 - En `Proveedores`, los movimientos visibles combinan `providerLedger` con compras/pagos asociados en `purchases`, evitando duplicados cuando ya existe asiento de cuenta corriente.
+- Verificacion productiva: `Proveedor Generico` tiene `666` compras asociadas en `purchases` y `0` asientos en `providerLedger`; la falta de asientos explicaba que antes no aparecieran movimientos.
 - No se registraron credenciales en este documento ni en el historial.
 
 ### Backups asociados
 
 - VPS pre-cambio impresion/facturacion/proveedores: dump PostgreSQL, `app_state` y tar de `/opt/pare-carrito` generados con timestamp `20260621_115714`.
 - PC pre-cambio impresion/facturacion/proveedores: `auditoria/repo-backup-20260621-1157-pre-print-billing-providers.zip`.
-- VPS post-cambio impresion/facturacion/proveedores: pendiente hasta finalizar despliegue y verificacion.
-- PC post-cambio impresion/facturacion/proveedores: pendiente hasta finalizar commit/despliegue.
+- VPS post-cambio impresion/facturacion/proveedores: dump PostgreSQL, `app_state` y tar de `/opt/pare-carrito` generados con timestamp `20260621_120443`.
+- PC post-cambio impresion/facturacion/proveedores: `auditoria/repo-backup-20260621-1206-post-print-billing-providers.zip`.
