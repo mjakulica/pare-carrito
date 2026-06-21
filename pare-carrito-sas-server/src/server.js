@@ -802,7 +802,8 @@ app.post("/billing/run", authenticate, requireRole("manager", "admin", "contador
     const clientIds = Array.isArray(body.clientIds)
       ? body.clientIds.map((id) => String(id || "").trim()).filter(Boolean)
       : [];
-    const result = await runBilling({ pool, force: true, simulate: body.simulate === true, onlyClientId: String(body.clientId || ""), onlyClientIds: clientIds });
+    const ivaOverrides = body.ivaOverrides && typeof body.ivaOverrides === "object" ? body.ivaOverrides : {};
+    const result = await runBilling({ pool, force: true, simulate: body.simulate === true, onlyClientId: String(body.clientId || ""), onlyClientIds: clientIds, ivaOverrides });
     res.json(result);
   } catch (error) {
     res.status(500).json({ error: "Fallo la facturacion: " + error.message });

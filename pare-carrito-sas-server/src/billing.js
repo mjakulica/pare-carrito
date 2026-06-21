@@ -207,6 +207,30 @@ function buildPeriod(state, client, freq, from, to) {
   };
 }
 
+function applyManualIvaOverride(invoice, ivaAmount) {
+  if (!invoice || ivaAmount == null || ivaAmount === "") return invoice;
+  const manualIva = d(ivaAmount);
+  if (manualIva.isNegative()) return invoice;
+  const neto = d(invoice.neto || 0);
+  const rate = neto.isZero() ? d(0) : manualIva.times(100).dividedBy(neto);
+  const items = (invoice.items || []).map((item) => {
+    const itemNeto = d(item.neto || d(item.precio || 0).times(item.cantidad || 0));
+    return {
+      ...item,
+      alicuota: rate,
+      iva: itemNeto.times(rate).dividedBy(100)
+    };
+  });
+  const iva = sumDecimals(items.map((item) => item.iva));
+  return {
+    ...invoice,
+    items,
+    iva: round2(iva),
+    total: round2(neto.plus(iva)),
+    manualIvaOverride: round2(manualIva)
+  };
+}
+
 // Devuelve la lista de facturas a emitir "ahora" segun la hora ART
 function computeDueInvoices(state, art, force = false) {
   if (!force && art.hour < 23) return [];
@@ -449,6 +473,7 @@ function buildBillingEntry(invoice, emittedAt, periodResult, simulate, cfg) {
     total: invoice.total,
     iva: invoice.iva,
     neto: invoice.neto,
+    manualIvaOverride: invoice.manualIvaOverride == null ? null : invoice.manualIvaOverride,
     orders: invoice.orders,
     emittedAt: emittedAt.toISOString()
   };
@@ -500,7 +525,7 @@ function buildBillingEntry(invoice, emittedAt, periodResult, simulate, cfg) {
 
 // Corre la facturacion sobre el estado central, registra resultados en billingLog
 // Retorna { ran, simulate, count, results, lastRunDate }
-async function runBilling({ pool, force = false, simulate = false, onlyClientId = "", onlyClientIds = null, fetchImpl = fetch, now = new Date(), lastRunDate = "" }) {
+async function runBilling({ pool, force = false, simulate = false, onlyClientId = "", onlyClientIds = null, ivaOverrides = null, fetchImpl = fetch, now = new Date(), lastRunDate = "" }) {
   const cfg = billingConfig();
   if (!cfg.enabled) simulate = true;
   const stateRow = await pool.query("SELECT data FROM app_state WHERE id = 'main'");
@@ -514,6 +539,10 @@ async function runBilling({ pool, force = false, simulate = false, onlyClientId 
     : new Set();
   if (onlyClientId) selectedClientIds.add(String(onlyClientId || "").trim());
   if (selectedClientIds.size) due = due.filter((d) => selectedClientIds.has(d.clientId));
+  const manualIvaByClient = ivaOverrides && typeof ivaOverrides === "object" ? ivaOverrides : {};
+  due = due.map((invoice) => Object.prototype.hasOwnProperty.call(manualIvaByClient, invoice.clientId)
+    ? applyManualIvaOverride(invoice, manualIvaByClient[invoice.clientId])
+    : invoice);
 
   const results = [];
   const emittedAt = new Date();

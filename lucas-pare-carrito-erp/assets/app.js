@@ -287,6 +287,7 @@
     historyLoading: false,
     historyError: "",
     billingSelectedClients: null,
+    billingIvaOverrides: {},
     lastOverwrite: null
   };
 
@@ -4359,13 +4360,17 @@
     const sections = [];
     if (scope === "all" || scope === "purchase") {
       const rows = buildPurchaseHistoryMatrix(from, to, ui.historyData.purchaseHistory || []);
-      sections.push(`<section class="print-sheet"><h1>Precios de compras</h1><p>Rango: ${formatDate(from)} - ${formatDate(to)}</p>${renderHistoryMatrixTable(rows, dates, "purchase")}</section>`);
+      sections.push(`<section class="print-sheet history-print-sheet">${renderHistoryPrintTitle("Precios de compras", from, to)}${renderHistoryMatrixTable(rows, dates, "purchase")}</section>`);
     }
     if (scope === "all" || scope === "sales") {
       const rows = buildSalesHistoryMatrix(from, to, ui.historyData.salesQuantityHistory || [], ui.historyData.listPriceHistory || []);
-      sections.push(`<section class="print-sheet"><h1>Historial de ventas</h1><p>Rango: ${formatDate(from)} - ${formatDate(to)}</p>${renderHistoryMatrixTable(rows, dates, "sales")}</section>`);
+      sections.push(`<section class="print-sheet history-print-sheet">${renderHistoryPrintTitle("Historial de ventas", from, to)}${renderHistoryMatrixTable(rows, dates, "sales")}</section>`);
     }
-    printHtmlDocument("Historiales " + formatDate(from) + " - " + formatDate(to), `<section class="print-page history-print-page">${sections.join("")}</section>`);
+    printHtmlDocument("Historiales " + formatDate(from) + " - " + formatDate(to), `<section class="history-print-page">${sections.join("")}</section>`, { landscape: true, margin: "4mm" });
+  }
+
+  function renderHistoryPrintTitle(title, from, to) {
+    return `<div class="history-print-title"><strong>${escapeHtml(title)}</strong><span>${formatDate(from)} - ${formatDate(to)}</span></div>`;
   }
 
   function renderHistoryMatrixTable(rows, dates, type) {
@@ -7889,6 +7894,16 @@
         render();
       });
       document.querySelectorAll("[data-pay-provider]").forEach((button) => button.addEventListener("click", () => openProviderQuickPayment(button.dataset.payProvider)));
+      document.querySelectorAll("[data-print-provider-account]").forEach((button) => button.addEventListener("click", () => {
+        printProviderAccount({
+          providerIds: isAllProviders ? providers.map((provider) => provider.id) : [ui.providerSelectedId],
+          providerLabel: isAllProviders ? "Todos los proveedores" : (selectedProvider ? selectedProvider.name : ""),
+          from: ui.providerFrom,
+          to: ui.providerTo,
+          balance: providerBalanceValue,
+          movements: providerMovements
+        });
+      }));
       document.querySelectorAll("[data-edit-provider]").forEach((button) => button.addEventListener("click", () => openProviderForm(button.dataset.editProvider)));
       document.querySelectorAll("[data-annul-provider-ledger]").forEach((button) => button.addEventListener("click", () => {
         const entry = state.providerLedger.find((item) => item.id === button.dataset.annulProviderLedger);
@@ -7919,9 +7934,9 @@
           <div class="field"><label>Hasta</label><input type="date" id="provider-account-to" value="${ui.providerTo}" /></div>
           <div class="field"><label>Saldo</label><input disabled value="${formatMoney(providerBalanceValue)}" /></div>
           <div class="field"><label>&nbsp;</label><button class="btn blue" type="button" data-pay-provider="${selectedProvider ? selectedProvider.id : ""}">Pagar</button></div>
-          <div class="field"><label>&nbsp;</label><button class="btn ghost" data-print type="button">PDF / Imprimir proveedor</button></div>
+          <div class="field"><label>&nbsp;</label><button class="btn ghost" data-print-provider-account type="button">PDF / Imprimir proveedor</button></div>
         </div>
-        <div class="table-wrap" style="margin-top:10px">
+        <div class="table-wrap provider-account-box" style="margin-top:10px">
           <table>
             <thead><tr><th>Fecha</th><th>Proveedor</th><th>Tipo</th><th>Descripcion</th><th>Monto</th><th>Saldo</th><th>Notas</th><th>Acciones</th></tr></thead>
             <tbody>${providerMovements.map((entry) => {
@@ -7956,6 +7971,33 @@
       `,
       "proveedores"
     );
+  }
+
+  function printProviderAccount(options) {
+    const rows = (options.movements || []).map((entry) => `
+      <tr>
+        <td>${formatDate(entry.date)}</td>
+        <td>${escapeHtml(entry.providerName || "")}</td>
+        <td>${escapeHtml(entry.type || "")}</td>
+        <td>${escapeHtml(entry.description || "")}</td>
+        <td class="num">${formatMoney(entry.amount || 0)}</td>
+        <td class="num">${entry.balance == null ? "" : formatMoney(entry.balance)}</td>
+        <td>${escapeHtml(entry.notes || "")}</td>
+      </tr>
+    `).join("");
+    const body = `
+      <section class="print-sheet provider-print-sheet">
+        <div class="print-title">
+          <h1>Cuenta proveedor</h1>
+          <div>${escapeHtml(options.providerLabel || "")}<br>${formatDate(options.from)} - ${formatDate(options.to)}<br>Saldo ${formatMoney(options.balance || 0)}</div>
+        </div>
+        <table class="print-table">
+          <thead><tr><th>Fecha</th><th>Proveedor</th><th>Tipo</th><th>Descripcion</th><th>Monto</th><th>Saldo</th><th>Notas</th></tr></thead>
+          <tbody>${rows || `<tr><td colspan="7">Sin movimientos para este rango.</td></tr>`}</tbody>
+        </table>
+      </section>
+    `;
+    printHtmlDocument("Cuenta proveedor " + (options.providerLabel || ""), `<section class="print-page provider-print-page">${body}</section>`, { margin: "6mm" });
   }
 
   function renderEmployees() {
@@ -8520,6 +8562,7 @@
     const orders = state.orders.filter((order) => order.clientId === client.id && order.date >= fromDate && order.date <= toDate && !["cancelado", "anulado"].includes(order.status));
     return {
       from: fromDate,
+      neto: orders.reduce((sum, order) => sum + Number(order.subtotalAmount || Math.max(0, Number(order.totalAmount || 0) - Number(order.ivaAmount || 0))), 0),
       total: orders.reduce((sum, order) => sum + Number(order.totalAmount || 0), 0),
       iva: orders.reduce((sum, order) => sum + Number(order.ivaAmount || 0), 0),
       orders: orders.length
@@ -8535,14 +8578,18 @@
     const clientIds = clients.map((client) => client.id);
     if (!Array.isArray(ui.billingSelectedClients)) ui.billingSelectedClients = clientIds.slice();
     ui.billingSelectedClients = ui.billingSelectedClients.filter((id) => clientIds.includes(id));
+    if (!ui.billingIvaOverrides || typeof ui.billingIvaOverrides !== "object") ui.billingIvaOverrides = {};
     const selectedBillingIds = ui.billingSelectedClients;
     const allBillingSelected = clientIds.length > 0 && clientIds.every((id) => selectedBillingIds.includes(id));
     let ivaTotal = 0;
     let totalAcumulado = 0;
     const rows = clients.map((client) => {
       const pending = getBillingPendingForClient(client, from, to);
-      ivaTotal += pending.iva;
-      totalAcumulado += pending.total;
+      const overrideText = Object.prototype.hasOwnProperty.call(ui.billingIvaOverrides, client.id) ? ui.billingIvaOverrides[client.id] : "";
+      const ivaForBilling = overrideText === "" || overrideText == null ? pending.iva : parseAmount(overrideText);
+      const totalForBilling = Number(pending.neto || 0) + Number(ivaForBilling || 0);
+      ivaTotal += ivaForBilling;
+      totalAcumulado += totalForBilling;
       return `
         <tr>
           <td class="num"><input type="checkbox" data-billing-client="${escapeAttr(client.id)}" ${selectedBillingIds.includes(client.id) ? "checked" : ""} aria-label="Seleccionar ${escapeAttr(client.name)}" /></td>
@@ -8551,8 +8598,8 @@
           <td>${escapeHtml(client.invoiceFrequency || "mensual")}</td>
           <td>${escapeHtml(client.billingEmail || client.email || "")}</td>
           <td>${formatDate(pending.from)}<br><span class="muted">${pending.orders} pedidos</span></td>
-          <td class="num">${formatMoney(pending.total)}</td>
-          <td class="num">${formatMoney(pending.iva)}</td>
+          <td class="num">${formatMoney(totalForBilling)}<br><span class="muted">Neto ${formatMoney(pending.neto)}</span></td>
+          <td class="num"><input class="billing-iva-input" data-billing-iva="${escapeAttr(client.id)}" value="${escapeAttr(overrideText === "" || overrideText == null ? formatAmountInput(pending.iva) : String(overrideText))}" inputmode="decimal" /></td>
         </tr>
       `;
     }).join("");
@@ -8605,6 +8652,22 @@
           : current.filter((item) => item !== id);
         render();
       }));
+      document.querySelectorAll("[data-billing-iva]").forEach((input) => {
+        input.addEventListener("change", () => {
+          const id = input.dataset.billingIva;
+          const pendingClient = clients.find((client) => client.id === id);
+          const pending = pendingClient ? getBillingPendingForClient(pendingClient, from, to) : null;
+          const value = parseAmount(input.value);
+          if (value < 0) {
+            alert("El IVA no puede ser negativo.");
+            input.value = pending ? formatAmountInput(pending.iva) : "";
+            return;
+          }
+          if (pending && Math.abs(value - Number(pending.iva || 0)) < 0.005) delete ui.billingIvaOverrides[id];
+          else ui.billingIvaOverrides[id] = formatAmountInput(value);
+          render();
+        });
+      });
       document.querySelectorAll("[data-billing-range]").forEach((button) => button.addEventListener("click", () => {
         const range = button.dataset.billingRange;
         if (range === "this-month") {
@@ -8621,11 +8684,17 @@
         const simulate = button.dataset.billingRun === "simulate";
         const cfg = getCloudSyncConfig();
         const selectedIds = (Array.isArray(ui.billingSelectedClients) ? ui.billingSelectedClients : []).filter((id) => clientIds.includes(id));
+        const ivaOverrides = {};
+        selectedIds.forEach((id) => {
+          if (!Object.prototype.hasOwnProperty.call(ui.billingIvaOverrides || {}, id)) return;
+          const value = parseAmount(ui.billingIvaOverrides[id]);
+          if (Number.isFinite(value) && value >= 0) ivaOverrides[id] = value;
+        });
         if (!cfg.username || !cloudSyncReady(cfg)) return alert("La emision corre en el servidor propio (Opcion F). Configure el ingreso con usuario y contrasena.");
         if (!selectedIds.length) return alert("Seleccione al menos un cliente para facturar.");
         if (!confirm(simulate ? "Simular la emision de las facturas pendientes para " + selectedIds.length + " cliente(s)? (no emite nada real)" : "Emitir AHORA las facturas pendientes via TusFacturas para " + selectedIds.length + " cliente(s)?")) return;
         try {
-          const response = await cloudRequest(cfg, "/billing/run", { method: "POST", body: JSON.stringify({ simulate, clientIds: selectedIds }) });
+          const response = await cloudRequest(cfg, "/billing/run", { method: "POST", body: JSON.stringify({ simulate, clientIds: selectedIds, ivaOverrides }) });
           const result = await response.json().catch(() => ({}));
           if (!response.ok) throw new Error(result.error || "HTTP " + response.status);
           alert("Proceso terminado: " + (result.count || 0) + " comprobante(s) procesado(s)" + (result.simulate ? " en modo simulacion." : "."));
@@ -8667,7 +8736,7 @@
         <h2 class="page-title" style="font-size:18px">Clientes con factura</h2>
         <div class="table-wrap" style="margin-top:10px">
           <table>
-            <thead><tr><th class="num"><input type="checkbox" id="billing-select-all" ${allBillingSelected ? "checked" : ""} aria-label="Seleccionar todos los clientes" /></th><th>Cliente</th><th>CUIT / Tipo</th><th>Periodicidad</th><th>Correo de facturacion</th><th>Acumula desde</th><th>Total acumulado</th><th>IVA acumulado</th></tr></thead>
+            <thead><tr><th class="num"><input type="checkbox" id="billing-select-all" ${allBillingSelected ? "checked" : ""} aria-label="Seleccionar todos los clientes" /></th><th>Cliente</th><th>CUIT / Tipo</th><th>Periodicidad</th><th>Correo de facturacion</th><th>Acumula desde</th><th>Total a facturar</th><th>IVA a facturar</th></tr></thead>
             <tbody>${rows || emptyRow(8, "No hay clientes marcados con factura A o B.")}</tbody>
           </table>
         </div>
@@ -12242,14 +12311,60 @@
     }).sort((a, b) => b.balance - a.balance);
   }
 
+  function getPurchaseProviderId(purchase) {
+    if (purchase.providerId) return purchase.providerId;
+    const provider = findProviderByInput(purchase.providerName || "");
+    return provider ? provider.id : "";
+  }
+
+  function purchaseHasProviderLedger(purchase, ledgerEntries) {
+    if (!purchase || !purchase.id) return false;
+    return ledgerEntries.some((entry) => entry.relatedEntityId === purchase.id || entry.purchaseId === purchase.id);
+  }
+
+  function providerMovementSort(a, b) {
+    return String(a.date).localeCompare(String(b.date)) || String(a.timestamp || "").localeCompare(String(b.timestamp || "")) || String(a.id).localeCompare(String(b.id));
+  }
+
   function getProviderMovements(providerId, from, to) {
     const start = from || "0000-01-01";
     const end = to || "9999-12-31";
     const ids = Array.isArray(providerId) ? providerId : providerId === "all" ? activeProviders().map((provider) => provider.id) : [providerId];
-    return state.providerLedger
+    const ledgerEntries = state.providerLedger
       .filter((entry) => ids.includes(entry.providerId) && entry.date >= start && entry.date <= end)
-      .map((entry) => ({ ...entry, providerName: getProvider(entry.providerId) ? getProvider(entry.providerId).name : entry.providerId }))
-      .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.id).localeCompare(String(b.id)));
+      .map((entry) => ({ ...entry, source: "ledger", providerName: getProvider(entry.providerId) ? getProvider(entry.providerId).name : entry.providerId }));
+    const allLedgerForProviders = state.providerLedger.filter((entry) => ids.includes(entry.providerId));
+    const purchaseMovements = state.purchases
+      .filter((purchase) => {
+        const resolvedProviderId = getPurchaseProviderId(purchase);
+        if (!ids.includes(resolvedProviderId)) return false;
+        if (purchase.date < start || purchase.date > end) return false;
+        if (["other_expense", "market_price", "cash_movement"].includes(purchase.expenseType)) return false;
+        if (purchaseHasProviderLedger(purchase, allLedgerForProviders)) return false;
+        return true;
+      })
+      .map((purchase) => {
+        const resolvedProviderId = getPurchaseProviderId(purchase);
+        const provider = getProvider(resolvedProviderId);
+        const isPayment = purchase.expenseType === "provider_payment";
+        const amount = Number(purchase.totalCost || purchase.amount || 0);
+        return {
+          id: purchase.id,
+          date: purchase.date,
+          timestamp: purchase.timestamp || "",
+          providerId: resolvedProviderId,
+          providerName: provider ? provider.name : (purchase.providerName || resolvedProviderId),
+          type: isPayment ? "pago" : "compra",
+          description: purchase.description || (isPayment ? "Pago proveedor" : "Compra") + " - " + (purchase.productName || purchase.providerName || ""),
+          amount: isPayment ? -Math.abs(amount) : amount,
+          balance: null,
+          notes: purchase.notes || "",
+          relatedEntityId: purchase.id,
+          relatedEntityType: "purchase",
+          source: "purchase"
+        };
+      });
+    return ledgerEntries.concat(purchaseMovements).sort(providerMovementSort);
   }
 
   function addProviderLedgerEntry(entry) {
@@ -13953,7 +14068,7 @@
     });
   }
 
-  function printHtmlDocument(title, body) {
+  function printHtmlDocument(title, body, options = {}) {
     const previousTitle = document.title;
     document.title = title;
     const frame = document.createElement("iframe");
@@ -13968,7 +14083,7 @@
     const doc = frame.contentWindow.document;
     doc.open();
     const baseHref = location.origin + location.pathname.replace(/[^/]*$/, "");
-    doc.write(`<!doctype html><html><head><base href="${escapeAttr(baseHref)}"><title>${escapeHtml(title)}</title><style>${printDocumentStyles()}</style></head><body>${body}</body></html>`);
+    doc.write(`<!doctype html><html><head><base href="${escapeAttr(baseHref)}"><title>${escapeHtml(title)}</title><style>${printDocumentStyles(options)}</style></head><body>${body}</body></html>`);
     doc.close();
     const cleanup = () => {
       setTimeout(() => {
@@ -13988,23 +14103,32 @@
     setTimeout(runPrint, 300);
   }
 
-  function printDocumentStyles() {
+  function printDocumentStyles(options = {}) {
+    const pageSize = options.landscape ? "A4 landscape" : "A4";
+    const pageMargin = options.margin || "8mm";
     return `
-      @page{size:A4;margin:8mm}
+      @page{size:${pageSize};margin:${pageMargin}}
       *{box-sizing:border-box}
       body{font-family:Arial,sans-serif;margin:0;color:#111;background:#fff}
       table{width:100%;border-collapse:collapse}
       th,td{padding:4px 6px;text-align:left}
       .num{text-align:right}
-      .history-print-page .print-sheet{break-inside:auto;page-break-inside:auto}
-      .history-print-page h1{margin:0 0 4px;font-size:16px}
-      .history-print-page p{margin:0 0 8px;font-size:10px}
+      .history-print-page{margin:0;padding:0}
+      .history-print-page .print-sheet{break-inside:auto;page-break-inside:auto;margin:0 0 4mm}
+      .history-print-sheet{width:100%}
+      .history-print-title{display:flex;justify-content:space-between;gap:8px;margin:0 0 3px;font-size:9px}
+      .history-print-page h1{margin:0 0 4px;font-size:13px}
+      .history-print-page p{margin:0 0 6px;font-size:9px}
       .history-print-page .muted{color:#555;font-size:9px}
       .history-print-page .table-wrap{overflow:visible}
-      .history-print-page table{font-size:8.5px;min-width:0}
-      .history-print-page th,.history-print-page td{border:1px solid #ddd;padding:2px 3px;white-space:nowrap}
+      .history-print-page table{font-size:7px;min-width:0;table-layout:auto}
+      .history-print-page th,.history-print-page td{border:1px solid #ddd;padding:1px 2px;white-space:nowrap;line-height:1.1}
       .history-print-page th{background:#f3f4f6}
       .history-print-page .history-category-row td{background:#e5e7eb;font-weight:700}
+      .provider-print-page{margin:0;padding:0}
+      .provider-print-sheet .print-title{margin-bottom:6px}
+      .provider-print-sheet .print-table{font-size:10px}
+      .provider-print-sheet .print-table th,.provider-print-sheet .print-table td{border:1px solid #ddd;padding:3px 4px}
       .assigned-group{break-inside:avoid;page-break-inside:avoid;border:0;padding:2px 0;margin:0 0 4px}
       .assigned-group span{color:#475467}
       .divide-client-spacer{height:8px}

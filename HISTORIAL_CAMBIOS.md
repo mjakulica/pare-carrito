@@ -1,5 +1,25 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.8.17 - Impresion compacta, IVA editable y movimientos de proveedores (2026-06-21)
+
+### Frontend / Historiales, Facturacion y Proveedores
+
+- La impresion de `Historiales` usa documento temporal propio, hoja A4 horizontal y margenes minimos.
+- Los botones de impresion de compras y ventas imprimen solo el recuadro correspondiente; el boton general imprime solo ambos cuadros de historiales.
+- Los botones rapidos de rango en `Historiales` tienen un tamano minimo mayor para mejorar usabilidad.
+- En `Facturacion`, admin, gerente y contador pueden editar el IVA a facturar por cliente antes de emitir/simular.
+- En `Facturacion`, los clientes desmarcados quedan fuera del envio a TusFacturas.
+- El backend `/billing/run` acepta `ivaOverrides` por cliente y registra `manualIvaOverride` en el log.
+- En `Proveedores`, `PDF / Imprimir proveedor` imprime solo la cuenta del proveedor/rango seleccionado.
+- En `Proveedores`, los movimientos ahora combinan cuenta corriente de proveedor con compras/pagos asociados en `purchases`, evitando duplicados cuando ya existe asiento en `providerLedger`.
+- Commit funcional desplegado: pendiente hasta finalizar deploy.
+- Backups VPS: pre-cambio `20260621_115714`; post-cambio pendiente.
+- Backup PC pre-cambio: `auditoria/repo-backup-20260621-1157-pre-print-billing-providers.zip`.
+- Backup PC post-cambio: pendiente.
+- No se registraron credenciales en documentacion ni reportes.
+
+---
+
 ## v12.8.16 - Refresco de historiales, seleccion de facturacion y ajustes de inicio (2026-06-20)
 
 ### Frontend / Historiales, pedidos, inicio y facturacion

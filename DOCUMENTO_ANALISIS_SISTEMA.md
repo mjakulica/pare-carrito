@@ -358,25 +358,26 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 
 ## 12. Ultimo Cambio y Version
 
-**Version operativa:** 12.8.16  
-**Fecha:** 2026-06-20  
-**Commit GitHub del cambio funcional:** `072685ac3f38c14797b33dc83303f095dab8978d`  
+**Version operativa:** 12.8.17  
+**Fecha:** 2026-06-21  
+**Commit GitHub del cambio funcional:** pendiente hasta finalizar deploy  
 **Entorno actualizado:** VPS productivo `/opt/pare-carrito` con Docker Compose (`api`, `caddy`, `db`).
 
 ### Detalle del ultimo cambio
 
-- La pagina `Historiales` de admin/gerente carga el rango seleccionado de forma inmediata desde `/product-history` y evita mostrar "Sin datos" durante la espera.
-- `Historiales` incorpora botones rapidos `7 dias`, `30 dias`, `3 meses`, `6 meses` e impresion directa de compras, ventas o ambos recuadros.
-- `Dividir Compras` simplifica los botones de WhatsApp a icono + `Todos` y `Seleccionado`.
-- `Facturacion` en admin, gerente y contador permite seleccionar clientes con checkbox, seleccionar/deseleccionar todos y emitir/simular solo los seleccionados.
-- El backend `/billing/run` acepta `clientIds` y queda habilitado para roles `manager`, `admin` y `contador`.
-- En `Inicio` de admin/gerente, las tendencias excluyen dias sin pedidos de todos los graficos y los avisos de comprobantes/usuarios pendientes se compactan.
-- En `Nuevo Pedido`, el cambio de cliente recalcula precios/preferencias en el momento y el selector permite volver a desplegar clientes sin usar la X.
+- La impresion de `Historiales` se genera en un documento temporal propio, en hoja A4 horizontal y con margen minimo.
+- Los botones de impresion de compras y ventas imprimen solo el recuadro correspondiente; el boton general imprime solo ambos cuadros de historiales.
+- Los botones rapidos de rango de `Historiales` aumentan su tamano minimo para mejorar uso en desktop y mobile.
+- En `Facturacion`, admin, gerente y contador pueden editar el IVA que se va a facturar por cliente antes de emitir o simular.
+- En `Facturacion`, desmarcar un cliente lo excluye del envio a TusFacturas aunque este dentro de los pendientes del dia/rango.
+- El backend `/billing/run` acepta `ivaOverrides` por cliente, recalcula la alicuota efectiva y registra `manualIvaOverride` en `billingLog`.
+- En `Proveedores`, `PDF / Imprimir proveedor` genera impresion directa solo del recuadro de cuenta proveedor.
+- En `Proveedores`, los movimientos visibles combinan `providerLedger` con compras/pagos asociados en `purchases`, evitando duplicados cuando ya existe asiento de cuenta corriente.
 - No se registraron credenciales en este documento ni en el historial.
 
 ### Backups asociados
 
-- VPS pre-cambio UI/historiales/facturacion: dump PostgreSQL, `app_state` y tar de `/opt/pare-carrito` generados con timestamp `20260620_143543`.
-- PC pre-cambio UI/historiales/facturacion: `auditoria/repo-backup-20260620-1436-pre-ui-historiales-facturacion.zip`.
-- VPS post-cambio UI/historiales/facturacion: dump PostgreSQL, `app_state` y tar de `/opt/pare-carrito` generados con timestamp `20260620_144815`.
-- PC post-cambio UI/historiales/facturacion: `auditoria/repo-backup-20260620-1450-post-ui-historiales-facturacion.zip`.
+- VPS pre-cambio impresion/facturacion/proveedores: dump PostgreSQL, `app_state` y tar de `/opt/pare-carrito` generados con timestamp `20260621_115714`.
+- PC pre-cambio impresion/facturacion/proveedores: `auditoria/repo-backup-20260621-1157-pre-print-billing-providers.zip`.
+- VPS post-cambio impresion/facturacion/proveedores: pendiente hasta finalizar despliegue y verificacion.
+- PC post-cambio impresion/facturacion/proveedores: pendiente hasta finalizar commit/despliegue.
