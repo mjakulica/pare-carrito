@@ -353,32 +353,36 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 - Si el servidor tiene una version distinta, responde conflicto y el cliente no pisa datos silenciosamente.
 - Si se reintenta una operacion ya aplicada, `state_operations.operation_id` evita duplicados.
 - El servidor sigue siendo la fuente de verdad.
+- El rol Cliente no ejecuta sincronizacion completa contra `/state`; sus escrituras permitidas usan endpoints especificos (`/orders/customer` y `/transfers`) con cola local de reintento.
+- `/orders/customer` valida que el cliente del pedido este vinculado al usuario y registra pedido, saldo y caja dentro de una transaccion.
 
 ---
 
 ## 12. Ultimo Cambio y Version
 
-**Version operativa:** 12.8.17  
+**Version operativa:** 12.8.18  
 **Fecha:** 2026-06-21  
-**Commit GitHub del cambio funcional:** `c4095ad28c73b082d9f450de115946922f9d33e2`  
+**Commit GitHub del cambio funcional:** `e7f89bdbeae185e01b95508bff361c0bdcc64e6e`  
 **Entorno actualizado:** VPS productivo `/opt/pare-carrito` con Docker Compose (`api`, `caddy`, `db`).
 
 ### Detalle del ultimo cambio
 
-- La impresion de `Historiales` se genera en un documento temporal propio, en hoja A4 horizontal y con margen minimo.
-- Los botones de impresion de compras y ventas imprimen solo el recuadro correspondiente; el boton general imprime solo ambos cuadros de historiales.
-- Los botones rapidos de rango de `Historiales` aumentan su tamano minimo para mejorar uso en desktop y mobile.
-- En `Facturacion`, admin, gerente y contador pueden editar el IVA que se va a facturar por cliente antes de emitir o simular.
-- En `Facturacion`, desmarcar un cliente lo excluye del envio a TusFacturas aunque este dentro de los pendientes del dia/rango.
-- El backend `/billing/run` acepta `ivaOverrides` por cliente, recalcula la alicuota efectiva y registra `manualIvaOverride` en `billingLog`.
-- En `Proveedores`, `PDF / Imprimir proveedor` genera impresion directa solo del recuadro de cuenta proveedor.
-- En `Proveedores`, los movimientos visibles combinan `providerLedger` con compras/pagos asociados en `purchases`, evitando duplicados cuando ya existe asiento de cuenta corriente.
-- Verificacion productiva: `Proveedor Generico` tiene `666` compras asociadas en `purchases` y `0` asientos en `providerLedger`; la falta de asientos explicaba que antes no aparecieran movimientos.
+- En `Historiales`, la carga de datos por rango queda asociada al rango consultado y tiene timeout; esto evita estados infinitos de "Cargando historiales...".
+- La impresion de `Historiales` usa documento/ventana temporal directa para que mobile imprima solo compras, solo ventas o ambos cuadros, sin arrastrar el resto de la pagina.
+- Los botones compactos y controles mobile respetan area tactil minima de 44px; las tablas hacen scroll dentro de su contenedor para no ensanchar dashboards.
+- En `Nuevo Pedido` mobile, el carrito queda sticky y compacto; cada item muestra producto, cantidad, subtotal y quitar en una misma fila, sin unidad ni leyenda auxiliar.
+- El carrito oculta la linea de IVA cuando el cliente seleccionado no corresponde a IVA.
+- El boton `Todos` de categorias puede desmarcar todas las categorias sin que el render reactive la seleccion completa.
+- El rol Cliente deja de ejecutar sincronizacion completa contra `/state` y `/state/patch`, evitando 403 repetidos.
+- Pedidos y transferencias de clientes se guardan por endpoints especificos y quedan en cola local de reintento cuando no hay conexion.
+- El backend agrega `/orders/customer`, valida clientes vinculados y registra pedido, saldo y caja de forma transaccional.
+- El backend valida transferencias de cliente contra sus clientes vinculados y evita duplicados al reintentar operaciones.
+- Verificacion productiva: API del VPS respondio health OK desde el contenedor luego del rebuild.
 - No se registraron credenciales en este documento ni en el historial.
 
 ### Backups asociados
 
-- VPS pre-cambio impresion/facturacion/proveedores: dump PostgreSQL, `app_state` y tar de `/opt/pare-carrito` generados con timestamp `20260621_115714`.
-- PC pre-cambio impresion/facturacion/proveedores: `auditoria/repo-backup-20260621-1157-pre-print-billing-providers.zip`.
-- VPS post-cambio impresion/facturacion/proveedores: dump PostgreSQL, `app_state` y tar de `/opt/pare-carrito` generados con timestamp `20260621_120443`.
-- PC post-cambio impresion/facturacion/proveedores: `auditoria/repo-backup-20260621-1206-post-print-billing-providers.zip`.
+- VPS pre-cambio mobile/historiales/sync cliente: dump PostgreSQL, `app_state` y tar de `/opt/pare-carrito` generados con timestamp `20260621_123029`.
+- PC pre-cambio mobile/historiales/sync cliente: `auditoria/repo-backup-20260621-1230-pre-mobile-history-sync.zip`.
+- VPS post-cambio mobile/historiales/sync cliente: dump PostgreSQL, `app_state` y tar de `/opt/pare-carrito` generados con timestamp `20260621_125146`.
+- PC post-cambio mobile/historiales/sync cliente: `auditoria/repo-backup-20260621-1252-post-mobile-history-sync.zip`.

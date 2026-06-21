@@ -1,5 +1,29 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.8.18 - Historiales robustos, mobile y sync cliente (2026-06-21)
+
+### Frontend / Historiales, Nuevo Pedido, mobile y sincronizacion
+
+- En `Historiales`, la carga por rango queda asociada al rango exacto y tiene timeout para no quedar indefinidamente en "Cargando historiales...".
+- La impresion de `Historiales` usa una ventana/documento temporal directo para evitar que en mobile se imprima toda la pagina.
+- Los botones de rango de `Historiales` y los controles compactos en mobile respetan un area tactil minima de 44px.
+- En mobile, las tablas y wrappers hacen scroll horizontal interno sin ensanchar la pagina de `Inicio` ni otros dashboards.
+- En `Nuevo Pedido` mobile, el carrito queda sticky, compacto y muestra producto, cantidad, subtotal y quitar en una sola fila.
+- El carrito ya no muestra la unidad del producto ni la leyenda de ayuda; si el cliente no tiene IVA, tampoco muestra linea de IVA.
+- El boton `Todos` de categorias ahora puede desmarcar todas las categorias sin que el render las vuelva a marcar automaticamente.
+- El rol Cliente deja de ejecutar auto-sync completo contra `/state` y `/state/patch`, evitando 403 repetidos.
+- Pedidos y transferencias de clientes se envian por endpoints especificos y quedan en una cola local de reintento si no hay conexion.
+- El backend agrega `/orders/customer`, valida clientes vinculados y registra pedido, saldo y caja de forma transaccional.
+- El backend valida transferencias de cliente contra sus clientes vinculados y evita duplicados en reintentos.
+- Commit funcional desplegado: `e7f89bdbeae185e01b95508bff361c0bdcc64e6e`.
+- Verificacion: `node --check` en frontend/backend; carga local mobile 375px sin overflow inicial ni controles menores a 44px; API en VPS `HEALTH ok`.
+- Backups VPS: pre-cambio `20260621_123029`; post-cambio `20260621_125146`.
+- Backup PC pre-cambio: `auditoria/repo-backup-20260621-1230-pre-mobile-history-sync.zip`.
+- Backup PC post-cambio: `auditoria/repo-backup-20260621-1252-post-mobile-history-sync.zip`.
+- No se registraron credenciales en documentacion ni reportes.
+
+---
+
 ## v12.8.17 - Impresion compacta, IVA editable y movimientos de proveedores (2026-06-21)
 
 ### Frontend / Historiales, Facturacion y Proveedores
