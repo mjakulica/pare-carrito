@@ -4734,20 +4734,21 @@
   }
 
   async function ensureHistoryRangeLoaded(from, to, options = {}) {
+    const isCurrentPage = () => getRoute().base === "historiales";
     const requestKey = from + "|" + to;
     if (ui.historyLoading && ui.historyLoadingKey === requestKey) {
       const startedAt = Date.now();
       while (ui.historyLoading && ui.historyLoadingKey === requestKey && Date.now() - startedAt < 19000) {
         await new Promise((resolve) => setTimeout(resolve, 150));
       }
-      if (route.base === "historiales" && options.forceRender !== false) render();
+      if (isCurrentPage() && options.forceRender !== false) render();
       return;
     }
     if (ui.historyData && ui.historyData.from === from && ui.historyData.to === to) return;
     const config = getCloudSyncConfig();
     if (!cloudSyncReady(config)) {
       ui.historyError = "No hay conexion configurada al servidor para cargar historiales.";
-      if (route.base === "historiales" && options.forceRender !== false) render();
+      if (isCurrentPage() && options.forceRender !== false) render();
       return;
     }
     ui.historyLoading = true;
@@ -4780,7 +4781,7 @@
         ui.historyLoading = false;
         ui.historyLoadingKey = "";
       }
-      if (route.base === "historiales" && options.forceRender !== false) render();
+      if (isCurrentPage() && options.forceRender !== false) render();
     }
   }
 
