@@ -2335,7 +2335,11 @@ tr:last-child td {
   }
 
   .order-cart-panel {
-    position: static;
+    position: sticky;
+    top: 78px;
+    z-index: 20;
+    max-height: calc(100vh - 96px);
+    overflow: auto;
   }
 
   .order-row {
@@ -3374,12 +3378,13 @@ tr:last-child td {
     position: sticky;
     top: auto;
     bottom: 0;
-    z-index: 30;
-    max-height: 38vh;
+    z-index: 70;
+    max-height: 34vh;
     overflow: auto;
     padding: 8px 10px;
     margin: 0 -12px -8px;
     border-radius: var(--radius) var(--radius) 0 0;
+    box-shadow: 0 -8px 22px rgba(23, 33, 46, 0.14);
   }
 
   .order-cart-panel .page-title {
@@ -3455,6 +3460,17 @@ tr:last-child td {
 
   .order-total-main strong {
     font-size: 18px;
+  }
+
+  .order-quick-note-field {
+    max-width: 170px;
+    justify-self: start;
+  }
+
+  .order-quick-note-field input {
+    min-height: var(--tap);
+    padding: 4px 7px;
+    font-size: 12px;
   }
 
   .order-grid-cards {
