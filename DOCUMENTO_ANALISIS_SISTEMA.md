@@ -362,28 +362,22 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 
 ## 12. Ultimo Cambio y Version
 
-**Version operativa:** 12.8.20  
+**Version operativa:** 12.8.21  
 **Fecha:** 2026-06-22  
-**Commit GitHub del cambio funcional:** `5953e66c8ee9ca767f26f6d1a77019c9bea859a9`  
+**Commit GitHub del cambio funcional:** `37526e6eb11fb239315c3aa02f9afd94a7768d70`  
 **Entorno actualizado:** VPS productivo `/opt/pare-carrito` con Docker Compose (`api`, `caddy`, `db`).
 
 ### Detalle del ultimo cambio
 
-- `Nuevo Pedido` conserva un historial compacto de productos comprados por cliente en `state.preferences` y lo reconcilia desde pedidos historicos existentes.
-- Los productos de la ultima compra del cliente muestran `Ultima compra` con cantidad; los productos comprados antes quedan como `Favorito`.
-- El campo `Nota producto filtrado` pasa a llamarse `Nota`.
-- El selector de `Vista` de `Nuevo Pedido` se reemplaza por dos botones iconicos para cuadricula y lista.
-- Si el navegador no soporta lazy-load o `IntersectionObserver`, `Nuevo Pedido` renderiza todos los productos como antes de la virtualizacion.
-- El rol empleado ve todos los pedidos dentro del rango seleccionado en la pagina `Pedidos`.
-- El boton `Eliminar` de pedidos queda reservado al rol gerente; admin conserva las acciones de anulacion/restauracion permitidas.
-- `Historiales` cachea en backend las matrices agregadas por rango/version de datos para acelerar cargas repetidas.
-- Los botones rapidos de rango de `Historiales` tienen ancho minimo mayor para mejorar lectura.
-- Verificacion productiva: API del VPS respondio health OK desde el contenedor luego del rebuild; frontend desplegado.
+- En `Historiales`, los cambios de `Desde`, `Hasta` y botones rapidos de rango actualizan la pantalla inmediatamente sin tener que navegar a otra pagina.
+- El rango anterior se invalida antes de pedir datos nuevos para que la pantalla no quede mostrando informacion vieja.
+- Si una carga del mismo rango ya esta en curso, al finalizar tambien se repinta la pagina actual.
+- El ajuste es frontend y mantiene la fuente canonica `/product-history?mode=matrix` agregada por backend.
 - No se registraron credenciales en este documento ni en el historial.
 
 ### Backups asociados
 
-- VPS pre-cambio favoritos/historiales: dump PostgreSQL y tar de `/opt/pare-carrito` generados con timestamp `20260621_173641`.
-- PC pre-cambio favoritos/historiales: `auditoria/repo-backup-20260621-1736-pre-client-history-favorites.zip`.
-- VPS post-cambio favoritos/historiales: dump PostgreSQL y tar de `/opt/pare-carrito` generados con timestamp `20260622_060708`.
-- PC post-cambio favoritos/historiales: `auditoria/repo-backup-20260622-0607-post-client-history-favorites.zip`.
+- VPS pre-cambio refresco Historiales: dump PostgreSQL y tar de `/opt/pare-carrito` generados con timestamp `20260622_115526`.
+- PC pre-cambio refresco Historiales: `auditoria/repo-backup-20260622-1155-pre-history-range-refresh.zip`.
+- VPS post-cambio refresco Historiales: tar de `/opt/pare-carrito` generado con timestamp `20260622_115810`.
+- PC post-cambio refresco Historiales: `auditoria/repo-backup-20260622-1158-post-history-range-refresh.zip`.

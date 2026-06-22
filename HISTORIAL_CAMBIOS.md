@@ -1,5 +1,20 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.8.21 - Refresco inmediato de Historiales por rango (2026-06-22)
+
+### Frontend / Historiales
+
+- Al cambiar `Desde`, `Hasta` o usar los botones `7 dias`, `30 dias`, `3 meses` y `6 meses`, la pantalla `Historiales` invalida el rango anterior y dispara la carga del nuevo rango inmediatamente.
+- Si ya habia una carga del mismo rango en curso, al finalizar tambien se fuerza el repintado de la pagina para evitar tener que salir y volver a entrar.
+- El mensaje de carga y los datos quedan sincronizados con el rango seleccionado en la misma pagina.
+- Commit funcional desplegado: `37526e6eb11fb239315c3aa02f9afd94a7768d70`.
+- Verificacion: `node --check` en frontend y `git diff --check`.
+- Backups VPS: pre-cambio `20260622_115526`; post-cambio `20260622_115810`.
+- Backup PC pre-cambio: `auditoria/repo-backup-20260622-1155-pre-history-range-refresh.zip`.
+- Backup PC post-cambio: `auditoria/repo-backup-20260622-1158-post-history-range-refresh.zip`.
+- No se registraron credenciales en documentacion ni reportes.
+
+---
 ## v12.8.20 - Favoritos historicos, pedidos de empleado y cache de historiales (2026-06-22)
 
 ### Frontend / Nuevo Pedido, Pedidos e Historiales
