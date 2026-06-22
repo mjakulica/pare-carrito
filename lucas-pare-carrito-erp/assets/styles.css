@@ -3654,6 +3654,60 @@ tr:last-child td {
   }
 }
 
+/* Carrito fijo en Nuevo Pedido: acompaña todo el scroll de productos. */
+.page.page-nuevo-pedido {
+  padding-right: 386px;
+}
+
+.page.page-nuevo-pedido .order-main-layout {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.page.page-nuevo-pedido .order-cart-panel {
+  position: fixed;
+  top: 82px;
+  right: 22px;
+  bottom: auto;
+  width: 340px;
+  max-width: calc(100vw - 44px);
+  max-height: calc(100vh - 104px);
+  overflow: auto;
+  z-index: 80;
+}
+
+@media (max-width: 1060px) {
+  .page.page-nuevo-pedido {
+    padding-right: 362px;
+  }
+
+  .page.page-nuevo-pedido .order-cart-panel {
+    right: 12px;
+    width: 340px;
+    max-height: calc(100vh - 92px);
+  }
+}
+
+@media (max-width: 760px) {
+  .page.page-nuevo-pedido {
+    padding-right: 12px;
+    padding-bottom: 220px;
+  }
+
+  .page.page-nuevo-pedido .order-cart-panel {
+    position: fixed;
+    top: auto;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: auto;
+    max-width: none;
+    max-height: 34vh;
+    margin: 0;
+    border-radius: var(--radius) var(--radius) 0 0;
+    z-index: 90;
+  }
+}
+
 /* Totales por caja en pagina Caja */
 .cash-totals-grid {
   grid-template-columns: repeat(4, minmax(0, 1fr));

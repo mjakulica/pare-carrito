@@ -2354,8 +2354,9 @@
 
   function pageShell(title, subtitle, actions, body, routeName) {
     const toolbar = toolbarRoutes.has(routeName) ? renderToolbar() : "";
+    const pageClass = routeName ? " page-" + String(routeName).replace(/[^a-z0-9_-]/gi, "-").toLowerCase() : "";
     return `
-      <section class="page">
+      <section class="page${pageClass}">
         ${toolbar}
         ${renderSyncBanners()}
         <div class="page-header">
