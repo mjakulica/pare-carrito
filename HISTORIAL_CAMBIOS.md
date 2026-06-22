@@ -1,5 +1,21 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.8.23 - Carrito fijo al viewport en Nuevo Pedido (2026-06-22)
+
+### Frontend / Nuevo Pedido
+
+- `pageShell` agrega una clase de ruta (`page-nuevo-pedido`, etc.) para permitir estilos acotados por pagina.
+- El carrito de `Nuevo Pedido` deja de depender de `position: sticky` dentro de su contenedor y pasa a `position: fixed` respecto del viewport.
+- En desktop/tablet se reserva espacio lateral para el carrito fijo y en mobile se reserva espacio inferior para que no tape productos ni botones.
+- El cambio corrige el caso donde el carrito desaparecia al scrollear la grilla de productos porque el contenedor padre terminaba antes del listado.
+- Commit funcional desplegado: `39a1c775415e9705798ae90a375ee977c8cea53d`.
+- Verificacion: `node --check` en frontend y `git diff --check`.
+- Backups VPS: pre-cambio `20260622_135946`; post-cambio `20260622_140250`.
+- Backup PC pre-cambio: `auditoria/repo-backup-20260622-1359-pre-order-cart-fixed.zip`.
+- Backup PC post-cambio: `auditoria/repo-backup-20260622-1402-post-order-cart-fixed.zip`.
+- No se registraron credenciales en documentacion ni reportes.
+
+---
 ## v12.8.22 - Carrito sticky y Nota compacta en Nuevo Pedido (2026-06-22)
 
 ### Frontend / Nuevo Pedido

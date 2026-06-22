@@ -362,22 +362,22 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 
 ## 12. Ultimo Cambio y Version
 
-**Version operativa:** 12.8.22  
+**Version operativa:** 12.8.23  
 **Fecha:** 2026-06-22  
-**Commit GitHub del cambio funcional:** `47d24ecdac259b8ee22f6de85c231107ec1db38e`  
+**Commit GitHub del cambio funcional:** `39a1c775415e9705798ae90a375ee977c8cea53d`  
 **Entorno actualizado:** VPS productivo `/opt/pare-carrito` con Docker Compose (`api`, `caddy`, `db`).
 
 ### Detalle del ultimo cambio
 
-- En `Nuevo Pedido`, el carrito de compras queda sticky tambien en el breakpoint intermedio desktop/tablet, evitando que desaparezca al scrollear el listado de productos.
-- En mobile, el carrito sticky inferior tiene mayor prioridad visual, menor altura maxima y sombra superior para mantenerse visible sin tapar demasiado la pantalla.
-- En mobile, el campo rapido `Nota` queda mas compacto en ancho y padding, manteniendo altura tactil minima.
+- `pageShell` agrega una clase de ruta a cada pagina, por ejemplo `page-nuevo-pedido`, para aplicar estilos especificos sin afectar otras vistas.
+- En `Nuevo Pedido`, el carrito pasa a `position: fixed` respecto del viewport, porque `position: sticky` quedaba limitado al contenedor inicial y no acompanaba el scroll de la grilla de productos.
+- En desktop/tablet se reserva espacio lateral para el carrito fijo; en mobile se fija abajo y se reserva espacio inferior para no tapar contenido.
 - El ajuste es frontend/CSS y no modifica datos ni relaciones de base.
 - No se registraron credenciales en este documento ni en el historial.
 
 ### Backups asociados
 
-- VPS pre-cambio carrito sticky: dump PostgreSQL y tar de `/opt/pare-carrito` generados con timestamp `20260622_120217`.
-- PC pre-cambio carrito sticky: `auditoria/repo-backup-20260622-1202-pre-order-cart-sticky-note.zip`.
-- VPS post-cambio carrito sticky: tar de `/opt/pare-carrito` generado con timestamp `20260622_120448`.
-- PC post-cambio carrito sticky: `auditoria/repo-backup-20260622-1204-post-order-cart-sticky-note.zip`.
+- VPS pre-cambio carrito fixed: dump PostgreSQL y tar de `/opt/pare-carrito` generados con timestamp `20260622_135946`.
+- PC pre-cambio carrito fixed: `auditoria/repo-backup-20260622-1359-pre-order-cart-fixed.zip`.
+- VPS post-cambio carrito fixed: tar de `/opt/pare-carrito` generado con timestamp `20260622_140250`.
+- PC post-cambio carrito fixed: `auditoria/repo-backup-20260622-1402-post-order-cart-fixed.zip`.
