@@ -4630,24 +4630,38 @@
   function bindHistories() {
     const from = document.getElementById("history-from");
     const to = document.getElementById("history-to");
-    if (from) from.addEventListener("change", () => {
-      ui.historyFrom = from.value || todayISO();
-      if (ui.historyTo < ui.historyFrom) ui.historyTo = ui.historyFrom;
+    const refreshRange = (nextFrom, nextTo) => {
+      const normalizedFrom = nextFrom || todayISO();
+      const normalizedTo = nextTo || normalizedFrom;
+      ui.historyFrom = normalizedFrom <= normalizedTo ? normalizedFrom : normalizedTo;
+      ui.historyTo = normalizedTo >= normalizedFrom ? normalizedTo : normalizedFrom;
+      if (!ui.historyData || ui.historyData.from !== ui.historyFrom || ui.historyData.to !== ui.historyTo) {
+        ui.historyData = null;
+      }
+      ui.historyError = "";
       render();
-    });
-    if (to) to.addEventListener("change", () => {
-      ui.historyTo = to.value || ui.historyFrom || todayISO();
-      if (ui.historyTo < ui.historyFrom) ui.historyFrom = ui.historyTo;
-      render();
-    });
+      setTimeout(() => ensureHistoryRangeLoaded(ui.historyFrom, ui.historyTo), 0);
+    };
+    if (from) {
+      from.addEventListener("change", () => refreshRange(from.value || todayISO(), (to && to.value) || ui.historyTo || from.value || todayISO()));
+      from.addEventListener("input", () => {
+        if (from.value) refreshRange(from.value, (to && to.value) || ui.historyTo || from.value);
+      });
+    }
+    if (to) {
+      to.addEventListener("change", () => refreshRange((from && from.value) || ui.historyFrom || to.value || todayISO(), to.value || ui.historyTo || todayISO()));
+      to.addEventListener("input", () => {
+        if (to.value) refreshRange((from && from.value) || ui.historyFrom || to.value, to.value);
+      });
+    }
     document.querySelectorAll("[data-history-range]").forEach((button) => button.addEventListener("click", () => {
       const anchor = to && to.value ? to.value : (ui.historyTo || todayISO());
-      ui.historyTo = anchor;
-      if (button.dataset.historyRange === "7") ui.historyFrom = addDaysISO(anchor, -6);
-      else if (button.dataset.historyRange === "30") ui.historyFrom = addDaysISO(anchor, -29);
-      else if (button.dataset.historyRange === "3m") ui.historyFrom = addMonthsISO(anchor, -3);
-      else if (button.dataset.historyRange === "6m") ui.historyFrom = addMonthsISO(anchor, -6);
-      render();
+      let nextFrom = anchor;
+      if (button.dataset.historyRange === "7") nextFrom = addDaysISO(anchor, -6);
+      else if (button.dataset.historyRange === "30") nextFrom = addDaysISO(anchor, -29);
+      else if (button.dataset.historyRange === "3m") nextFrom = addMonthsISO(anchor, -3);
+      else if (button.dataset.historyRange === "6m") nextFrom = addMonthsISO(anchor, -6);
+      refreshRange(nextFrom, anchor);
     }));
     document.querySelectorAll("[data-print-history]").forEach((button) => button.addEventListener("click", async () => {
       const scope = button.dataset.printHistory || "all";
@@ -4725,12 +4739,14 @@
       while (ui.historyLoading && ui.historyLoadingKey === requestKey && Date.now() - startedAt < 19000) {
         await new Promise((resolve) => setTimeout(resolve, 150));
       }
+      if (route.base === "historiales" && options.forceRender !== false) render();
       return;
     }
     if (ui.historyData && ui.historyData.from === from && ui.historyData.to === to) return;
     const config = getCloudSyncConfig();
     if (!cloudSyncReady(config)) {
       ui.historyError = "No hay conexion configurada al servidor para cargar historiales.";
+      if (route.base === "historiales" && options.forceRender !== false) render();
       return;
     }
     ui.historyLoading = true;
