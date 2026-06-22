@@ -1,5 +1,21 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.8.26 - Altura desktop acotada del carrito overlay (2026-06-22)
+
+### Frontend / Nuevo Pedido
+
+- En desktop/tablet, el carrito overlay de `Nuevo Pedido` reduce su altura maxima a `min(44vh, 340px)` para mostrar aproximadamente 5 o 6 filas antes del scroll.
+- En pantallas intermedias hasta 1060px, el limite queda en `min(46vh, 340px)` para mantener el overlay compacto sin volver a ocupar toda la columna lateral.
+- Se mantiene sin cambios el comportamiento mobile del carrito inferior definido en la version anterior.
+- Commit funcional desplegado: `8c87e51060dbac59b64cf4cf39d1b97b3ad84769`.
+- Verificacion: `git diff --check`.
+- Backups VPS: pre-cambio codigo `20260622_192653`; post-cambio codigo `20260622_192913`.
+- Backup PC pre-cambio: `auditoria/repo-backup-20260622-precart-desktop-height.zip`.
+- Backup PC post-cambio: `auditoria/repo-backup-20260622-postcart-desktop-height.zip`.
+- Nota operativa: por bajo espacio disponible en el VPS, este cambio frontend uso backups livianos de codigo y no dump completo de base de datos.
+- No se registraron credenciales en documentacion ni reportes.
+
+---
 ## v12.8.25 - Overlay desktop y altura mobile del carrito (2026-06-22)
 
 ### Frontend / Nuevo Pedido

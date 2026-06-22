@@ -362,24 +362,23 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 
 ## 12. Ultimo Cambio y Version
 
-**Version operativa:** 12.8.25  
-**Fecha:** 2026-06-22  
-**Commit GitHub del cambio funcional:** `10045fad49ab751dcca3b7ce4723595651a2f278`  
+**Version operativa:** 12.8.26
+**Fecha:** 2026-06-22
+**Commit GitHub del cambio funcional:** `8c87e51060dbac59b64cf4cf39d1b97b3ad84769`
 **Entorno actualizado:** VPS productivo `/opt/pare-carrito` con Docker Compose (`api`, `caddy`, `db`).
 
 ### Detalle del ultimo cambio
 
-- En desktop/tablet, el carrito fijo de `Nuevo Pedido` funciona como overlay y deja de reservar una columna lateral permanente, recuperando ancho para la grilla/lista de productos.
-- El overlay conserva sombra para diferenciarse del contenido sin achicar los productos visibles por fila.
-- En mobile, el carrito inferior conserva scroll interno pero reduce su altura maxima a `min(24vh, 188px)`, orientado a mostrar aproximadamente 4 o 5 filas.
-- Se redujo el padding inferior reservado en mobile para acompañar la nueva altura.
-- El ajuste es frontend/CSS y no modifica datos ni relaciones de base.
-- Nota operativa: el VPS estaba al 100% de disco; se eliminaron solo los archivos fallidos del intento de backup parcial para liberar espacio. No se borraron backups validos.
+- En desktop/tablet, el carrito overlay de `Nuevo Pedido` reduce su altura maxima a `min(44vh, 340px)` para que no tape toda la columna lateral y muestre aproximadamente 5 o 6 filas antes del scroll.
+- En pantallas intermedias hasta 1060px, el limite queda en `min(46vh, 340px)` para conservar el mismo comportamiento compacto.
+- El comportamiento mobile del carrito inferior se mantiene igual al de la version anterior.
+- El ajuste es frontend/CSS y no modifica datos, historiales, funcionalidades por rol ni relaciones de base.
+- Nota operativa: por bajo espacio disponible en el VPS, este cambio frontend uso backups livianos de codigo y no dump completo de base de datos.
 - No se registraron credenciales en este documento ni en el historial.
 
 ### Backups asociados
 
-- VPS pre-cambio overlay carrito: tar de `/opt/pare-carrito` generado con timestamp `20260622_141520`.
-- PC pre-cambio overlay carrito: `auditoria/repo-backup-20260622-1415-pre-order-cart-overlay-height.zip`.
-- VPS post-cambio overlay carrito: tar de `/opt/pare-carrito` generado con timestamp `20260622_141734`.
-- PC post-cambio overlay carrito: `auditoria/repo-backup-20260622-1417-post-order-cart-overlay-height.zip`.
+- VPS pre-cambio altura desktop carrito: tar de `/opt/pare-carrito` generado con timestamp `20260622_192653`.
+- PC pre-cambio altura desktop carrito: `auditoria/repo-backup-20260622-precart-desktop-height.zip`.
+- VPS post-cambio altura desktop carrito: tar de `/opt/pare-carrito` generado con timestamp `20260622_192913`.
+- PC post-cambio altura desktop carrito: `auditoria/repo-backup-20260622-postcart-desktop-height.zip`.
