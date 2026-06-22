@@ -345,7 +345,7 @@ Los historiales canonicos viven en la tabla `product_history_state`, fuera del J
 
 Esto reduce el peso de cada operacion diaria, porque editar clientes, crear pedidos o registrar pagos ya no transporta decenas de miles de registros historicos.
 
-Desde la version 12.8.19, la pantalla `Historiales` solicita `/product-history?mode=matrix`. En ese modo, el backend devuelve filas agregadas por producto/dia para compras y ventas, evitando que el navegador tenga que procesar todo el historial crudo del rango.
+Desde la version 12.8.19, la pantalla `Historiales` solicita `/product-history?mode=matrix`. En ese modo, el backend devuelve filas agregadas por producto/dia para compras y ventas, evitando que el navegador tenga que procesar todo el historial crudo del rango. Desde la version 12.8.20, el backend cachea esas matrices por rango y version de datos para acelerar cargas repetidas sin cambiar la fuente canonica.
 
 ### 11.4 Sincronizacion offline
 
@@ -362,27 +362,28 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 
 ## 12. Ultimo Cambio y Version
 
-**Version operativa:** 12.8.19  
-**Fecha:** 2026-06-21  
-**Commit GitHub del cambio funcional:** `5194050c009ada03336bf010ac99f65fedf77443`  
+**Version operativa:** 12.8.20  
+**Fecha:** 2026-06-22  
+**Commit GitHub del cambio funcional:** `5953e66c8ee9ca767f26f6d1a77019c9bea859a9`  
 **Entorno actualizado:** VPS productivo `/opt/pare-carrito` con Docker Compose (`api`, `caddy`, `db`).
 
 ### Detalle del ultimo cambio
 
-- `Nuevo Pedido` renderiza productos por lotes de 80 y carga mas al acercarse al final del listado, reduciendo el costo inicial de la pantalla.
-- El borrador local de `Nuevo Pedido` conserva cantidades, notas, precios y unidades aunque el producto no este renderizado por la virtualizacion.
-- El carrito mobile queda sticky y compacto para todos los roles; `Total` queda a la izquierda y el importe a la derecha.
-- Si el cliente no tiene IVA, no se muestra subtotal; si tiene IVA, se muestran subtotal e IVA como detalle.
-- Los botones `X` del carrito mobile se achicaron visualmente y las filas se compactaron.
-- La etiqueta de preferencias de producto ahora muestra `ultima compra`.
-- `Historiales` usa el modo agregado del backend (`/product-history?mode=matrix`) para recibir filas ya consolidadas de compras y ventas.
-- Los botones `7 dias`, `30 dias`, `3 meses` y `6 meses` tienen ancho minimo legible en mobile y desktop.
+- `Nuevo Pedido` conserva un historial compacto de productos comprados por cliente en `state.preferences` y lo reconcilia desde pedidos historicos existentes.
+- Los productos de la ultima compra del cliente muestran `Ultima compra` con cantidad; los productos comprados antes quedan como `Favorito`.
+- El campo `Nota producto filtrado` pasa a llamarse `Nota`.
+- El selector de `Vista` de `Nuevo Pedido` se reemplaza por dos botones iconicos para cuadricula y lista.
+- Si el navegador no soporta lazy-load o `IntersectionObserver`, `Nuevo Pedido` renderiza todos los productos como antes de la virtualizacion.
+- El rol empleado ve todos los pedidos dentro del rango seleccionado en la pagina `Pedidos`.
+- El boton `Eliminar` de pedidos queda reservado al rol gerente; admin conserva las acciones de anulacion/restauracion permitidas.
+- `Historiales` cachea en backend las matrices agregadas por rango/version de datos para acelerar cargas repetidas.
+- Los botones rapidos de rango de `Historiales` tienen ancho minimo mayor para mejorar lectura.
 - Verificacion productiva: API del VPS respondio health OK desde el contenedor luego del rebuild; frontend desplegado.
 - No se registraron credenciales en este documento ni en el historial.
 
 ### Backups asociados
 
-- VPS pre-cambio virtualizacion/historiales: dump PostgreSQL, `app_state` y tar de `/opt/pare-carrito` generados con timestamp `20260621_170034`.
-- PC pre-cambio virtualizacion/historiales: `auditoria/repo-backup-20260621-1700-pre-virtual-history-order.zip`.
-- VPS post-cambio virtualizacion/historiales: dump PostgreSQL, `app_state` y tar de `/opt/pare-carrito` generados con timestamp `20260621_171221`.
-- PC post-cambio virtualizacion/historiales: `auditoria/repo-backup-20260621-1712-post-virtual-history-order.zip`.
+- VPS pre-cambio favoritos/historiales: dump PostgreSQL y tar de `/opt/pare-carrito` generados con timestamp `20260621_173641`.
+- PC pre-cambio favoritos/historiales: `auditoria/repo-backup-20260621-1736-pre-client-history-favorites.zip`.
+- VPS post-cambio favoritos/historiales: dump PostgreSQL y tar de `/opt/pare-carrito` generados con timestamp `20260622_060708`.
+- PC post-cambio favoritos/historiales: `auditoria/repo-backup-20260622-0607-post-client-history-favorites.zip`.

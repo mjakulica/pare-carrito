@@ -1,5 +1,26 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.8.20 - Favoritos historicos, pedidos de empleado y cache de historiales (2026-06-22)
+
+### Frontend / Nuevo Pedido, Pedidos e Historiales
+
+- `Nuevo Pedido` conserva un historial compacto de productos comprados por cliente en `state.preferences`, reconciliado tambien desde pedidos historicos ya cargados.
+- Los productos de la ultima compra del cliente muestran `Ultima compra` con cantidad; los productos comprados anteriormente muestran `Favorito`.
+- La etiqueta `Nota producto filtrado` se simplifico a `Nota`.
+- El selector `Vista` de `Nuevo Pedido` se reemplazo por dos botones iconicos para cuadricula y lista.
+- Si el navegador no soporta lazy-load/IntersectionObserver, `Nuevo Pedido` vuelve a cargar todos los productos como antes y no depende del boton `Cargar mas`.
+- El rol `employee` ahora ve todos los pedidos del rango seleccionado en la pagina `Pedidos`, no solo los del dia.
+- En `Pedidos`, el boton `Eliminar` queda disponible solo para rol gerente; admin conserva anulacion/restauracion segun corresponda.
+- `Historiales` agrega cache de matrices por rango/version en backend para acelerar cargas repetidas del mismo rango.
+- Los botones rapidos de rango de `Historiales` aumentan su ancho minimo para mejorar lectura.
+- Commit funcional desplegado: `5953e66c8ee9ca767f26f6d1a77019c9bea859a9`.
+- Verificacion: `node --check` en frontend/backend; `git diff --check`; API en VPS `HEALTH ok` tras rebuild.
+- Backups VPS: pre-cambio `20260621_173641`; post-cambio `20260622_060708`.
+- Backup PC pre-cambio: `auditoria/repo-backup-20260621-1736-pre-client-history-favorites.zip`.
+- Backup PC post-cambio: `auditoria/repo-backup-20260622-0607-post-client-history-favorites.zip`.
+- No se registraron credenciales en documentacion ni reportes.
+
+---
 ## v12.8.19 - Virtualizacion de Nuevo Pedido e historiales agregados (2026-06-21)
 
 ### Frontend / Nuevo Pedido, Historiales y mobile
