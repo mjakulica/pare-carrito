@@ -362,23 +362,24 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 
 ## 12. Ultimo Cambio y Version
 
-**Version operativa:** 12.8.24  
+**Version operativa:** 12.8.25  
 **Fecha:** 2026-06-22  
-**Commit GitHub del cambio funcional:** `429d4b0335a732bfce61d4f4a5edbe761afb6461`  
+**Commit GitHub del cambio funcional:** `10045fad49ab751dcca3b7ce4723595651a2f278`  
 **Entorno actualizado:** VPS productivo `/opt/pare-carrito` con Docker Compose (`api`, `caddy`, `db`).
 
 ### Detalle del ultimo cambio
 
-- En `Historiales`, al terminar la carga de un rango se repinta la pagina actual correctamente.
-- La causa era que `ensureHistoryRangeLoaded` consultaba `route.base`, pero `route` es una variable local de `render()` y no existe dentro de esa funcion async.
-- Se reemplazo esa verificacion por `getRoute().base === "historiales"`.
-- Esto corrige el caso donde los datos quedaban cargados y recien aparecian al cambiar de pagina y volver.
-- El ajuste es frontend y mantiene la fuente canonica `/product-history?mode=matrix`.
+- En desktop/tablet, el carrito fijo de `Nuevo Pedido` funciona como overlay y deja de reservar una columna lateral permanente, recuperando ancho para la grilla/lista de productos.
+- El overlay conserva sombra para diferenciarse del contenido sin achicar los productos visibles por fila.
+- En mobile, el carrito inferior conserva scroll interno pero reduce su altura maxima a `min(24vh, 188px)`, orientado a mostrar aproximadamente 4 o 5 filas.
+- Se redujo el padding inferior reservado en mobile para acompañar la nueva altura.
+- El ajuste es frontend/CSS y no modifica datos ni relaciones de base.
+- Nota operativa: el VPS estaba al 100% de disco; se eliminaron solo los archivos fallidos del intento de backup parcial para liberar espacio. No se borraron backups validos.
 - No se registraron credenciales en este documento ni en el historial.
 
 ### Backups asociados
 
-- VPS pre-cambio repintado Historiales: dump PostgreSQL y tar de `/opt/pare-carrito` generados con timestamp `20260622_140706`.
-- PC pre-cambio repintado Historiales: `auditoria/repo-backup-20260622-1407-pre-history-render-route-fix.zip`.
-- VPS post-cambio repintado Historiales: tar de `/opt/pare-carrito` generado con timestamp `20260622_140949`.
-- PC post-cambio repintado Historiales: `auditoria/repo-backup-20260622-1410-post-history-render-route-fix.zip`.
+- VPS pre-cambio overlay carrito: tar de `/opt/pare-carrito` generado con timestamp `20260622_141520`.
+- PC pre-cambio overlay carrito: `auditoria/repo-backup-20260622-1415-pre-order-cart-overlay-height.zip`.
+- VPS post-cambio overlay carrito: tar de `/opt/pare-carrito` generado con timestamp `20260622_141734`.
+- PC post-cambio overlay carrito: `auditoria/repo-backup-20260622-1417-post-order-cart-overlay-height.zip`.

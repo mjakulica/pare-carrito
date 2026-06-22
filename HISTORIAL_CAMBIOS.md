@@ -1,5 +1,22 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.8.25 - Overlay desktop y altura mobile del carrito (2026-06-22)
+
+### Frontend / Nuevo Pedido
+
+- En desktop/tablet, el carrito fijo de `Nuevo Pedido` ahora funciona como overlay y ya no reserva una columna lateral permanente, devolviendo ancho al listado de productos.
+- Se agrego sombra al overlay del carrito para separarlo visualmente del contenido sin achicar la grilla.
+- En mobile, el carrito inferior mantiene scroll interno pero reduce su altura maxima a `min(24vh, 188px)`, para mostrar aproximadamente 4 o 5 filas en vez de 8.
+- Se redujo el espacio inferior reservado en mobile para acompañar la nueva altura del carrito.
+- Commit funcional desplegado: `10045fad49ab751dcca3b7ce4723595651a2f278`.
+- Verificacion: `git diff --check`.
+- Backups VPS: pre-cambio codigo `20260622_141520`; post-cambio codigo `20260622_141734`.
+- Backup PC pre-cambio: `auditoria/repo-backup-20260622-1415-pre-order-cart-overlay-height.zip`.
+- Backup PC post-cambio: `auditoria/repo-backup-20260622-1417-post-order-cart-overlay-height.zip`.
+- Nota operativa: el VPS estaba al 100% de disco; se eliminaron solo los archivos fallidos del intento de backup parcial para liberar espacio. No se borraron backups validos.
+- No se registraron credenciales en documentacion ni reportes.
+
+---
 ## v12.8.24 - Repintado final de Historiales al cargar rango (2026-06-22)
 
 ### Frontend / Historiales
