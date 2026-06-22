@@ -1,5 +1,20 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.8.22 - Carrito sticky y Nota compacta en Nuevo Pedido (2026-06-22)
+
+### Frontend / Nuevo Pedido
+
+- El carrito de compras de `Nuevo Pedido` queda sticky tambien en el breakpoint intermedio desktop/tablet, para que siga visible al scrollear productos.
+- En mobile, el carrito sticky inferior se refuerza con mayor prioridad visual, menor altura maxima y sombra superior.
+- En mobile, el campo rapido `Nota` se compacta en ancho y padding manteniendo altura tactil minima.
+- Commit funcional desplegado: `47d24ecdac259b8ee22f6de85c231107ec1db38e`.
+- Verificacion: `git diff --check`.
+- Backups VPS: pre-cambio `20260622_120217`; post-cambio `20260622_120448`.
+- Backup PC pre-cambio: `auditoria/repo-backup-20260622-1202-pre-order-cart-sticky-note.zip`.
+- Backup PC post-cambio: `auditoria/repo-backup-20260622-1204-post-order-cart-sticky-note.zip`.
+- No se registraron credenciales en documentacion ni reportes.
+
+---
 ## v12.8.21 - Refresco inmediato de Historiales por rango (2026-06-22)
 
 ### Frontend / Historiales

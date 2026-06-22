@@ -362,22 +362,22 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 
 ## 12. Ultimo Cambio y Version
 
-**Version operativa:** 12.8.21  
+**Version operativa:** 12.8.22  
 **Fecha:** 2026-06-22  
-**Commit GitHub del cambio funcional:** `37526e6eb11fb239315c3aa02f9afd94a7768d70`  
+**Commit GitHub del cambio funcional:** `47d24ecdac259b8ee22f6de85c231107ec1db38e`  
 **Entorno actualizado:** VPS productivo `/opt/pare-carrito` con Docker Compose (`api`, `caddy`, `db`).
 
 ### Detalle del ultimo cambio
 
-- En `Historiales`, los cambios de `Desde`, `Hasta` y botones rapidos de rango actualizan la pantalla inmediatamente sin tener que navegar a otra pagina.
-- El rango anterior se invalida antes de pedir datos nuevos para que la pantalla no quede mostrando informacion vieja.
-- Si una carga del mismo rango ya esta en curso, al finalizar tambien se repinta la pagina actual.
-- El ajuste es frontend y mantiene la fuente canonica `/product-history?mode=matrix` agregada por backend.
+- En `Nuevo Pedido`, el carrito de compras queda sticky tambien en el breakpoint intermedio desktop/tablet, evitando que desaparezca al scrollear el listado de productos.
+- En mobile, el carrito sticky inferior tiene mayor prioridad visual, menor altura maxima y sombra superior para mantenerse visible sin tapar demasiado la pantalla.
+- En mobile, el campo rapido `Nota` queda mas compacto en ancho y padding, manteniendo altura tactil minima.
+- El ajuste es frontend/CSS y no modifica datos ni relaciones de base.
 - No se registraron credenciales en este documento ni en el historial.
 
 ### Backups asociados
 
-- VPS pre-cambio refresco Historiales: dump PostgreSQL y tar de `/opt/pare-carrito` generados con timestamp `20260622_115526`.
-- PC pre-cambio refresco Historiales: `auditoria/repo-backup-20260622-1155-pre-history-range-refresh.zip`.
-- VPS post-cambio refresco Historiales: tar de `/opt/pare-carrito` generado con timestamp `20260622_115810`.
-- PC post-cambio refresco Historiales: `auditoria/repo-backup-20260622-1158-post-history-range-refresh.zip`.
+- VPS pre-cambio carrito sticky: dump PostgreSQL y tar de `/opt/pare-carrito` generados con timestamp `20260622_120217`.
+- PC pre-cambio carrito sticky: `auditoria/repo-backup-20260622-1202-pre-order-cart-sticky-note.zip`.
+- VPS post-cambio carrito sticky: tar de `/opt/pare-carrito` generado con timestamp `20260622_120448`.
+- PC post-cambio carrito sticky: `auditoria/repo-backup-20260622-1204-post-order-cart-sticky-note.zip`.
