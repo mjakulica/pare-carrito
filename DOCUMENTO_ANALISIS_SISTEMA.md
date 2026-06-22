@@ -362,22 +362,23 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 
 ## 12. Ultimo Cambio y Version
 
-**Version operativa:** 12.8.23  
+**Version operativa:** 12.8.24  
 **Fecha:** 2026-06-22  
-**Commit GitHub del cambio funcional:** `39a1c775415e9705798ae90a375ee977c8cea53d`  
+**Commit GitHub del cambio funcional:** `429d4b0335a732bfce61d4f4a5edbe761afb6461`  
 **Entorno actualizado:** VPS productivo `/opt/pare-carrito` con Docker Compose (`api`, `caddy`, `db`).
 
 ### Detalle del ultimo cambio
 
-- `pageShell` agrega una clase de ruta a cada pagina, por ejemplo `page-nuevo-pedido`, para aplicar estilos especificos sin afectar otras vistas.
-- En `Nuevo Pedido`, el carrito pasa a `position: fixed` respecto del viewport, porque `position: sticky` quedaba limitado al contenedor inicial y no acompanaba el scroll de la grilla de productos.
-- En desktop/tablet se reserva espacio lateral para el carrito fijo; en mobile se fija abajo y se reserva espacio inferior para no tapar contenido.
-- El ajuste es frontend/CSS y no modifica datos ni relaciones de base.
+- En `Historiales`, al terminar la carga de un rango se repinta la pagina actual correctamente.
+- La causa era que `ensureHistoryRangeLoaded` consultaba `route.base`, pero `route` es una variable local de `render()` y no existe dentro de esa funcion async.
+- Se reemplazo esa verificacion por `getRoute().base === "historiales"`.
+- Esto corrige el caso donde los datos quedaban cargados y recien aparecian al cambiar de pagina y volver.
+- El ajuste es frontend y mantiene la fuente canonica `/product-history?mode=matrix`.
 - No se registraron credenciales en este documento ni en el historial.
 
 ### Backups asociados
 
-- VPS pre-cambio carrito fixed: dump PostgreSQL y tar de `/opt/pare-carrito` generados con timestamp `20260622_135946`.
-- PC pre-cambio carrito fixed: `auditoria/repo-backup-20260622-1359-pre-order-cart-fixed.zip`.
-- VPS post-cambio carrito fixed: tar de `/opt/pare-carrito` generado con timestamp `20260622_140250`.
-- PC post-cambio carrito fixed: `auditoria/repo-backup-20260622-1402-post-order-cart-fixed.zip`.
+- VPS pre-cambio repintado Historiales: dump PostgreSQL y tar de `/opt/pare-carrito` generados con timestamp `20260622_140706`.
+- PC pre-cambio repintado Historiales: `auditoria/repo-backup-20260622-1407-pre-history-render-route-fix.zip`.
+- VPS post-cambio repintado Historiales: tar de `/opt/pare-carrito` generado con timestamp `20260622_140949`.
+- PC post-cambio repintado Historiales: `auditoria/repo-backup-20260622-1410-post-history-render-route-fix.zip`.

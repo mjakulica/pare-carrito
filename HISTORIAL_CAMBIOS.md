@@ -1,5 +1,21 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.8.24 - Repintado final de Historiales al cargar rango (2026-06-22)
+
+### Frontend / Historiales
+
+- Se corrigio el repintado final de `Historiales` al terminar la carga de un rango.
+- `ensureHistoryRangeLoaded` ya no usa `route.base`, porque `route` es local de `render()` y no existe en esa funcion async.
+- Ahora verifica la pagina actual con `getRoute().base === "historiales"` antes de llamar a `render()`.
+- Esto evita que los datos queden cargados en memoria pero visibles recien al salir y volver a entrar a la pagina.
+- Commit funcional desplegado: `429d4b0335a732bfce61d4f4a5edbe761afb6461`.
+- Verificacion: `node --check` en frontend y `git diff --check`.
+- Backups VPS: pre-cambio `20260622_140706`; post-cambio `20260622_140949`.
+- Backup PC pre-cambio: `auditoria/repo-backup-20260622-1407-pre-history-render-route-fix.zip`.
+- Backup PC post-cambio: `auditoria/repo-backup-20260622-1410-post-history-render-route-fix.zip`.
+- No se registraron credenciales en documentacion ni reportes.
+
+---
 ## v12.8.23 - Carrito fijo al viewport en Nuevo Pedido (2026-06-22)
 
 ### Frontend / Nuevo Pedido
