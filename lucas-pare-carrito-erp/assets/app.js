@@ -23,6 +23,8 @@
   ];
   const CATEGORIES = ["FRUTAS", "VERDURAS", "HUEVOS", "HOJAS", "CONDIMENTOS", "LEGUMBRES", "FRUTOS SECOS", "CONGELADOS", "OTROS"];
   const ORDER_PRODUCT_BATCH_SIZE = 80;
+  const supportsOrderProductLazyLoad = () => typeof HTMLImageElement !== "undefined" && "loading" in HTMLImageElement.prototype && "IntersectionObserver" in window;
+  const getOrderProductBatchLimit = () => supportsOrderProductLazyLoad() ? ORDER_PRODUCT_BATCH_SIZE : Number.MAX_SAFE_INTEGER;
       const PRODUCT_IMAGE_FILES = [
     "Queso criollo horma.jpg",
     "acelga.jpg",
@@ -789,8 +791,57 @@
     const clientTransfers = Array.isArray(loaded.clientTransfers) ? loaded.clientTransfers : [];
     const deletedOrders = Array.isArray(loaded.deletedOrders) ? loaded.deletedOrders.slice() : [];
     const normalized = { ...loaded, users, clients, products, providers, saldos, caja, cashBoxes, exampleOrders, employeeReimbursements, clientTransfers, deletedOrders, appSettings: { ...defaultAppSettings(), ...(loaded.appSettings || {}) } };
+    normalized.preferences = reconcileClientProductPreferences(normalized);
     ensureUserCashBoxes(normalized);
     return normalized;
+  }
+
+  function orderPreferenceKey(order) {
+    const date = String(order && order.date || "").slice(0, 10);
+    return String(order && (order.createdAt || order.updatedAt || date || order.id) || "");
+  }
+
+  function reconcileClientProductPreferences(source) {
+    const existing = Array.isArray(source.preferences) ? source.preferences.slice() : [];
+    const byKey = new Map();
+    const derivedCounts = new Map();
+    existing.forEach((pref) => {
+      if (!pref || !pref.clientId || !pref.productId) return;
+      byKey.set(pref.clientId + "|" + pref.productId, { ...pref });
+    });
+    (Array.isArray(source.orders) ? source.orders : [])
+      .filter((order) => order && order.clientId && !["cancelado", "anulado"].includes(order.status))
+      .forEach((order) => {
+        const orderKey = orderPreferenceKey(order);
+        const orderedAt = order.createdAt || order.updatedAt || (order.date ? String(order.date).slice(0, 10) + "T00:00:00.000Z" : orderKey);
+        (Array.isArray(order.items) ? order.items : []).forEach((item) => {
+          if (!item || !item.productId) return;
+          const key = order.clientId + "|" + item.productId;
+          const purchaseCount = Number(derivedCounts.get(key) || 0) + 1;
+          derivedCounts.set(key, purchaseCount);
+          const pref = byKey.get(key) || {
+            clientId: order.clientId,
+            productId: item.productId,
+            preferredUnitType: item.unitType || "",
+            lastQuantity: 0,
+            firstOrderedAt: orderedAt,
+            lastOrderedAt: "",
+            lastOrderKey: "",
+            purchaseCount: 0
+          };
+          const previousKey = getPreferenceOrderKey(pref);
+          pref.firstOrderedAt = pref.firstOrderedAt || orderedAt;
+          pref.purchaseCount = purchaseCount;
+          if (!previousKey || orderKey >= previousKey) {
+            pref.preferredUnitType = item.unitType || pref.preferredUnitType || "";
+            pref.lastQuantity = Number(item.quantity || 0);
+            pref.lastOrderedAt = orderedAt;
+            pref.lastOrderKey = orderKey;
+          }
+          byKey.set(key, pref);
+        });
+      });
+    return Array.from(byKey.values());
   }
 
   function defaultAppSettings() {
@@ -2624,7 +2675,7 @@
   }
 
   function renderEmployeeDashboard() {
-    const todaysOrders = visibleOrders();
+    const todaysOrders = state.orders.filter((order) => order.date === todayISO() && !["cancelado", "anulado"].includes(order.status));
     const assignedItems = getTodaysAssignableItems().length;
     const employeeCaja = getEmployeeCajaTotal(currentUser.id);
     const weeklyPay = getWeeklyPayDue(currentUser.id);
@@ -2899,11 +2950,14 @@
 
   function renderOrderProductRow(product, client, options = {}) {
     const pref = getPreference(client ? client.id : "", product.id);
+    const prefStatus = pref && client ? getPreferenceDisplayStatus(client.id, pref, options.clientLastPreferenceKey) : { isLastPurchase: false };
     const draft = (ui.orderDraft && ui.orderDraft[product.id]) || {};
     const price = draft.price !== undefined && draft.price !== "" ? Number(draft.price || 0) : getAdjustedProductPrice(product, client);
     const unit = draft.unitType || (pref ? pref.preferredUnitType : product.unitType);
     const integerQty = options.isCustomerOrder && product.unitType === "unidad";
-    const favoriteText = pref ? `&uacute;ltima compra ${escapeHtml(pref.preferredUnitType)}${pref.lastQuantity ? `, ${formatNumber(pref.lastQuantity)}` : ""}` : "";
+    const favoriteText = pref
+      ? (prefStatus.isLastPurchase ? `Ultima compra ${formatNumber(pref.lastQuantity || 0)}` : "Favorito")
+      : "";
     return `
       <div class="order-row ${ui.orderView === "grid" ? "compact" : ""}" data-product-row="${product.id}">
         <div class="order-product-title">
@@ -2995,9 +3049,11 @@
       return product.name.toLowerCase().includes(ui.orderProductFilter.toLowerCase());
     };
     const filteredProducts = products.filter((product) => productMatches(product) && nameMatches(product));
-    if (!Number.isFinite(Number(ui.orderRenderedLimit)) || Number(ui.orderRenderedLimit) < ORDER_PRODUCT_BATCH_SIZE) ui.orderRenderedLimit = ORDER_PRODUCT_BATCH_SIZE;
+    const initialOrderLimit = getOrderProductBatchLimit();
+    if (!supportsOrderProductLazyLoad() || !Number.isFinite(Number(ui.orderRenderedLimit)) || Number(ui.orderRenderedLimit) < ORDER_PRODUCT_BATCH_SIZE) ui.orderRenderedLimit = initialOrderLimit;
     const renderedProducts = filteredProducts.slice(0, Number(ui.orderRenderedLimit));
-    const productRows = renderedProducts.map((product) => renderOrderProductRow(product, client, { hideOrderPrices, isCustomerOrder })).join("");
+    const clientLastPreferenceKey = client ? getClientLastPreferenceKey(client.id) : "";
+    const productRows = renderedProducts.map((product) => renderOrderProductRow(product, client, { hideOrderPrices, isCustomerOrder, clientLastPreferenceKey })).join("");
     const wholesaleFilterButtons = `<div class="order-wholesale-filters">
         <button type="button" class="btn small wholesale-filter-btn ${wholesaleFilter.includes("mayor") ? "blue" : "ghost"}" data-order-wholesale="mayor">Por Mayor</button>
         <button type="button" class="btn small wholesale-filter-btn ${wholesaleFilter.includes("menor") ? "blue" : "ghost"}" data-order-wholesale="menor">Por Menor</button>
@@ -3053,15 +3109,15 @@
               <datalist id="order-product-options">${activeProducts().map((product) => `<option value="${escapeAttr(product.name)}"></option>`).join("")}</datalist>
             </div>
             <div class="field order-quick-note-field">
-              <label>Nota producto filtrado</label>
+              <label>Nota</label>
               <input id="order-quick-note" placeholder="Nota" />
             </div>
             <div class="field order-view-field">
               <label>Vista</label>
-              <select id="order-view">
-                <option value="grid" ${ui.orderView === "grid" ? "selected" : ""}>Cuadricula</option>
-                <option value="list" ${ui.orderView === "list" ? "selected" : ""}>Lista</option>
-              </select>
+              <div class="segmented-icon-control" role="group" aria-label="Vista de productos">
+                <button class="btn icon ${ui.orderView === "grid" ? "primary" : "ghost"}" type="button" data-order-view="grid" title="Cuadricula" aria-label="Cuadricula">&#9638;</button>
+                <button class="btn icon ${ui.orderView === "list" ? "primary" : "ghost"}" type="button" data-order-view="list" title="Lista" aria-label="Lista">&#9776;</button>
+              </div>
             </div>
             <div class="field order-actions-field">
               <div class="page-actions">
@@ -3111,7 +3167,6 @@
     const clientSelect = document.getElementById("order-client");
     const dateInput = document.getElementById("order-date");
     const searchInput = document.getElementById("order-product-search");
-    const viewSelect = document.getElementById("order-view");
     const pasteInput = document.getElementById("order-whatsapp-paste");
     const warningBox = document.getElementById("order-parse-warning");
     const isCustomerOrder = isClientLikeRole(currentUser.role);
@@ -3146,6 +3201,7 @@
       if (vatTotalNode) vatTotalNode.textContent = "IVA " + formatMoney(vatTotal);
       if (orderTotal) orderTotal.textContent = formatMoney(subtotalTotal + vatTotal);
     };
+    const orderBatchLimit = () => getOrderProductBatchLimit();
     const currentFilteredProducts = () => sortProductsForClient(clientSelect.value).filter((product) => filterMatches(product));
     const bindDraftInputs = () => {
       document.querySelectorAll("[data-qty],[data-price],[data-note]").forEach((input) => input.addEventListener("input", recalc));
@@ -3153,7 +3209,8 @@
     const updateLoadMoreButton = (filteredProducts) => {
       const wrap = document.getElementById("order-load-more-wrap");
       if (!wrap) return;
-      const rendered = Math.min(Number(ui.orderRenderedLimit || ORDER_PRODUCT_BATCH_SIZE), filteredProducts.length);
+      const batchLimit = orderBatchLimit();
+      const rendered = Math.min(Number(ui.orderRenderedLimit || batchLimit), filteredProducts.length);
       wrap.innerHTML = rendered < filteredProducts.length ? `<button class="btn ghost small" id="load-more-order-products" type="button">Cargar mas</button>` : "";
       const button = document.getElementById("load-more-order-products");
       if (button) {
@@ -3170,15 +3227,17 @@
     };
     const renderProductWindow = (resetLimit) => {
       syncOrderDraftFromDom();
-      if (resetLimit) ui.orderRenderedLimit = ORDER_PRODUCT_BATCH_SIZE;
-      else ui.orderRenderedLimit = Number(ui.orderRenderedLimit || ORDER_PRODUCT_BATCH_SIZE) + ORDER_PRODUCT_BATCH_SIZE;
+      const batchLimit = orderBatchLimit();
+      if (resetLimit) ui.orderRenderedLimit = batchLimit;
+      else ui.orderRenderedLimit = Number(ui.orderRenderedLimit || batchLimit) + batchLimit;
       const client = getClient(clientSelect.value);
+      const clientLastPreferenceKey = client ? getClientLastPreferenceKey(client.id) : "";
       const filteredProducts = currentFilteredProducts();
-      const renderedLimit = Math.min(Number(ui.orderRenderedLimit || ORDER_PRODUCT_BATCH_SIZE), filteredProducts.length);
+      const renderedLimit = Math.min(Number(ui.orderRenderedLimit || batchLimit), filteredProducts.length);
       const renderedProducts = filteredProducts.slice(0, renderedLimit);
       const grid = document.querySelector(".order-grid");
       if (grid) {
-        grid.innerHTML = renderedProducts.map((product) => renderOrderProductRow(product, client, { hideOrderPrices, isCustomerOrder })).join("");
+        grid.innerHTML = renderedProducts.map((product) => renderOrderProductRow(product, client, { hideOrderPrices, isCustomerOrder, clientLastPreferenceKey })).join("");
       }
       const countNode = document.getElementById("order-product-count");
       if (countNode) countNode.textContent = "Mostrando " + renderedProducts.length + " de " + filteredProducts.length + " producto" + (filteredProducts.length === 1 ? "" : "s");
@@ -3203,7 +3262,7 @@
       const countNode = document.getElementById("order-product-count");
       if (!countNode) return;
       const filteredProducts = currentFilteredProducts();
-      const rendered = Math.min(Number(ui.orderRenderedLimit || ORDER_PRODUCT_BATCH_SIZE), filteredProducts.length);
+      const rendered = Math.min(Number(ui.orderRenderedLimit || orderBatchLimit()), filteredProducts.length);
       countNode.textContent = "Mostrando " + rendered + " de " + filteredProducts.length + " producto" + (filteredProducts.length === 1 ? "" : "s");
     };
     const applyOrderFilters = () => {
@@ -3241,7 +3300,7 @@
           selected = selected.includes(value) ? selected.filter((cat) => cat !== value) : [...selected, value];
         }
         ui.orderSelectedCategories = selected;
-        ui.orderRenderedLimit = ORDER_PRODUCT_BATCH_SIZE;
+        ui.orderRenderedLimit = orderBatchLimit();
         render();
       });
     });
@@ -3252,7 +3311,7 @@
         selected = selected.includes(value) ? selected.filter((item) => item !== value) : [...selected, value];
         if (selected.length === 0) selected = ["mayor", "menor"];
         ui.orderWholesaleFilter = selected;
-        ui.orderRenderedLimit = ORDER_PRODUCT_BATCH_SIZE;
+        ui.orderRenderedLimit = orderBatchLimit();
         render();
       });
     });
@@ -3263,16 +3322,16 @@
       clientSelect.value = "";
       ui.selectedClientId = "";
     });
-    viewSelect.addEventListener("change", () => {
-      ui.orderView = viewSelect.value;
+    document.querySelectorAll("[data-order-view]").forEach((button) => button.addEventListener("click", () => {
+      ui.orderView = button.dataset.orderView || "grid";
       render();
-    });
+    }));
     const applySelectedClient = (clientId, shouldRender) => {
       clientSelect.value = clientId;
       ui.selectedClientId = clientId;
       if (shouldRender) {
         ui.orderDraft = {};
-        ui.orderRenderedLimit = ORDER_PRODUCT_BATCH_SIZE;
+        ui.orderRenderedLimit = orderBatchLimit();
       }
       const client = getClient(clientId);
       const vehicleSelect = document.getElementById("order-vehicle");
@@ -3505,7 +3564,7 @@
         ui.selectedClientId = "";
         ui.orderProductFilter = "";
         ui.orderDraft = {};
-        ui.orderRenderedLimit = ORDER_PRODUCT_BATCH_SIZE;
+        ui.orderRenderedLimit = getOrderProductBatchLimit();
         alert("Pedido guardado: " + order.id);
         render();
         return;
@@ -3541,7 +3600,7 @@
       ui.selectedClientId = "";
       ui.orderProductFilter = "";
       ui.orderDraft = {};
-      ui.orderRenderedLimit = ORDER_PRODUCT_BATCH_SIZE;
+      ui.orderRenderedLimit = getOrderProductBatchLimit();
       alert("Pedido guardado: " + order.id);
       render();
     });
@@ -3587,6 +3646,7 @@
 
   function collectOrderDraftItems(client, withIds) {
     const items = [];
+    const preferenceOrderKey = withIds && client ? new Date().toISOString() : "";
     const draftEntries = ui.orderDraft && typeof ui.orderDraft === "object"
       ? Object.values(ui.orderDraft)
       : [];
@@ -3602,7 +3662,7 @@
         const subtotal = qty * unitPrice;
         const ivaRate = shouldApplyInvoiceVat(client) ? getIvaRate(product && product.ivaType) : 0;
         const ivaAmount = subtotal * (ivaRate / 100);
-        if (withIds && client) upsertPreference(client.id, productId, unitType, qty);
+        if (withIds && client) upsertPreference(client.id, productId, unitType, qty, preferenceOrderKey);
         items.push({
           id: withIds ? nextItemId() : productId,
           productId,
@@ -3633,7 +3693,7 @@
       const subtotal = qty * unitPrice;
       const ivaRate = shouldApplyInvoiceVat(client) ? getIvaRate(product && product.ivaType) : 0;
       const ivaAmount = subtotal * (ivaRate / 100);
-      if (withIds && client) upsertPreference(client.id, productId, unitType, qty);
+      if (withIds && client) upsertPreference(client.id, productId, unitType, qty, preferenceOrderKey);
       items.push({
         id: withIds ? nextItemId() : productId,
         productId,
@@ -3736,7 +3796,7 @@
             ${["manager", "admin", "employee"].includes(currentUser.role) ? `<button class="btn small ghost" data-print-order-remito="${order.id}" title="Imprimir" aria-label="Imprimir">&#128424;</button>` : ""}
             ${order.handwrittenImage ? `<button class="btn small ghost" data-view-handwritten="${order.id}" title="Ver pedido manuscrito" aria-label="Pedido manuscrito">&#128196;</button>` : ""}
             ${["manager", "admin"].includes(currentUser.role) ? (annulledView ? `<button class="btn small primary" data-restore-order="${order.id}">Restaurar</button>` : `<button class="btn small danger" data-annul-order="${order.id}" title="Anular pedido" aria-label="Anular">X</button>`) : ""}
-            ${["manager", "admin"].includes(currentUser.role) ? `<button class="btn small danger" data-delete-order="${order.id}" title="Eliminar pedido" aria-label="Eliminar">&#128465;</button>` : ""}
+            ${currentUser.role === "manager" ? `<button class="btn small danger" data-delete-order="${order.id}" title="Eliminar pedido" aria-label="Eliminar">&#128465;</button>` : ""}
             ${currentUser.role === "employee" ? `<button class="btn small ghost" data-route="vehiculos">Vehiculo</button>` : ""}
             `}
           </td>` : ""}
@@ -3748,7 +3808,7 @@
     afterRender.push(bindOrders);
     return pageShell(
       "Pedidos",
-      currentUser.role === "employee" ? "Pedidos de hoy para reparto y cobranza." : isClientLikeRole(currentUser.role) ? "Pedidos de su cuenta." : "Lista de pedidos y estados.",
+      currentUser.role === "employee" ? "Pedidos para reparto y cobranza segun el rango seleccionado." : isClientLikeRole(currentUser.role) ? "Pedidos de su cuenta." : "Lista de pedidos y estados.",
       ["manager", "admin"].includes(currentUser.role)
         ? `<button class="btn primary" data-route="nuevo-pedido">Nuevo pedido</button>`
         : currentUser.role === "employee" ? `<button class="btn primary" data-route="nuevo-pedido">Nuevo Pedido</button><button class="btn blue" data-route="pagos">Registrar pago</button>` : "",
@@ -11372,9 +11432,6 @@
     if (isClientLikeRole(currentUser.role)) {
       return getCustomerOrdersForIds(getCustomerVisibleClientIds());
     }
-    if (currentUser.role === "employee") {
-      return state.orders.filter((order) => order.date === todayISO() && !["cancelado", "anulado"].includes(order.status));
-    }
     return state.orders;
   }
 
@@ -13208,15 +13265,38 @@
     return state.preferences.find((pref) => pref.clientId === clientId && pref.productId === productId);
   }
 
-  function upsertPreference(clientId, productId, preferredUnitType, lastQuantity) {
+  function getPreferenceOrderKey(pref) {
+    return String((pref && (pref.lastOrderKey || pref.lastOrderedAt)) || "");
+  }
+
+  function getClientLastPreferenceKey(clientId) {
+    return (state.preferences || [])
+      .filter((pref) => pref.clientId === clientId)
+      .map(getPreferenceOrderKey)
+      .filter(Boolean)
+      .sort()
+      .pop() || "";
+  }
+
+  function getPreferenceDisplayStatus(clientId, pref, knownLastKey) {
+    const key = getPreferenceOrderKey(pref);
+    const lastKey = knownLastKey || getClientLastPreferenceKey(clientId);
+    return { isLastPurchase: !!key && key === lastKey };
+  }
+
+  function upsertPreference(clientId, productId, preferredUnitType, lastQuantity, orderKey) {
     let pref = getPreference(clientId, productId);
+    const now = orderKey || new Date().toISOString();
     if (!pref) {
-      pref = { clientId, productId, preferredUnitType, lastQuantity: 0, lastOrderedAt: new Date().toISOString() };
+      pref = { clientId, productId, preferredUnitType, lastQuantity: 0, firstOrderedAt: now, lastOrderedAt: now, lastOrderKey: now, purchaseCount: 0 };
       state.preferences.push(pref);
     }
     pref.preferredUnitType = preferredUnitType;
     pref.lastQuantity = lastQuantity;
-    pref.lastOrderedAt = new Date().toISOString();
+    pref.firstOrderedAt = pref.firstOrderedAt || pref.lastOrderedAt || now;
+    pref.lastOrderedAt = now;
+    pref.lastOrderKey = now;
+    pref.purchaseCount = Number(pref.purchaseCount || 0) + 1;
   }
 
   function getVehicleTotals(vehicleId, date) {

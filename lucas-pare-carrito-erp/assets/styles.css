@@ -415,6 +415,23 @@ a {
   font-size: 18px;
 }
 
+.segmented-icon-control {
+  display: inline-grid;
+  grid-template-columns: repeat(2, var(--tap));
+  gap: 6px;
+  align-items: center;
+}
+
+.segmented-icon-control .btn.icon {
+  width: var(--tap);
+  min-width: var(--tap);
+  height: var(--tap);
+  min-height: var(--tap);
+  padding: 0;
+  font-size: 19px;
+  line-height: 1;
+}
+
 .grid {
   display: grid;
   gap: 14px;
@@ -1369,7 +1386,7 @@ tr:last-child td {
 
 .history-buttons-row .btn.small {
   min-height: 36px;
-  min-width: 82px;
+  min-width: 92px;
   padding: 0 10px;
   font-size: 12.5px;
   white-space: nowrap;
@@ -3520,15 +3537,15 @@ tr:last-child td {
   .history-buttons-row {
     width: 100%;
     display: grid;
-    grid-template-columns: minmax(64px, 0.8fr) minmax(72px, 0.9fr) minmax(78px, 1fr) minmax(78px, 1fr) 44px;
+    grid-template-columns: minmax(72px, 0.9fr) minmax(76px, 0.95fr) minmax(82px, 1fr) minmax(82px, 1fr) 44px;
     gap: 4px;
   }
 
   .history-buttons-row .btn.small {
     min-height: var(--tap);
     min-width: 0;
-    padding: 0 4px;
-    font-size: 11.5px;
+    padding: 0 5px;
+    font-size: 12px;
   }
 
   /* Scrollboxes horizontales para tablas en dashboards y gastos */

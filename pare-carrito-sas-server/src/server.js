@@ -445,6 +445,17 @@ function buildSalesHistoryMatrix(salesRecords, priceRecords, productMap) {
   return sortHistoryMatrixRows(rows);
 }
 
+const historyMatrixCache = new Map();
+
+function rememberHistoryMatrixCache(key, value) {
+  historyMatrixCache.set(key, value);
+  if (historyMatrixCache.size > 24) {
+    const firstKey = historyMatrixCache.keys().next().value;
+    if (firstKey) historyMatrixCache.delete(firstKey);
+  }
+  return value;
+}
+
 function patchKeyForItem(key, item) {
   if (!item) return "";
   if (key === "preferences") return String(item.clientId || "") + "|" + String(item.productId || "");
@@ -499,18 +510,29 @@ app.get("/state", authenticate, requireRole(...SYNC_ROLES), async (req, res) => 
 
 app.get("/product-history", authenticate, requireRole("manager", "admin"), async (req, res) => {
   const history = await loadProductHistoryState(pool);
-  const listPriceHistory = filterHistoryByRange(history.listPriceHistory, req.query.from, req.query.to);
-  const salesQuantityHistory = filterHistoryByRange(history.salesQuantityHistory, req.query.from, req.query.to);
-  const purchaseHistory = filterHistoryByRange(history.purchaseHistory, req.query.from, req.query.to);
   if (String(req.query.mode || "") === "matrix") {
-    const stateRow = await pool.query("SELECT data FROM app_state WHERE id = 'main'");
+    const stateRow = await pool.query("SELECT data, updated_at FROM app_state WHERE id = 'main'");
+    const stateUpdatedAt = stateRow.rows[0] && stateRow.rows[0].updated_at ? stateRow.rows[0].updated_at.toISOString() : "";
+    const cacheKey = [
+      String(req.query.from || ""),
+      String(req.query.to || ""),
+      String(history.updatedAt || ""),
+      stateUpdatedAt
+    ].join("|");
+    if (historyMatrixCache.has(cacheKey)) return res.json(historyMatrixCache.get(cacheKey));
+    const listPriceHistory = filterHistoryByRange(history.listPriceHistory, req.query.from, req.query.to);
+    const salesQuantityHistory = filterHistoryByRange(history.salesQuantityHistory, req.query.from, req.query.to);
+    const purchaseHistory = filterHistoryByRange(history.purchaseHistory, req.query.from, req.query.to);
     const productMap = productLookupFromState(stateRow.rows[0] ? stateRow.rows[0].data : {});
-    return res.json({
+    return res.json(rememberHistoryMatrixCache(cacheKey, {
       purchaseRows: buildPurchaseHistoryMatrix(purchaseHistory, productMap),
       salesRows: buildSalesHistoryMatrix(salesQuantityHistory, listPriceHistory, productMap),
       updatedAt: history.updatedAt
-    });
+    }));
   }
+  const listPriceHistory = filterHistoryByRange(history.listPriceHistory, req.query.from, req.query.to);
+  const salesQuantityHistory = filterHistoryByRange(history.salesQuantityHistory, req.query.from, req.query.to);
+  const purchaseHistory = filterHistoryByRange(history.purchaseHistory, req.query.from, req.query.to);
   res.json({
     listPriceHistory,
     salesQuantityHistory,
