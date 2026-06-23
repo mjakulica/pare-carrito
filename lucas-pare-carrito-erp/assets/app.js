@@ -4763,6 +4763,9 @@
       }
       printHistoryRange(scope, currentFrom, currentTo, printWindow);
     }));
+    document.querySelectorAll("[data-history-row]").forEach((row) => row.addEventListener("click", () => {
+      openHistoryProductChart(row.dataset.historyType, row.dataset.historyProductId || "", row.dataset.historyProductName || "");
+    }));
   }
 
   function printHistoryRange(scope, from, to, printWindow) {
@@ -4794,7 +4797,7 @@
       return `
         <tr class="history-category-row"><td colspan="${3 + dates.length}">${escapeHtml(category)}</td></tr>
         ${categoryRows.map((row) => `
-          <tr>
+          <tr class="history-product-row" data-history-row data-history-type="${escapeAttr(type)}" data-history-product-id="${escapeAttr(row.productId || "")}" data-history-product-name="${escapeAttr(row.productName || "")}">
             <td>${escapeHtml(row.productName)}</td>
             <td>${escapeHtml(row.unitType)}</td>
             <td class="num"><strong>${formatMoney(row.totalAmount)}</strong><br><span class="muted">${formatNumber(row.totalQuantity)}</span></td>
@@ -4812,6 +4815,87 @@
           <thead><tr><th>Producto</th><th>Unidad</th><th>${type === "purchase" ? "Total comprado" : "Total vendido"}</th>${dateHeaders}</tr></thead>
           <tbody>${rowsByCategory}</tbody>
         </table>
+      </div>
+    `;
+  }
+
+  function openHistoryProductChart(type, productId, productName) {
+    const from = ui.historyFrom || todayISO();
+    const to = ui.historyTo || from;
+    const historyReady = ui.historyData && ui.historyData.from === from && ui.historyData.to === to;
+    if (!historyReady) return alert("Todavia se estan cargando los historiales del rango.");
+    const dates = buildDateRange(from, to);
+    const rows = type === "purchase"
+      ? (ui.historyData.purchaseRows || buildPurchaseHistoryMatrix(from, to, ui.historyData.purchaseHistory || []))
+      : (ui.historyData.salesRows || buildSalesHistoryMatrix(from, to, ui.historyData.salesQuantityHistory || [], ui.historyData.listPriceHistory || []));
+    const row = rows.find((item) => String(item.productId || "") === String(productId || "") && String(item.productName || "") === String(productName || ""))
+      || rows.find((item) => String(item.productId || "") === String(productId || ""))
+      || rows.find((item) => String(item.productName || "") === String(productName || ""));
+    if (!row) return alert("No se encontro el producto en el rango seleccionado.");
+    const quantitySeries = dates.map((date) => ({ date, value: Number(row.days[date] && row.days[date].quantity || 0) }));
+    const priceSeries = dates.map((date) => ({ date, value: Number(row.days[date] && row.days[date].price || 0) }));
+    const title = (type === "purchase" ? "Compra - " : "Venta - ") + row.productName;
+    showModal(
+      title,
+      `<div class="history-product-modal">
+        <div class="history-product-meta">
+          <span>${escapeHtml(formatDate(from))} - ${escapeHtml(formatDate(to))}</span>
+          <span>${escapeHtml(row.unitType || "")}</span>
+        </div>
+        ${renderHistoryLineChart("Cantidad", quantitySeries, formatNumber)}
+        ${renderHistoryLineChart(type === "purchase" ? "Precio de compra" : "Precio de lista", priceSeries, formatMoney)}
+      </div>`,
+      () => {
+        const save = document.getElementById("modal-save");
+        if (save) {
+          save.textContent = "Cerrar";
+          save.addEventListener("click", closeModal);
+        }
+      },
+      { className: "wide" }
+    );
+  }
+
+  function renderHistoryLineChart(title, series, formatter) {
+    const values = (series || []).map((point) => Number(point.value || 0));
+    const max = Math.max(0, ...values);
+    const min = Math.min(0, ...values);
+    const width = 680;
+    const height = 220;
+    const padLeft = 46;
+    const padRight = 16;
+    const padTop = 24;
+    const padBottom = 38;
+    const chartWidth = width - padLeft - padRight;
+    const chartHeight = height - padTop - padBottom;
+    const span = max - min || 1;
+    const points = (series || []).map((point, index, list) => {
+      const x = padLeft + (list.length <= 1 ? chartWidth / 2 : (index / (list.length - 1)) * chartWidth);
+      const y = padTop + chartHeight - ((Number(point.value || 0) - min) / span) * chartHeight;
+      return { ...point, x, y };
+    });
+    const polyline = points.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" ");
+    const last = points.filter((point) => point.value > 0).slice(-1)[0] || points[points.length - 1];
+    return `
+      <div class="history-line-card">
+        <div class="history-line-head">
+          <strong>${escapeHtml(title)}</strong>
+          <span>${last ? escapeHtml(formatter(last.value || 0)) : "-"}</span>
+        </div>
+        <svg class="history-line-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeAttr(title)}">
+          <line x1="${padLeft}" y1="${padTop}" x2="${padLeft}" y2="${padTop + chartHeight}" class="history-axis" />
+          <line x1="${padLeft}" y1="${padTop + chartHeight}" x2="${padLeft + chartWidth}" y2="${padTop + chartHeight}" class="history-axis" />
+          <text x="8" y="${padTop + 5}" class="history-chart-label">${escapeHtml(formatter(max))}</text>
+          <text x="8" y="${padTop + chartHeight}" class="history-chart-label">${escapeHtml(formatter(min))}</text>
+          ${polyline ? `<polyline points="${polyline}" class="history-line-path" />` : ""}
+          ${points.map((point, index) => `
+            <g class="history-line-point" tabindex="0">
+              <circle cx="${point.x.toFixed(1)}" cy="${point.y.toFixed(1)}" r="${point.value > 0 ? 4 : 2.5}" />
+              <title>${escapeHtml(formatDateShort(point.date) + ": " + formatter(point.value || 0))}</title>
+              ${index === 0 || index === points.length - 1 ? `<text x="${point.x.toFixed(1)}" y="${height - 10}" text-anchor="${index === 0 ? "start" : "end"}">${escapeHtml(formatDateShort(point.date))}</text>` : ""}
+            </g>
+          `).join("")}
+        </svg>
       </div>
     `;
   }
@@ -11955,7 +12039,7 @@
   }
 
   function parseOrderLine(line, clientId) {
-    const aliased = applyQuantityAliases(line, clientId);
+    const aliased = applyQuantityAliases(normalizeWhatsappOrderSyntax(line), clientId);
     const rawTokens = String(aliased || "").split(/\s+/).map(cleanRawOrderToken).filter(Boolean);
     const tokens = rawTokens.map(normalizeOrderTokenText);
     for (let index = 0; index < tokens.length; index += 1) {
@@ -11983,13 +12067,32 @@
         remove.add(index - 1);
         if (normalizeText(prevToken).startsWith("gr")) quantity = quantity / 1000;
       }
-      const nameTokens = tokens.filter((_, tokenIndex) => !remove.has(tokenIndex)).filter(Boolean);
-      const rawNameTokens = rawTokens.filter((_, tokenIndex) => !remove.has(tokenIndex));
+      const nameTokens = tokens.filter((_, tokenIndex) => !remove.has(tokenIndex)).filter((token) => token && !isOrderConnectorToken(token));
+      const rawNameTokens = rawTokens.filter((_, tokenIndex) => !remove.has(tokenIndex)).filter((token) => !isOrderConnectorToken(normalizeOrderTokenText(token)));
       const resolved = resolveParsedProductNameAndNote(nameTokens, rawNameTokens, unitType, clientId);
       if (!resolved.name) continue;
       return { name: resolved.name, quantity, unitType, note: resolved.note };
     }
     return null;
+  }
+
+  function normalizeWhatsappOrderSyntax(line) {
+    return String(line || "")
+      .replace(/(\d)([a-zA-Z\u00c0-\u017f]+)/g, "$1 $2")
+      .replace(/([a-zA-Z\u00c0-\u017f])(\d)/g, "$1 $2")
+      .replace(/\bkilo\s*n?de\b/gi, "kilo de")
+      .replace(/\bkilonde\b/gi, "kilo de")
+      .replace(/\bkilode\b/gi, "kilo de")
+      .replace(/\bkilos?\s+de\b/gi, "kg de")
+      .replace(/\bkgs?\s+de\b/gi, "kg de")
+      .replace(/\bbolsas?\s+de\b/gi, "bolsa de")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function isOrderConnectorToken(value) {
+    const clean = normalizeText(value);
+    return clean === "de" || clean === "del" || clean === "la" || clean === "el";
   }
 
   function isQuantityToken(value) {

@@ -1429,6 +1429,79 @@ tr:last-child td {
   vertical-align: top;
 }
 
+.history-product-row {
+  cursor: pointer;
+}
+
+.history-product-row:hover td {
+  background: #f7fbff;
+}
+
+.history-product-modal {
+  display: grid;
+  gap: 12px;
+}
+
+.history-product-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  flex-wrap: wrap;
+}
+
+.history-line-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px;
+  background: #fff;
+}
+
+.history-line-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.history-line-head span {
+  color: var(--blue);
+  font-weight: 800;
+}
+
+.history-line-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.history-axis {
+  stroke: #cbd5e1;
+  stroke-width: 1;
+}
+
+.history-line-path {
+  fill: none;
+  stroke: var(--blue);
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.history-line-point circle {
+  fill: #fff;
+  stroke: var(--blue);
+  stroke-width: 2;
+}
+
+.history-line-point text,
+.history-chart-label {
+  fill: var(--muted);
+  font-size: 11px;
+}
+
 .history-range-grid {
   align-items: end;
 }
