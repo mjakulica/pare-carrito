@@ -23,6 +23,7 @@ const STATE_HISTORY_KEEP = Number(process.env.STATE_HISTORY_KEEP || 200);
 const MOONSHOT_API_KEY = process.env.MOONSHOT_API_KEY || "";
 const MOONSHOT_API_URL = (process.env.MOONSHOT_API_URL || "https://api.moonshot.ai/v1/chat/completions").trim();
 const MOONSHOT_MODEL = process.env.MOONSHOT_MODEL || "kimi-k2.7";
+const MOONSHOT_VISION_MODEL = process.env.MOONSHOT_VISION_MODEL || "moonshot-v1-32k-vision-preview";
 
 if (!JWT_SECRET) {
   console.error("FALTA JWT_SECRET en las variables de entorno. Genere uno con: openssl rand -hex 32");
@@ -131,6 +132,28 @@ function parseImageDataUrl(value) {
     byteLength: Buffer.byteLength(normalized, "base64"),
     dataUrl: "data:" + match[1].toLowerCase() + ";base64," + normalized
   };
+}
+
+function sanitizeExternalApiError(detail) {
+  const text = String(detail || "").trim();
+  if (!text) return "";
+  if (/insufficient balance|recharge|billing|suspended/i.test(text)) {
+    return "la cuenta no tiene saldo o el plan esta suspendido; revise la facturacion de Moonshot/Kimi.";
+  }
+  if (/model/i.test(text) && /not|invalid|support|exist|found/i.test(text)) {
+    return "el modelo configurado no esta disponible para OCR de imagen.";
+  }
+  if (/unauthorized|invalid api key|authentication|auth/i.test(text)) {
+    return "la API key no fue aceptada por Moonshot/Kimi.";
+  }
+  if (/rate limit|too many requests/i.test(text)) {
+    return "se alcanzo el limite temporal de uso de la API.";
+  }
+  return text
+    .replace(/sk-[A-Za-z0-9._-]+/g, "[redactado]")
+    .replace(/ak-[A-Za-z0-9._-]+/g, "[redactado]")
+    .replace(/org-[A-Za-z0-9._-]+/g, "[redactado]")
+    .slice(0, 240);
 }
 
 // ---------- Rutas publicas ----------
@@ -848,7 +871,7 @@ app.post("/ocr/order-image", authenticate, requireRole("manager", "admin", "empl
         authorization: "Bearer " + MOONSHOT_API_KEY
       },
       body: JSON.stringify({
-        model: MOONSHOT_MODEL,
+        model: MOONSHOT_VISION_MODEL,
         temperature: 0,
         max_tokens: 1600,
         messages: [
@@ -865,7 +888,8 @@ app.post("/ocr/order-image", authenticate, requireRole("manager", "admin", "empl
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
       const detail = payload && (payload.error && (payload.error.message || payload.error) || payload.message);
-      return res.status(502).json({ error: "Kimi no pudo interpretar la imagen" + (detail ? ": " + detail : ".") });
+      const safeDetail = sanitizeExternalApiError(detail);
+      return res.status(502).json({ error: "Kimi no pudo interpretar la imagen" + (safeDetail ? ": " + safeDetail : ".") });
     }
     const text = payload && payload.choices && payload.choices[0] && payload.choices[0].message
       ? String(payload.choices[0].message.content || "").trim()

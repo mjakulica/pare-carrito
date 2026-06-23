@@ -44,6 +44,7 @@ services:
       MOONSHOT_API_KEY: ${MOONSHOT_API_KEY:-}
       MOONSHOT_API_URL: ${MOONSHOT_API_URL:-https://api.moonshot.ai/v1/chat/completions}
       MOONSHOT_MODEL: ${MOONSHOT_MODEL:-kimi-k2.7}
+      MOONSHOT_VISION_MODEL: ${MOONSHOT_VISION_MODEL:-moonshot-v1-32k-vision-preview}
     volumes:
       - uploads:/data/uploads
 

@@ -14254,7 +14254,7 @@
       return await recognizeOrderImageWithKimi(file, statusNode);
     } catch (aiError) {
       console.warn("OCR por IA no disponible, usando OCR local:", aiError.message);
-      if (statusNode) statusNode.textContent = "IA no disponible, usando OCR local...";
+      if (statusNode) statusNode.textContent = "IA no disponible (" + aiError.message + "), usando OCR local...";
     }
     await loadTesseract();
     if (!window.Tesseract) throw new Error("OCR no disponible.");
