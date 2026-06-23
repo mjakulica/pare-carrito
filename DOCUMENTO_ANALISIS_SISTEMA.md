@@ -362,23 +362,26 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 
 ## 12. Ultimo Cambio y Version
 
-**Version operativa:** 12.8.27
+**Version operativa:** 12.8.28
 **Fecha:** 2026-06-23
-**Commit GitHub del cambio funcional:** `c4766bc4105edda97dbc498e3e5d51fcce48e6ef`
+**Commit GitHub del cambio funcional:** `db227306efd36e15d5e5ade711b7168f72784350`
 **Entorno actualizado:** VPS productivo `/opt/pare-carrito` con Docker Compose (`api`, `caddy`, `db`).
 
 ### Detalle del ultimo cambio
 
-- Se realizo una limpieza operativa de backups antiguos en `/root/backups-pare-carrito`.
-- Antes del borrado se verificaron los zips recientes de PC y que GitHub tuviera completo el HEAD local.
-- Se conservaron 2 dumps `.sql`, 2 backups `.tar.gz` de codigo y 2 archivos json/otros mas recientes.
-- La carpeta de backups del VPS paso de 150 archivos a 6 archivos, liberando aproximadamente 16.3 GB.
-- El disco `/` del VPS paso de 99% usado a 31% usado, con aproximadamente 17 GB libres.
-- El cambio es operativo/de infraestructura y no modifica funcionalidades, roles, datos de negocio ni relaciones de base.
+- En `Nuevo Pedido`, `Pegar pedido de WhatsApp` descarta encabezados y textos ajenos al pedido antes de generar dudas.
+- Las aclaraciones posteriores a producto/cantidad se guardan como nota del producto, sin mezclarlas con el nombre del producto.
+- El sistema intenta detectar cliente por numero o nombre dentro del texto pegado/OCR y seleccionarlo antes de cargar items, actualizando precios y vehiculo en el momento.
+- `Subir imagen` intenta usar el nuevo endpoint `/ocr/order-image`, preparado para Kimi/Moonshot por variables de entorno, y conserva OCR local como fallback.
+- El backend agrega `POST /ocr/order-image` para roles gerente, admin y empleado; la clave se lee desde `MOONSHOT_API_KEY` y no se expone al navegador.
+- Se corrigieron textos visibles puntuales con tildes y enes sin modificar rutas internas, IDs ni nombres de productos/archivos.
+- El cambio modifica frontend, backend y docker-compose; no modifica relaciones de base ni datos existentes.
+- Nota operativa: al momento del deploy, el VPS no tenia `MOONSHOT_API_KEY` configurada; el sistema queda con OCR local como respaldo hasta cargar esa variable.
 - No se registraron credenciales en este documento ni en el historial.
 
 ### Backups asociados
 
-- Backups PC verificados: zips recientes de `auditoria/repo-backup-*.zip`, incluyendo `repo-backup-20260622-finalcart-desktop-height-docs.zip`.
-- GitHub verificado: `origin/master` coincide con `c4766bc4105edda97dbc498e3e5d51fcce48e6ef`.
-- Inventario post-limpieza generado: `outputs/inventario_backups_vps_post_limpieza_20260623.csv`.
+- VPS pre-cambio WhatsApp/OCR: tar de `/opt/pare-carrito` generado con timestamp `20260623_063119`.
+- PC pre-cambio WhatsApp/OCR: `auditoria/repo-backup-20260623-pre-kimi-whatsapp-texts.zip`.
+- VPS post-deploy WhatsApp/OCR: tar de `/opt/pare-carrito` generado con timestamp `20260623_065545`.
+- PC post-deploy WhatsApp/OCR: `auditoria/repo-backup-20260623-post-kimi-whatsapp-texts.zip`.

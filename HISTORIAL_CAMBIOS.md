@@ -1,5 +1,30 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.8.28 - Pegado WhatsApp con notas y OCR IA configurable (2026-06-23)
+
+### Frontend / Nuevo Pedido
+
+- `Pegar pedido de WhatsApp` ahora descarta encabezados o textos claramente ajenos al pedido, como `Pedido 23/06` o `Lista de verduras`.
+- El parseo de lineas pegadas conserva aclaraciones posteriores a producto/cantidad como nota del producto. Ejemplo: `Cebolla Morada Kg. 0,5. pequenas` carga cantidad `0,5` y nota `pequenas`.
+- Si el texto pegado u OCR incluye datos de cliente por numero o nombre, como `194`, `pedido para Belgrano 2` o `Charrua`, intenta seleccionar ese cliente antes de cargar el pedido y actualiza precios/vehiculo en el momento.
+- `Subir imagen` intenta leer la imagen con el endpoint backend `/ocr/order-image`, preparado para Kimi/Moonshot por variables de entorno, y mantiene fallback al OCR local si la API no esta configurada o falla.
+- Se corrigieron textos visibles puntuales con tildes y enes, cuidando no modificar rutas, IDs internos ni nombres de productos/archivos.
+
+### Backend / OCR IA
+
+- Se agrego `POST /ocr/order-image` para roles gerente, admin y empleado.
+- El endpoint envia la imagen a la API compatible de Moonshot/Kimi con el prompt solicitado y devuelve solo texto interpretado.
+- La clave se configura con `MOONSHOT_API_KEY` en `.env`; no se guarda ni documenta ningun secreto.
+- `docker-compose.yml` declara `MOONSHOT_API_KEY`, `MOONSHOT_API_URL` y `MOONSHOT_MODEL` como variables configurables.
+- Commit funcional desplegado: `db227306efd36e15d5e5ade711b7168f72784350`.
+- Verificacion: `node --check` en frontend/backend, `git diff --check`, rebuild de `api` y health check interno OK.
+- Backups VPS: pre-cambio codigo `20260623_063119`; post-deploy codigo `20260623_065545`.
+- Backup PC pre-cambio: `auditoria/repo-backup-20260623-pre-kimi-whatsapp-texts.zip`.
+- Backup PC post-deploy: `auditoria/repo-backup-20260623-post-kimi-whatsapp-texts.zip`.
+- Nota operativa: al momento del deploy, el VPS no tenia `MOONSHOT_API_KEY` configurada; el sistema queda con OCR local como respaldo hasta cargar esa variable.
+- No se registraron credenciales en documentacion ni reportes.
+
+---
 ## v12.8.27 - Limpieza de retencion de backups VPS (2026-06-23)
 
 ### Operacion / Infraestructura
