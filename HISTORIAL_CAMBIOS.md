@@ -1,5 +1,21 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.8.35 - Graficos imprimibles y parser WhatsApp por unidad (2026-06-23)
+
+### Frontend / Historiales, Inicio y Nuevo Pedido
+
+- En `Historiales`, el popup por producto ahora usa el mismo formato de grafico lineal de la pagina `Inicio`: eje de cantidades/precios a la izquierda, grilla y tooltip con fecha y valor al pasar por cada punto.
+- Los graficos de `Historiales` y `Inicio` muestran hasta 7 fechas distribuidas en la linea de tiempo; si el rango tiene menos de 7 dias, se muestran todos los dias disponibles.
+- El popup de producto en `Historiales` incluye un boton para imprimir ambos graficos y cada grafico tiene su propio boton de impresion.
+- La impresion se dispara directamente, en hoja horizontal, con margenes minimos y solo con los graficos seleccionados, sin imprimir el resto de la pagina.
+- En `Nuevo Pedido`, el parser de `Pegar pedido de WhatsApp` mejora la prioridad producto/unidad para evitar que `kilos de tomate` elija `Tomate Cajon` y prioriza `Tomate Perita Kg`.
+- El parser reconoce `riestra` como `ristra`, separa casos como `Papa.1 bolsa`, convierte cantidades en unidades a docenas cuando corresponde (`Banana 12 unidades` -> `Bananas Docena 1`) y mejora coincidencias como `Lechuga crespa.2 atado`.
+- Commit funcional desplegado: `a0475fe722b61b29be85c197a06978059ba37413`.
+- Verificacion: `node --check`, `git diff --check`, escaneo de secretos, pruebas locales de parser, deploy de assets y health VPS por Caddy correcto.
+- Backups: PC pre-cambio `auditoria/repo-backup-20260623-pre-history-chart-print-parser-units.zip`; VPS pre-deploy `pare-carrito-code-pre-history-chart-print-parser-units_20260623_184842.tar.gz`; VPS post-deploy `pare-carrito-code-post-history-chart-print-parser-units_20260623_184842.tar.gz`.
+- No se registraron credenciales en documentacion ni reportes.
+
+---
 ## v12.8.34 - Graficos por producto y parser WhatsApp robusto (2026-06-23)
 
 ### Frontend / Historiales y Nuevo Pedido

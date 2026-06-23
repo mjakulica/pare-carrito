@@ -362,22 +362,22 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 
 ## 12. Ultimo Cambio y Version
 
-**Version operativa:** 12.8.34
+**Version operativa:** 12.8.35
 **Fecha:** 2026-06-23
-**Commit GitHub del cambio funcional:** `1ba337215c04dea6b891b15d39c8ee0fa500ab3a`
+**Commit GitHub del cambio funcional:** `a0475fe722b61b29be85c197a06978059ba37413`
 **Entorno actualizado:** VPS productivo `/opt/pare-carrito` con frontend estatico y API Docker Compose saludable.
 
 ### Detalle del ultimo cambio
 
-- Se agrego en `Historiales` un popup por producto con dos graficos lineales generados bajo demanda: cantidad y precio en el rango seleccionado.
-- La carga inicial de la pagina no aumenta de forma relevante porque los graficos se calculan solo al hacer click y usan los datos ya cargados de la tabla.
-- Se mejoro el parser de WhatsApp de `Nuevo Pedido` para reconocer cantidades con unidad pegada (`1kg`) y frases naturales con conectores (`kilos de`, `bolsa de`).
-- El parser elimina conectores del nombre antes de buscar producto y mantiene la prioridad de coincidencias exactas/favoritos.
+- Se alinearon los graficos del popup de `Historiales` con el formato visual usado en `Inicio`, incluyendo eje lateral, grilla, puntos y tooltip con fecha y valor.
+- Los graficos de `Historiales` e `Inicio` ahora distribuyen hasta 7 fechas en el eje horizontal para mejorar la lectura de rangos largos.
+- El popup de producto en `Historiales` permite imprimir ambos graficos juntos o cada grafico por separado, directamente, en formato horizontal y sin el resto de la pagina.
+- Se ajusto el parser de WhatsApp para ponderar mejor la unidad escrita por el cliente: `kilos de tomate` prioriza `Tomate Perita Kg`, `Ajo 1 riestra` prioriza `Ajo Ristra`, `Papa.1 bolsa` se interpreta como bolsa y `Banana 12 unidades` se convierte a docena cuando corresponde.
 - No se modifico estructura de base de datos ni relaciones entre tablas.
 - No se registraron credenciales en este documento ni en el historial.
 
 ### Backups asociados
 
-- PC pre-cambio: `auditoria/repo-backup-20260623-pre-history-popup-whatsapp-parser.zip`.
-- VPS pre-deploy: `pare-carrito-code-pre-history-popup-whatsapp-parser_20260623_181512.tar.gz`.
-- VPS post-deploy: `pare-carrito-code-post-history-popup-whatsapp-parser_20260623_181513.tar.gz`.
+- PC pre-cambio: `auditoria/repo-backup-20260623-pre-history-chart-print-parser-units.zip`.
+- VPS pre-deploy: `pare-carrito-code-pre-history-chart-print-parser-units_20260623_184842.tar.gz`.
+- VPS post-deploy: `pare-carrito-code-post-history-chart-print-parser-units_20260623_184842.tar.gz`.
