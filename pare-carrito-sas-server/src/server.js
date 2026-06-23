@@ -20,6 +20,9 @@ const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, "..", "uploads
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "gerente";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "gerente123";
 const STATE_HISTORY_KEEP = Number(process.env.STATE_HISTORY_KEEP || 200);
+const MOONSHOT_API_KEY = process.env.MOONSHOT_API_KEY || "";
+const MOONSHOT_API_URL = (process.env.MOONSHOT_API_URL || "https://api.moonshot.ai/v1/chat/completions").trim();
+const MOONSHOT_MODEL = process.env.MOONSHOT_MODEL || "kimi-k2.7";
 
 if (!JWT_SECRET) {
   console.error("FALTA JWT_SECRET en las variables de entorno. Genere uno con: openssl rand -hex 32");
@@ -59,7 +62,7 @@ async function sendMail(to, subject, html) {
     await transport.sendMail({ from: process.env.MAIL_FROM || process.env.SMTP_USER, to, subject, html });
     return true;
   } catch (error) {
-    console.error("Error enviando mail a", to, ":", error.message);
+    console.error("Error envíando mail a", to, ":", error.message);
     return false;
   }
 }
@@ -99,21 +102,34 @@ function signToken(user) {
 function authenticate(req, res, next) {
   const header = String(req.headers.authorization || "");
   const token = header.replace(/^Bearer\s+/i, "").trim();
-  if (!token) return res.status(401).json({ error: "Falta el token. Inicie sesion en /auth/login." });
+  if (!token) return res.status(401).json({ error: "Falta el token. Inicie sesión en /auth/login." });
   try {
     req.user = jwt.verify(token, JWT_SECRET);
     next();
   } catch {
-    return res.status(401).json({ error: "Token invalido o vencido. Vuelva a iniciar sesion." });
+    return res.status(401).json({ error: "Token inválido o vencido. Vuelva a iniciar sesión." });
   }
 }
 
 function requireRole(...roles) {
   return (req, res, next) => {
     if (!req.user || !roles.includes(req.user.role)) {
-      return res.status(403).json({ error: "Permisos insuficientes para esta operacion (requiere: " + roles.join(", ") + ")." });
+      return res.status(403).json({ error: "Permisos insuficientes para esta operación (requiere: " + roles.join(", ") + ")." });
     }
     next();
+  };
+}
+
+function parseImageDataUrl(value) {
+  const text = String(value || "");
+  const match = text.match(/^data:(image\/(?:png|jpe?g|webp));base64,([a-z0-9+/=\s]+)$/i);
+  if (!match) return null;
+  const normalized = match[2].replace(/\s/g, "");
+  return {
+    mimeType: match[1].toLowerCase(),
+    base64: normalized,
+    byteLength: Buffer.byteLength(normalized, "base64"),
+    dataUrl: "data:" + match[1].toLowerCase() + ";base64," + normalized
   };
 }
 
@@ -138,7 +154,7 @@ function loginAttemptKey(req, username) {
 
 app.post("/auth/login", async (req, res) => {
   const { username, password } = req.body || {};
-  if (!username || !password) return res.status(400).json({ error: "Envie usuario y contrasena." });
+  if (!username || !password) return res.status(400).json({ error: "Envíe usuario y contraseña." });
   const attemptKey = loginAttemptKey(req, username);
   const attempt = loginAttempts.get(attemptKey);
   if (attempt && attempt.blockedUntil && attempt.blockedUntil > Date.now()) {
@@ -158,34 +174,34 @@ app.post("/auth/login", async (req, res) => {
       previous.count = 0;
     }
     loginAttempts.set(attemptKey, previous);
-    return res.status(401).json({ error: "Usuario o contrasena incorrectos." });
+    return res.status(401).json({ error: "Usuario o contraseña incorrectos." });
   }
   loginAttempts.delete(attemptKey);
   if (!user.is_active) {
-    return res.status(403).json({ error: "Su cuenta queda pendiente de aprobacion, por favor comunicarse con administracion para empezar a trabajar con nosotros.", pending: true });
+    return res.status(403).json({ error: "Su cuenta queda pendiente de aprobación, por favor comunicarse con administración para empezar a trabajar con nosotros.", pending: true });
   }
   res.json({ token: signToken(user), role: user.role, name: user.name, username: user.username, expiresIn: JWT_EXPIRES });
 });
 
-// ---------- Registro de clientes y recuperacion de contrasena ----------
+// ---------- Registro de clientes y recuperación de contraseña ----------
 const INVOICE_TYPES = ["Sin Factura", "Factura A", "Factura B"];
 
 app.post("/auth/register", async (req, res) => {
   const b = req.body || {};
-  const required = { username: "nombre de usuario", password: "contrasena", localName: "nombre del local", address: "direccion", email: "correo electronico", openingTime: "horario de apertura", maxDeliveryTime: "horario maximo de entrega", phone: "telefono", zone: "zona", invoiceType: "tipo de factura" };
+  const required = { username: "nombre de usuario", password: "contraseña", localName: "nombre del local", address: "dirección", email: "correo electrónico", openingTime: "horario de apertura", maxDeliveryTime: "horario máximo de entrega", phone: "teléfono", zone: "zona", invoiceType: "tipo de factura" };
   for (const [key, label] of Object.entries(required)) {
     if (!String(b[key] || "").trim()) return res.status(400).json({ error: "Falta el campo obligatorio: " + label + "." });
   }
-  if (!INVOICE_TYPES.includes(b.invoiceType)) return res.status(400).json({ error: "Tipo de factura invalido." });
+  if (!INVOICE_TYPES.includes(b.invoiceType)) return res.status(400).json({ error: "Tipo de factura inválido." });
   const needsInvoice = b.invoiceType !== "Sin Factura";
   if (needsInvoice && !String(b.cuit || "").trim()) return res.status(400).json({ error: "Falta el campo obligatorio: CUIT." });
-  if (String(b.password).length < 6) return res.status(400).json({ error: "La contrasena debe tener al menos 6 caracteres." });
+  if (String(b.password).length < 6) return res.status(400).json({ error: "La contraseña debe tener al menos 6 caracteres." });
   const username = String(b.username).trim().toLowerCase();
   const taken = await pool.query("SELECT 1 FROM users WHERE lower(username) = $1", [username]);
   if (taken.rows.length) return res.status(409).json({ error: "Ese nombre de usuario ya existe. Elija otro." });
 
   const stateRow = await pool.query("SELECT data FROM app_state WHERE id = 'main'");
-  if (!stateRow.rows.length) return res.status(503).json({ error: "El sistema todavia no fue inicializado por el negocio." });
+  if (!stateRow.rows.length) return res.status(503).json({ error: "El sistema todavía no fue inicializado por el negocio." });
   const data = stateRow.rows[0].data;
   data.clients = Array.isArray(data.clients) ? data.clients : [];
   data.users = Array.isArray(data.users) ? data.users : [];
@@ -229,11 +245,11 @@ app.post("/auth/register", async (req, res) => {
     clientDb.release();
   }
   sendMail(client.email, "Registro recibido - Pare Carrito SAS",
-    `<p>Hola ${client.name},</p><p>Recibimos su registro en Pare Carrito SAS. Su cuenta (usuario <strong>${username}</strong>) queda <strong>pendiente de aprobacion</strong>: administracion la revisara a la brevedad y le avisaremos cuando este activa.</p><p>Ante cualquier consulta, escribanos por WhatsApp al +54 9 387 456 6725.</p>`);
+    `<p>Hola ${client.name},</p><p>Recibimos su registro en Pare Carrito SAS. Su cuenta (usuario <strong>${username}</strong>) queda <strong>pendiente de aprobación</strong>: administración la revisara a la brevedad y le avisaremos cuando este activa.</p><p>Ante cualquier consulta, escribanos por WhatsApp al +54 9 387 456 6725.</p>`);
   const admins = await pool.query("SELECT email FROM users WHERE role IN ('manager','admin') AND email <> '' AND is_active = TRUE");
   for (const row of admins.rows) {
-    sendMail(row.email, "Nuevo registro de cliente pendiente de aprobacion",
-      `<p>Se registro un nuevo cliente:</p><ul><li>Local: <strong>${client.name}</strong></li><li>Usuario: ${username}</li><li>Zona: ${client.zone}</li><li>Telefono: ${client.phone}</li><li>CUIT: ${client.cuit}</li><li>Factura: ${client.invoiceType}</li></ul><p>Para aprobarlo: ingrese al sistema → pagina <strong>Usuarios</strong> → activar la cuenta.</p>`);
+    sendMail(row.email, "Nuevo registro de cliente pendiente de aprobación",
+      `<p>Se registro un nuevo cliente:</p><ul><li>Local: <strong>${client.name}</strong></li><li>Usuario: ${username}</li><li>Zona: ${client.zone}</li><li>Telefono: ${client.phone}</li><li>CUIT: ${client.cuit}</li><li>Factura: ${client.invoiceType}</li></ul><p>Para aprobarlo: ingrese al sistema → página <strong>Usuarios</strong> → activar la cuenta.</p>`);
   }
   res.status(201).json({ ok: true, pending: true, clientId });
 });
@@ -242,7 +258,7 @@ app.post("/auth/register", async (req, res) => {
 app.post("/auth/welcome", async (req, res) => {
   const b = req.body || {};
   const email = String(b.email || "").trim();
-  if (!email) return res.status(400).json({ error: "Falta el correo electronico." });
+  if (!email) return res.status(400).json({ error: "Falta el correo electrónico." });
   const name = String(b.name || "").trim();
   const username = String(b.username || "").trim();
   const password = String(b.password || "");
@@ -250,11 +266,11 @@ app.post("/auth/welcome", async (req, res) => {
   const link = PUBLIC_URL || "";
   const statusText = isActive
     ? "<p>Su cuenta ya esta <strong>activa</strong> y puede ingresar.</p>"
-    : "<p>Su cuenta queda <strong>pendiente de aprobacion</strong>: administracion la revisara a la brevedad y le avisaremos cuando este activa.</p>";
+    : "<p>Su cuenta queda <strong>pendiente de aprobación</strong>: administración la revisara a la brevedad y le avisaremos cuando este activa.</p>";
   const sent = await sendMail(email, "Bienvenido/a a Pare Carrito SAS",
     `<p>Hola ${name || username},</p>` +
     `<p>Le informamos que se creo su usuario en el sistema de Pare Carrito SAS.</p>` +
-    `<ul><li><strong>Usuario:</strong> ${escapeHtml(username)}</li><li><strong>Contrasena:</strong> ${escapeHtml(password)}</li></ul>` +
+    `<ul><li><strong>Usuario:</strong> ${escapeHtml(username)}</li><li><strong>Contraseña:</strong> ${escapeHtml(password)}</li></ul>` +
     `${statusText}<p>Para ingresar: <a href="${escapeHtml(link)}">${escapeHtml(link) || "Pare Carrito SAS"}</a></p>` +
     `<p>Ante cualquier consulta, escribanos por WhatsApp al +54 9 387 456 6725.</p>`);
   res.json({ ok: sent });
@@ -262,26 +278,26 @@ app.post("/auth/welcome", async (req, res) => {
 
 app.post("/auth/recover", async (req, res) => {
   const identifier = String((req.body || {}).usernameOrEmail || "").trim().toLowerCase();
-  if (!identifier) return res.status(400).json({ error: "Indique su usuario o correo electronico." });
+  if (!identifier) return res.status(400).json({ error: "Indique su usuario o correo electrónico." });
   const { rows } = await pool.query("SELECT * FROM users WHERE lower(username) = $1 OR lower(email) = $1", [identifier]);
   const user = rows[0];
   if (user && user.email) {
     const token = crypto.randomBytes(24).toString("hex");
     await pool.query("INSERT INTO password_resets (token, user_id, expires_at) VALUES ($1, $2, now() + interval '1 hour')", [token, user.id]);
     const link = (PUBLIC_URL || "") + "/#/restablecer/" + token;
-    sendMail(user.email, "Recuperar contrasena - Pare Carrito SAS",
-      `<p>Hola ${user.name},</p><p>Para crear una nueva contrasena haga clic en este enlace (valido por 1 hora):</p><p><a href="${link}">${link}</a></p><p>Si usted no pidio este cambio, ignore este correo.</p>`);
+    sendMail(user.email, "Recuperar contraseña - Pare Carrito SAS",
+      `<p>Hola ${user.name},</p><p>Para crear una nueva contraseña haga clic en este enlace (válido por 1 hora):</p><p><a href="${link}">${link}</a></p><p>Si usted no pidió este cambio, ignore este correo.</p>`);
   }
-  res.json({ ok: true, message: "Si el usuario existe y tiene correo registrado, le enviamos las instrucciones." });
+  res.json({ ok: true, message: "Si el usuario existe y tiene correo registrado, le envíamos las instrucciones." });
 });
 
 app.post("/auth/reset", async (req, res) => {
   const { token, password } = req.body || {};
   if (!token || !password) return res.status(400).json({ error: "Faltan datos." });
-  if (String(password).length < 6) return res.status(400).json({ error: "La contrasena debe tener al menos 6 caracteres." });
+  if (String(password).length < 6) return res.status(400).json({ error: "La contraseña debe tener al menos 6 caracteres." });
   const { rows } = await pool.query("SELECT * FROM password_resets WHERE token = $1 AND used = FALSE AND expires_at > now()", [token]);
   const reset = rows[0];
-  if (!reset) return res.status(400).json({ error: "El enlace es invalido o ya vencio. Pida uno nuevo desde Me olvide la contrasena." });
+  if (!reset) return res.status(400).json({ error: "El enlace es inválido o ya venció. Pida uno nuevo desde Me olvidé la contraseña." });
   const hash = await bcrypt.hash(String(password), 10);
   const clientDb = await pool.connect();
   try {
@@ -300,14 +316,14 @@ app.post("/auth/reset", async (req, res) => {
     await clientDb.query("COMMIT");
   } catch (error) {
     await clientDb.query("ROLLBACK").catch(() => {});
-    return res.status(500).json({ error: "No se pudo cambiar la contrasena: " + error.message });
+    return res.status(500).json({ error: "No se pudo cambiar la contraseña: " + error.message });
   } finally {
     clientDb.release();
   }
   res.json({ ok: true });
 });
 
-// ---------- Estado del ERP (sincronizacion) ----------
+// ---------- Estado del ERP (sincronización) ----------
 const SYNC_ROLES = ["manager", "admin", "employee", "contador"];
 const HISTORY_KEYS = ["productListPriceHistory", "productSalesQuantityHistory", "productPurchaseHistory"];
 const ARRAY_PATCH_KEYS = [
@@ -504,7 +520,7 @@ function applyStatePatch(data, patch) {
 
 app.get("/state", authenticate, requireRole(...SYNC_ROLES), async (req, res) => {
   const { rows } = await pool.query("SELECT data, updated_at FROM app_state WHERE id = 'main'");
-  if (!rows.length) return res.status(404).json({ error: "Sin datos guardados todavia." });
+  if (!rows.length) return res.status(404).json({ error: "Sin datos guardados todavía." });
   res.json({ data: stripHistoryFromState(rows[0].data), updatedAt: rows[0].updated_at.toISOString() });
 });
 
@@ -544,7 +560,7 @@ app.get("/product-history", authenticate, requireRole("manager", "admin"), async
 app.put("/state", authenticate, requireRole(...SYNC_ROLES), async (req, res) => {
   const body = req.body || {};
   if (!body.data || typeof body.data !== "object") {
-    return res.status(400).json({ error: "Cuerpo invalido: se espera { data: { ... } }." });
+    return res.status(400).json({ error: "Cuerpo inválido: se espera { data: { ... } }." });
   }
   const clientDb = await pool.connect();
   try {
@@ -559,7 +575,7 @@ app.put("/state", authenticate, requireRole(...SYNC_ROLES), async (req, res) => 
     if (current.rows.length) {
       if (body.baseUpdatedAt === undefined || body.baseUpdatedAt === null) {
         await clientDb.query("ROLLBACK");
-        return res.status(409).json({ error: "conflicto: el cliente no tiene la ultima version. Descargue primero.", updatedAt: current.rows[0].updated_at.toISOString() });
+        return res.status(409).json({ error: "conflicto: el cliente no tiene la última version. Descargue primero.", updatedAt: current.rows[0].updated_at.toISOString() });
       }
       const storedIso = current.rows[0].updated_at.toISOString();
       if (storedIso !== String(body.baseUpdatedAt)) {
@@ -605,7 +621,7 @@ app.put("/state", authenticate, requireRole(...SYNC_ROLES), async (req, res) => 
 app.post("/state/patch", authenticate, requireRole(...SYNC_ROLES), async (req, res) => {
   const body = req.body || {};
   if (!body.operationId || !body.patch || typeof body.patch !== "object") {
-    return res.status(400).json({ error: "Cuerpo invalido: se espera { operationId, baseUpdatedAt, patch }." });
+    return res.status(400).json({ error: "Cuerpo inválido: se espera { operationId, baseUpdatedAt, patch }." });
   }
   const clientDb = await pool.connect();
   try {
@@ -619,11 +635,11 @@ app.post("/state/patch", authenticate, requireRole(...SYNC_ROLES), async (req, r
     const current = await clientDb.query("SELECT updated_at, data FROM app_state WHERE id = 'main' FOR UPDATE");
     if (!current.rows.length) {
       await clientDb.query("ROLLBACK");
-      return res.status(404).json({ error: "Sin datos guardados todavia." });
+      return res.status(404).json({ error: "Sin datos guardados todavía." });
     }
     if (body.baseUpdatedAt === undefined || body.baseUpdatedAt === null) {
       await clientDb.query("ROLLBACK");
-      return res.status(409).json({ error: "conflicto: operacion sin version base. Descargue primero.", updatedAt: current.rows[0].updated_at.toISOString() });
+      return res.status(409).json({ error: "conflicto: operación sin version base. Descargue primero.", updatedAt: current.rows[0].updated_at.toISOString() });
     }
     const storedIso = current.rows[0].updated_at.toISOString();
     if (storedIso !== String(body.baseUpdatedAt)) {
@@ -646,13 +662,13 @@ app.post("/state/patch", authenticate, requireRole(...SYNC_ROLES), async (req, r
   } catch (error) {
     await clientDb.query("ROLLBACK").catch(() => {});
     console.error("POST /state/patch:", error);
-    res.status(500).json({ error: "No se pudo aplicar la operacion: " + error.message });
+    res.status(500).json({ error: "No se pudo aplicar la operación: " + error.message });
   } finally {
     clientDb.release();
   }
 });
 
-// ---------- Pedidos enviados por clientes ----------
+// ---------- Pedidos envíados por clientes ----------
 function parseLinkedClientIds(value) {
   if (Array.isArray(value)) return value.filter(Boolean).map(String);
   if (!value) return [];
@@ -673,7 +689,7 @@ function nextStateId(prefix, records) {
 app.post("/orders/customer", authenticate, requireRole("customer"), async (req, res) => {
   const body = req.body || {};
   if (!body.order || typeof body.order !== "object") {
-    return res.status(400).json({ error: "Cuerpo invalido: se espera { order: { ... } }." });
+    return res.status(400).json({ error: "Cuerpo inválido: se espera { order: { ... } }." });
   }
   const clientDb = await pool.connect();
   try {
@@ -765,11 +781,11 @@ app.post("/orders/customer", authenticate, requireRole("customer"), async (req, 
   }
 });
 
-// ---------- Transferencias enviadas por clientes ----------
+// ---------- Transferencias envíadas por clientes ----------
 app.post("/transfers", authenticate, requireRole("customer", "example"), async (req, res) => {
   const body = req.body || {};
   if (!body.transfer || typeof body.transfer !== "object") {
-    return res.status(400).json({ error: "Cuerpo invalido: se espera { transfer: { ... } }." });
+    return res.status(400).json({ error: "Cuerpo inválido: se espera { transfer: { ... } }." });
   }
   const clientDb = await pool.connect();
   try {
@@ -813,6 +829,51 @@ app.post("/transfers", authenticate, requireRole("customer", "example"), async (
     res.status(500).json({ error: "No se pudo guardar la transferencia: " + error.message });
   } finally {
     clientDb.release();
+  }
+});
+
+app.post("/ocr/order-image", authenticate, requireRole("manager", "admin", "employee"), async (req, res) => {
+  if (!MOONSHOT_API_KEY) {
+    return res.status(503).json({ error: "OCR por IA no configurado. Falta MOONSHOT_API_KEY en el servidor." });
+  }
+  const image = parseImageDataUrl(req.body && req.body.imageData);
+  if (!image) return res.status(400).json({ error: "Envíe una imagen PNG, JPG o WEBP en base64." });
+  if (image.byteLength > 8 * 1024 * 1024) return res.status(413).json({ error: "La imagen supera el máximo de 8 MB." });
+  const prompt = "puedes leer lo que dice esa hoja? por favor contestame solo con el texto que puedes interpretar";
+  try {
+    const response = await fetch(MOONSHOT_API_URL, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer " + MOONSHOT_API_KEY
+      },
+      body: JSON.stringify({
+        model: MOONSHOT_MODEL,
+        temperature: 0,
+        max_tokens: 1600,
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: prompt },
+              { type: "image_url", image_url: { url: image.dataUrl } }
+            ]
+          }
+        ]
+      })
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const detail = payload && (payload.error && (payload.error.message || payload.error) || payload.message);
+      return res.status(502).json({ error: "Kimi no pudo interpretar la imagen" + (detail ? ": " + detail : ".") });
+    }
+    const text = payload && payload.choices && payload.choices[0] && payload.choices[0].message
+      ? String(payload.choices[0].message.content || "").trim()
+      : "";
+    if (!text) return res.status(502).json({ error: "Kimi no devolvió texto interpretable." });
+    return res.json({ text });
+  } catch (error) {
+    return res.status(502).json({ error: "No se pudo conectar con Kimi: " + error.message });
   }
 });
 
@@ -881,7 +942,7 @@ async function mirrorStateToTables(db, data) {
   }
 }
 
-// Usuarios del ERP -> usuarios reales con hash bcrypt (la gestion sigue en la pagina Usuarios)
+// Usuarios del ERP -> usuarios reales con hash bcrypt (la gestion sigue en la página Usuarios)
 async function syncUsersFromState(db, data) {
   for (const u of Array.isArray(data.users) ? data.users : []) {
     if (!u || !u.id || !u.username || !u.password) continue;
@@ -999,7 +1060,7 @@ app.get("/exports/orders.csv", authenticate, requireRole(...REPORT_ROLES), async
 
 app.get("/exports/backup.json", authenticate, requireRole("manager"), async (req, res) => {
   const { rows } = await pool.query("SELECT data, updated_at FROM app_state WHERE id = 'main'");
-  if (!rows.length) return res.status(404).json({ error: "Sin datos guardados todavia." });
+  if (!rows.length) return res.status(404).json({ error: "Sin datos guardados todavía." });
   const history = await loadProductHistoryState(pool);
   res.set("content-disposition", `attachment; filename="pare-carrito-backup-${new Date().toISOString().slice(0, 10)}.json"`);
   res.json({
@@ -1015,7 +1076,7 @@ app.get("/exports/backup.json", authenticate, requireRole("manager"), async (req
   });
 });
 
-// ---------- Facturacion automatica (TusFacturasAPP) ----------
+// ---------- Facturación automática (TusFacturasAPP) ----------
 app.get("/billing/status", authenticate, requireRole("manager", "admin", "contador"), async (req, res) => {
   const cfg = billingConfig();
   const stateRow = await pool.query("SELECT data FROM app_state WHERE id = 'main'");
@@ -1050,7 +1111,7 @@ app.post("/billing/run", authenticate, requireRole("manager", "admin", "contador
 function externalAuth(req, res, next) {
   const key = process.env.EXTERNAL_API_KEY || "";
   if (!key) return res.status(503).json({ error: "API externa deshabilitada: configure EXTERNAL_API_KEY en el .env." });
-  if (String(req.headers["x-api-key"] || "") !== key) return res.status(401).json({ error: "x-api-key invalida." });
+  if (String(req.headers["x-api-key"] || "") !== key) return res.status(401).json({ error: "x-api-key inválida." });
   next();
 }
 
@@ -1142,7 +1203,7 @@ app.get("/external/performance", externalAuth, async (req, res) => {
 
 app.post("/external/transfers/:id/:action", externalAuth, async (req, res) => {
   const action = req.params.action;
-  if (!["approve", "reject"].includes(action)) return res.status(400).json({ error: "Accion invalida (approve|reject)." });
+  if (!["approve", "reject"].includes(action)) return res.status(400).json({ error: "Accion inválida (approve|reject)." });
   const clientDb = await pool.connect();
   try {
     await clientDb.query("BEGIN");
@@ -1164,7 +1225,7 @@ app.post("/external/transfers/:id/:action", externalAuth, async (req, res) => {
     } else {
       transfer.status = "accepted";
       const today = new Date(Date.now() - 3 * 3600 * 1000).toISOString().slice(0, 10);
-      const payment = { id: "PAY-EXT-" + Date.now(), date: today, clientId: transfer.clientId, amount: Number(transfer.amount || 0), method: "transferencia", receivedByUserId: "external-api", notes: "Transferencia aprobada via API externa - " + transfer.id };
+      const payment = { id: "PAY-EXT-" + Date.now(), date: today, clientId: transfer.clientId, amount: Number(transfer.amount || 0), method: "transferencia", receivedByUserId: "external-api", notes: "Transferencia aprobada vía API externa - " + transfer.id };
       data.payments = data.payments || [];
       data.payments.push(payment);
       const lastBalance = clientBalanceFromState(data, transfer.clientId);
@@ -1219,10 +1280,10 @@ function startBillingScheduler() {
           billingLastRunDate = result.lastRunDate;
           await saveBillingLastRunDate(billingLastRunDate);
         }
-        if (result.count) console.log("Facturacion automatica:", result.count, "comprobante(s) procesado(s)", result.simulate ? "(simulada)" : "");
+        if (result.count) console.log("Facturación automática:", result.count, "comprobante(s) procesado(s)", result.simulate ? "(simulada)" : "");
       }
     } catch (error) {
-      console.error("Facturacion automatica fallo:", error.message);
+      console.error("Facturación automática falló:", error.message);
     }
   }, 5 * 60 * 1000);
 }

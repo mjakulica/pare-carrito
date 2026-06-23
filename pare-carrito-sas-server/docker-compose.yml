@@ -41,6 +41,9 @@ services:
       TUSFACTURAS_PROVINCIA: ${TUSFACTURAS_PROVINCIA:-17}
       TUSFACTURAS_RUBRO: ${TUSFACTURAS_RUBRO:-Frutas y verduras}
       TUSFACTURAS_CONDICION_PAGO: ${TUSFACTURAS_CONDICION_PAGO:-211}
+      MOONSHOT_API_KEY: ${MOONSHOT_API_KEY:-}
+      MOONSHOT_API_URL: ${MOONSHOT_API_URL:-https://api.moonshot.ai/v1/chat/completions}
+      MOONSHOT_MODEL: ${MOONSHOT_MODEL:-kimi-k2.7}
     volumes:
       - uploads:/data/uploads
 

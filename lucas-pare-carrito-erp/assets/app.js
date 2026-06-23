@@ -316,7 +316,7 @@
     { id: "rendimiento", label: "Rendimiento", icon: "RE", roles: ["manager"] },
     { id: "compras", label: "Compras/Gastos", icon: "CO", roles: ["manager", "admin", "employee"] },
     { id: "dividir", label: "Dividir Compras", icon: "DV", roles: ["manager", "admin", "employee"] },
-    { id: "vehiculos", label: "Vehiculos", icon: "VH", roles: ["manager", "admin", "employee"] },
+    { id: "vehiculos", label: "Vehículos", icon: "VH", roles: ["manager", "admin", "employee"] },
     { id: "remitos", label: "Remitos", icon: "RM", roles: ["manager", "admin", "employee"] },
     { id: "unidades", label: "Unidades", icon: "UN", roles: ["manager", "admin", "employee"] },
     { id: "pagos", label: "Pagos", icon: "PG", roles: ["manager", "admin", "employee", "contador"] },
@@ -326,12 +326,12 @@
     { id: "horarios", label: "Horarios", icon: "HR", roles: ["employee"] },
     { id: "registrar-transferencia", label: "Registrar Transferencia", icon: "RT", roles: ["customer", "example"] },
     { id: "comprobar-transferencias", label: "Comprobar Transferencias", icon: "CT", roles: ["manager", "admin", "contador"] },
-    { id: "facturacion", label: "Facturacion", icon: "FA", roles: ["manager", "admin", "contador"] },
+    { id: "facturacion", label: "Facturación", icon: "FA", roles: ["manager", "admin", "contador"] },
     { id: "mis-pedidos", label: "Mis Pedidos", icon: "MP", roles: ["customer", "example"] },
     { id: "lista-precios", label: "Lista de Precios", icon: "LP", roles: ["customer", "example"] },
     { id: "proveedores", label: "Proveedores", icon: "PV", roles: ["manager", "admin", "employee", "contador"] },
     { id: "usuarios", label: "Usuarios", icon: "US", roles: ["manager"] },
-    { id: "configuracion", label: "Configuracion", icon: "CF", roles: ["manager", "admin", "employee", "customer", "contador", "example"] },
+    { id: "configuracion", label: "Configuración", icon: "CF", roles: ["manager", "admin", "employee", "customer", "contador", "example"] },
     { id: "backup", label: "Backup", icon: "BK", roles: ["manager", "admin"] }
   ];
 
@@ -1189,7 +1189,7 @@
       patch,
       createdAt: new Date().toISOString()
     }]);
-    ui.syncStatus = navigator.onLine === false ? "Cambios pendientes sin conexion" : "Cambios pendientes por sincronizar";
+    ui.syncStatus = navigator.onLine === false ? "Cambios pendientes sin conexión" : "Cambios pendientes por sincronizar";
     return true;
   }
 
@@ -1205,7 +1205,7 @@
     try {
       localStorage.setItem(SYNC_KEY, JSON.stringify(config || {}));
     } catch (error) {
-      console.warn("No se pudo guardar la configuracion de sincronizacion local.", error);
+      console.warn("No se pudo guardar la configuración de sincronización local.", error);
     }
   }
 
@@ -1232,7 +1232,7 @@
       try {
         detail = (await response.json()).error || "";
       } catch {}
-      throw new Error(detail || "no se pudo iniciar sesion en el servidor (HTTP " + response.status + ")");
+      throw new Error(detail || "no se pudo iniciar sesión en el servidor (HTTP " + response.status + ")");
     }
     const payload = await response.json();
     config.jwt = payload.token;
@@ -1281,7 +1281,7 @@
   async function flushPatchQueue(manual) {
     const config = getCloudSyncConfig();
     if (!canUseFullCloudSync()) {
-      if (manual) alert("El rol Cliente no usa sincronizacion completa. Sus pedidos y transferencias se envian por separado.");
+      if (manual) alert("El rol Cliente no usa sincronización completa. Sus pedidos y transferencias se envían por separado.");
       return true;
     }
     const queue = loadPatchQueue();
@@ -1290,11 +1290,11 @@
       return true;
     }
     if (!cloudSyncReady(config)) {
-      if (manual) alert("Configure la sincronizacion antes de subir cambios.");
+      if (manual) alert("Configure la sincronización antes de subir cambios.");
       return false;
     }
     if (navigator.onLine === false) {
-      ui.syncStatus = queue.length + " cambio(s) pendiente(s) sin conexion";
+      ui.syncStatus = queue.length + " cambio(s) pendiente(s) sin conexión";
       schedulePatchFlush(5000);
       return false;
     }
@@ -1309,7 +1309,7 @@
         const detail = await readCloudErrorDetail(response);
         config.lastError = "Conflicto al sincronizar cambio pendiente" + detail + ". Descargue datos antes de reintentar.";
         saveCloudSyncConfig(config);
-        ui.syncStatus = "Conflicto de sincronizacion";
+        ui.syncStatus = "Conflicto de sincronización";
         if (manual) alert(config.lastError);
         render();
         return false;
@@ -1329,10 +1329,10 @@
     } catch (error) {
       config.lastError = "Subida pendiente fallida " + formatTimestampShort(new Date().toISOString()) + ": " + error.message;
       saveCloudSyncConfig(config);
-      ui.syncStatus = "Sincronizacion pendiente";
-      console.warn("Sincronizacion pendiente:", error.message);
+      ui.syncStatus = "Sincronización pendiente";
+      console.warn("Sincronización pendiente:", error.message);
       schedulePatchFlush(5000);
-      if (manual) alert("No se pudo sincronizar todavia: " + error.message);
+      if (manual) alert("No se pudo sincronizar todavía: " + error.message);
       return false;
     }
   }
@@ -1460,15 +1460,15 @@
     } catch (error) {
       config.lastError = "Subida fallida " + formatTimestampShort(new Date().toISOString()) + ": " + error.message;
       saveCloudSyncConfig(config);
-      console.warn("Sincronizacion: " + error.message);
+      console.warn("Sincronización: " + error.message);
       if (manual) alert("No se pudo subir a la nube: " + error.message);
     }
   }
 
   async function syncClientTransferToCloud(transfer) {
     const config = getCloudSyncConfig();
-    if (!cloudSyncReady(config)) throw new Error("sin conexion configurada");
-    if (navigator.onLine === false) throw new Error("sin conexion");
+    if (!cloudSyncReady(config)) throw new Error("sin conexión configurada");
+    if (navigator.onLine === false) throw new Error("sin conexión");
     try {
       const response = await cloudRequest(config, "/transfers", {
         method: "POST",
@@ -1476,7 +1476,7 @@
       });
       if (!response.ok) throw new Error("HTTP " + response.status + (await readCloudErrorDetail(response)));
     } catch (error) {
-      console.warn("Sincronizacion de transferencia fallida:", error.message);
+      console.warn("Sincronización de transferencia fallida:", error.message);
       throw error;
     }
   }
@@ -1556,8 +1556,8 @@
 
   async function syncCustomerOrderToCloud(order) {
     const config = getCloudSyncConfig();
-    if (!cloudSyncReady(config)) throw new Error("sin conexion configurada");
-    if (navigator.onLine === false) throw new Error("sin conexion");
+    if (!cloudSyncReady(config)) throw new Error("sin conexión configurada");
+    if (navigator.onLine === false) throw new Error("sin conexión");
     const response = await cloudRequest(config, "/orders/customer", {
       method: "POST",
       body: JSON.stringify({ order })
@@ -1695,7 +1695,7 @@
       }
       if (!response.ok) throw new Error("HTTP " + response.status + (await readCloudErrorDetail(response)));
       const payload = await response.json();
-      if (!payload || typeof payload.data !== "object") throw new Error("respuesta invalida");
+      if (!payload || typeof payload.data !== "object") throw new Error("respuesta inválida");
       const remoteUpdated = String(payload.updatedAt || "");
       if (!manual && !isLogin) {
         if (config.lastSync && remoteUpdated && remoteUpdated <= config.lastSync) return;
@@ -1707,7 +1707,7 @@
         if (typing || ui.modal || cloudPushTimer) return;
       }
       if (!manual && looksLikeSeedState(payload.data) && localStateIsRicherThanRemote(state, payload.data)) {
-        console.warn("Sincronizacion: el servidor tiene datos de ejemplo/vacio; se conservan los datos locales.");
+        console.warn("Sincronización: el servidor tiene datos de ejemplo/vacío; se conservan los datos locales.");
         return;
       }
       // Safety check: prevent silent overwrite when local state has more operational data
@@ -1718,7 +1718,7 @@
           .filter((k) => local[k] !== remote[k])
           .map((k) => `${k}: local ${local[k]} vs nube ${remote[k]}`)
           .join(", ");
-        const msg = `Sincronizacion bloqueada: los datos locales tienen mas informacion (${details}). Use 'Subir datos ahora' para enviarlos, o 'Descargar datos ahora' si esta seguro de reemplazarlos.`;
+        const msg = `Sincronización bloqueada: los datos locales tienen más información (${details}). Use 'Subir datos ahora' para enviarlos, o 'Descargar datos ahora' si está seguro de reemplazarlos.`;
         ui.syncWarning = msg;
         if (!manual) {
           console.warn(msg);
@@ -1727,7 +1727,7 @@
           render();
           return;
         }
-        if (!confirm(`ADVERTENCIA: los datos locales tienen mas informacion que la nube (${details}). Reemplazar los datos locales con la nube?`)) return;
+        if (!confirm(`ADVERTENCIA: los datos locales tienen más información que la nube (${details}). Reemplazar los datos locales con la nube?`)) return;
       } else {
         ui.syncWarning = "";
       }
@@ -1755,25 +1755,25 @@
       const errorConfig = getCloudSyncConfig();
       errorConfig.lastError = "Descarga fallida " + formatTimestampShort(new Date().toISOString()) + ": " + error.message;
       saveCloudSyncConfig(errorConfig);
-      console.warn("Sincronizacion: " + error.message);
+      console.warn("Sincronización: " + error.message);
       if (manual) alert("No se pudo descargar de la nube: " + error.message);
     }
   }
 
   async function cloudTest() {
     const config = getCloudSyncConfig();
-    if (!cloudSyncReady(config)) return alert("Complete la URL y el token, y presione Guardar configuracion.");
+    if (!cloudSyncReady(config)) return alert("Complete la URL y el token, y presione Guardar configuración.");
     try {
       const health = await fetch(cloudBaseUrl(config) + "/health");
       if (!health.ok) throw new Error("el backend no responde (HTTP " + health.status + ")");
       if (config.username) await cloudLogin(config);
       const stateResponse = await cloudRequest(config, "/state", { method: "GET" });
-      if (stateResponse.status === 401) throw new Error(config.username ? "usuario o contrasena incorrectos" : "token incorrecto (revise que el secreto API_TOKEN del Worker sea igual al token pegado aca)");
-      if (stateResponse.status === 403) throw new Error("ese usuario no tiene permisos de sincronizacion (use gerente, admin o empleado)");
+      if (stateResponse.status === 401) throw new Error(config.username ? "usuario o contraseña incorrectos" : "token incorrecto (revise que el secreto API_TOKEN del Worker sea igual al token pegado aca)");
+      if (stateResponse.status === 403) throw new Error("ese usuario no tiene permisos de sincronización (use gerente, admin o empleado)");
       if (!stateResponse.ok && stateResponse.status !== 404) throw new Error("el backend respondio HTTP " + stateResponse.status + (await readCloudErrorDetail(stateResponse)));
-      alert("Conexion correcta. " + (stateResponse.status === 404 ? "La nube todavia no tiene datos: use Subir datos ahora." : "Hay datos guardados en la nube."));
+      alert("Conexión correcta. " + (stateResponse.status === 404 ? "La nube todavía no tiene datos: use Subir datos ahora." : "Hay datos guardados en la nube."));
     } catch (error) {
-      alert("Fallo la prueba de conexion: " + error.message);
+      alert("Fallo la prueba de conexión: " + error.message);
     }
   }
 
@@ -1810,7 +1810,7 @@
 
     const page = renderRoute(route);
     app.innerHTML = `
-      <div id="offline-banner" class="offline-banner" style="display:${typeof navigator !== "undefined" && navigator.onLine === false ? "block" : "none"}">Sin conexion a internet: los cambios se guardan en este dispositivo y se sincronizaran al volver la conexion.</div>
+      <div id="offline-banner" class="offline-banner" style="display:${typeof navigator !== "undefined" && navigator.onLine === false ? "block" : "none"}">Sin conexión a internet: los cambios se guardan en este dispositivo y se sincronizarán al volver la conexión.</div>
       <div class="app-shell">
         ${renderSidebar(route.base)}
         <div class="sidebar-overlay" aria-hidden="true"></div>
@@ -1836,12 +1836,12 @@
     if (window.__pcForcePwdOpen) return;
     window.__pcForcePwdOpen = true;
     showModal(
-      "Cambie su contrasena",
+      "Cambie su contraseña",
       `
-      <div class="alert" style="margin-bottom:12px">Su cuenta todavia usa la contrasena por defecto. Por seguridad debe crear una nueva antes de continuar.</div>
+      <div class="alert" style="margin-bottom:12px">Su cuenta todavía usa la contraseña por defecto. Por seguridad debe crear una nueva antes de continuar.</div>
       <form id="force-pwd-form" class="grid">
-        <div class="field"><label>Nueva contrasena (minimo 8 caracteres)</label><input id="force-pwd-1" type="password" autocomplete="new-password" /></div>
-        <div class="field"><label>Repetir contrasena</label><input id="force-pwd-2" type="password" autocomplete="new-password" /></div>
+        <div class="field"><label>Nueva contraseña (mínimo 8 caracteres)</label><input id="force-pwd-1" type="password" autocomplete="new-password" /></div>
+        <div class="field"><label>Repetir contraseña</label><input id="force-pwd-2" type="password" autocomplete="new-password" /></div>
       </form>
       `,
       () => {
@@ -1849,9 +1849,9 @@
         if (saveButton) saveButton.addEventListener("click", () => {
           const p1 = document.getElementById("force-pwd-1").value;
           const p2 = document.getElementById("force-pwd-2").value;
-          if (p1.length < 8) return alert("La contrasena debe tener al menos 8 caracteres.");
-          if (DEFAULT_PASSWORDS.includes(p1)) return alert("Elija una contrasena distinta a las contrasenas por defecto.");
-          if (p1 !== p2) return alert("Las contrasenas no coinciden.");
+          if (p1.length < 8) return alert("La contraseña debe tener al menos 8 caracteres.");
+          if (DEFAULT_PASSWORDS.includes(p1)) return alert("Elija una contraseña distinta a las contraseñas por defecto.");
+          if (p1 !== p2) return alert("Las contraseñas no coinciden.");
           const stateUser = state.users.find((item) => item.id === currentUser.id);
           if (stateUser) stateUser.password = p1;
           const config = getCloudSyncConfig();
@@ -1863,10 +1863,10 @@
           saveState();
           window.__pcForcePwdOpen = false;
           closeModal();
-          alert("Contrasena actualizada correctamente.");
+          alert("Contraseña actualizada correctamente.");
         });
       },
-      { saveLabel: "Guardar contrasena", cancelLabel: "Mas tarde" }
+      { saveLabel: "Guardar contraseña", cancelLabel: "Más tarde" }
     );
   }
 
@@ -1884,13 +1884,13 @@
         <div class="alert" style="margin-bottom:12px;display:none" id="reg-invoice-alert">Con Factura se cobrara el IVA</div>
         <form id="register-form" class="form-grid register-grid">
           <div class="field span-2"><label>Nombre de usuario *</label><input id="reg-username" autocomplete="off" /></div>
-          <div class="field span-2"><label>Contrasena * (minimo 6)</label><input id="reg-password" type="password" autocomplete="new-password" /></div>
+          <div class="field span-2"><label>Contrasena * (mínimo 6)</label><input id="reg-password" type="password" autocomplete="new-password" /></div>
           <div class="field span-2"><label>Nombre del local *</label><input id="reg-local" /></div>
           <div class="field span-2"><label>Direccion *</label><input id="reg-address" /></div>
           <div class="field span-2"><label id="reg-cuit-label">CUIT</label><input id="reg-cuit" placeholder="30-12345678-9" /></div>
-          <div class="field span-2"><label>Correo electronico *</label><input id="reg-email" type="email" /></div>
+          <div class="field span-2"><label>Correo electrónico *</label><input id="reg-email" type="email" /></div>
           <div class="field"><label>Apertura del local *</label><input id="reg-opening" type="time" /></div>
-          <div class="field"><label>Horario maximo de entrega *</label><input id="reg-delivery" type="time" /></div>
+          <div class="field"><label>Horario máximo de entrega *</label><input id="reg-delivery" type="time" /></div>
           <div class="field"><label>Telefono *</label><input id="reg-phone" inputmode="tel" /></div>
           <div class="field"><label>Zona *</label><input id="reg-zone" /></div>
           <div class="field span-2"><label>Facturacion *</label><select id="reg-invoice"><option value="Sin Factura">Sin factura</option><option value="Factura A">Factura A</option><option value="Factura B">Factura B</option></select></div>
@@ -1902,27 +1902,27 @@
       `;
     } else if (view === "registered") {
       body = `
-        <div class="alert" style="margin-bottom:14px">Su cuenta queda pendiente de aprobacion, por favor comunicarse con administracion para empezar a trabajar con nosotros.</div>
+        <div class="alert" style="margin-bottom:14px">Su cuenta queda pendiente de aprobación, por favor comunicarse con administración para empezar a trabajar con nosotros.</div>
         <a class="btn full whatsapp-btn" href="${WHATSAPP_REGISTER_LINK}" target="_blank" rel="noopener">${WHATSAPP_SVG}&nbsp;Escribirnos por WhatsApp</a>
         <button class="btn ghost full" type="button" id="back-to-login" style="margin-top:10px">Volver al ingreso</button>
       `;
     } else if (view === "recover") {
       body = `
-        <h2 style="margin:0 0 8px;font-size:18px">Recuperar contrasena</h2>
-        <p class="muted" style="margin:0 0 12px">Le enviaremos un correo con un enlace para crear una contrasena nueva.</p>
+        <h2 style="margin:0 0 8px;font-size:18px">Recuperar contraseña</h2>
+        <p class="muted" style="margin:0 0 12px">Le enviaremos un correo con un enlace para crear una contraseña nueva.</p>
         <form id="recover-form" class="grid">
-          <div class="field"><label>Usuario o correo electronico</label><input id="recover-identifier" autocomplete="username" /></div>
+          <div class="field"><label>Usuario o correo electrónico</label><input id="recover-identifier" autocomplete="username" /></div>
           <button class="btn primary full" type="submit">Enviar correo de recuperacion</button>
         </form>
         <button class="btn ghost full" type="button" id="back-to-login" style="margin-top:10px">Volver al ingreso</button>
       `;
     } else if (view === "reset") {
       body = `
-        <h2 style="margin:0 0 8px;font-size:18px">Crear nueva contrasena</h2>
+        <h2 style="margin:0 0 8px;font-size:18px">Crear nueva contraseña</h2>
         <form id="reset-form" class="grid">
-          <div class="field"><label>Nueva contrasena (minimo 6)</label><input id="reset-password" type="password" autocomplete="new-password" /></div>
-          <div class="field"><label>Repetir contrasena</label><input id="reset-password2" type="password" autocomplete="new-password" /></div>
-          <button class="btn primary full" type="submit">Guardar contrasena</button>
+          <div class="field"><label>Nueva contraseña (mínimo 6)</label><input id="reset-password" type="password" autocomplete="new-password" /></div>
+          <div class="field"><label>Repetir contraseña</label><input id="reset-password2" type="password" autocomplete="new-password" /></div>
+          <button class="btn primary full" type="submit">Guardar contraseña</button>
         </form>
         <button class="btn ghost full" type="button" id="back-to-login" style="margin-top:10px">Volver al ingreso</button>
       `;
@@ -1931,17 +1931,17 @@
         <form id="login-form" class="grid">
           <div class="field">
             <label>Usuario</label>
-            <input id="login-username" autocomplete="username" placeholder="usuario o correo electronico" />
+            <input id="login-username" autocomplete="username" placeholder="usuario o correo electrónico" />
           </div>
           <div class="field">
             <label>Contrasena</label>
-            <input id="login-password" type="password" autocomplete="current-password" placeholder="Ingrese su contrasena" />
+            <input id="login-password" type="password" autocomplete="current-password" placeholder="Ingrese su contraseña" />
           </div>
           <button class="btn primary full" type="submit">Ingresar</button>
         </form>
         <div class="login-actions">
           <button class="btn ghost full" type="button" id="open-register">Registrarme como cliente</button>
-          <button class="btn ghost full" type="button" id="open-recover">Me olvide la contrasena</button>
+          <button class="btn ghost full" type="button" id="open-recover">Me olvide la contraseña</button>
         </div>
       `;
     }
@@ -2024,9 +2024,9 @@
       const needsInvoice = payload.invoiceType !== "Sin Factura";
       const requiredOk = payload.username && payload.password && payload.localName && payload.address && (!needsInvoice || payload.cuit) && payload.email && payload.openingTime && payload.maxDeliveryTime && payload.phone && payload.zone;
       if (!requiredOk) return alert("Complete todos los campos obligatorios (*).");
-      if (payload.password.length < 6) return alert("La contrasena debe tener al menos 6 caracteres.");
+      if (payload.password.length < 6) return alert("La contraseña debe tener al menos 6 caracteres.");
       const base = await findServerBase();
-      if (!base) return alert("El registro en linea esta disponible solo con el servidor del negocio. Comuniquese con administracion.");
+      if (!base) return alert("El registro en linea esta disponible solo con el servidor del negocio. Comuniquese con administración.");
       try {
         const response = await fetch(base + "/auth/register", {
           method: "POST",
@@ -2045,9 +2045,9 @@
     if (recoverForm) recoverForm.addEventListener("submit", async (event) => {
       event.preventDefault();
       const identifier = document.getElementById("recover-identifier").value.trim();
-      if (!identifier) return alert("Indique su usuario o correo electronico.");
+      if (!identifier) return alert("Indique su usuario o correo electrónico.");
       const base = await findServerBase();
-      if (!base) return alert("La recuperacion en linea esta disponible solo con el servidor del negocio. Comuniquese con administracion.");
+      if (!base) return alert("La recuperacion en linea esta disponible solo con el servidor del negocio. Comuniquese con administración.");
       try {
         const response = await fetch(base + "/auth/recover", {
           method: "POST",
@@ -2067,8 +2067,8 @@
       event.preventDefault();
       const password = document.getElementById("reset-password").value;
       const password2 = document.getElementById("reset-password2").value;
-      if (password.length < 6) return alert("La contrasena debe tener al menos 6 caracteres.");
-      if (password !== password2) return alert("Las contrasenas no coinciden.");
+      if (password.length < 6) return alert("La contraseña debe tener al menos 6 caracteres.");
+      if (password !== password2) return alert("Las contraseñas no coinciden.");
       const base = await findServerBase();
       if (!base) return alert("No se pudo contactar al servidor del negocio.");
       try {
@@ -2078,14 +2078,14 @@
           body: JSON.stringify({ token: ui.resetToken, password })
         });
         const result = await response.json().catch(() => ({}));
-        if (!response.ok) return alert(result.error || "No se pudo cambiar la contrasena.");
-        alert("Contrasena actualizada. Ya puede ingresar con la nueva contrasena.");
+        if (!response.ok) return alert(result.error || "No se pudo cambiar la contraseña.");
+        alert("Contrasena actualizada. Ya puede ingresar con la nueva contraseña.");
         ui.loginView = "login";
         ui.resetToken = "";
         location.hash = "";
         render();
       } catch (error) {
-        alert("No se pudo cambiar la contrasena: " + error.message);
+        alert("No se pudo cambiar la contraseña: " + error.message);
       }
     });
   }
@@ -2130,13 +2130,13 @@
           return;
         }
         if (serverResult && serverResult.failed && serverResult.status === 401) {
-          alert("Usuario o contrasena incorrectos.");
+          alert("Usuario o contraseña incorrectos.");
           return;
         }
         // 2) Sin servidor: ingreso local como siempre.
         const user = state.users.find((item) => item.isActive !== false && (item.username.toLowerCase() === username || String(item.email || "").toLowerCase() === username) && item.password === password);
         if (!user) {
-          alert("Usuario o contrasena incorrectos.");
+          alert("Usuario o contraseña incorrectos.");
           return;
         }
         setCurrentUser(user);
@@ -2328,12 +2328,12 @@
   function renderSyncBanners() {
     let html = "";
     if (ui.syncWarning) {
-      html += `<div class="alert" style="margin-bottom:14px"><strong>Atencion sincronizacion:</strong> ${escapeHtml(ui.syncWarning)}</div>`;
+      html += `<div class="alert" style="margin-bottom:14px"><strong>Atencion sincronización:</strong> ${escapeHtml(ui.syncWarning)}</div>`;
     }
     if (ui.syncStatus || loadPatchQueue().length) {
       const pending = loadPatchQueue().length;
       const label = ui.syncStatus || (pending ? pending + " cambio(s) pendiente(s)" : "");
-      html += `<div class="alert ${pending ? "warn" : ""}" style="margin-bottom:14px"><strong>Sincronizacion:</strong> ${escapeHtml(label)}</div>`;
+      html += `<div class="alert ${pending ? "warn" : ""}" style="margin-bottom:14px"><strong>Sincronización:</strong> ${escapeHtml(label)}</div>`;
     }
     if (ui.lastOverwrite) {
       const elapsed = Math.floor((Date.now() - ui.lastOverwrite.at) / 1000);
@@ -2341,7 +2341,7 @@
       if (remaining > 0) {
         html += `
           <div class="alert warn" style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
-            <span>La ultima descarga de la nube redujo los pedidos de ${ui.lastOverwrite.ordersBefore} a ${ui.lastOverwrite.ordersAfter}. Se puede deshacer durante ${remaining}s.</span>
+            <span>La última descarga de la nube redujo los pedidos de ${ui.lastOverwrite.ordersBefore} a ${ui.lastOverwrite.ordersAfter}. Se puede deshacer durante ${remaining}s.</span>
             <button class="btn small primary" type="button" data-undo-last-overwrite>Deshacer</button>
           </div>
         `;
@@ -2442,11 +2442,11 @@
       </div>
       <div class="grid two" style="margin-top:14px">
         <div class="panel">
-          <h2 class="page-title" style="font-size:18px">Vehiculos de hoy</h2>
+          <h2 class="page-title" style="font-size:18px">Vehículos de hoy</h2>
           <div class="table-scroll-box">
             <div class="table-wrap dash-vehicle-table" style="margin-top:10px">
               <table>
-                <thead><tr><th>Vehiculo</th><th>Pedidos</th><th>Items</th><th>Total</th></tr></thead>
+                <thead><tr><th>Vehículo</th><th>Pedidos</th><th>Items</th><th>Total</th></tr></thead>
                 <tbody>${vehicleRows || emptyRow(4, "No hay pedidos para repartir.")}</tbody>
               </table>
             </div>
@@ -2456,7 +2456,7 @@
           <h2 class="page-title" style="font-size:18px">Proximas acciones</h2>
           <div class="grid dash-actions" style="margin-top:10px">
             <button class="btn ghost full" data-route="dividir">Dividir compras por proveedor</button>
-            <button class="btn ghost full" data-route="vehiculos">Revisar carga de vehiculos</button>
+            <button class="btn ghost full" data-route="vehiculos">Revisar carga de vehículos</button>
             <button class="btn ghost full" data-route="unidades">Revisar Unidades</button>
             <button class="btn ghost full" data-route="remitos">Generar remitos</button>
             <button class="btn ghost full" data-route="backup">Exportar backup</button>
@@ -2698,17 +2698,17 @@
        <button class="btn ghost" data-route="compras">Registrar gasto</button>`,
       `
       <div class="grid three">
-        ${metricCard("Pedidos de hoy", todaysOrders.length, "Solo la operacion del dia")}
+        ${metricCard("Pedidos de hoy", todaysOrders.length, "Solo la operación del dia")}
         ${metricCard("Mi caja", formatMoney(employeeCaja), "Cobros registrados a mi nombre")}
         ${metricCard("Cobro semanal", formatMoney(weeklyPay), "Horas presentes de esta semana")}
       </div>
       <div class="grid two" style="margin-top:14px">
         <div class="panel">
-          <h2 class="page-title" style="font-size:18px">Vehiculos de hoy</h2>
+          <h2 class="page-title" style="font-size:18px">Vehículos de hoy</h2>
           <div class="table-scroll-box">
             <div class="table-wrap dash-vehicle-table" style="margin-top:10px">
               <table>
-                <thead><tr><th>Vehiculo</th><th>Pedidos</th><th>Items</th><th>Total</th></tr></thead>
+                <thead><tr><th>Vehículo</th><th>Pedidos</th><th>Items</th><th>Total</th></tr></thead>
                 <tbody>${vehicleRows || emptyRow(4, "No hay pedidos para repartir.")}</tbody>
               </table>
             </div>
@@ -2718,7 +2718,7 @@
           <h2 class="page-title" style="font-size:18px">Acciones permitidas</h2>
           <div class="grid dash-actions" style="margin-top:10px">
             <button class="btn ghost full" data-route="pedidos">Ver pedidos del dia</button>
-            <button class="btn ghost full" data-route="vehiculos">Cambiar distribucion de vehiculos</button>
+            <button class="btn ghost full" data-route="vehiculos">Cambiar distribución de vehículos</button>
             <button class="btn ghost full" data-route="dividir">Cambiar distribucion de productos</button>
             <button class="btn ghost full" data-route="saldos">Ver cuenta de clientes</button>
             <button class="btn ghost full" data-route="horarios">Registrar fin de dia</button>
@@ -2893,7 +2893,7 @@
         ${metricCard("Saldo", currentUser.role === "example" ? formatMoney(0) : formatMoney(totalBalance), currentUser.role === "example" ? "Dato ficticio" : "Cuenta corriente")}
         ${metricCard(todayOrder ? "Pedido de hoy" : "Ultimo pedido", featuredOrder ? formatMoney(featuredAmount) : "$0", featuredOrder ? formatDate(featuredDate) : "Sin pedidos")}
         ${metricCard("Pedidos", customerOrders.length, "Pedidos registrados")}
-        ${metricCard("Vehiculo", client ? getVehicleName(client.vehicleId) : "-", "Ruta asignada")}
+        ${metricCard("Vehículo", client ? getVehicleName(client.vehicleId) : "-", "Ruta asignada")}
       </div>
       <div class="panel" style="margin-top:14px">
         <h2 class="page-title" style="font-size:18px">Ultimos pedidos</h2>
@@ -3071,7 +3071,7 @@
     afterRender.push(bindNewOrder);
     return pageShell(
       "Nuevo Pedido",
-      isCustomerOrder ? "Cargue su pedido. Los precios se calculan internamente para la cuenta." : "Carga rapida con favoritos por cliente.",
+      isCustomerOrder ? "Cargue su pedido. Los precios se calculan internamente para la cuenta." : "Carga rápida con favoritos por cliente.",
       `<button class="btn ghost" data-route="pedidos">${isCustomerOrder ? "Ver mis pedidos" : "Ver pedidos"}</button>`,
       `
       <form id="new-order-form" class="grid ${isCustomerOrder ? "customer-order-form" : "admin-order-form"}">
@@ -3087,7 +3087,7 @@
               <input type="date" id="order-date" value="${selectedDate}" ${isCustomerOrder ? `min="${minOrderDate}"` : ""} />
             </div>
             ${isCustomerOrder ? "" : `<div class="field order-vehicle-field">
-              <label>Vehiculo</label>
+              <label>Vehículo</label>
               <select id="order-vehicle">
                 ${activeVehicles().map((vehicle) => `<option value="${vehicle.id}" ${client && client.vehicleId === vehicle.id ? "selected" : ""}>${escapeHtml(vehicle.name)}</option>`).join("")}
               </select>
@@ -3116,7 +3116,7 @@
             <div class="field order-view-field">
               <label>Vista</label>
               <div class="segmented-icon-control" role="group" aria-label="Vista de productos">
-                <button class="btn icon ${ui.orderView === "grid" ? "primary" : "ghost"}" type="button" data-order-view="grid" title="Cuadricula" aria-label="Cuadricula">&#9638;</button>
+                <button class="btn icon ${ui.orderView === "grid" ? "primary" : "ghost"}" type="button" data-order-view="grid" title="Cuadrícula" aria-label="Cuadrícula">&#9638;</button>
                 <button class="btn icon ${ui.orderView === "list" ? "primary" : "ghost"}" type="button" data-order-view="list" title="Lista" aria-label="Lista">&#9776;</button>
               </div>
             </div>
@@ -3156,7 +3156,7 @@
         ${categoryFilterButtons}
         <div class="order-product-count" id="order-product-count">Mostrando ${renderedProductCount} de ${visibleProductCount} producto${visibleProductCount === 1 ? "" : "s"}</div>
         <div class="order-grid ${ui.orderView === "grid" ? "order-grid-cards" : ""}">${productRows}</div>
-        <div class="order-load-more-wrap" id="order-load-more-wrap">${renderedProductCount < visibleProductCount ? `<button class="btn ghost small" id="load-more-order-products" type="button">Cargar mas</button>` : ""}</div>
+        <div class="order-load-more-wrap" id="order-load-more-wrap">${renderedProductCount < visibleProductCount ? `<button class="btn ghost small" id="load-more-order-products" type="button">Cargar más</button>` : ""}</div>
       </form>
       `,
       "nuevo-pedido"
@@ -3212,7 +3212,7 @@
       if (!wrap) return;
       const batchLimit = orderBatchLimit();
       const rendered = Math.min(Number(ui.orderRenderedLimit || batchLimit), filteredProducts.length);
-      wrap.innerHTML = rendered < filteredProducts.length ? `<button class="btn ghost small" id="load-more-order-products" type="button">Cargar mas</button>` : "";
+      wrap.innerHTML = rendered < filteredProducts.length ? `<button class="btn ghost small" id="load-more-order-products" type="button">Cargar más</button>` : "";
       const button = document.getElementById("load-more-order-products");
       if (button) {
         button.addEventListener("click", () => renderProductWindow(false));
@@ -3483,6 +3483,11 @@
     if (aliasButton) aliasButton.addEventListener("click", () => openOrderAliasesModal(clientSelect.value));
     const parseButton = document.getElementById("parse-whatsapp-order");
     if (parseButton) parseButton.addEventListener("click", () => {
+      const detectedClient = detectClientFromOrderText(pasteInput.value);
+      if (detectedClient && detectedClient.id !== clientSelect.value) {
+        applySelectedClient(detectedClient.id, false);
+        if (clientSearch) clientSearch.value = detectedClient.id + " - " + detectedClient.name;
+      }
       const parsed = parseWhatsappOrder(pasteInput.value, clientSelect.value);
       applyParsedOrderToRows(parsed, searchInput, warningBox);
       if (parsed.unmatched.length && ["manager", "admin"].includes(currentUser.role)) {
@@ -3611,6 +3616,8 @@
   function applyParsedOrderToRows(parsed, searchInput, warningBox) {
     document.querySelectorAll("[data-product-row]").forEach((row) => {
       row.querySelector("[data-qty]").value = "";
+      const noteInput = row.querySelector("[data-note]");
+      if (noteInput) noteInput.value = "";
     });
     ui.orderDraft = {};
     parsed.items.forEach((entry) => {
@@ -3798,7 +3805,7 @@
             ${order.handwrittenImage ? `<button class="btn small ghost" data-view-handwritten="${order.id}" title="Ver pedido manuscrito" aria-label="Pedido manuscrito">&#128196;</button>` : ""}
             ${["manager", "admin"].includes(currentUser.role) ? (annulledView ? `<button class="btn small primary" data-restore-order="${order.id}">Restaurar</button>` : `<button class="btn small danger" data-annul-order="${order.id}" title="Anular pedido" aria-label="Anular">X</button>`) : ""}
             ${currentUser.role === "manager" ? `<button class="btn small danger" data-delete-order="${order.id}" title="Eliminar pedido" aria-label="Eliminar">&#128465;</button>` : ""}
-            ${currentUser.role === "employee" ? `<button class="btn small ghost" data-route="vehiculos">Vehiculo</button>` : ""}
+            ${currentUser.role === "employee" ? `<button class="btn small ghost" data-route="vehiculos">Vehículo</button>` : ""}
             `}
           </td>` : ""}
         </tr>
@@ -3997,7 +4004,7 @@
           <div><span class="muted">Cliente</span><strong>${escapeHtml(order.clientId)} - ${escapeHtml(client ? client.name : order.clientId)}</strong></div>
           <div><span class="muted">Fecha</span><strong>${formatDate(order.date)}</strong></div>
           <div><span class="muted">Estado</span><strong>${statusLabel(order.status)}</strong></div>
-          <div><span class="muted">Vehiculo</span><strong>${escapeHtml(vehicle ? vehicle.name : order.deliveryVehicleId || "-")}</strong></div>
+          <div><span class="muted">Vehículo</span><strong>${escapeHtml(vehicle ? vehicle.name : order.deliveryVehicleId || "-")}</strong></div>
         </div>
         ${order.notes ? `<div class="note-card" style="margin:12px 0"><strong>Notas del pedido</strong><small>${escapeHtml(order.notes)}</small></div>` : ""}
         <div class="table-wrap">
@@ -4276,14 +4283,14 @@
 
     return pageShell(
       "Clientes",
-      "Alta, edicion, saldos y vehiculo asignado.",
+      "Alta, edición, saldos y vehículo asignado.",
       `<button class="btn primary" data-add-client>Agregar cliente</button>`,
       `
       ${renderTabs()}
       <div class="panel">
         <div class="table-wrap">
           <table>
-            <thead><tr><th>ID</th><th>Cliente</th><th>Zona</th><th>Apertura</th><th>Vehiculo</th><th>Pago</th><th>Precio</th><th>Factura</th><th>Saldo</th><th>Acciones</th></tr></thead>
+            <thead><tr><th>ID</th><th>Cliente</th><th>Zona</th><th>Apertura</th><th>Vehículo</th><th>Pago</th><th>Precio</th><th>Factura</th><th>Saldo</th><th>Acciones</th></tr></thead>
             <tbody>${rows || emptyRow(10, "No hay clientes en esta vista.")}</tbody>
           </table>
         </div>
@@ -4747,7 +4754,7 @@
     if (ui.historyData && ui.historyData.from === from && ui.historyData.to === to) return;
     const config = getCloudSyncConfig();
     if (!cloudSyncReady(config)) {
-      ui.historyError = "No hay conexion configurada al servidor para cargar historiales.";
+      ui.historyError = "No hay conexión configurada al servidor para cargar historiales.";
       if (isCurrentPage() && options.forceRender !== false) render();
       return;
     }
@@ -5165,7 +5172,7 @@
       event.preventDefault();
       const amount = parseAmount(document.getElementById("performance-adjustment-amount").value);
       const description = document.getElementById("performance-adjustment-description").value.trim();
-      if (amount <= 0 || !description) return alert("Complete descripcion y monto.");
+      if (amount <= 0 || !description) return alert("Complete descripción y monto.");
       const adjustment = {
         id: nextDatedId("PERF", state.performanceAdjustments),
         date: document.getElementById("performance-adjustment-date").value || ui.performanceFrom || todayISO(),
@@ -5410,7 +5417,7 @@
               <input id="purchase-provider-payment-amount" inputmode="decimal" />
             </div>
             <div class="field" id="provider-payment-method-wrap">
-              <label>Metodo pago</label>
+              <label>Método pago</label>
               <select id="purchase-provider-payment-method">${providerPaymentMethods.map((method) => `<option value="${method}">${escapeHtml(PAYMENT_METHODS[method])}</option>`).join("")}</select>
             </div>` : ""}
             <div class="field" id="purchase-cash-box-wrap">
@@ -5446,7 +5453,7 @@
             </div>
             <div class="field span-2" id="purchase-notes-wrap">
               <label>Notas</label>
-              <input id="purchase-notes" placeholder="Detalle de compra, gasto, cancelacion, etc." />
+              <input id="purchase-notes" placeholder="Detalle de compra, gasto, cancelación, etc." />
             </div>
           </div>
           ${canPurchaseProviders ? `<div id="provider-favorites-wrap" class="panel" style="box-shadow:none;margin-top:12px"><strong>Favoritos del proveedor</strong><div id="provider-favorites" class="favorite-row"></div></div>` : ""}
@@ -5466,7 +5473,7 @@
           <div id="vendor-favorites-wrap" class="panel" style="box-shadow:none;margin-top:12px">
             <div class="page-actions" style="justify-content:space-between">
               <strong>Favoritos del vendedor</strong>
-              <select id="purchase-product-view" style="max-width:160px"><option value="list" ${ui.purchaseProductView === "list" ? "selected" : ""}>Lista</option><option value="grid" ${ui.purchaseProductView === "grid" ? "selected" : ""}>Cuadricula</option></select>
+              <select id="purchase-product-view" style="max-width:160px"><option value="list" ${ui.purchaseProductView === "list" ? "selected" : ""}>Lista</option><option value="grid" ${ui.purchaseProductView === "grid" ? "selected" : ""}>Cuadrícula</option></select>
             </div>
             <div id="vendor-favorites" class="favorite-row ${ui.purchaseProductView === "grid" ? "favorite-grid" : ""}"></div>
           </div>
@@ -5519,7 +5526,7 @@
               <input id="provider-payment-amount" inputmode="decimal" />
             </div>
             <div class="field">
-              <label>Metodo</label>
+              <label>Método</label>
               <select id="provider-payment-method">
                 ${Object.keys(PAYMENT_METHODS).map((method) => `<option value="${method}">${escapeHtml(PAYMENT_METHODS[method])}</option>`).join("")}
               </select>
@@ -5551,7 +5558,7 @@
         <h2 class="page-title" style="font-size:18px">Pagos registrados</h2>
         <div class="table-wrap" style="margin-top:10px">
           <table>
-            <thead><tr><th>Fecha</th><th>Proveedor</th><th>Tipo</th><th>Metodo</th><th>Caja</th><th>Monto</th><th>Usuario</th><th>Notas</th></tr></thead>
+            <thead><tr><th>Fecha</th><th>Proveedor</th><th>Tipo</th><th>Método</th><th>Caja</th><th>Monto</th><th>Usuario</th><th>Notas</th></tr></thead>
             <tbody>${paymentRows || emptyRow(8, "Todavia no hay pagos a proveedores.")}</tbody>
           </table>
         </div>
@@ -5873,7 +5880,7 @@
         return;
       }
       if (expenseType === "purchase" && !provider) return alert("Seleccione un proveedor en el dropdown.");
-      if (expenseType === "other_expense" && !description) return alert("Ingrese una descripcion para el gasto.");
+      if (expenseType === "other_expense" && !description) return alert("Ingrese una descripción para el gasto.");
       const items = expenseType === "other_expense" ? [] : expenseType === "market_price" ? readMarketPriceItems() : readPurchaseItems(expenseType === "prepared");
       const totalCost = expenseType === "other_expense"
         ? parseAmount(otherAmount.value)
@@ -6578,8 +6585,8 @@
     }).join("");
     afterRender.push(bindVehicles);
     return pageShell(
-      "Vehiculos",
-      "Carga por vehiculo con suma consolidada de productos.",
+      "Vehículos",
+      "Carga por vehículo con suma consolidada de productos.",
       `<div class="vehicle-page-actions">
          <div class="field vehicle-date-field">
            <label>Fecha</label>
@@ -6589,7 +6596,7 @@
          <button class="btn ghost" data-print-vehicle="flat">&#128424; Sin dividir</button>
          <button class="btn ghost" data-copy-vehicle="all">${WHATSAPP_SVG} Todos</button>
          <button class="btn ghost" data-copy-vehicle="flat">${WHATSAPP_SVG} Sin dividir</button>
-         ${canManageVehicles ? `<button class="btn primary" data-add-vehicle>Agregar vehiculo</button>` : ""}
+         ${canManageVehicles ? `<button class="btn primary" data-add-vehicle>Agregar vehículo</button>` : ""}
        </div>`,
       `<div class="vehicle-board">${columns}</div>`,
       "vehiculos"
@@ -6604,7 +6611,7 @@
         <div class="muted">${escapeHtml(order.id)} - ${order.items.length} items - ${formatMoney(order.totalAmount)}</div>
         ${order.notes ? `<div class="note-text" style="margin-top:6px">${escapeHtml(order.notes)}</div>` : ""}
         <div class="field" style="margin-top:8px">
-          <label>Mover a vehiculo</label>
+          <label>Mover a vehículo</label>
           <select data-move-order="${order.id}">
             ${activeVehicles().map((vehicle) => `<option value="${vehicle.id}" ${order.deliveryVehicleId === vehicle.id ? "selected" : ""}>${escapeHtml(vehicle.name)}</option>`).join("")}
           </select>
@@ -6635,7 +6642,7 @@
       button.addEventListener("click", () => {
         const vehicle = getVehicle(button.dataset.deleteVehicle);
         if (!vehicle) return;
-        if (!confirm("Borrar/desactivar vehiculo " + vehicle.name + "?")) return;
+        if (!confirm("Borrar/desactivar vehículo " + vehicle.name + "?")) return;
         vehicle.isActive = false;
         saveState();
         render();
@@ -6666,7 +6673,7 @@
     const html = stripPrintControls(vehicleId === "flat" ? renderVehicleFlatPrint(date) : renderVehiclePrint(vehicleId));
     let title;
     if (vehicleId === "all") {
-      title = fileDate(date) + " Vehiculos Todos";
+      title = fileDate(date) + " Vehículos Todos";
     } else if (vehicleId === "flat") {
       title = fileDate(date) + " Pedidos";
     } else {
@@ -6686,7 +6693,7 @@
     const sheets = ids.map((id) => renderVehiclePrintSheet(id, ui.vehicleDate || todayISO())).join("");
     const allHeader = vehicleId === "all" ? `
       <div class="print-title">
-        <div><h1>${BUSINESS_NAME.toUpperCase()}</h1><strong>Todos los vehiculos</strong></div>
+        <div><h1>${BUSINESS_NAME.toUpperCase()}</h1><strong>Todos los vehículos</strong></div>
         <div>Fecha: ${formatDate(ui.vehicleDate || todayISO())}</div>
       </div>` : "";
     return `
@@ -6771,7 +6778,7 @@
         <div class="print-title">
           <div>
             <h1>${BUSINESS_NAME.toUpperCase()}</h1>
-            <strong>${escapeHtml(tplGet("vehiculos", "titulo", "Planilla de vehiculo"))}: ${escapeHtml(vehicle ? vehicle.name : vehicleId)}</strong>
+            <strong>${escapeHtml(tplGet("vehiculos", "titulo", "Planilla de vehículo"))}: ${escapeHtml(vehicle ? vehicle.name : vehicleId)}</strong>
           </div>
           <div>
             <div>Fecha: ${formatDate(date)}</div>
@@ -6795,7 +6802,7 @@
 
   function buildVehicleAllText(date) {
     const vehicles = activeVehicles();
-    const title = `${BUSINESS_NAME} - Vehiculos - ${formatDate(date)}`;
+    const title = `${BUSINESS_NAME} - Vehículos - ${formatDate(date)}`;
     const parts = [title];
     vehicles.forEach((vehicle) => {
       const totals = getVehicleTotals(vehicle.id, date);
@@ -6832,7 +6839,7 @@
     const lines = [title, ""];
     orders.forEach((order) => {
       const client = getClient(order.clientId);
-      lines.push(`${order.id} - ${client ? client.name : order.clientId} - Vehiculo: ${getVehicleName(order.deliveryVehicleId)} - ${formatMoney(order.totalAmount)}`);
+      lines.push(`${order.id} - ${client ? client.name : order.clientId} - Vehículo: ${getVehicleName(order.deliveryVehicleId)} - ${formatMoney(order.totalAmount)}`);
       order.items.forEach((item) => {
         lines.push(`  ${formatNumber(item.quantity)} ${item.unitType} ${item.productName}${item.note ? " (" + item.note + ")" : ""}`);
       });
@@ -7365,7 +7372,7 @@
               <input id="payment-amount" inputmode="decimal" placeholder="0" />
             </div>
             <div class="field payment-method-field">
-              <label>Metodo</label>
+              <label>Método</label>
               <select id="payment-method">${methods.map((method) => `<option value="${method}">${escapeHtml(PAYMENT_METHODS[method])}</option>`).join("")}</select>
             </div>
             <div class="field payment-receiver-field">
@@ -7401,7 +7408,7 @@
         <div class="panel payment-history-wrap">
           <div class="table-wrap">
             <table>
-              <thead><tr><th>Fecha</th><th>Cliente</th><th>Recibio</th><th>Metodo</th><th>Caja</th><th>Monto</th><th>Comprobante</th><th>Notas</th><th>Acciones</th></tr></thead>
+              <thead><tr><th>Fecha</th><th>Cliente</th><th>Recibio</th><th>Método</th><th>Caja</th><th>Monto</th><th>Comprobante</th><th>Notas</th><th>Acciones</th></tr></thead>
               <tbody>${paymentRows || emptyRow(8, "Todavia no hay pagos.")}</tbody>
             </table>
           </div>
@@ -7807,7 +7814,7 @@
     afterRender.push(bindCustomerTransferRegistration);
     return pageShell(
       "Registrar Transferencia",
-      "Envie los datos de una transferencia para que administracion la compruebe.",
+      "Envíe los datos de una transferencia para que administración la compruebe.",
       "",
       `
       <div class="grid">
@@ -8054,7 +8061,7 @@
   function transferStatusPill(status) {
     if (status === "accepted") return `<span class="pill green">Pago aceptado</span>`;
     if (status === "rejected") return `<span class="pill red">Pago rechazado</span>`;
-    return `<span class="pill amber">Pendiente de aprobacion</span>`;
+    return `<span class="pill amber">Pendiente de aprobación</span>`;
   }
 
   function renderCaja() {
@@ -8423,7 +8430,7 @@
           <div class="form-grid" style="margin-top:10px">
             <div class="field span-2"><label>Empleado</label><select id="employee-payment-user">${employees.map((employee) => `<option value="${employee.id}">${escapeHtml(employee.name)}</option>`).join("")}</select></div>
             <div class="field"><label>Fecha</label><input type="date" id="employee-payment-date" value="${todayISO()}" /></div>
-            <div class="field"><label>Metodo</label><select id="employee-payment-method">${Object.keys(PAYMENT_METHODS).map((method) => `<option value="${method}">${escapeHtml(PAYMENT_METHODS[method])}</option>`).join("")}</select></div>
+            <div class="field"><label>Método</label><select id="employee-payment-method">${Object.keys(PAYMENT_METHODS).map((method) => `<option value="${method}">${escapeHtml(PAYMENT_METHODS[method])}</option>`).join("")}</select></div>
             <div class="field"><label>Caja</label><select id="employee-payment-cash-box">${renderCashBoxOptions(defaultEmployeeCashBox)}</select></div>
             <div class="field"><label>Monto</label><input id="employee-payment-amount" inputmode="decimal" /></div>
             <div class="field"><label>Pago extra</label><input id="employee-payment-extra" inputmode="decimal" placeholder="0" /></div>
@@ -8459,7 +8466,7 @@
           <h2 class="page-title" style="font-size:18px">Pagos registrados</h2>
           <div class="table-wrap" style="margin-top:10px">
             <table>
-              <thead><tr><th>Fecha</th><th>Empleado</th><th>Semana</th><th>Metodo</th><th>Caja</th><th>Monto</th><th>Notas</th></tr></thead>
+              <thead><tr><th>Fecha</th><th>Empleado</th><th>Semana</th><th>Método</th><th>Caja</th><th>Monto</th><th>Notas</th></tr></thead>
               <tbody>${paymentRows || emptyRow(7, "Sin pagos de empleados.")}</tbody>
             </table>
           </div>
@@ -8827,7 +8834,7 @@
       <div class="field price-list-view-field">
         <label>Vista</label>
         <select id="price-list-view">
-          <option value="grid" ${ui.priceListView === "grid" ? "selected" : ""}>Cuadricula</option>
+          <option value="grid" ${ui.priceListView === "grid" ? "selected" : ""}>Cuadrícula</option>
           <option value="list" ${ui.priceListView === "list" ? "selected" : ""}>Lista</option>
         </select>
       </div>
@@ -8890,7 +8897,7 @@
       : `<div class="panel" style="margin-bottom:14px"><div class="form-grid">${viewSelector}</div></div>`;
     return pageShell(
       "Lista de Precios",
-      "Precios de referencia de la ultima compra, los precios pueden cambiar de manera diaria",
+      "Precios de referencia de la última compra, los precios pueden cambiar de manera diaria",
       "",
       `
       ${accountPanel}
@@ -9040,7 +9047,7 @@
           const value = parseAmount(ui.billingIvaOverrides[id]);
           if (Number.isFinite(value) && value >= 0) ivaOverrides[id] = value;
         });
-        if (!cfg.username || !cloudSyncReady(cfg)) return alert("La emision corre en el servidor propio (Opcion F). Configure el ingreso con usuario y contrasena.");
+        if (!cfg.username || !cloudSyncReady(cfg)) return alert("La emision corre en el servidor propio (Opcion F). Configure el ingreso con usuario y contraseña.");
         if (!selectedIds.length) return alert("Seleccione al menos un cliente para facturar.");
         if (!confirm(simulate ? "Simular la emision de las facturas pendientes para " + selectedIds.length + " cliente(s)? (no emite nada real)" : "Emitir AHORA las facturas pendientes via TusFacturas para " + selectedIds.length + " cliente(s)?")) return;
         try {
@@ -9178,7 +9185,7 @@
             <div class="field span-2"><label>Correo</label><input value="${escapeAttr(currentUser.email || "")}" disabled /></div>
             <div class="field"><label>Telefono</label><input value="${escapeAttr(currentUser.phone || "")}" disabled /></div>
           </div>
-          <p class="muted" style="margin-top:12px">Esta cuenta usa datos ficticios y no permite modificar configuracion ni datos de contacto.</p>
+          <p class="muted" style="margin-top:12px">Esta cuenta usa datos ficticios y no permite modificar configuración ni datos de contacto.</p>
         </div>
         `,
         "configuracion"
@@ -9243,9 +9250,9 @@
             ${isClientLikeRole(currentUser.role) ? "" : `<div class="field"><label>Rol</label><input value="${escapeAttr(roleLabel(currentUser.role))}" disabled /></div>`}
             <div class="field span-2"><label>Correo</label><input id="settings-email" type="email" value="${escapeAttr(currentUser.email || "")}" /></div>
             <div class="field"><label>Telefono</label><input id="settings-phone" value="${escapeAttr(currentUser.phone || "")}" /></div>
-            <div class="field"><label>Nueva contrasena</label><input id="settings-password" type="password" placeholder="Dejar vacio para no cambiar" /></div>
+            <div class="field"><label>Nueva contraseña</label><input id="settings-password" type="password" placeholder="Dejar vacio para no cambiar" /></div>
           </div>
-          <div class="page-actions" style="margin-top:12px"><button class="btn primary" type="submit">Guardar configuracion</button></div>
+          <div class="page-actions" style="margin-top:12px"><button class="btn primary" type="submit">Guardar configuración</button></div>
         </form>
         ${currentUser.role === "customer" ? `
         <div class="panel">
@@ -9259,7 +9266,7 @@
         </div>` : currentUser.role === "manager" ? `
         <div class="panel">
           <h2 class="page-title" style="font-size:18px">Permisos</h2>
-          <p class="muted">Gerente administra todos los usuarios. Admin gestiona la operacion completa. Empleado opera rutas, division, gastos, caja propia y cobros. Cliente consulta sus cuentas.</p>
+          <p class="muted">Gerente administra todos los usuarios. Admin gestiona la operación completa. Empleado opera rutas, division, gastos, caja propia y cobros. Cliente consulta sus cuentas.</p>
         </div>` : ""}
       </div>
       ${(canEditRemitoSettings || canEditSidebarOrder || canManageProductCategories) ? `
@@ -9442,7 +9449,7 @@
 
   const PRINT_TEMPLATE_KEYS = [
     { id: "remito", label: "Remitos", hasLeyenda: true },
-    { id: "vehiculos", label: "Vehiculos", hasLeyenda: false },
+    { id: "vehiculos", label: "Vehículos", hasLeyenda: false },
     { id: "dividir", label: "Dividir compras", hasLeyenda: false },
     { id: "saldos", label: "Saldos / movimientos", hasLeyenda: false }
   ];
@@ -9563,7 +9570,7 @@
       if (!file) return alert("Seleccione un archivo JSON de plantilla.");
       try {
         const parsed = JSON.parse(await file.text());
-        if (!parsed || parsed.type !== "printTemplate" || !parsed.template) throw new Error("Formato invalido.");
+        if (!parsed || parsed.type !== "printTemplate" || !parsed.template) throw new Error("Formato inválido.");
         state.appSettings.printTemplates = state.appSettings.printTemplates || {};
         const tpl = state.appSettings.printTemplates[key] || {};
         if (parsed.template.titulo !== undefined) tpl.titulo = String(parsed.template.titulo || "").trim();
@@ -9603,7 +9610,7 @@
       const username = document.getElementById("settings-link-username").value.trim().toLowerCase();
       const password = document.getElementById("settings-link-password").value;
       const linkedUser = state.users.find((user) => user.role === "customer" && user.username.toLowerCase() === username && user.password === password && user.clientId);
-      if (!linkedUser) return alert("Usuario o contrasena de la cuenta vinculada incorrectos.");
+      if (!linkedUser) return alert("Usuario o contraseña de la cuenta vinculada incorrectos.");
       currentUser.linkedClientIds = Array.from(new Set([...(currentUser.linkedClientIds || []), currentUser.clientId, linkedUser.clientId].filter(Boolean)));
       saveState();
       render();
@@ -10082,22 +10089,22 @@
       </div>
       ${renderLocalBackupPanel()}
       <div class="panel" style="margin-top:14px">
-        <h2 class="page-title" style="font-size:18px">Sincronizacion en la nube (Cloudflare)</h2>
-        <p class="muted">Conecte el backend de la Opcion E (DEPLOYMENT.md) para compartir los datos entre dispositivos. Version de la app: <strong>${APP_VERSION}</strong>. Ultima sincronizacion: <strong id="cloud-sync-status">${escapeHtml(getCloudSyncConfig().lastSync ? formatTimestampShort(getCloudSyncConfig().lastSync) : "nunca")}</strong></p>
+        <h2 class="page-title" style="font-size:18px">Sincronización en la nube (Cloudflare)</h2>
+        <p class="muted">Conecte el backend de la Opcion E (DEPLOYMENT.md) para compartir los datos entre dispositivos. Version de la app: <strong>${APP_VERSION}</strong>. Ultima sincronización: <strong id="cloud-sync-status">${escapeHtml(getCloudSyncConfig().lastSync ? formatTimestampShort(getCloudSyncConfig().lastSync) : "nunca")}</strong></p>
         ${getCloudSyncConfig().lastError ? `<div class="alert">${escapeHtml(getCloudSyncConfig().lastError)}</div>` : ""}
         <div class="form-grid" style="margin-top:10px">
           <div class="field span-2"><label>URL del backend</label><input id="cloud-sync-url" placeholder="https://api.sudominio.com o https://...workers.dev" value="${escapeAttr(getCloudSyncConfig().url || "")}" /></div>
           <div class="field"><label>Usuario (servidor propio)</label><input id="cloud-sync-username" placeholder="gerente" autocomplete="off" value="${escapeAttr(getCloudSyncConfig().username || "")}" /></div>
           <div class="field"><label>Contrasena (servidor propio)</label><input id="cloud-sync-password" type="password" autocomplete="new-password" value="${escapeAttr(getCloudSyncConfig().password || "")}" /></div>
-          <div class="field span-2"><label>Token (solo para Cloudflare Workers)</label><input id="cloud-sync-token" type="password" placeholder="dejar vacio si usa usuario y contrasena" value="${escapeAttr(getCloudSyncConfig().token || "")}" /></div>
+          <div class="field span-2"><label>Token (solo para Cloudflare Workers)</label><input id="cloud-sync-token" type="password" placeholder="dejar vacio si usa usuario y contraseña" value="${escapeAttr(getCloudSyncConfig().token || "")}" /></div>
           <label class="field" style="display:flex;align-items:center;gap:8px;grid-template-columns:auto 1fr">
             <input type="checkbox" id="cloud-sync-auto" style="width:auto;min-height:auto" ${getCloudSyncConfig().auto === false ? "" : "checked"} />
-            <span>Sincronizacion automatica (sube cada cambio y descarga al abrir)</span>
+            <span>Sincronización automatica (sube cada cambio y descarga al abrir)</span>
           </label>
         </div>
         <div class="page-actions" style="margin-top:12px">
-          <button class="btn ghost" id="cloud-sync-save" type="button">Guardar configuracion</button>
-          <button class="btn ghost" id="cloud-sync-test" type="button">Probar conexion</button>
+          <button class="btn ghost" id="cloud-sync-save" type="button">Guardar configuración</button>
+          <button class="btn ghost" id="cloud-sync-test" type="button">Probar conexión</button>
           <button class="btn blue" id="cloud-sync-push" type="button">Subir datos ahora</button>
           <button class="btn primary" id="cloud-sync-pull" type="button">Descargar datos ahora</button>
         </div>
@@ -10118,7 +10125,7 @@
       ${["manager", "admin"].includes(currentUser.role) ? `
       <div class="panel" style="margin-top:14px">
         <h2 class="page-title" style="font-size:18px">Reportes del servidor (PostgreSQL)</h2>
-        <p class="muted">Disponible con el servidor propio (modo usuario y contrasena). Los calculos corren en la base de datos.</p>
+        <p class="muted">Disponible con el servidor propio (modo usuario y contraseña). Los calculos corren en la base de datos.</p>
         <div class="form-grid" style="margin-top:10px">
           <div class="field"><label>Desde</label><input type="date" id="server-report-from" value="${escapeAttr(addDaysISO(todayISO(), -29))}" /></div>
           <div class="field"><label>Hasta</label><input type="date" id="server-report-to" value="${escapeAttr(todayISO())}" /></div>
@@ -10131,7 +10138,7 @@
           ${currentUser.role === "manager" ? `<button class="btn ghost" type="button" id="server-export-backup">Backup del servidor (JSON)</button>` : ""}
         </div>
       </div>` : ""}
-      <div class="alert" style="margin-top:14px">Sin la sincronizacion en la nube, los datos viven solo en este navegador. Exporte un backup antes de actualizar o cambiar de dispositivo.</div>
+      <div class="alert" style="margin-top:14px">Sin la sincronización en la nube, los datos viven solo en este navegador. Exporte un backup antes de actualizar o cambiar de dispositivo.</div>
       `,
       "backup"
     );
@@ -10139,7 +10146,7 @@
 
   async function openServerReport(kind) {
     const config = getCloudSyncConfig();
-    if (!config.username) return alert("Los reportes del servidor requieren el modo usuario y contrasena (servidor propio).");
+    if (!config.username) return alert("Los reportes del servidor requieren el modo usuario y contraseña (servidor propio).");
     const from = document.getElementById("server-report-from").value || addDaysISO(todayISO(), -29);
     const to = document.getElementById("server-report-to").value || todayISO();
     try {
@@ -10172,7 +10179,7 @@
 
   async function downloadServerFile(path, fileName) {
     const config = getCloudSyncConfig();
-    if (!config.username) return alert("Requiere el modo usuario y contrasena (servidor propio).");
+    if (!config.username) return alert("Requiere el modo usuario y contraseña (servidor propio).");
     try {
       const response = await cloudRequest(config, path, { method: "GET" });
       if (!response.ok) throw new Error("HTTP " + response.status + (await readCloudErrorDetail(response)));
@@ -10208,7 +10215,7 @@
       const text = await file.text();
       try {
         const parsed = JSON.parse(text);
-        if (!parsed.clients || !parsed.products) throw new Error("Backup invalido.");
+        if (!parsed.clients || !parsed.products) throw new Error("Backup inválido.");
         if (!confirm("Importar este backup reemplazara los datos locales actuales. Continuar?")) return;
         state = { ...seedState(), ...parsed };
         saveState();
@@ -10450,7 +10457,7 @@
         <div class="field"><label>Tipo pago</label><select id="client-payment">${["cuenta_corriente", "contado", "semanal", "contra_factura"].map((type) => `<option value="${type}" ${client && client.paymentType === type ? "selected" : ""}>${escapeHtml(paymentTypeLabel(type))}</option>`).join("")}</select></div>
         <div class="field"><label>Precio</label><select id="client-tier"><option value="general" ${client && client.priceTier === "general" ? "selected" : ""}>General</option><option value="preferencial" ${client && client.priceTier === "preferencial" ? "selected" : ""}>Preferencial</option><option value="con_factura" ${client && client.priceTier === "con_factura" ? "selected" : ""}>Con Factura</option></select></div>
         <div class="field"><label>Ajuste precio %</label><input id="client-adjustment" inputmode="decimal" value="${formatAmountInput(client ? client.priceAdjustmentPct || 0 : 0)}" /></div>
-        <div class="field"><label>Vehiculo</label><select id="client-vehicle">${activeVehicles().map((vehicle) => `<option value="${vehicle.id}" ${client && client.vehicleId === vehicle.id ? "selected" : ""}>${escapeHtml(vehicle.name)}</option>`).join("")}</select></div>
+        <div class="field"><label>Vehículo</label><select id="client-vehicle">${activeVehicles().map((vehicle) => `<option value="${vehicle.id}" ${client && client.vehicleId === vehicle.id ? "selected" : ""}>${escapeHtml(vehicle.name)}</option>`).join("")}</select></div>
         <label class="field" style="display:flex;align-items:center;gap:8px;grid-template-columns:auto 1fr">
           <input type="checkbox" id="client-needs-invoice" style="width:auto;min-height:auto" ${client && client.needsInvoice ? "checked" : ""} />
           <span>Necesita factura</span>
@@ -10677,7 +10684,7 @@
         </label>
         <label class="field" style="display:flex;align-items:center;gap:8px;grid-template-columns:auto 1fr">
           <input type="checkbox" id="product-show-vehicle" style="width:auto;min-height:auto" ${!product || product.showInVehicleTotals !== false ? "checked" : ""} />
-          <span>Mostrar en suma de vehiculos</span>
+          <span>Mostrar en suma de vehículos</span>
         </label>
         <div class="field span-2"><label>Asignado a</label><select id="product-assignee-modal"><option value="">Sin asignar</option>${activeAssignees().map((entry) => `<option value="${entry.value}" ${assignedValue === entry.value ? "selected" : ""}>${escapeHtml(entry.label)}</option>`).join("")}</select></div>
         <div class="field span-4">
@@ -10840,7 +10847,7 @@
   function openVehicleForm(id) {
     const vehicle = id ? getVehicle(id) : null;
     showModal(
-      vehicle ? "Editar vehiculo" : "Agregar vehiculo",
+      vehicle ? "Editar vehículo" : "Agregar vehículo",
       `
       <form id="vehicle-form" class="form-grid">
         <div class="field"><label>ID</label><input id="vehicle-id" value="${escapeAttr(vehicle ? vehicle.id : "VH-" + String(state.vehicles.length + 1).padStart(3, "0"))}" ${vehicle ? "disabled" : ""} /></div>
@@ -10892,7 +10899,7 @@
       <form id="order-edit-form" class="grid">
         <div class="form-grid">
           <div class="field"><label>Fecha</label><input type="date" id="edit-order-date" value="${escapeAttr(order.date)}" /></div>
-          ${isCustomerEdit ? "" : `<div class="field"><label>Vehiculo</label><select id="edit-order-vehicle">${activeVehicles().map((vehicle) => `<option value="${vehicle.id}" ${order.deliveryVehicleId === vehicle.id ? "selected" : ""}>${escapeHtml(vehicle.name)}</option>`).join("")}</select></div>
+          ${isCustomerEdit ? "" : `<div class="field"><label>Vehículo</label><select id="edit-order-vehicle">${activeVehicles().map((vehicle) => `<option value="${vehicle.id}" ${order.deliveryVehicleId === vehicle.id ? "selected" : ""}>${escapeHtml(vehicle.name)}</option>`).join("")}</select></div>
           <div class="field"><label>Estado</label><select id="edit-order-status">${["pendiente", "preparando", "listo", "entregado", "cancelado"].map((status) => `<option value="${status}" ${order.status === status ? "selected" : ""}>${statusLabel(status)}</option>`).join("")}</select></div>`}
           <div class="field span-4"><label>Notas pedido</label><textarea id="edit-order-notes">${escapeHtml(order.notes || "")}</textarea></div>
         </div>
@@ -11294,7 +11301,7 @@
     document.querySelectorAll("[data-print]").forEach((button) => button.addEventListener("click", () => window.print()));
     document.querySelectorAll("[data-undo-last-overwrite]").forEach((button) => button.addEventListener("click", () => {
       if (!ui.lastOverwrite) return;
-      if (!confirm(`Deshacer la ultima descarga? Volvera a ${ui.lastOverwrite.ordersBefore} pedidos.`)) return;
+      if (!confirm(`Deshacer la última descarga? Volvera a ${ui.lastOverwrite.ordersBefore} pedidos.`)) return;
       if (restoreLocalBackup(ui.lastOverwrite.backupIndex)) {
         ui.lastOverwrite = null;
         ui.syncWarning = "";
@@ -11357,7 +11364,7 @@
       return { from: dateToISO(first), to: dateToISO(last) };
     }
     if (name === "semana-pasada") {
-      // lunes a sabado de la ultima semana completa
+      // lunes a sabado de la última semana completa
       const weekday = date.getUTCDay(); // 0 domingo
       const daysSinceMonday = (weekday + 6) % 7;
       const monday = addDaysISO(today, -daysSinceMonday - 7);
@@ -11706,7 +11713,7 @@
     const user = state.users.find((item) => item.role === "customer" && item.clientId === client.id);
     const username = user ? user.username : "cliente" + client.id;
     const subject = encodeURIComponent("Acceso a " + BUSINESS_NAME);
-    const body = encodeURIComponent("Hola " + client.name + ",\n\nTu usuario para " + BUSINESS_NAME + " es " + username + " y tu contrasena inicial es " + password + ".\n\nSaludos.");
+    const body = encodeURIComponent("Hola " + client.name + ",\n\nTu usuario para " + BUSINESS_NAME + " es " + username + " y tu contraseña inicial es " + password + ".\n\nSaludos.");
     return "mailto:" + encodeURIComponent(client.email || "") + "?subject=" + subject + "&body=" + body;
   }
 
@@ -11836,6 +11843,7 @@
     const items = [];
     const unmatched = [];
     String(text || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean).forEach((line) => {
+      if (shouldIgnoreOrderTextLine(line)) return;
       const parsed = parseOrderLine(line, clientId);
       if (!parsed) {
         unmatched.push(line);
@@ -11850,15 +11858,16 @@
         product,
         quantity: parsed.quantity,
         unitType: normalizeUnitForProduct(parsed.unitType, product),
-        note: ""
+        note: parsed.note || ""
       });
     });
     return { items, unmatched };
   }
 
   function parseOrderLine(line, clientId) {
-    const clean = normalizeOrderLineText(applyQuantityAliases(line, clientId));
-    const tokens = clean.split(" ").filter(Boolean);
+    const aliased = applyQuantityAliases(line, clientId);
+    const rawTokens = String(aliased || "").split(/\s+/).map(cleanRawOrderToken).filter(Boolean);
+    const tokens = rawTokens.map(normalizeOrderTokenText);
     for (let index = 0; index < tokens.length; index += 1) {
       if (!isQuantityToken(tokens[index])) continue;
       let quantity = parseLooseQuantity(tokens[index]);
@@ -11884,15 +11893,18 @@
         remove.add(index - 1);
         if (normalizeText(prevToken).startsWith("gr")) quantity = quantity / 1000;
       }
-      const name = tokens.filter((_, tokenIndex) => !remove.has(tokenIndex)).join(" ").trim();
-      if (!name) continue;
-      return { name, quantity, unitType };
+      const nameTokens = tokens.filter((_, tokenIndex) => !remove.has(tokenIndex)).filter(Boolean);
+      const rawNameTokens = rawTokens.filter((_, tokenIndex) => !remove.has(tokenIndex));
+      const resolved = resolveParsedProductNameAndNote(nameTokens, rawNameTokens, unitType, clientId);
+      if (!resolved.name) continue;
+      return { name: resolved.name, quantity, unitType, note: resolved.note };
     }
     return null;
   }
 
   function isQuantityToken(value) {
-    return /^\d+(?:[,.]\d+)?(?:\/\d+(?:[,.]\d+)?)?$/.test(String(value || "").replace(/\s/g, "")) || /^\d+\/\d+$/.test(String(value || ""));
+    const clean = cleanQuantityToken(value);
+    return /^\d+(?:[,.]\d+)?(?:\/\d+(?:[,.]\d+)?)?$/.test(clean.replace(/\s/g, "")) || /^\d+\/\d+$/.test(clean);
   }
 
   function applyQuantityAliases(line, clientId) {
@@ -11922,8 +11934,26 @@
       .trim();
   }
 
+  function cleanRawOrderToken(value) {
+    return String(value || "").trim().replace(/^[\s,;:()]+|[\s;:()]+$/g, "").replace(/\.+$/g, ".");
+  }
+
+  function cleanQuantityToken(value) {
+    return String(value || "").replace(/\s/g, "").replace(/^[^\d]+|[.;:]+$/g, "");
+  }
+
+  function normalizeOrderTokenText(value) {
+    return String(value || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/^[^\w\d]+|[.;:]+$/g, "")
+      .replace(/[^a-z0-9,./]/g, "")
+      .trim();
+  }
+
   function parseLooseQuantity(value) {
-    const clean = String(value || "").replace(/\s/g, "").replace(",", ".");
+    const clean = cleanQuantityToken(value).replace(",", ".");
     if (clean.includes("/")) {
       const [a, b] = clean.split("/").map(Number);
       return b ? a / b : 0;
@@ -11952,12 +11982,50 @@
     return "";
   }
 
+  function resolveParsedProductNameAndNote(nameTokens, rawNameTokens, unitType, clientId) {
+    const cleanTokens = (nameTokens || []).filter(Boolean);
+    if (!cleanTokens.length) return { name: "", note: "" };
+    let best = null;
+    for (let index = 1; index <= cleanTokens.length; index += 1) {
+      const candidateName = cleanTokens.slice(0, index).join(" ").trim();
+      if (!candidateName) continue;
+      const match = matchProductForParsedLine(candidateName, unitType, clientId);
+      if (!match || !match.product) continue;
+      const noteTokens = (rawNameTokens || []).slice(index);
+      const note = cleanupParsedProductNote(noteTokens.join(" "));
+      const score = match.score - (note ? 0 : 0.25);
+      if (!best || score > best.score || (score === best.score && note && !best.note)) {
+        best = { name: candidateName, note, score };
+      }
+    }
+    if (best) return { name: best.name, note: best.note };
+    return { name: cleanTokens.join(" ").trim(), note: "" };
+  }
+
+  function cleanupParsedProductNote(value) {
+    return String(value || "")
+      .replace(/^[\s.,;:()/-]+|[\s.,;:()/-]+$/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
   function findProductForParsedLine(name, unitType, clientId) {
+    const match = matchProductForParsedLine(name, unitType, clientId);
+    return match ? match.product : null;
+  }
+
+  function matchProductForParsedLine(name, unitType, clientId) {
     const clean = normalizeText(name);
     const clientAlias = state.clientProductAliases.find((alias) => alias.clientId === clientId && normalizeText(alias.alias) === clean);
-    if (clientAlias) return getProduct(clientAlias.productId);
+    if (clientAlias) {
+      const product = getProduct(clientAlias.productId);
+      return product ? { product, score: 100 } : null;
+    }
     const generalAlias = state.productAliases.find((alias) => normalizeText(alias.alias) === clean);
-    if (generalAlias) return getProduct(generalAlias.productId);
+    if (generalAlias) {
+      const product = getProduct(generalAlias.productId);
+      return product ? { product, score: 95 } : null;
+    }
     const searchable = clean.replace(/\bdc\b/g, "docena").replace(/\bk\b/g, "kg").replace(/\bl\b/g, "lechuga");
     const candidates = activeProducts().map((product) => {
       const productText = normalizeText(product.name);
@@ -11974,11 +12042,77 @@
       const exactBonus = productText.includes(searchable) ? 3 : 0;
       return { product, score: wordScore + unitScore + exactBonus + firstWordBonus };
     }).sort((a, b) => b.score - a.score);
-    return candidates[0] && candidates[0].score > 0 ? candidates[0].product : null;
+    return candidates[0] && candidates[0].score > 0 ? candidates[0] : null;
   }
 
   function normalizeUnitForProduct(unitType, product) {
     return unitType || (product ? product.unitType : "unidad");
+  }
+
+  function shouldIgnoreOrderTextLine(line) {
+    const clean = normalizeText(line);
+    if (!clean) return true;
+    if (/^(pedido|pedidos)\s*(\d{1,2}[\/-]\d{1,2}(?:[\/-]\d{2,4})?)?$/.test(clean)) return true;
+    if (/^(lista|listado)\s+(de\s+)?(verduras|frutas|productos)$/.test(clean)) return true;
+    if (/^(fecha|cliente|total|subtotal|observaciones|nota|notas)\b/.test(clean)) return true;
+    if (/^\d{1,2}[\/-]\d{1,2}(?:[\/-]\d{2,4})?$/.test(clean)) return true;
+    return false;
+  }
+
+  function detectClientFromOrderText(text) {
+    const lines = String(text || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean).slice(0, 12);
+    let best = null;
+    const remember = (client, score) => {
+      if (!client || score <= 0) return;
+      if (!best || score > best.score) best = { client, score };
+    };
+    lines.forEach((line, index) => {
+      const clean = normalizeText(line);
+      if (!clean) return;
+      const pedidoPara = clean.match(/\bpedido\s+(?:para|de)\s+(.+)$/);
+      if (pedidoPara) remember(findClientByLooseText(pedidoPara[1]), 90 - index);
+      const numbers = clean.match(/\b\d{1,4}\b/g) || [];
+      numbers.forEach((num, numIndex) => {
+        const client = findClientByNumberToken(num);
+        const clientNameBonus = client && clean.includes(normalizeText(client.name)) ? 20 : 0;
+        remember(client, 70 - index + numIndex + clientNameBonus);
+      });
+      remember(findClientByLooseText(clean), 55 - index);
+    });
+    return best && best.score >= 45 ? best.client : null;
+  }
+
+  function findClientByNumberToken(value) {
+    const raw = String(value || "").replace(/\D/g, "");
+    if (!raw) return null;
+    const padded = raw.padStart(3, "0");
+    return activeClients().find((client) => {
+      const id = String(client.id || "");
+      return id === raw || id === padded || String(Number(id)) === String(Number(raw));
+    }) || null;
+  }
+
+  function findClientByLooseText(value) {
+    const clean = normalizeText(value);
+    if (!clean) return null;
+    let best = null;
+    activeClients().forEach((client) => {
+      const id = normalizeText(client.id);
+      const name = normalizeText(client.name);
+      let score = 0;
+      if (id && clean === id) score += 95;
+      if (id && clean.includes(id)) score += 30;
+      if (name && clean === name) score += 95;
+      else if (name && (clean.includes(name) || name.includes(clean))) score += 70;
+      else if (name) {
+        const cleanWords = clean.split(" ").filter((word) => word.length > 1);
+        const nameWords = name.split(" ").filter((word) => word.length > 1);
+        const shared = cleanWords.filter((word) => nameWords.some((nameWord) => nameWord === word || nameWord.startsWith(word) || word.startsWith(nameWord))).length;
+        if (shared) score += shared * 18;
+      }
+      if (score > 0 && (!best || score > best.score)) best = { client, score };
+    });
+    return best && best.score >= 35 ? best.client : null;
   }
 
   function normalizeText(value) {
@@ -12818,7 +12952,7 @@
         <div class="field"><label>Saldo</label><input id="quick-provider-payment-balance" value="${formatMoney(balance)}" disabled /></div>
         <div class="field"><label>Pago</label><select id="quick-provider-payment-mode"><option value="full">Pago total</option><option value="partial">Pago parcial</option></select></div>
         <div class="field"><label>Monto</label><input id="quick-provider-payment-amount" inputmode="decimal" value="${formatAmountInput(balance)}" /></div>
-        <div class="field"><label>Metodo</label><select id="quick-provider-payment-method">${(employeeMode ? ["efectivo"] : Object.keys(PAYMENT_METHODS)).map((method) => `<option value="${method}">${escapeHtml(PAYMENT_METHODS[method])}</option>`).join("")}</select></div>
+        <div class="field"><label>Método</label><select id="quick-provider-payment-method">${(employeeMode ? ["efectivo"] : Object.keys(PAYMENT_METHODS)).map((method) => `<option value="${method}">${escapeHtml(PAYMENT_METHODS[method])}</option>`).join("")}</select></div>
         <div class="field"><label>Caja</label>${employeeMode ? `<input value="${escapeAttr(getCashBoxName(getDefaultOutgoingCashBoxId()))}" disabled /><input type="hidden" id="quick-provider-payment-cash-box" value="${escapeAttr(getDefaultOutgoingCashBoxId())}" />` : `<select id="quick-provider-payment-cash-box">${renderCashBoxOptions(getDefaultOutgoingCashBoxId())}</select>`}</div>
         <div class="field span-4"><label>Notas</label><input id="quick-provider-payment-notes" placeholder="Pago a proveedor" /></div>
       </form>
@@ -14097,7 +14231,31 @@
     });
   }
 
+  async function recognizeOrderImageWithKimi(file, statusNode) {
+    const config = getCloudSyncConfig();
+    if (!cloudSyncReady(config)) throw new Error("Servidor no configurado para OCR por IA.");
+    if (statusNode) statusNode.textContent = "Analizando imagen con IA...";
+    const imageData = await compressImageFile(file, 1600, 0.82);
+    const response = await cloudRequest(config, "/ocr/order-image", {
+      method: "POST",
+      body: JSON.stringify({ imageData })
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.error || "OCR por IA no disponible.");
+    }
+    const text = String(payload.text || "").trim();
+    if (!text) throw new Error("La IA no devolvió texto interpretable.");
+    return text;
+  }
+
   async function recognizeOrderImage(file, statusNode) {
+    try {
+      return await recognizeOrderImageWithKimi(file, statusNode);
+    } catch (aiError) {
+      console.warn("OCR por IA no disponible, usando OCR local:", aiError.message);
+      if (statusNode) statusNode.textContent = "IA no disponible, usando OCR local...";
+    }
     await loadTesseract();
     if (!window.Tesseract) throw new Error("OCR no disponible.");
     const variants = await prepareOcrImageVariants(file);
@@ -14170,7 +14328,7 @@
       if (best.confidence >= 0 && best.text) break;
     }
     if (!best.text) {
-      throw new Error("No se pudo completar el OCR. Revise la conexion a internet o pruebe una foto mas clara y de frente. Detalle: " + (lastError ? lastError.message : "sin detalle"));
+      throw new Error("No se pudo completar el OCR. Revise la conexión a internet o pruebe una foto mas clara y de frente. Detalle: " + (lastError ? lastError.message : "sin detalle"));
     }
     return best.text;
   }
@@ -14413,13 +14571,13 @@
       const existing = document.querySelector("script[data-tesseract]");
       if (existing) {
         existing.addEventListener("load", resolve, { once: true });
-        existing.addEventListener("error", () => reject(new Error("No se pudo cargar la libreria OCR.")), { once: true });
+        existing.addEventListener("error", () => reject(new Error("No se pudo cargar la librería OCR.")), { once: true });
         return;
       }
       let index = 0;
       const tryNext = () => {
         if (index >= sources.length) {
-          reject(new Error("No se pudo cargar la libreria " + name + ". Revise la conexion a internet."));
+          reject(new Error("No se pudo cargar la librería " + name + ". Revise la conexión a internet."));
           return;
         }
         const script = document.createElement("script");
