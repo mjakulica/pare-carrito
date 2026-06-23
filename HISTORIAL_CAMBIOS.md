@@ -1,5 +1,20 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.8.33 - Carrito con logo, sync claro y matching exacto (2026-06-23)
+
+### Frontend / Nuevo Pedido
+
+- La ventana movil del carrito ahora muestra el icono de arrastre `cart-drag-handle.png` en la esquina superior derecha de la cabecera.
+- El carrito flotante queda por encima de la topbar para evitar que la cabecera de arrastre quede atrapada debajo de la barra superior.
+- El mensaje de `Sincronizacion: Conflicto de sincronizacion` ahora muestra el detalle guardado del conflicto y una indicacion concreta para resolverlo desde `Configuracion > Sincronizacion` usando `Descargar datos ahora` o `Subir datos ahora` segun corresponda.
+- El pegado de WhatsApp prioriza alias exactos, nombre exacto con unidad, nombre exacto sin unidad y favoritos del cliente antes de usar similitud por palabras.
+- Se validaron casos de matching: `Tomate cajon` -> `Tomate Cajon`, `Zapallo negro` -> `Zapallo Negro kg`, `Ajo Ristra` -> `Ajo Ristra`, `Albahaca unidad` -> `Albahaca unidad`.
+- Commit funcional desplegado: `389238b401a567ca976d0e66e365d622099222fd`.
+- Verificacion: `node --check` en copia de trabajo, `git diff --check`, prueba local de matching, deploy de assets y health VPS correcto.
+- Backups: PC pre-cambio `auditoria/repo-backup-20260623-pre-cart-parser-sync-fixes.zip`; VPS pre-deploy `pare-carrito-code-pre-cart-parser-sync-fixes_20260623_172407.tar.gz`; VPS post-deploy `pare-carrito-code-post-cart-parser-sync-fixes_20260623_172409.tar.gz`.
+- No se registraron credenciales en documentacion ni reportes.
+
+---
 ## v12.8.32 - Carrito movible y mejoras WhatsApp (2026-06-23)
 
 ### Frontend / Nuevo Pedido
