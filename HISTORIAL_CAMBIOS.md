@@ -1,5 +1,21 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.8.31 - Modelo de vision para OCR Kimi (2026-06-23)
+
+### Backend / OCR por imagen
+
+- El endpoint `/ocr/order-image` ahora usa `MOONSHOT_VISION_MODEL` para lectura de imagen, con valor por defecto `moonshot-v1-32k-vision-preview`.
+- `docker-compose.yml` declara `MOONSHOT_VISION_MODEL` para que el contenedor `api` reciba explicitamente el modelo de vision.
+- Se sanitizan los errores externos de Moonshot/Kimi para no exponer datos internos de cuenta, organizaciones ni claves.
+- En `Nuevo Pedido`, si la IA falla, el mensaje informa el motivo resumido antes de continuar con OCR local.
+- Verificacion VPS: health correcto, `MOONSHOT_API_KEY` configurada, `MOONSHOT_VISION_MODEL=moonshot-v1-32k-vision-preview` activo.
+- La prueba externa de vision respondio `429` por saldo/plan insuficiente en Moonshot/Kimi; al regularizar la facturacion, el flujo queda preparado para usar el modelo de vision.
+- Commit funcional desplegado: `94a7000f702c2f13d88ce5e0e04ab2e2b1cde207`.
+- Backups VPS: pre-deploy `pare-carrito-code-pre-kimi-vision-fix-final_20260623_144139.tar.gz` y post-deploy `pare-carrito-code-post-kimi-vision-fix_20260623_144156.tar.gz`.
+- Backup PC pre-cambio: `auditoria/repo-backup-20260623-pre-kimi-vision-fix.zip`.
+- No se registro la clave en Git, documentacion ni reportes.
+
+---
 ## v12.8.30 - Kimi operativo para OCR de pedidos (2026-06-23)
 
 ### Backend / OCR por imagen

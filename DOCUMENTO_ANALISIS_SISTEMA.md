@@ -362,21 +362,24 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 
 ## 12. Ultimo Cambio y Version
 
-**Version operativa:** 12.8.30
+**Version operativa:** 12.8.31
 **Fecha:** 2026-06-23
-**Commit GitHub del cambio funcional:** No aplica, configuracion operativa de entorno en VPS.
+**Commit GitHub del cambio funcional:** `94a7000f702c2f13d88ce5e0e04ab2e2b1cde207`
 **Entorno actualizado:** VPS productivo `/opt/pare-carrito/pare-carrito-sas-server` con Docker Compose (`api`, `caddy`, `db`).
 
 ### Detalle del ultimo cambio
 
-- Se habilito Kimi/Moonshot para el OCR por imagen del endpoint `/ocr/order-image` configurando `MOONSHOT_API_KEY` en el `.env` productivo del VPS.
-- Se recreo el contenedor `api` para que tome la variable de entorno.
-- El frontend mantiene el flujo existente: al presionar `Subir imagen`, intenta OCR por IA y conserva OCR local como respaldo si la API remota falla.
-- No se modifico codigo fuente ni estructura de base de datos.
+- Se corrigio el OCR por imagen para usar un modelo de vision dedicado mediante `MOONSHOT_VISION_MODEL`.
+- El valor por defecto configurado es `moonshot-v1-32k-vision-preview`.
+- Se mantuvo `MOONSHOT_MODEL=kimi-k2.7` para usos generales, separandolo del modelo de imagen.
+- Se mejoro la respuesta de error cuando Moonshot/Kimi rechaza la llamada por facturacion, autenticacion, limite temporal o modelo no disponible.
+- El frontend de `Nuevo Pedido` muestra el motivo resumido cuando la IA no esta disponible y luego conserva el OCR local como respaldo.
+- Verificacion productiva: la API del sistema esta saludable y el contenedor tiene la clave y el modelo de vision configurados. La llamada externa a Moonshot/Kimi devuelve falta de saldo/plan, por lo que requiere regularizar la cuenta para que el OCR IA procese imagenes.
+- No se modifico la estructura de base de datos.
 - No se registraron credenciales en este documento ni en el historial.
 
 ### Backups asociados
 
-- VPS pre-configuracion codigo: `pare-carrito-code-pre-kimi-env-retry_20260623_134404.tar.gz`.
-- VPS backup privado de entorno previo: `env-pre-kimi-retry_20260623_134404.bak`.
-- VPS post-configuracion codigo: `pare-carrito-code-post-kimi-env_20260623_134421.tar.gz`.
+- PC pre-cambio: `auditoria/repo-backup-20260623-pre-kimi-vision-fix.zip`.
+- VPS pre-deploy: `pare-carrito-code-pre-kimi-vision-fix-final_20260623_144139.tar.gz`.
+- VPS post-deploy: `pare-carrito-code-post-kimi-vision-fix_20260623_144156.tar.gz`.
