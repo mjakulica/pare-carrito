@@ -10725,7 +10725,7 @@
             imageUrl: document.getElementById("product-image-url").value.trim(),
             imageData,
             isActive: product ? product.isActive : true,
-            sortOrder: product ? product.sortOrder : state.products.length,
+            sortOrder: product ? product.sortOrder : 0,
             notes: document.getElementById("product-notes").value.trim()
           };
           const [assignedType, assignedId] = String(document.getElementById("product-assignee-modal").value || "").split(":");
@@ -13170,7 +13170,7 @@
   }
 
   function activeProducts() {
-    return state.products.filter((product) => product.isActive);
+    return state.products.filter((product) => product && product.isActive !== false);
   }
 
   function activeVehicles() {
