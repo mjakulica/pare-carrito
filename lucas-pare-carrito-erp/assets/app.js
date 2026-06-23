@@ -2563,7 +2563,7 @@
     });
   }
 
-  function renderLineChartSvg(dates, values, color, formatValue) {
+  function renderLineChartSvg(dates, values, color, formatValue, options = {}) {
     const width = 580;
     const height = 170;
     const padLeft = 46;
@@ -2601,12 +2601,14 @@
       const date = dates[position] || "";
       const valueLabel = formatValue(value);
       const pointLabel = chartPointTooltipLabel(date, valueLabel);
+      const showPointText = values.length <= Number(options.maxPointLabels || values.length || 0);
+      const visiblePointLabel = options.pointLabelMode === "value" ? valueLabel : formatDateShort(date) + " " + valueLabel;
       return `
         <g class="chart-point" tabindex="0" role="img" aria-label="${escapeAttr(pointLabel)}">
           <title>${escapeHtml(pointLabel)}</title>
           <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="8" fill="transparent" />
           <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" fill="${color}" />
-          <text x="${labelX.toFixed(1)}" y="${labelY.toFixed(1)}" text-anchor="middle">${escapeHtml(formatDateShort(date) + " " + valueLabel)}</text>
+          ${showPointText ? `<text x="${labelX.toFixed(1)}" y="${labelY.toFixed(1)}" text-anchor="middle">${escapeHtml(visiblePointLabel)}</text>` : ""}
         </g>
       `;
     }).join("");
@@ -4907,7 +4909,7 @@
   function renderHistoryLineChart(title, series, formatter, color, chartKey) {
     const dates = (series || []).map((point) => point.date);
     const values = (series || []).map((point) => Number(point.value || 0));
-    const chart = renderLineChartSvg(dates, values, color || "#2457a6", formatter);
+    const chart = renderLineChartSvg(dates, values, color || "#2457a6", formatter, { pointLabelMode: "value", maxPointLabels: 10 });
     const list = Array.isArray(series) ? series : [];
     const last = list.filter((point) => Number(point.value || 0) > 0).slice(-1)[0] || list[list.length - 1];
     return `
@@ -12121,6 +12123,9 @@
     if ((cleanName === "naranja" || cleanName === "naranjas") && cleanUnit === "bolsa") {
       return { unitType: "jaula", quantity: quantity > 0 && quantity < 1 ? 1 : quantity };
     }
+    if ((cleanName === "naranja bolsa" || cleanName === "naranjas bolsa") && (!cleanUnit || cleanUnit === "docena")) {
+      return { unitType: "jaula", quantity: quantity > 0 && quantity < 1 ? 1 : quantity };
+    }
     return null;
   }
 
@@ -12332,6 +12337,9 @@
       return findByWords(["limon"], ["jaula"]);
     }
     if ((cleanName === "naranja" || cleanName === "naranjas") && cleanUnit === "jaula") {
+      return findByWords(["naranja"], ["jaula"]);
+    }
+    if ((cleanName === "naranja bolsa" || cleanName === "naranjas bolsa") && (cleanUnit === "jaula" || cleanUnit === "docena" || !cleanUnit)) {
       return findByWords(["naranja"], ["jaula"]);
     }
     return null;
