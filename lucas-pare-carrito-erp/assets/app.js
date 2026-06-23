@@ -2329,12 +2329,18 @@
   function renderSyncBanners() {
     let html = "";
     if (ui.syncWarning) {
-      html += `<div class="alert" style="margin-bottom:14px"><strong>Atencion sincronización:</strong> ${escapeHtml(ui.syncWarning)}</div>`;
+      html += `<div class="alert" style="margin-bottom:14px"><strong>Atencion sincronizacion:</strong> ${escapeHtml(ui.syncWarning)}</div>`;
     }
     if (ui.syncStatus || loadPatchQueue().length) {
       const pending = loadPatchQueue().length;
       const label = ui.syncStatus || (pending ? pending + " cambio(s) pendiente(s)" : "");
-      html += `<div class="alert ${pending ? "warn" : ""}" style="margin-bottom:14px"><strong>Sincronización:</strong> ${escapeHtml(label)}</div>`;
+      const config = getCloudSyncConfig();
+      const detail = String(config.lastError || "").trim();
+      const isConflict = /conflicto|409/i.test(label + " " + detail);
+      const help = isConflict
+        ? `<div class="muted" style="margin-top:6px">Solucion: vaya a Configuracion &gt; Sincronizacion y use "Descargar datos ahora" para traer la version del servidor, o "Subir datos ahora" si esta seguro de que esta pantalla tiene la informacion correcta.</div>`
+        : "";
+      html += `<div class="alert ${pending || isConflict ? "warn" : ""}" style="margin-bottom:14px"><strong>Sincronizacion:</strong> ${escapeHtml(label)}${detail ? `<div style="margin-top:6px">${escapeHtml(detail)}</div>` : ""}${help}</div>`;
     }
     if (ui.lastOverwrite) {
       const elapsed = Math.floor((Date.now() - ui.lastOverwrite.at) / 1000);
@@ -2342,7 +2348,7 @@
       if (remaining > 0) {
         html += `
           <div class="alert warn" style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
-            <span>La última descarga de la nube redujo los pedidos de ${ui.lastOverwrite.ordersBefore} a ${ui.lastOverwrite.ordersAfter}. Se puede deshacer durante ${remaining}s.</span>
+            <span>La ultima descarga de la nube redujo los pedidos de ${ui.lastOverwrite.ordersBefore} a ${ui.lastOverwrite.ordersAfter}. Se puede deshacer durante ${remaining}s.</span>
             <button class="btn small primary" type="button" data-undo-last-overwrite>Deshacer</button>
           </div>
         `;
@@ -3146,6 +3152,7 @@
           <aside class="panel order-cart-panel" id="order-cart-panel">
             <div class="order-cart-head" data-order-cart-drag>
               <h2 class="page-title" style="font-size:18px">Carrito</h2>
+              <img class="order-cart-drag-logo" src="./assets/cart-drag-handle.png" alt="" aria-hidden="true" />
             </div>
             <div id="order-cart" class="cart-list"><div class="empty compact">Sin productos agregados.</div></div>
             ${hideOrderPrices ? "" : `<div class="order-total-summary">
@@ -12069,17 +12076,18 @@
     const cleanTokens = (nameTokens || []).filter(Boolean);
     if (!cleanTokens.length) return { name: "", note: "" };
     let best = null;
-    for (let index = 1; index <= cleanTokens.length; index += 1) {
+    for (let index = cleanTokens.length; index >= 1; index -= 1) {
       const candidateName = cleanTokens.slice(0, index).join(" ").trim();
       if (!candidateName) continue;
       const match = matchProductForParsedLine(candidateName, unitType, clientId);
       if (!match || !match.product) continue;
       const noteTokens = (rawNameTokens || []).slice(index);
       const note = cleanupParsedProductNote(noteTokens.join(" "));
-      const score = match.score - (note ? 0 : 0.25);
+      const score = match.score - (note ? 0.5 : 0);
       if (!best || score > best.score || (score === best.score && note && !best.note)) {
         best = { name: candidateName, note, score };
       }
+      if (match.exact && !note) break;
     }
     if (best) return { name: best.name, note: best.note };
     return { name: cleanTokens.join(" ").trim(), note: "" };
@@ -12099,21 +12107,42 @@
 
   function matchProductForParsedLine(name, unitType, clientId) {
     const clean = normalizeText(name);
+    if (!clean) return null;
     const clientAlias = state.clientProductAliases.find((alias) => alias.clientId === clientId && normalizeText(alias.alias) === clean);
     if (clientAlias) {
       const product = getProduct(clientAlias.productId);
-      return product ? { product, score: 100 } : null;
+      return product ? { product, score: 120, exact: true } : null;
     }
     const generalAlias = state.productAliases.find((alias) => normalizeText(alias.alias) === clean);
     if (generalAlias) {
       const product = getProduct(generalAlias.productId);
-      return product ? { product, score: 95 } : null;
+      return product ? { product, score: 115, exact: true } : null;
     }
     const searchable = clean.replace(/\bdc\b/g, "docena").replace(/\bk\b/g, "kg").replace(/\bl\b/g, "lechuga");
+    const unitText = normalizeText(unitType);
+    const searchableWithUnit = [searchable, unitText].filter(Boolean).join(" ").trim();
+    const exactCandidates = activeProducts().map((product) => {
+      const productText = normalizeText(product.name);
+      const productWithoutUnit = stripTrailingProductUnitWords(productText);
+      const preferred = !!getPreference(clientId, product.id);
+      const unitMatches = !unitText || normalizeText(product.unitType) === unitText || productText.endsWith(" " + unitText);
+      const exact = productText === searchable || productText === searchableWithUnit || productWithoutUnit === searchable;
+      if (!exact) return null;
+      return {
+        product,
+        score: 105 + (preferred ? 10 : 0) + (unitMatches ? 8 : 0) - Math.max(0, productText.length - searchableWithUnit.length) / 100,
+        exact: true,
+        preferred,
+        unitMatches,
+        nameLength: productText.length
+      };
+    }).filter(Boolean).sort((a, b) => b.score - a.score || Number(b.preferred) - Number(a.preferred) || Number(b.unitMatches) - Number(a.unitMatches) || a.nameLength - b.nameLength);
+    if (exactCandidates.length) return exactCandidates[0];
     const candidates = activeProducts().map((product) => {
       const productText = normalizeText(product.name);
       const words = searchable.split(" ").filter(Boolean);
       const productWords = productText.split(" ");
+      const preferred = !!getPreference(clientId, product.id);
       const wordScore = words.reduce((sum, word) => {
         if (productText.includes(word)) return sum + 2;
         if (productWords.some((pword) => pword.startsWith(word) || word.startsWith(pword))) return sum + 1;
@@ -12121,11 +12150,20 @@
         return sum - 1;
       }, 0);
       const firstWordBonus = words.length && productWords.length && (productWords[0] === words[0] || productWords[0].startsWith(words[0]) || (words[0].length > 3 && levenshtein(productWords[0], words[0]) <= 1)) ? 3 : 0;
-      const unitScore = unitType && product.unitType === unitType ? 4 : unitType ? -1 : 0;
-      const exactBonus = productText.includes(searchable) ? 3 : 0;
-      return { product, score: wordScore + unitScore + exactBonus + firstWordBonus };
+      const unitScore = unitType && (product.unitType === unitType || productText.endsWith(" " + unitText)) ? 5 : unitType ? -2 : 0;
+      const exactBonus = productText.includes(searchableWithUnit || searchable) ? 4 : productText.includes(searchable) ? 2 : 0;
+      const preferenceBonus = preferred ? 4 : 0;
+      const extraWordPenalty = Math.max(0, productWords.length - words.length) * 0.35;
+      return { product, score: wordScore + unitScore + exactBonus + firstWordBonus + preferenceBonus - extraWordPenalty, preferred };
     }).sort((a, b) => b.score - a.score);
     return candidates[0] && candidates[0].score > 0 ? candidates[0] : null;
+  }
+
+  function stripTrailingProductUnitWords(value) {
+    const units = new Set(DEFAULT_UNIT_TYPES.map((unit) => normalizeText(unit.name)).concat(["kg", "kilo", "kilos", "unidad", "unidades", "cajon", "cajones"]));
+    const words = normalizeText(value).split(" ").filter(Boolean);
+    while (words.length > 1 && units.has(words[words.length - 1])) words.pop();
+    return words.join(" ");
   }
 
   function normalizeUnitForProduct(unitType, product) {
