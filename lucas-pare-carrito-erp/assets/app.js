@@ -2547,6 +2547,22 @@
     return formatNumber(value);
   }
 
+  function buildChartDateTicks(dates, maxTicks) {
+    const list = Array.isArray(dates) ? dates.filter(Boolean) : [];
+    const limit = maxTicks || 7;
+    if (list.length <= limit) return list.map((date, index) => ({ date, index }));
+    const lastIndex = list.length - 1;
+    const seen = new Set();
+    return Array.from({ length: limit }).map((_, tickIndex) => {
+      const index = Math.round((tickIndex * lastIndex) / (limit - 1));
+      return { date: list[index], index };
+    }).filter((tick) => {
+      if (seen.has(tick.index)) return false;
+      seen.add(tick.index);
+      return true;
+    });
+  }
+
   function renderLineChartSvg(dates, values, color, formatValue) {
     const width = 580;
     const height = 170;
@@ -2572,6 +2588,11 @@
     }).join("");
     const zeroY = min < 0 ? pointY(0) : null;
     const lastValue = values.length ? values[values.length - 1] : 0;
+    const dateTicks = buildChartDateTicks(dates, 7).map((tick) => {
+      const x = pointX(tick.index);
+      const anchor = tick.index === 0 ? "start" : tick.index === dates.length - 1 ? "end" : "middle";
+      return `<text class="chart-grid-label" x="${x.toFixed(1)}" y="${height - 2}" text-anchor="${anchor}">${escapeHtml(formatDateShort(tick.date))}</text>`;
+    }).join("");
     const pointMarks = values.map((value, position) => {
       const x = pointX(position);
       const y = pointY(value);
@@ -2595,8 +2616,7 @@
         ${zeroY !== null ? `<line x1="${padLeft}" y1="${zeroY.toFixed(1)}" x2="${width - padRight}" y2="${zeroY.toFixed(1)}" stroke="#f0b1ad" stroke-dasharray="4 4" stroke-width="1" />` : ""}
         ${values.length > 1 ? `<polyline fill="none" stroke="${color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" points="${points}" />` : ""}
         ${pointMarks}
-        <text class="chart-grid-label" x="${padLeft}" y="${height - 2}">${escapeHtml(formatDateShort(dates[0] || ""))}</text>
-        <text class="chart-grid-label" x="${width - padRight}" y="${height - 2}" text-anchor="end">${escapeHtml(formatDateShort(dates[dates.length - 1] || ""))}</text>
+        ${dateTicks}
       </svg>
       <div class="line-chart-meta"><span>Max: ${escapeHtml(formatValue(max))}</span><span>Ultimo: ${escapeHtml(formatValue(lastValue))}</span></div>
     `;
@@ -4835,15 +4855,20 @@
     const quantitySeries = dates.map((date) => ({ date, value: Number(row.days[date] && row.days[date].quantity || 0) }));
     const priceSeries = dates.map((date) => ({ date, value: Number(row.days[date] && row.days[date].price || 0) }));
     const title = (type === "purchase" ? "Compra - " : "Venta - ") + row.productName;
+    const quantityChart = renderHistoryLineChart("Cantidad", quantitySeries, formatNumber, "#2457a6", "quantity");
+    const priceChart = renderHistoryLineChart(type === "purchase" ? "Precio de compra" : "Precio de lista", priceSeries, formatMoney, "#0f7a5d", "price");
     showModal(
       title,
       `<div class="history-product-modal">
+        <div class="history-product-actions">
+          <button class="btn small blue" type="button" data-print-history-chart="all">Imprimir gráficos</button>
+        </div>
         <div class="history-product-meta">
           <span>${escapeHtml(formatDate(from))} - ${escapeHtml(formatDate(to))}</span>
           <span>${escapeHtml(row.unitType || "")}</span>
         </div>
-        ${renderHistoryLineChart("Cantidad", quantitySeries, formatNumber)}
-        ${renderHistoryLineChart(type === "purchase" ? "Precio de compra" : "Precio de lista", priceSeries, formatMoney)}
+        ${quantityChart}
+        ${priceChart}
       </div>`,
       () => {
         const save = document.getElementById("modal-save");
@@ -4851,51 +4876,48 @@
           save.textContent = "Cerrar";
           save.addEventListener("click", closeModal);
         }
+        document.querySelectorAll("[data-print-history-chart]").forEach((button) => {
+          button.addEventListener("click", () => {
+            const scope = button.dataset.printHistoryChart || "all";
+            printHistoryProductCharts(title, from, to, row.unitType || "", scope);
+          });
+        });
       },
       { className: "wide" }
     );
   }
 
-  function renderHistoryLineChart(title, series, formatter) {
+  function printHistoryProductCharts(title, from, to, unitType, scope) {
+    const charts = Array.from(document.querySelectorAll(".history-line-card"))
+      .filter((card) => scope === "all" || card.dataset.historyChart === scope)
+      .map((card) => card.outerHTML)
+      .join("");
+    if (!charts) return;
+    printHtmlDocument(
+      title,
+      `<section class="history-chart-print-page">
+        <h1>${escapeHtml(title)}</h1>
+        <p>${escapeHtml(formatDate(from))} - ${escapeHtml(formatDate(to))}${unitType ? " · " + escapeHtml(unitType) : ""}</p>
+        <div class="history-product-modal">${charts}</div>
+      </section>`,
+      { landscape: true, margin: "6mm" }
+    );
+  }
+
+  function renderHistoryLineChart(title, series, formatter, color, chartKey) {
+    const dates = (series || []).map((point) => point.date);
     const values = (series || []).map((point) => Number(point.value || 0));
-    const max = Math.max(0, ...values);
-    const min = Math.min(0, ...values);
-    const width = 680;
-    const height = 220;
-    const padLeft = 46;
-    const padRight = 16;
-    const padTop = 24;
-    const padBottom = 38;
-    const chartWidth = width - padLeft - padRight;
-    const chartHeight = height - padTop - padBottom;
-    const span = max - min || 1;
-    const points = (series || []).map((point, index, list) => {
-      const x = padLeft + (list.length <= 1 ? chartWidth / 2 : (index / (list.length - 1)) * chartWidth);
-      const y = padTop + chartHeight - ((Number(point.value || 0) - min) / span) * chartHeight;
-      return { ...point, x, y };
-    });
-    const polyline = points.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" ");
-    const last = points.filter((point) => point.value > 0).slice(-1)[0] || points[points.length - 1];
+    const chart = renderLineChartSvg(dates, values, color || "#2457a6", formatter);
+    const list = Array.isArray(series) ? series : [];
+    const last = list.filter((point) => Number(point.value || 0) > 0).slice(-1)[0] || list[list.length - 1];
     return `
-      <div class="history-line-card">
+      <div class="history-line-card" data-history-chart="${escapeAttr(chartKey || "")}">
         <div class="history-line-head">
           <strong>${escapeHtml(title)}</strong>
-          <span>${last ? escapeHtml(formatter(last.value || 0)) : "-"}</span>
+          <span>${last ? escapeHtml(formatter(Number(last.value || 0))) : "-"}</span>
+          <button class="btn small ghost" type="button" data-print-history-chart="${escapeAttr(chartKey || "")}" title="Imprimir ${escapeAttr(title)}" aria-label="Imprimir ${escapeAttr(title)}">&#128424;</button>
         </div>
-        <svg class="history-line-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeAttr(title)}">
-          <line x1="${padLeft}" y1="${padTop}" x2="${padLeft}" y2="${padTop + chartHeight}" class="history-axis" />
-          <line x1="${padLeft}" y1="${padTop + chartHeight}" x2="${padLeft + chartWidth}" y2="${padTop + chartHeight}" class="history-axis" />
-          <text x="8" y="${padTop + 5}" class="history-chart-label">${escapeHtml(formatter(max))}</text>
-          <text x="8" y="${padTop + chartHeight}" class="history-chart-label">${escapeHtml(formatter(min))}</text>
-          ${polyline ? `<polyline points="${polyline}" class="history-line-path" />` : ""}
-          ${points.map((point, index) => `
-            <g class="history-line-point" tabindex="0">
-              <circle cx="${point.x.toFixed(1)}" cy="${point.y.toFixed(1)}" r="${point.value > 0 ? 4 : 2.5}" />
-              <title>${escapeHtml(formatDateShort(point.date) + ": " + formatter(point.value || 0))}</title>
-              ${index === 0 || index === points.length - 1 ? `<text x="${point.x.toFixed(1)}" y="${height - 10}" text-anchor="${index === 0 ? "start" : "end"}">${escapeHtml(formatDateShort(point.date))}</text>` : ""}
-            </g>
-          `).join("")}
-        </svg>
+        ${chart}
       </div>
     `;
   }
@@ -12062,10 +12084,18 @@
         unitType = nextUnit;
         remove.add(index + 1);
         if (normalizeText(nextToken).startsWith("gr")) quantity = quantity / 1000;
+        if (normalizeText(nextToken).startsWith("un") && quantity >= 12 && quantity % 12 === 0) {
+          quantity = quantity / 12;
+          unitType = "docena";
+        }
       } else if (prevUnit) {
         unitType = prevUnit;
         remove.add(index - 1);
         if (normalizeText(prevToken).startsWith("gr")) quantity = quantity / 1000;
+        if (normalizeText(prevToken).startsWith("un") && quantity >= 12 && quantity % 12 === 0) {
+          quantity = quantity / 12;
+          unitType = "docena";
+        }
       }
       const nameTokens = tokens.filter((_, tokenIndex) => !remove.has(tokenIndex)).filter((token) => token && !isOrderConnectorToken(token));
       const rawNameTokens = rawTokens.filter((_, tokenIndex) => !remove.has(tokenIndex)).filter((token) => !isOrderConnectorToken(normalizeOrderTokenText(token)));
@@ -12078,8 +12108,11 @@
 
   function normalizeWhatsappOrderSyntax(line) {
     return String(line || "")
+      .replace(/([a-zA-Z\u00c0-\u017f])\.(?=\d)/g, "$1 ")
+      .replace(/\.(?=\d)/g, " ")
       .replace(/(\d)([a-zA-Z\u00c0-\u017f]+)/g, "$1 $2")
       .replace(/([a-zA-Z\u00c0-\u017f])(\d)/g, "$1 $2")
+      .replace(/\briestra\b/gi, "ristra")
       .replace(/\bkilo\s*n?de\b/gi, "kilo de")
       .replace(/\bkilonde\b/gi, "kilo de")
       .replace(/\bkilode\b/gi, "kilo de")
@@ -12170,7 +12203,7 @@
     if (clean === "u" || clean.startsWith("un")) return "unidad";
     if (clean === "mp" || clean.startsWith("mapl")) return "maple";
     if (clean.startsWith("band")) return "bandeja";
-    if (clean.startsWith("rist")) return "ristra";
+    if (clean.startsWith("rist") || clean.startsWith("riestr")) return "ristra";
     if (clean.startsWith("cabez")) return "cabeza";
     return "";
   }
@@ -12229,7 +12262,7 @@
       const productWithoutUnit = stripTrailingProductUnitWords(productText);
       const preferred = !!getPreference(clientId, product.id);
       const unitMatches = !unitText || normalizeText(product.unitType) === unitText || productText.endsWith(" " + unitText);
-      const exact = productText === searchable || productText === searchableWithUnit || productWithoutUnit === searchable;
+      const exact = productText === searchable || productText === searchableWithUnit || (productWithoutUnit === searchable && unitMatches);
       if (!exact) return null;
       return {
         product,
@@ -12253,11 +12286,13 @@
         return sum - 1;
       }, 0);
       const firstWordBonus = words.length && productWords.length && (productWords[0] === words[0] || productWords[0].startsWith(words[0]) || (words[0].length > 3 && levenshtein(productWords[0], words[0]) <= 1)) ? 3 : 0;
-      const unitScore = unitType && (product.unitType === unitType || productText.endsWith(" " + unitText)) ? 5 : unitType ? -2 : 0;
       const exactBonus = productText.includes(searchableWithUnit || searchable) ? 4 : productText.includes(searchable) ? 2 : 0;
+      const hasNameSignal = wordScore > 0 || firstWordBonus > 0 || exactBonus > 0;
+      const unitScore = !hasNameSignal ? 0 : unitType && (product.unitType === unitType || productText.endsWith(" " + unitText)) ? 8 : unitType ? -6 : 0;
       const preferenceBonus = preferred ? 4 : 0;
       const extraWordPenalty = Math.max(0, productWords.length - words.length) * 0.35;
-      return { product, score: wordScore + unitScore + exactBonus + firstWordBonus + preferenceBonus - extraWordPenalty, preferred };
+      const noNamePenalty = hasNameSignal ? 0 : 20;
+      return { product, score: wordScore + unitScore + exactBonus + firstWordBonus + preferenceBonus - extraWordPenalty - noNamePenalty, preferred };
     }).sort((a, b) => b.score - a.score);
     return candidates[0] && candidates[0].score > 0 ? candidates[0] : null;
   }
@@ -14920,6 +14955,17 @@
       .history-print-page th,.history-print-page td{border:1px solid #ddd;padding:1px 2px;white-space:nowrap;line-height:1.1}
       .history-print-page th{background:#f3f4f6}
       .history-print-page .history-category-row td{background:#e5e7eb;font-weight:700}
+      .history-chart-print-page{margin:0;padding:0}
+      .history-chart-print-page h1{font-size:16px;margin:0 0 4px}
+      .history-chart-print-page p{font-size:11px;margin:0 0 8px;color:#475467}
+      .history-chart-print-page .history-product-modal{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+      .history-chart-print-page .history-line-card{border:1px solid #ddd;border-radius:6px;padding:8px;break-inside:avoid;page-break-inside:avoid}
+      .history-chart-print-page .history-line-head{display:flex;justify-content:space-between;gap:8px;margin:0 0 4px;font-size:12px}
+      .history-chart-print-page .history-line-head .btn{display:none}
+      .history-chart-print-page .line-chart-svg{width:100%;height:auto}
+      .history-chart-print-page .chart-grid-line{stroke:#e5e7eb;stroke-width:1}
+      .history-chart-print-page .chart-grid-label,.history-chart-print-page .chart-point text{fill:#475467;font-size:10px}
+      .history-chart-print-page .line-chart-meta{display:flex;justify-content:space-between;font-size:10px;color:#475467}
       .provider-print-page{margin:0;padding:0}
       .provider-print-sheet .print-title{margin-bottom:6px}
       .provider-print-sheet .print-table{font-size:10px}

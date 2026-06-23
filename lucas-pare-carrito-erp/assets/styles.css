@@ -1442,6 +1442,11 @@ tr:last-child td {
   gap: 12px;
 }
 
+.history-product-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .history-product-meta {
   display: flex;
   justify-content: space-between;
@@ -1461,14 +1466,24 @@ tr:last-child td {
 .history-line-head {
   display: flex;
   justify-content: space-between;
-  align-items: baseline;
+  align-items: center;
   gap: 10px;
   margin-bottom: 6px;
+}
+
+.history-line-head strong {
+  min-width: 0;
 }
 
 .history-line-head span {
   color: var(--blue);
   font-weight: 800;
+  margin-left: auto;
+}
+
+.history-line-head .btn {
+  min-width: 44px;
+  flex: 0 0 auto;
 }
 
 .history-line-svg {
