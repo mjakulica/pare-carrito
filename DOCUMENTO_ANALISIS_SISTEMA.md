@@ -362,25 +362,21 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 
 ## 12. Ultimo Cambio y Version
 
-**Version operativa:** 12.8.29
+**Version operativa:** 12.8.30
 **Fecha:** 2026-06-23
-**Commit GitHub del cambio funcional:** `93957387fcec2ccf26181b9cd89ebcf004579e87`
-**Entorno actualizado:** VPS productivo `/opt/pare-carrito` con Docker Compose (`api`, `caddy`, `db`).
+**Commit GitHub del cambio funcional:** No aplica, configuracion operativa de entorno en VPS.
+**Entorno actualizado:** VPS productivo `/opt/pare-carrito/pare-carrito-sas-server` con Docker Compose (`api`, `caddy`, `db`).
 
 ### Detalle del ultimo cambio
 
-- Se corrigio la visibilidad de productos nuevos en `Nuevo Pedido`.
-- Los productos sin `isActive === false` ahora son considerados activos por el listado de productos.
-- Al crear productos nuevos desde `Productos`, el `sortOrder` inicial queda en `0` para que aparezcan dentro del primer bloque visible de su categoria.
-- Se ajustaron los productos ya creados `PROD-173` (`Pepino unidad`) y `PROD-174` (`Palta Madura Unidad`) para que aparezcan en posiciones 42 y 43 del listado de `Nuevo Pedido`.
-- El cambio modifica frontend y datos operativos de productos existentes, pero no modifica relaciones de base ni estructura de tablas.
+- Se habilito Kimi/Moonshot para el OCR por imagen del endpoint `/ocr/order-image` configurando `MOONSHOT_API_KEY` en el `.env` productivo del VPS.
+- Se recreo el contenedor `api` para que tome la variable de entorno.
+- El frontend mantiene el flujo existente: al presionar `Subir imagen`, intenta OCR por IA y conserva OCR local como respaldo si la API remota falla.
+- No se modifico codigo fuente ni estructura de base de datos.
 - No se registraron credenciales en este documento ni en el historial.
 
 ### Backups asociados
 
-- VPS pre-cambio codigo: tar de `/opt/pare-carrito` generado con timestamp `20260623_070131`.
-- VPS SQL pre-ajuste: `parecarrito-db-pre-new-products-order-list_20260623_070303.sql`.
-- PC pre-cambio: `auditoria/repo-backup-20260623-pre-new-products-order-list.zip`.
-- VPS post-deploy codigo: tar de `/opt/pare-carrito` generado con timestamp `20260623_070417`.
-- VPS SQL post-ajuste: `parecarrito-db-post-new-products-order-list_20260623_070521.sql`.
-- PC post-deploy: `auditoria/repo-backup-20260623-post-new-products-order-list.zip`.
+- VPS pre-configuracion codigo: `pare-carrito-code-pre-kimi-env-retry_20260623_134404.tar.gz`.
+- VPS backup privado de entorno previo: `env-pre-kimi-retry_20260623_134404.bak`.
+- VPS post-configuracion codigo: `pare-carrito-code-post-kimi-env_20260623_134421.tar.gz`.

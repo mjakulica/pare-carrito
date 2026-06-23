@@ -1,5 +1,17 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.8.30 - Kimi operativo para OCR de pedidos (2026-06-23)
+
+### Backend / OCR por imagen
+
+- Se configuro en el VPS productivo la variable operativa `MOONSHOT_API_KEY` para habilitar el endpoint `/ocr/order-image` con Kimi/Moonshot.
+- Se mantuvieron `MOONSHOT_API_URL` y `MOONSHOT_MODEL=kimi-k2.7` como configuracion del backend.
+- Se recreo el contenedor `api` para tomar la configuracion actualizada.
+- Verificacion VPS: health de API correcto y `MOONSHOT_API_KEY` disponible dentro del contenedor sin exponer el valor.
+- Backups VPS: pre-configuracion codigo `pare-carrito-code-pre-kimi-env-retry_20260623_134404.tar.gz`, backup privado de `.env` `env-pre-kimi-retry_20260623_134404.bak` y post-configuracion `pare-carrito-code-post-kimi-env_20260623_134421.tar.gz`.
+- No se registro la clave en Git, documentacion ni reportes.
+
+---
 ## v12.8.29 - Productos nuevos visibles en Nuevo Pedido (2026-06-23)
 
 ### Frontend / Nuevo Pedido y Productos
