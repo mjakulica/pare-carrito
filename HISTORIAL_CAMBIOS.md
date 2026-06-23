@@ -1,5 +1,17 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.8.27 - Limpieza de retencion de backups VPS (2026-06-23)
+
+### Operacion / Infraestructura
+
+- Se verificaron los backups zip recientes de PC abriendolos y leyendo sus entradas completas.
+- Se verifico que `origin/master` en GitHub coincide con el HEAD local `c4766bc4105edda97dbc498e3e5d51fcce48e6ef`.
+- Se aplico retencion en `/root/backups-pare-carrito`: 2 dumps `.sql`, 2 backups `.tar.gz` de codigo y 2 archivos json/otros mas recientes.
+- La carpeta de backups del VPS paso de 150 archivos a 6 archivos, liberando aproximadamente 16.3 GB.
+- El disco `/` del VPS paso de 99% usado a 31% usado, con aproximadamente 17 GB libres.
+- No se registraron credenciales en documentacion ni reportes.
+
+---
 ## v12.8.26 - Altura desktop acotada del carrito overlay (2026-06-22)
 
 ### Frontend / Nuevo Pedido

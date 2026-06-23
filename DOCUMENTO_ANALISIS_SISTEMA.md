@@ -362,23 +362,23 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 
 ## 12. Ultimo Cambio y Version
 
-**Version operativa:** 12.8.26
-**Fecha:** 2026-06-22
-**Commit GitHub del cambio funcional:** `8c87e51060dbac59b64cf4cf39d1b97b3ad84769`
+**Version operativa:** 12.8.27
+**Fecha:** 2026-06-23
+**Commit GitHub del cambio funcional:** `c4766bc4105edda97dbc498e3e5d51fcce48e6ef`
 **Entorno actualizado:** VPS productivo `/opt/pare-carrito` con Docker Compose (`api`, `caddy`, `db`).
 
 ### Detalle del ultimo cambio
 
-- En desktop/tablet, el carrito overlay de `Nuevo Pedido` reduce su altura maxima a `min(44vh, 340px)` para que no tape toda la columna lateral y muestre aproximadamente 5 o 6 filas antes del scroll.
-- En pantallas intermedias hasta 1060px, el limite queda en `min(46vh, 340px)` para conservar el mismo comportamiento compacto.
-- El comportamiento mobile del carrito inferior se mantiene igual al de la version anterior.
-- El ajuste es frontend/CSS y no modifica datos, historiales, funcionalidades por rol ni relaciones de base.
-- Nota operativa: por bajo espacio disponible en el VPS, este cambio frontend uso backups livianos de codigo y no dump completo de base de datos.
+- Se realizo una limpieza operativa de backups antiguos en `/root/backups-pare-carrito`.
+- Antes del borrado se verificaron los zips recientes de PC y que GitHub tuviera completo el HEAD local.
+- Se conservaron 2 dumps `.sql`, 2 backups `.tar.gz` de codigo y 2 archivos json/otros mas recientes.
+- La carpeta de backups del VPS paso de 150 archivos a 6 archivos, liberando aproximadamente 16.3 GB.
+- El disco `/` del VPS paso de 99% usado a 31% usado, con aproximadamente 17 GB libres.
+- El cambio es operativo/de infraestructura y no modifica funcionalidades, roles, datos de negocio ni relaciones de base.
 - No se registraron credenciales en este documento ni en el historial.
 
 ### Backups asociados
 
-- VPS pre-cambio altura desktop carrito: tar de `/opt/pare-carrito` generado con timestamp `20260622_192653`.
-- PC pre-cambio altura desktop carrito: `auditoria/repo-backup-20260622-precart-desktop-height.zip`.
-- VPS post-cambio altura desktop carrito: tar de `/opt/pare-carrito` generado con timestamp `20260622_192913`.
-- PC post-cambio altura desktop carrito: `auditoria/repo-backup-20260622-postcart-desktop-height.zip`.
+- Backups PC verificados: zips recientes de `auditoria/repo-backup-*.zip`, incluyendo `repo-backup-20260622-finalcart-desktop-height-docs.zip`.
+- GitHub verificado: `origin/master` coincide con `c4766bc4105edda97dbc498e3e5d51fcce48e6ef`.
+- Inventario post-limpieza generado: `outputs/inventario_backups_vps_post_limpieza_20260623.csv`.
