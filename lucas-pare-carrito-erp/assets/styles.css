@@ -770,6 +770,25 @@ tr:last-child td {
   top: 78px;
 }
 
+.order-cart-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  cursor: grab;
+  touch-action: none;
+}
+
+.order-cart-head .page-title {
+  margin: 0;
+}
+
+.order-cart-panel.dragging,
+.order-cart-panel.dragging .order-cart-head {
+  cursor: grabbing;
+  user-select: none;
+}
+
 .order-form-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -922,6 +941,32 @@ tr:last-child td {
 .cart-line .btn.icon {
   grid-column: 4;
   min-height: 26px;
+  padding: 0;
+}
+
+.unmatched-alias-row {
+  position: relative;
+}
+
+.unmatched-alias-title {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 32px;
+  gap: 8px;
+  align-items: center;
+}
+
+.unmatched-alias-title strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.unmatched-alias-remove {
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  min-height: 32px;
   padding: 0;
 }
 

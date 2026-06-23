@@ -23,6 +23,7 @@
   ];
   const CATEGORIES = ["FRUTAS", "VERDURAS", "HUEVOS", "HOJAS", "CONDIMENTOS", "LEGUMBRES", "FRUTOS SECOS", "CONGELADOS", "OTROS"];
   const ORDER_PRODUCT_BATCH_SIZE = 80;
+  const ORDER_CART_POSITION_KEY = "lpc_order_cart_position_v1";
   const supportsOrderProductLazyLoad = () => typeof HTMLImageElement !== "undefined" && "loading" in HTMLImageElement.prototype && "IntersectionObserver" in window;
   const getOrderProductBatchLimit = () => supportsOrderProductLazyLoad() ? ORDER_PRODUCT_BATCH_SIZE : Number.MAX_SAFE_INTEGER;
       const PRODUCT_IMAGE_FILES = [
@@ -3142,8 +3143,10 @@
             </div>
           </div>`}
         </div>
-          <aside class="panel order-cart-panel">
-            <h2 class="page-title" style="font-size:18px">Carrito</h2>
+          <aside class="panel order-cart-panel" id="order-cart-panel">
+            <div class="order-cart-head" data-order-cart-drag>
+              <h2 class="page-title" style="font-size:18px">Carrito</h2>
+            </div>
             <div id="order-cart" class="cart-list"><div class="empty compact">Sin productos agregados.</div></div>
             ${hideOrderPrices ? "" : `<div class="order-total-summary">
               <div class="order-total-main"><span>Total</span><strong id="order-total">$0</strong></div>
@@ -3172,6 +3175,75 @@
     const warningBox = document.getElementById("order-parse-warning");
     const isCustomerOrder = isClientLikeRole(currentUser.role);
     const hideOrderPrices = isCustomerOrder || currentUser.role === "employee";
+    const initOrderCartDrag = () => {
+      const panel = document.getElementById("order-cart-panel");
+      const handle = panel ? panel.querySelector("[data-order-cart-drag]") : null;
+      if (!panel || !handle) return;
+      const isMobile = () => window.matchMedia("(max-width: 760px)").matches;
+      const clampPosition = (left, top) => {
+        const margin = 8;
+        const rect = panel.getBoundingClientRect();
+        return {
+          left: Math.min(Math.max(margin, left), Math.max(margin, window.innerWidth - rect.width - margin)),
+          top: Math.min(Math.max(margin, top), Math.max(margin, window.innerHeight - rect.height - margin))
+        };
+      };
+      const clearDesktopPosition = () => {
+        panel.style.left = "";
+        panel.style.right = "";
+        panel.style.top = "";
+      };
+      const applyPosition = () => {
+        if (isMobile()) {
+          clearDesktopPosition();
+          return;
+        }
+        let saved = null;
+        try {
+          saved = JSON.parse(localStorage.getItem(ORDER_CART_POSITION_KEY) || "null");
+        } catch {
+          saved = null;
+        }
+        if (!saved || !Number.isFinite(Number(saved.left)) || !Number.isFinite(Number(saved.top))) return;
+        const next = clampPosition(Number(saved.left), Number(saved.top));
+        panel.style.left = next.left + "px";
+        panel.style.top = next.top + "px";
+        panel.style.right = "auto";
+      };
+      applyPosition();
+      window.addEventListener("resize", applyPosition, { passive: true });
+      handle.addEventListener("pointerdown", (event) => {
+        if (isMobile() || event.button !== 0) return;
+        event.preventDefault();
+        const startRect = panel.getBoundingClientRect();
+        const startX = event.clientX;
+        const startY = event.clientY;
+        handle.setPointerCapture(event.pointerId);
+        panel.classList.add("dragging");
+        const move = (moveEvent) => {
+          const next = clampPosition(startRect.left + moveEvent.clientX - startX, startRect.top + moveEvent.clientY - startY);
+          panel.style.left = next.left + "px";
+          panel.style.top = next.top + "px";
+          panel.style.right = "auto";
+        };
+        const stop = (upEvent) => {
+          handle.releasePointerCapture(upEvent.pointerId);
+          handle.removeEventListener("pointermove", move);
+          handle.removeEventListener("pointerup", stop);
+          handle.removeEventListener("pointercancel", stop);
+          panel.classList.remove("dragging");
+          const rect = panel.getBoundingClientRect();
+          try {
+            localStorage.setItem(ORDER_CART_POSITION_KEY, JSON.stringify({ left: Math.round(rect.left), top: Math.round(rect.top) }));
+          } catch {
+            // Si localStorage esta bloqueado, el carrito sigue funcionando sin recordar posicion.
+          }
+        };
+        handle.addEventListener("pointermove", move);
+        handle.addEventListener("pointerup", stop);
+        handle.addEventListener("pointercancel", stop);
+      });
+    };
     ui.orderDraft = ui.orderDraft && typeof ui.orderDraft === "object" ? ui.orderDraft : {};
     const syncOrderDraftFromDom = () => {
       document.querySelectorAll("[data-product-row]").forEach((row) => {
@@ -3425,6 +3497,7 @@
     dateInput.addEventListener("change", handleDateChange);
     dateInput.addEventListener("blur", handleDateChange);
     bindDraftInputs();
+    initOrderCartDrag();
     updateLoadMoreButton(currentFilteredProducts());
     const orderGrid = document.querySelector(".order-grid");
     if (orderGrid) {
@@ -10627,8 +10700,11 @@
       const parsed = parseOrderLine(line, clientId);
       const aliasName = parsed ? parsed.name : line;
       return `
-        <div class="order-edit-line" data-unmatched-alias-row="${index}">
-          <strong>${escapeHtml(line)}</strong>
+        <div class="order-edit-line unmatched-alias-row" data-unmatched-alias-row="${index}">
+          <div class="unmatched-alias-title">
+            <strong>${escapeHtml(line)}</strong>
+            <button class="btn icon danger unmatched-alias-remove" type="button" data-remove-unmatched-alias title="Eliminar">X</button>
+          </div>
           <input type="hidden" data-unmatched-alias-name value="${escapeAttr(aliasName)}" />
           <div class="field span-2"><label>Producto existente</label><select data-unmatched-product><option value="">No vincular</option>${activeProducts().map((product) => `<option value="${product.id}">${escapeHtml(product.name)}</option>`).join("")}</select></div>
           <label class="field" style="display:flex;align-items:center;gap:8px;grid-template-columns:auto 1fr">
@@ -10642,6 +10718,12 @@
       "Vincular productos no reconocidos",
       `<p class="muted">Seleccione el producto correcto para guardar el alias y reconocerlo la proxima vez.</p><div class="grid">${rows}</div>`,
       () => {
+        document.querySelectorAll("[data-remove-unmatched-alias]").forEach((button) => {
+          button.addEventListener("click", () => {
+            const row = button.closest("[data-unmatched-alias-row]");
+            if (row) row.remove();
+          });
+        });
         document.getElementById("modal-save").textContent = "Guardar alias";
         document.getElementById("modal-save").addEventListener("click", () => {
           document.querySelectorAll("[data-unmatched-alias-row]").forEach((row) => {
@@ -11844,6 +11926,7 @@
     const unmatched = [];
     String(text || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean).forEach((line) => {
       if (shouldIgnoreOrderTextLine(line)) return;
+      if (shouldIgnoreDetectedClientLine(line, clientId)) return;
       const parsed = parseOrderLine(line, clientId);
       if (!parsed) {
         unmatched.push(line);
@@ -12059,6 +12142,20 @@
     return false;
   }
 
+  function shouldIgnoreDetectedClientLine(line, clientId) {
+    const client = getClient(clientId);
+    if (!client) return false;
+    const clean = normalizeText(line);
+    const name = normalizeText(client.name);
+    const id = normalizeText(client.id);
+    const numericId = String(client.id || "").replace(/\D/g, "");
+    if (!clean) return true;
+    if (name && (clean === name || clean.includes(name))) return true;
+    if (numericId && new RegExp("^0*" + regexEscape(String(Number(numericId))) + "\\b").test(clean) && lineHasClientNameHint(clean, client)) return true;
+    if (isExplicitClientHeaderLine(clean) && (findClientByLooseText(clean) || (id && clean.includes(id)))) return true;
+    return false;
+  }
+
   function detectClientFromOrderText(text) {
     const lines = String(text || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean).slice(0, 12);
     let best = null;
@@ -12074,12 +12171,28 @@
       const numbers = clean.match(/\b\d{1,4}\b/g) || [];
       numbers.forEach((num, numIndex) => {
         const client = findClientByNumberToken(num);
-        const clientNameBonus = client && clean.includes(normalizeText(client.name)) ? 20 : 0;
-        remember(client, 70 - index + numIndex + clientNameBonus);
+        const hasClientName = client && lineHasClientNameHint(clean, client);
+        const isStandalonePaddedClientId = index <= 2 && /^\d{3}$/.test(num) && clean === num;
+        if (isExplicitClientHeaderLine(clean) || hasClientName || isStandalonePaddedClientId) {
+          remember(client, 70 - index + numIndex + (hasClientName ? 20 : 0));
+        }
       });
-      remember(findClientByLooseText(clean), 55 - index);
+      const looseClient = findClientByLooseText(clean);
+      if (looseClient && (isExplicitClientHeaderLine(clean) || lineHasClientNameHint(clean, looseClient) || clean === normalizeText(looseClient.name))) {
+        remember(looseClient, 55 - index);
+      }
     });
     return best && best.score >= 45 ? best.client : null;
+  }
+
+  function isExplicitClientHeaderLine(clean) {
+    return /^(cliente|cuenta|pedido|para|nro|numero|num)\b/.test(clean);
+  }
+
+  function lineHasClientNameHint(clean, client) {
+    const nameWords = normalizeText(client && client.name).split(" ").filter((word) => word.length > 2);
+    if (!nameWords.length) return false;
+    return nameWords.some((word) => clean.includes(word));
   }
 
   function findClientByNumberToken(value) {
