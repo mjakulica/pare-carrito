@@ -1,5 +1,20 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.8.29 - Productos nuevos visibles en Nuevo Pedido (2026-06-23)
+
+### Frontend / Nuevo Pedido y Productos
+
+- `Nuevo Pedido` ahora considera activos a los productos salvo que tengan `isActive === false`, evitando ocultar productos nuevos o importados que no traigan ese campo explicitamente.
+- Al crear un producto nuevo desde la pagina `Productos`, el `sortOrder` inicial pasa a `0` para que aparezca dentro del primer bloque visible de su categoria en `Nuevo Pedido`.
+- Se ajustaron los productos ya creados `PROD-173` (`Pepino unidad`) y `PROD-174` (`Palta Madura Unidad`) para que queden en posiciones 42 y 43 del orden de `Nuevo Pedido`, dentro del primer lote virtualizado.
+- Commit funcional desplegado: `93957387fcec2ccf26181b9cd89ebcf004579e87`.
+- Verificacion: `node --check`, `git diff --check` y consulta SQL de posicion en listado.
+- Backups VPS: pre-cambio codigo `20260623_070131`, SQL pre-ajuste `20260623_070303`, post-deploy codigo `20260623_070417`, SQL post-ajuste `20260623_070521`.
+- Backup PC pre-cambio: `auditoria/repo-backup-20260623-pre-new-products-order-list.zip`.
+- Backup PC post-deploy: `auditoria/repo-backup-20260623-post-new-products-order-list.zip`.
+- No se registraron credenciales en documentacion ni reportes.
+
+---
 ## v12.8.28 - Pegado WhatsApp con notas y OCR IA configurable (2026-06-23)
 
 ### Frontend / Nuevo Pedido
@@ -511,4 +526,3 @@
 ## v12.7 y anteriores
 
 Ver `DOCUMENTO_ANALISIS_SISTEMA.md` para el detalle de funcionalidades hasta la versión `v12.7`.
-

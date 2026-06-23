@@ -362,26 +362,25 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 
 ## 12. Ultimo Cambio y Version
 
-**Version operativa:** 12.8.28
+**Version operativa:** 12.8.29
 **Fecha:** 2026-06-23
-**Commit GitHub del cambio funcional:** `db227306efd36e15d5e5ade711b7168f72784350`
+**Commit GitHub del cambio funcional:** `93957387fcec2ccf26181b9cd89ebcf004579e87`
 **Entorno actualizado:** VPS productivo `/opt/pare-carrito` con Docker Compose (`api`, `caddy`, `db`).
 
 ### Detalle del ultimo cambio
 
-- En `Nuevo Pedido`, `Pegar pedido de WhatsApp` descarta encabezados y textos ajenos al pedido antes de generar dudas.
-- Las aclaraciones posteriores a producto/cantidad se guardan como nota del producto, sin mezclarlas con el nombre del producto.
-- El sistema intenta detectar cliente por numero o nombre dentro del texto pegado/OCR y seleccionarlo antes de cargar items, actualizando precios y vehiculo en el momento.
-- `Subir imagen` intenta usar el nuevo endpoint `/ocr/order-image`, preparado para Kimi/Moonshot por variables de entorno, y conserva OCR local como fallback.
-- El backend agrega `POST /ocr/order-image` para roles gerente, admin y empleado; la clave se lee desde `MOONSHOT_API_KEY` y no se expone al navegador.
-- Se corrigieron textos visibles puntuales con tildes y enes sin modificar rutas internas, IDs ni nombres de productos/archivos.
-- El cambio modifica frontend, backend y docker-compose; no modifica relaciones de base ni datos existentes.
-- Nota operativa: al momento del deploy, el VPS no tenia `MOONSHOT_API_KEY` configurada; el sistema queda con OCR local como respaldo hasta cargar esa variable.
+- Se corrigio la visibilidad de productos nuevos en `Nuevo Pedido`.
+- Los productos sin `isActive === false` ahora son considerados activos por el listado de productos.
+- Al crear productos nuevos desde `Productos`, el `sortOrder` inicial queda en `0` para que aparezcan dentro del primer bloque visible de su categoria.
+- Se ajustaron los productos ya creados `PROD-173` (`Pepino unidad`) y `PROD-174` (`Palta Madura Unidad`) para que aparezcan en posiciones 42 y 43 del listado de `Nuevo Pedido`.
+- El cambio modifica frontend y datos operativos de productos existentes, pero no modifica relaciones de base ni estructura de tablas.
 - No se registraron credenciales en este documento ni en el historial.
 
 ### Backups asociados
 
-- VPS pre-cambio WhatsApp/OCR: tar de `/opt/pare-carrito` generado con timestamp `20260623_063119`.
-- PC pre-cambio WhatsApp/OCR: `auditoria/repo-backup-20260623-pre-kimi-whatsapp-texts.zip`.
-- VPS post-deploy WhatsApp/OCR: tar de `/opt/pare-carrito` generado con timestamp `20260623_065545`.
-- PC post-deploy WhatsApp/OCR: `auditoria/repo-backup-20260623-post-kimi-whatsapp-texts.zip`.
+- VPS pre-cambio codigo: tar de `/opt/pare-carrito` generado con timestamp `20260623_070131`.
+- VPS SQL pre-ajuste: `parecarrito-db-pre-new-products-order-list_20260623_070303.sql`.
+- PC pre-cambio: `auditoria/repo-backup-20260623-pre-new-products-order-list.zip`.
+- VPS post-deploy codigo: tar de `/opt/pare-carrito` generado con timestamp `20260623_070417`.
+- VPS SQL post-ajuste: `parecarrito-db-post-new-products-order-list_20260623_070521.sql`.
+- PC post-deploy: `auditoria/repo-backup-20260623-post-new-products-order-list.zip`.
