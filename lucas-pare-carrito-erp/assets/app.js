@@ -12099,9 +12099,27 @@
       }
       const nameTokens = tokens.filter((_, tokenIndex) => !remove.has(tokenIndex)).filter((token) => token && !isOrderConnectorToken(token));
       const rawNameTokens = rawTokens.filter((_, tokenIndex) => !remove.has(tokenIndex)).filter((token) => !isOrderConnectorToken(normalizeOrderTokenText(token)));
+      const override = getParsedLineUnitQuantityOverride(nameTokens, unitType, quantity);
+      if (override) {
+        unitType = override.unitType || unitType;
+        quantity = override.quantity || quantity;
+      }
       const resolved = resolveParsedProductNameAndNote(nameTokens, rawNameTokens, unitType, clientId);
       if (!resolved.name) continue;
       return { name: resolved.name, quantity, unitType, note: resolved.note };
+    }
+    return null;
+  }
+
+  function getParsedLineUnitQuantityOverride(nameTokens, unitType, quantity) {
+    const cleanName = normalizeText((nameTokens || []).join(" "));
+    const cleanUnit = normalizeText(unitType);
+    if (!cleanName || !cleanUnit) return null;
+    if ((cleanName === "limon" || cleanName === "limones") && cleanUnit === "bolsa") {
+      return { unitType: "jaula", quantity };
+    }
+    if ((cleanName === "naranja" || cleanName === "naranjas") && cleanUnit === "bolsa") {
+      return { unitType: "jaula", quantity: quantity > 0 && quantity < 1 ? 1 : quantity };
     }
     return null;
   }
@@ -12244,6 +12262,9 @@
   function matchProductForParsedLine(name, unitType, clientId) {
     const clean = normalizeText(name);
     if (!clean) return null;
+    const unitText = normalizeText(unitType);
+    const unitSensitiveProduct = findUnitSensitiveParsedProduct(clean, unitText);
+    if (unitSensitiveProduct) return { product: unitSensitiveProduct, score: 118, exact: true };
     const clientAlias = state.clientProductAliases.find((alias) => alias.clientId === clientId && normalizeText(alias.alias) === clean);
     if (clientAlias) {
       const product = getProduct(clientAlias.productId);
@@ -12255,7 +12276,6 @@
       return product ? { product, score: 115, exact: true } : null;
     }
     const searchable = clean.replace(/\bdc\b/g, "docena").replace(/\bk\b/g, "kg").replace(/\bl\b/g, "lechuga");
-    const unitText = normalizeText(unitType);
     const searchableWithUnit = [searchable, unitText].filter(Boolean).join(" ").trim();
     const exactCandidates = activeProducts().map((product) => {
       const productText = normalizeText(product.name);
@@ -12295,6 +12315,26 @@
       return { product, score: wordScore + unitScore + exactBonus + firstWordBonus + preferenceBonus - extraWordPenalty - noNamePenalty, preferred };
     }).sort((a, b) => b.score - a.score);
     return candidates[0] && candidates[0].score > 0 ? candidates[0] : null;
+  }
+
+  function findUnitSensitiveParsedProduct(cleanName, cleanUnit) {
+    const products = activeProducts();
+    const findByWords = (requiredWords, unitWords) => products.find((product) => {
+      const productName = normalizeText(product.name);
+      const productUnit = normalizeText(product.unitType);
+      return requiredWords.every((word) => productName.includes(word))
+        && unitWords.some((word) => productUnit === word || productName.includes(word));
+    });
+    if ((cleanName === "tomate" || cleanName === "tomates") && cleanUnit === "kg") {
+      return findByWords(["tomate", "perita"], ["kg"]) || findByWords(["tomate"], ["kg"]);
+    }
+    if ((cleanName === "limon" || cleanName === "limones") && cleanUnit === "jaula") {
+      return findByWords(["limon"], ["jaula"]);
+    }
+    if ((cleanName === "naranja" || cleanName === "naranjas") && cleanUnit === "jaula") {
+      return findByWords(["naranja"], ["jaula"]);
+    }
+    return null;
   }
 
   function stripTrailingProductUnitWords(value) {
@@ -14957,7 +14997,7 @@
       .history-print-page .history-category-row td{background:#e5e7eb;font-weight:700}
       .history-chart-print-page{margin:0;padding:0}
       .history-chart-print-page h1{font-size:16px;margin:0 0 4px}
-      .history-chart-print-page p{font-size:11px;margin:0 0 8px;color:#475467}
+      .history-chart-print-page p{display:none}
       .history-chart-print-page .history-product-modal{display:grid;grid-template-columns:1fr 1fr;gap:8px}
       .history-chart-print-page .history-line-card{border:1px solid #ddd;border-radius:6px;padding:8px;break-inside:avoid;page-break-inside:avoid}
       .history-chart-print-page .history-line-head{display:flex;justify-content:space-between;gap:8px;margin:0 0 4px;font-size:12px}
@@ -14965,6 +15005,7 @@
       .history-chart-print-page .line-chart-svg{width:100%;height:auto}
       .history-chart-print-page .chart-grid-line{stroke:#e5e7eb;stroke-width:1}
       .history-chart-print-page .chart-grid-label,.history-chart-print-page .chart-point text{fill:#475467;font-size:10px}
+      .history-chart-print-page .line-chart-label-x{display:none}
       .history-chart-print-page .line-chart-meta{display:flex;justify-content:space-between;font-size:10px;color:#475467}
       .provider-print-page{margin:0;padding:0}
       .provider-print-sheet .print-title{margin-bottom:6px}
