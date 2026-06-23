@@ -362,20 +362,20 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 
 ## 12. Ultimo Cambio y Version
 
-**Version operativa:** 12.8.36
+**Version operativa:** 12.8.37
 **Fecha:** 2026-06-23
-**Commit GitHub del cambio funcional:** `f5a5a8c671917d1afd4e569717d2b8e2f61e51c2`
+**Commit GitHub del cambio funcional:** `2feb7b1db5f8519e26eeffae7bd26684fecf5b90`
 **Entorno actualizado:** VPS productivo `/opt/pare-carrito` con frontend estatico y API Docker Compose saludable.
 
 ### Detalle del ultimo cambio
 
-- Se ajusto la impresion de los graficos por producto de `Historiales` para ocultar fechas del rango y etiquetas de fecha del eje horizontal en el documento impreso.
-- Se agregaron reglas unitarias conservadoras al parser de WhatsApp para que los nombres genericos respeten la unidad escrita: `Tomate 2kg` prioriza `Tomate Perita Kg`, `1 bolsa de limon` prioriza `Limon Jaula` y `Naranja bolsa 1/2` se interpreta como `Naranja Jaula 1`.
+- Se ajustaron los graficos por producto de `Historiales` para que las etiquetas visibles de los puntos muestren solo cantidad/precio, sin fecha, y se oculten completamente cuando el grafico supera 10 puntos.
+- Se reforzo el parser de WhatsApp para que `Naranja bolsa 1/2` se interprete como `Naranja Jaula 1` y no como `Naranja Docena 0,5`.
 - No se modifico estructura de base de datos ni relaciones entre tablas.
 - No se registraron credenciales en este documento ni en el historial.
 
 ### Backups asociados
 
-- PC pre-cambio: `auditoria/repo-backup-20260623-pre-history-print-parser-fixes.zip`.
-- VPS pre-deploy: `pare-carrito-code-pre-history-print-parser-fixes_20260623_192714.tar.gz`.
-- VPS post-deploy: `pare-carrito-code-post-history-print-parser-fixes_20260623_192714.tar.gz`.
+- PC pre-cambio: `auditoria/repo-backup-20260623-pre-history-popup-labels-orange-fix.zip`.
+- VPS pre-deploy: `pare-carrito-code-pre-history-popup-labels-orange-fix_20260623_202616.tar.gz`.
+- VPS post-deploy: `pare-carrito-code-post-history-popup-labels-orange-fix_20260623_202616.tar.gz`.

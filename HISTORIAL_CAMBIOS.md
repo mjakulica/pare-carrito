@@ -1,5 +1,19 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.8.37 - Etiquetas limpias en graficos y naranja jaula (2026-06-23)
+
+### Frontend / Historiales y Nuevo Pedido
+
+- En los popup de graficos por producto de `Historiales`, cada punto muestra solo el valor de cantidad o precio, sin fecha visible junto al punto.
+- Si el grafico tiene mas de 10 puntos, no se muestran etiquetas sobre los puntos y quedan solo los datos de los ejes horizontal y vertical.
+- El tooltip accesible del punto conserva fecha y valor para no perder contexto al pasar por encima.
+- En `Nuevo Pedido`, el parser de `Pegar pedido de WhatsApp` refuerza la interpretacion de `Naranja bolsa 1/2` como `Naranja Jaula 1`.
+- Commit funcional desplegado: `2feb7b1db5f8519e26eeffae7bd26684fecf5b90`.
+- Verificacion: `node --check`, `git diff --check`, escaneo de secretos, deploy de `app.js` y health VPS correcto.
+- Backups: PC pre-cambio `auditoria/repo-backup-20260623-pre-history-popup-labels-orange-fix.zip`; VPS pre-deploy `pare-carrito-code-pre-history-popup-labels-orange-fix_20260623_202616.tar.gz`; VPS post-deploy `pare-carrito-code-post-history-popup-labels-orange-fix_20260623_202616.tar.gz`.
+- No se registraron credenciales en documentacion ni reportes.
+
+---
 ## v12.8.36 - Impresion de graficos y parser WhatsApp por unidad exacta (2026-06-23)
 
 ### Frontend / Historiales y Nuevo Pedido
