@@ -362,24 +362,23 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 
 ## 12. Ultimo Cambio y Version
 
-**Version operativa:** 12.8.31
+**Version operativa:** 12.8.32
 **Fecha:** 2026-06-23
-**Commit GitHub del cambio funcional:** `94a7000f702c2f13d88ce5e0e04ab2e2b1cde207`
-**Entorno actualizado:** VPS productivo `/opt/pare-carrito/pare-carrito-sas-server` con Docker Compose (`api`, `caddy`, `db`).
+**Commit GitHub del cambio funcional:** `a19a36dac6374e1d8e9e58243a7e4f1e6e5efdbf`
+**Entorno actualizado:** VPS productivo `/opt/pare-carrito` con frontend estatico y API Docker Compose saludable.
 
 ### Detalle del ultimo cambio
 
-- Se corrigio el OCR por imagen para usar un modelo de vision dedicado mediante `MOONSHOT_VISION_MODEL`.
-- El valor por defecto configurado es `moonshot-v1-32k-vision-preview`.
-- Se mantuvo `MOONSHOT_MODEL=kimi-k2.7` para usos generales, separandolo del modelo de imagen.
-- Se mejoro la respuesta de error cuando Moonshot/Kimi rechaza la llamada por facturacion, autenticacion, limite temporal o modelo no disponible.
-- El frontend de `Nuevo Pedido` muestra el motivo resumido cuando la IA no esta disponible y luego conserva el OCR local como respaldo.
-- Verificacion productiva: la API del sistema esta saludable y el contenedor tiene la clave y el modelo de vision configurados. La llamada externa a Moonshot/Kimi devuelve falta de saldo/plan, por lo que requiere regularizar la cuenta para que el OCR IA procese imagenes.
-- No se modifico la estructura de base de datos.
+- Se agrego comportamiento de carrito flotante movible en desktop para `Nuevo Pedido`, con posicion persistida en el navegador.
+- En mobile se mantiene el carrito fijo inferior compacto para conservar usabilidad tactil.
+- Se agrego boton `X` por fila en el popup de productos no reconocidos para descartar lineas antes de guardar alias.
+- Se corrigio la deteccion automatica de cliente en textos pegados de WhatsApp para evitar seleccionar `005 Barrett` u otro cliente por cantidades sueltas.
+- Las lineas interpretadas como encabezado/cliente ya no pasan al listado de productos no reconocidos.
+- No se modifico estructura de base de datos ni relaciones entre tablas.
 - No se registraron credenciales en este documento ni en el historial.
 
 ### Backups asociados
 
-- PC pre-cambio: `auditoria/repo-backup-20260623-pre-kimi-vision-fix.zip`.
-- VPS pre-deploy: `pare-carrito-code-pre-kimi-vision-fix-final_20260623_144139.tar.gz`.
-- VPS post-deploy: `pare-carrito-code-post-kimi-vision-fix_20260623_144156.tar.gz`.
+- PC pre-cambio: `auditoria/repo-backup-20260623-pre-cart-whatsapp-fixes.zip`.
+- VPS pre-deploy: `pare-carrito-code-pre-cart-whatsapp-fixes_20260623_154544.tar.gz`.
+- VPS post-deploy: `pare-carrito-code-post-cart-whatsapp-fixes_20260623_154545.tar.gz`.

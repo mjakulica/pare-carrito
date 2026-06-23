@@ -1,5 +1,20 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.8.32 - Carrito movible y mejoras WhatsApp (2026-06-23)
+
+### Frontend / Nuevo Pedido
+
+- En desktop, el carrito de `Nuevo Pedido` ahora funciona como panel flotante movible desde su cabecera y recuerda su posicion en el navegador.
+- En mobile, el carrito conserva el formato fijo inferior compacto para evitar interferir con el scroll de productos.
+- En el popup `Vincular productos no reconocidos`, cada fila no reconocida tiene un boton `X` para eliminarla de la lista antes de guardar alias.
+- La deteccion automatica de cliente al pegar WhatsApp ya no usa cualquier numero de cantidad como cliente; solo toma cliente si la linea parece encabezado, contiene nombre claro del cliente o un identificador de cliente valido.
+- Las lineas reconocidas como cliente se excluyen del popup de productos no reconocidos.
+- Commit funcional desplegado: `a19a36dac6374e1d8e9e58243a7e4f1e6e5efdbf`.
+- Verificacion: `node --check`, `git diff --check`, escaneo de secretos, deploy de assets y health VPS correcto.
+- Backups: PC pre-cambio `auditoria/repo-backup-20260623-pre-cart-whatsapp-fixes.zip`; VPS pre-deploy `pare-carrito-code-pre-cart-whatsapp-fixes_20260623_154544.tar.gz`; VPS post-deploy `pare-carrito-code-post-cart-whatsapp-fixes_20260623_154545.tar.gz`.
+- No se registraron credenciales en documentacion ni reportes.
+
+---
 ## v12.8.31 - Modelo de vision para OCR Kimi (2026-06-23)
 
 ### Backend / OCR por imagen
