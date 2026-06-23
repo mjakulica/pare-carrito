@@ -1,5 +1,22 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.8.34 - Graficos por producto y parser WhatsApp robusto (2026-06-23)
+
+### Frontend / Historiales y Nuevo Pedido
+
+- En la pagina `Historiales`, cada producto de los historiales de compra y venta abre un popup al hacer click.
+- El popup se genera bajo demanda y muestra dos graficos lineales: cantidad y precio del producto en el rango seleccionado.
+- Los graficos usan los datos ya cargados en la tabla del rango, sin llamadas extra al servidor ni carga inicial adicional.
+- En `Nuevo Pedido`, el parser de `Pegar pedido de WhatsApp` reconoce cantidades con unidad pegada, por ejemplo `Tomate perita 1kg`, `Cherry 1kg` o `Pepino 1kg`.
+- El parser normaliza frases como `10 kilos de morron verde`, `1 bolsa de cebolla`, `1 bolsa de limon`, `8 kilos de tomate`, `1 Kilonde Aji` y `4 kilos de palta`.
+- Se eliminaron conectores como `de`, `del`, `la` y `el` del nombre del producto antes del matching.
+- Verificacion local de parser: `Tomate perita 1kg` -> `Tomate Perita kg`, `10 kilos de morron verde` -> `Morron Verde Kg`, `1 bolsa de cebolla` -> `Cebolla Bolsa`, `8 kilos de tomate` -> `Tomate Perita kg`, `1 Kilonde Aji` -> `Aji Picante Kg`, `4 kilos de palta` -> `Palta Madura Kg`.
+- Commit funcional desplegado: `1ba337215c04dea6b891b15d39c8ee0fa500ab3a`.
+- Verificacion: `node --check`, `git diff --check`, escaneo de secretos, prueba local de parser, deploy de assets y health VPS correcto.
+- Backups: PC pre-cambio `auditoria/repo-backup-20260623-pre-history-popup-whatsapp-parser.zip`; VPS pre-deploy `pare-carrito-code-pre-history-popup-whatsapp-parser_20260623_181512.tar.gz`; VPS post-deploy `pare-carrito-code-post-history-popup-whatsapp-parser_20260623_181513.tar.gz`.
+- No se registraron credenciales en documentacion ni reportes.
+
+---
 ## v12.8.33 - Carrito con logo, sync claro y matching exacto (2026-06-23)
 
 ### Frontend / Nuevo Pedido

@@ -362,23 +362,22 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 
 ## 12. Ultimo Cambio y Version
 
-**Version operativa:** 12.8.33
+**Version operativa:** 12.8.34
 **Fecha:** 2026-06-23
-**Commit GitHub del cambio funcional:** `389238b401a567ca976d0e66e365d622099222fd`
+**Commit GitHub del cambio funcional:** `1ba337215c04dea6b891b15d39c8ee0fa500ab3a`
 **Entorno actualizado:** VPS productivo `/opt/pare-carrito` con frontend estatico y API Docker Compose saludable.
 
 ### Detalle del ultimo cambio
 
-- Se agrego icono visual de arrastre al carrito flotante de `Nuevo Pedido`.
-- Se aumento la prioridad visual del carrito para que quede por encima de la topbar y no pueda quedar atrapado debajo de la barra superior.
-- El banner de sincronizacion ahora muestra el detalle del ultimo conflicto registrado y orienta al usuario sobre descargar o subir datos desde la configuracion de sincronizacion.
-- El parser de pedidos pegados de WhatsApp prioriza coincidencias exactas y favoritos del cliente antes de resolver por similitud, evitando casos como `Tomate cajon` reconocido como `Tomate Redondo Cajon`, `Zapallo negro` como `Zapallo Amarillo kg`, `Ajo Ristra` como `Ajo Cabeza`, o `Albahaca unidad` como `Albahaca Hidroponica` cuando existe un producto exacto.
-- Se agrego el asset `lucas-pare-carrito-erp/assets/cart-drag-handle.png`.
+- Se agrego en `Historiales` un popup por producto con dos graficos lineales generados bajo demanda: cantidad y precio en el rango seleccionado.
+- La carga inicial de la pagina no aumenta de forma relevante porque los graficos se calculan solo al hacer click y usan los datos ya cargados de la tabla.
+- Se mejoro el parser de WhatsApp de `Nuevo Pedido` para reconocer cantidades con unidad pegada (`1kg`) y frases naturales con conectores (`kilos de`, `bolsa de`).
+- El parser elimina conectores del nombre antes de buscar producto y mantiene la prioridad de coincidencias exactas/favoritos.
 - No se modifico estructura de base de datos ni relaciones entre tablas.
 - No se registraron credenciales en este documento ni en el historial.
 
 ### Backups asociados
 
-- PC pre-cambio: `auditoria/repo-backup-20260623-pre-cart-parser-sync-fixes.zip`.
-- VPS pre-deploy: `pare-carrito-code-pre-cart-parser-sync-fixes_20260623_172407.tar.gz`.
-- VPS post-deploy: `pare-carrito-code-post-cart-parser-sync-fixes_20260623_172409.tar.gz`.
+- PC pre-cambio: `auditoria/repo-backup-20260623-pre-history-popup-whatsapp-parser.zip`.
+- VPS pre-deploy: `pare-carrito-code-pre-history-popup-whatsapp-parser_20260623_181512.tar.gz`.
+- VPS post-deploy: `pare-carrito-code-post-history-popup-whatsapp-parser_20260623_181513.tar.gz`.
