@@ -1,5 +1,20 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.8.36 - Impresion de graficos y parser WhatsApp por unidad exacta (2026-06-23)
+
+### Frontend / Historiales y Nuevo Pedido
+
+- En `Historiales`, la impresion del popup de graficos por producto ya no muestra las fechas del rango ni las etiquetas de fecha del eje horizontal; conserva el grafico y los valores/cantidades para una impresion mas limpia.
+- En `Nuevo Pedido`, el parser de `Pegar pedido de WhatsApp` prioriza `Tomate Perita Kg` cuando el texto indica `Tomate` con unidad `kg`, por ejemplo `Tomate 2kg`.
+- El parser interpreta `1 bolsa de limon` como `Limon Jaula 1` en vez de `Limon Docena`.
+- El parser interpreta `Naranja bolsa 1/2` como `Naranja Jaula 1` en vez de `Naranja Docena 0,5`.
+- Se mantuvieron las mejoras previas para `Ajo 1 riestra`, `Papa.1 bolsa`, conversiones a docena y lechuga crespa.
+- Commit funcional desplegado: `f5a5a8c671917d1afd4e569717d2b8e2f61e51c2`.
+- Verificacion: `node --check`, `git diff --check`, escaneo de secretos, pruebas locales de parser, deploy de `app.js` y health VPS correcto.
+- Backups: PC pre-cambio `auditoria/repo-backup-20260623-pre-history-print-parser-fixes.zip`; VPS pre-deploy `pare-carrito-code-pre-history-print-parser-fixes_20260623_192714.tar.gz`; VPS post-deploy `pare-carrito-code-post-history-print-parser-fixes_20260623_192714.tar.gz`.
+- No se registraron credenciales en documentacion ni reportes.
+
+---
 ## v12.8.35 - Graficos imprimibles y parser WhatsApp por unidad (2026-06-23)
 
 ### Frontend / Historiales, Inicio y Nuevo Pedido

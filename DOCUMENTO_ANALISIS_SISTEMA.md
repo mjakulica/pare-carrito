@@ -362,22 +362,20 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 
 ## 12. Ultimo Cambio y Version
 
-**Version operativa:** 12.8.35
+**Version operativa:** 12.8.36
 **Fecha:** 2026-06-23
-**Commit GitHub del cambio funcional:** `a0475fe722b61b29be85c197a06978059ba37413`
+**Commit GitHub del cambio funcional:** `f5a5a8c671917d1afd4e569717d2b8e2f61e51c2`
 **Entorno actualizado:** VPS productivo `/opt/pare-carrito` con frontend estatico y API Docker Compose saludable.
 
 ### Detalle del ultimo cambio
 
-- Se alinearon los graficos del popup de `Historiales` con el formato visual usado en `Inicio`, incluyendo eje lateral, grilla, puntos y tooltip con fecha y valor.
-- Los graficos de `Historiales` e `Inicio` ahora distribuyen hasta 7 fechas en el eje horizontal para mejorar la lectura de rangos largos.
-- El popup de producto en `Historiales` permite imprimir ambos graficos juntos o cada grafico por separado, directamente, en formato horizontal y sin el resto de la pagina.
-- Se ajusto el parser de WhatsApp para ponderar mejor la unidad escrita por el cliente: `kilos de tomate` prioriza `Tomate Perita Kg`, `Ajo 1 riestra` prioriza `Ajo Ristra`, `Papa.1 bolsa` se interpreta como bolsa y `Banana 12 unidades` se convierte a docena cuando corresponde.
+- Se ajusto la impresion de los graficos por producto de `Historiales` para ocultar fechas del rango y etiquetas de fecha del eje horizontal en el documento impreso.
+- Se agregaron reglas unitarias conservadoras al parser de WhatsApp para que los nombres genericos respeten la unidad escrita: `Tomate 2kg` prioriza `Tomate Perita Kg`, `1 bolsa de limon` prioriza `Limon Jaula` y `Naranja bolsa 1/2` se interpreta como `Naranja Jaula 1`.
 - No se modifico estructura de base de datos ni relaciones entre tablas.
 - No se registraron credenciales en este documento ni en el historial.
 
 ### Backups asociados
 
-- PC pre-cambio: `auditoria/repo-backup-20260623-pre-history-chart-print-parser-units.zip`.
-- VPS pre-deploy: `pare-carrito-code-pre-history-chart-print-parser-units_20260623_184842.tar.gz`.
-- VPS post-deploy: `pare-carrito-code-post-history-chart-print-parser-units_20260623_184842.tar.gz`.
+- PC pre-cambio: `auditoria/repo-backup-20260623-pre-history-print-parser-fixes.zip`.
+- VPS pre-deploy: `pare-carrito-code-pre-history-print-parser-fixes_20260623_192714.tar.gz`.
+- VPS post-deploy: `pare-carrito-code-post-history-print-parser-fixes_20260623_192714.tar.gz`.
