@@ -1,5 +1,20 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.8.41 - Sincronizacion robusta por rol (2026-06-24)
+
+### Frontend / Backend / Sincronizacion
+
+- Se separaron permisos de sincronizacion por rol: lectura de estado, parches chicos y subida completa del estado.
+- El rol `Cliente` sigue fuera de la sincronizacion completa y usa sus canales especificos para pedidos y transferencias.
+- El rol `Empleado` puede descargar el estado para trabajar con datos actualizados y puede sincronizar cambios mediante parches chicos, pero ya no puede hacer `PUT /state` completo.
+- El backend permite que parches operativos seguros de `Empleado` se fusionen sobre la version actual del servidor aunque el `baseUpdatedAt` local haya quedado viejo.
+- Los parches de `Empleado` con eliminaciones, objetos globales o escalares siguen rechazandose si hay conflicto de version.
+- Commit funcional desplegado: `09844088277ae8f9b22bc847040e51b0ab637107`.
+- Verificacion: `node --check` en frontend y backend, `git diff --check`, escaneo de secretos, rebuild Docker de API, deploy de frontend/backend y health VPS correcto.
+- Backups: PC pre-cambio `auditoria/repo-backup-20260624-pre-role-sync-hardening.zip`; VPS pre-deploy `pare-carrito-code-pre-role-sync-hardening_20260624_083412.tar.gz`; VPS post-deploy `pare-carrito-code-post-role-sync-hardening_20260624_083412.tar.gz`.
+- No se registraron credenciales en documentacion ni reportes.
+
+---
 ## v12.8.40 - Resolucion de cola pendiente en sincronizacion (2026-06-24)
 
 ### Frontend / Sincronizacion

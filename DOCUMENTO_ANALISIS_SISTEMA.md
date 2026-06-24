@@ -362,20 +362,20 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 
 ## 12. Ultimo Cambio y Version
 
-**Version operativa:** 12.8.40
+**Version operativa:** 12.8.41
 **Fecha:** 2026-06-24
-**Commit GitHub del cambio funcional:** `646cd90ef67c640cc58fc5e0bae1665310199c48`
+**Commit GitHub del cambio funcional:** `09844088277ae8f9b22bc847040e51b0ab637107`
 **Entorno actualizado:** VPS productivo `/opt/pare-carrito` con frontend estatico y API Docker Compose saludable.
 
 ### Detalle del ultimo cambio
 
-- Se corrigio el flujo de sincronizacion para que `Descargar datos ahora` limpie parches locales pendientes que quedaron asociados a una version anterior del servidor.
-- Se redujo la duplicacion visual de mensajes de conflicto en el banner global y en la pantalla `Backup`.
-- No se modifico estructura de base de datos ni relaciones entre tablas.
+- Se separo la sincronizacion por rol: `Cliente` queda en canales especificos, `Empleado` usa lectura de estado y parches chicos, y solo roles altos pueden subir el estado completo.
+- El backend fusiona parches operativos seguros de `Empleado` sobre la version actual del servidor para evitar conflictos globales por `baseUpdatedAt` viejo.
+- Se rebuildo la API Docker porque el cambio modifica `src/server.js`.
 - No se registraron credenciales en este documento ni en el historial.
 
 ### Backups asociados
 
-- PC pre-cambio: `auditoria/repo-backup-20260624-pre-sync-conflict-queue-fix.zip`.
-- VPS pre-deploy: `pare-carrito-code-pre-sync-conflict-queue-fix_20260624_081050.tar.gz`.
-- VPS post-deploy: `pare-carrito-code-post-sync-conflict-queue-fix_20260624_081050.tar.gz`.
+- PC pre-cambio: `auditoria/repo-backup-20260624-pre-role-sync-hardening.zip`.
+- VPS pre-deploy: `pare-carrito-code-pre-role-sync-hardening_20260624_083412.tar.gz`.
+- VPS post-deploy: `pare-carrito-code-post-role-sync-hardening_20260624_083412.tar.gz`.
