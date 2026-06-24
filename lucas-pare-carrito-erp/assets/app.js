@@ -365,7 +365,7 @@
   window.addEventListener("hashchange", render);
   window.addEventListener("DOMContentLoaded", async () => {
     const cloudConfig = getCloudSyncConfig();
-    if (canUseFullCloudSync() && cloudSyncReady(cloudConfig) && cloudConfig.auto !== false) {
+    if (canReadCloudState() && cloudSyncReady(cloudConfig) && cloudConfig.auto !== false) {
       await cloudPull(false, true);
     }
     render();
@@ -376,8 +376,10 @@
     const banner = document.getElementById("offline-banner");
     if (banner) banner.style.display = "none";
     const cloudConfig = getCloudSyncConfig();
-    if (canUseFullCloudSync() && cloudSyncReady(cloudConfig) && cloudConfig.auto !== false) {
+    if (canWritePatchCloudSync() && cloudSyncReady(cloudConfig) && configAutoEnabled(cloudConfig)) {
       flushPatchQueue(false).then(() => cloudPull(false));
+    } else if (canReadCloudState() && cloudSyncReady(cloudConfig) && configAutoEnabled(cloudConfig)) {
+      cloudPull(false);
     }
     flushClientWriteQueue(false);
   });
@@ -388,7 +390,7 @@
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState !== "visible") return;
     const cloudConfig = getCloudSyncConfig();
-    if (canUseFullCloudSync() && cloudSyncReady(cloudConfig) && cloudConfig.auto !== false) cloudPull(false);
+    if (canReadCloudState() && cloudSyncReady(cloudConfig) && cloudConfig.auto !== false) cloudPull(false);
     flushClientWriteQueue(false);
   });
   window.addEventListener("beforeunload", (event) => {
@@ -1023,7 +1025,7 @@
   function saveState() {
     writeLocalStateSnapshot(state, "No se pudo guardar el estado completo en localStorage; se intentara sincronizar con el servidor.");
     const config = getCloudSyncConfig();
-    if (canUseFullCloudSync() && cloudSyncReady(config) && config.auto !== false) {
+    if (canWritePatchCloudSync() && cloudSyncReady(config) && config.auto !== false) {
       if (!queueCurrentStatePatch()) scheduleCloudPush();
       else schedulePatchFlush();
     }
@@ -1224,8 +1226,24 @@
     return !!(config && config.url && (config.token || (config.username && config.password)));
   }
 
-  function canUseFullCloudSync() {
+  function configAutoEnabled(config) {
+    return !config || config.auto !== false;
+  }
+
+  function canReadCloudState() {
     return !currentUser || !isClientLikeRole(currentUser.role);
+  }
+
+  function canWriteFullCloudSync() {
+    return !currentUser || ["manager", "admin", "contador"].includes(currentUser.role);
+  }
+
+  function canWritePatchCloudSync() {
+    return !currentUser || ["manager", "admin", "employee", "contador"].includes(currentUser.role);
+  }
+
+  function canUseFullCloudSync() {
+    return canWriteFullCloudSync();
   }
 
   function cloudBaseUrl(config) {
@@ -1271,7 +1289,7 @@
 
   function scheduleCloudPush() {
     const config = getCloudSyncConfig();
-    if (!canUseFullCloudSync() || !cloudSyncReady(config) || config.auto === false) return;
+    if (!canWriteFullCloudSync() || !cloudSyncReady(config) || config.auto === false) return;
     clearTimeout(cloudPushTimer);
     cloudPushTimer = setTimeout(() => {
       cloudPushTimer = null;
@@ -1281,7 +1299,7 @@
 
   function schedulePatchFlush(delay) {
     const config = getCloudSyncConfig();
-    if (!canUseFullCloudSync() || !cloudSyncReady(config) || config.auto === false) return;
+    if (!canWritePatchCloudSync() || !cloudSyncReady(config) || config.auto === false) return;
     clearTimeout(cloudPushTimer);
     cloudPushTimer = setTimeout(() => {
       cloudPushTimer = null;
@@ -1291,8 +1309,8 @@
 
   async function flushPatchQueue(manual) {
     const config = getCloudSyncConfig();
-    if (!canUseFullCloudSync()) {
-      if (manual) alert("El rol Cliente no usa sincronización completa. Sus pedidos y transferencias se envían por separado.");
+    if (!canWritePatchCloudSync()) {
+      if (manual) alert("Este rol no usa sincronizacion completa. Sus acciones permitidas se envian por canales especificos.");
       return true;
     }
     const queue = loadPatchQueue();
@@ -1354,7 +1372,7 @@
       cloudPushTimer = null;
     }
     const config = getCloudSyncConfig();
-    if (!canUseFullCloudSync() || !cloudSyncReady(config) || config.auto === false) return false;
+    if (!canWriteFullCloudSync() || !cloudSyncReady(config) || config.auto === false) return false;
     try {
       const xhr = new XMLHttpRequest();
       xhr.open("PUT", cloudBaseUrl(config) + "/state", false);
@@ -1388,7 +1406,7 @@
   function startCloudAutoSync() {
     clearInterval(cloudPollTimer);
     const config = getCloudSyncConfig();
-    if (!canUseFullCloudSync() || !cloudSyncReady(config) || config.auto === false) return;
+    if (!canReadCloudState() || !cloudSyncReady(config) || config.auto === false) return;
     cloudPollTimer = setInterval(() => {
       cloudPull(false);
     }, 25000);
@@ -1405,13 +1423,13 @@
 
   async function cloudPush(manual, isRetry) {
     const config = getCloudSyncConfig();
-    if (!canUseFullCloudSync()) {
-      if (manual) alert("El rol Cliente no puede subir el estado completo. Use las acciones permitidas: enviar pedidos o registrar transferencias.");
-      return;
-    }
     if (loadPatchQueue().length) {
       const ok = await flushPatchQueue(manual);
       if (ok || manual) return;
+    }
+    if (!canWriteFullCloudSync()) {
+      if (manual) alert(currentUser && currentUser.role === "employee" ? "El rol Empleado sincroniza cambios mediante operaciones chicas. No sube el estado completo del sistema." : "Este rol no puede subir el estado completo. Use las acciones permitidas.");
+      return;
     }
     if (!cloudSyncReady(config)) {
       if (manual) alert("Configure la URL y el token del backend en este panel.");
@@ -1690,7 +1708,7 @@
 
   async function cloudPull(manual, isLogin) {
     const config = getCloudSyncConfig();
-    if (!canUseFullCloudSync()) {
+    if (!canReadCloudState()) {
       if (manual) alert("El rol Cliente no descarga el estado completo. La informacion se actualiza por las pantallas permitidas.");
       return;
     }

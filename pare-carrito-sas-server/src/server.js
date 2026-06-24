@@ -347,7 +347,14 @@ app.post("/auth/reset", async (req, res) => {
 });
 
 // ---------- Estado del ERP (sincronización) ----------
-const SYNC_ROLES = ["manager", "admin", "employee", "contador"];
+const STATE_READ_ROLES = ["manager", "admin", "employee", "contador"];
+const SYNC_ROLES = ["manager", "admin", "contador"];
+const PATCH_SYNC_ROLES = ["manager", "admin", "employee", "contador"];
+const EMPLOYEE_STALE_PATCH_ARRAY_KEYS = new Set([
+  "orders", "remitos", "saldos", "purchases", "payments", "caja",
+  "providerLedger", "providerPayments", "clientTransfers", "vendorLedger",
+  "attendance", "employeePayments", "employeeReimbursements", "performanceAdjustments"
+]);
 const HISTORY_KEYS = ["productListPriceHistory", "productSalesQuantityHistory", "productPurchaseHistory"];
 const ARRAY_PATCH_KEYS = [
   "orders", "deletedOrders", "exampleOrders", "remitos", "saldos", "purchases", "payments", "caja",
@@ -541,7 +548,19 @@ function applyStatePatch(data, patch) {
   return next;
 }
 
-app.get("/state", authenticate, requireRole(...SYNC_ROLES), async (req, res) => {
+function canApplyStaleEmployeePatch(patch) {
+  if (!patch || typeof patch !== "object") return false;
+  if (patch.objects && Object.keys(patch.objects).length) return false;
+  if (patch.scalars && Object.keys(patch.scalars).length) return false;
+  const arrays = patch.arrays && typeof patch.arrays === "object" ? patch.arrays : {};
+  return Object.keys(arrays).every((key) => {
+    if (!EMPLOYEE_STALE_PATCH_ARRAY_KEYS.has(key)) return false;
+    const entry = arrays[key] || {};
+    return !Array.isArray(entry.delete) || entry.delete.length === 0;
+  });
+}
+
+app.get("/state", authenticate, requireRole(...STATE_READ_ROLES), async (req, res) => {
   const { rows } = await pool.query("SELECT data, updated_at FROM app_state WHERE id = 'main'");
   if (!rows.length) return res.status(404).json({ error: "Sin datos guardados todavía." });
   res.json({ data: stripHistoryFromState(rows[0].data), updatedAt: rows[0].updated_at.toISOString() });
@@ -641,7 +660,7 @@ app.put("/state", authenticate, requireRole(...SYNC_ROLES), async (req, res) => 
   }
 });
 
-app.post("/state/patch", authenticate, requireRole(...SYNC_ROLES), async (req, res) => {
+app.post("/state/patch", authenticate, requireRole(...PATCH_SYNC_ROLES), async (req, res) => {
   const body = req.body || {};
   if (!body.operationId || !body.patch || typeof body.patch !== "object") {
     return res.status(400).json({ error: "Cuerpo inválido: se espera { operationId, baseUpdatedAt, patch }." });
@@ -666,8 +685,11 @@ app.post("/state/patch", authenticate, requireRole(...SYNC_ROLES), async (req, r
     }
     const storedIso = current.rows[0].updated_at.toISOString();
     if (storedIso !== String(body.baseUpdatedAt)) {
-      await clientDb.query("ROLLBACK");
-      return res.status(409).json({ error: "conflicto: el servidor tiene una version mas nueva", updatedAt: storedIso });
+      const allowEmployeeMerge = req.user.role === "employee" && canApplyStaleEmployeePatch(body.patch);
+      if (!allowEmployeeMerge) {
+        await clientDb.query("ROLLBACK");
+        return res.status(409).json({ error: "conflicto: el servidor tiene una version mas nueva", updatedAt: storedIso });
+      }
     }
     const beforeData = current.rows[0].data || {};
     const nextData = applyStatePatch(beforeData, body.patch);
