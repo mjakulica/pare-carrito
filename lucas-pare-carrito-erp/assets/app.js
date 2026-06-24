@@ -1706,6 +1706,18 @@
     return Object.keys(local).some((key) => local[key] > remote[key]);
   }
 
+  function hasLocalUnsyncedPatchChanges() {
+    if (loadPatchQueue().length) return true;
+    const config = getCloudSyncConfig();
+    if (!config.lastSync || !lastSyncedState) return false;
+    try {
+      return patchHasChanges(buildStatePatch(lastSyncedState, state));
+    } catch (error) {
+      console.warn("No se pudo evaluar cambios locales pendientes:", error.message);
+      return false;
+    }
+  }
+
   async function cloudPull(manual, isLogin) {
     const config = getCloudSyncConfig();
     if (!canReadCloudState()) {
@@ -1735,12 +1747,23 @@
         const typing = active && ["INPUT", "TEXTAREA", "SELECT"].includes(active.tagName);
         if (typing || ui.modal || cloudPushTimer) return;
       }
+      const localUnsyncedChanges = hasLocalUnsyncedPatchChanges();
+      if (!manual && !isLogin && localUnsyncedChanges) {
+        const msg = "Descarga automatica omitida: hay cambios locales pendientes. Primero se intentara subir o fusionar esos cambios.";
+        ui.syncStatus = "Cambios pendientes por sincronizar";
+        ui.syncWarning = msg;
+        config.lastError = msg;
+        saveCloudSyncConfig(config);
+        schedulePatchFlush(1200);
+        render();
+        return;
+      }
       if (!manual && looksLikeSeedState(payload.data) && localStateIsRicherThanRemote(state, payload.data)) {
         console.warn("Sincronización: el servidor tiene datos de ejemplo/vacío; se conservan los datos locales.");
         return;
       }
       // Safety check: prevent silent overwrite when local state has more operational data
-      if (localStateIsNewerOrRicher(state, payload.data)) {
+      if (!localUnsyncedChanges && localStateIsNewerOrRicher(state, payload.data)) {
         const local = stateOperationalCounts(state);
         const remote = stateOperationalCounts(payload.data);
         const details = Object.keys(local)
@@ -1763,14 +1786,29 @@
       backupLocalState("antes de descarga de nube");
       const backupIndexBeforeOverwrite = 0; // backupLocalState inserts at index 0
       const localOrdersBefore = Array.isArray(state.orders) ? state.orders.length : 0;
-      state = normalizeLoadedState({ ...seedState(), ...payload.data }, seedState());
+      const remoteState = normalizeLoadedState({ ...seedState(), ...payload.data }, seedState());
+      state = localUnsyncedChanges
+        ? normalizeLoadedState({ ...seedState(), ...mergeCloudStates(remoteState, state) }, seedState())
+        : remoteState;
       writeLocalStateSnapshot(state, "No se pudo guardar la descarga de nube en localStorage.");
       config.lastSync = remoteUpdated || new Date().toISOString();
       config.lastError = "";
       saveCloudSyncConfig(config);
-      lastSyncedState = cloneSyncState(state);
-      const clearedQueueCount = clearPatchQueueAfterCloudPull("Datos descargados; cola pendiente anterior limpiada");
-      if (!clearedQueueCount) {
+      lastSyncedState = localUnsyncedChanges ? cloneSyncState(remoteState) : cloneSyncState(state);
+      let clearedQueueCount = 0;
+      let requeuedMergedPatch = false;
+      if (localUnsyncedChanges) {
+        clearedQueueCount = loadPatchQueue().length;
+        savePatchQueue([]);
+        pendingPatchBaseState = lastSyncedState;
+        pendingPatchBaseUpdatedAt = config.lastSync;
+        requeuedMergedPatch = queueCurrentStatePatch();
+        if (requeuedMergedPatch) schedulePatchFlush(1200);
+        ui.syncWarning = "Se fusionaron datos de nube con cambios locales pendientes. Los cambios locales quedaron listos para subir.";
+      } else {
+        clearedQueueCount = clearPatchQueueAfterCloudPull("Datos descargados; cola pendiente anterior limpiada");
+      }
+      if (!requeuedMergedPatch) {
         pendingPatchBaseState = null;
         pendingPatchBaseUpdatedAt = "";
       }
@@ -1782,7 +1820,15 @@
         ui.lastOverwrite = null;
       }
       render();
-      if (manual) alert(clearedQueueCount ? `Datos descargados de la nube correctamente. Se limpiaron ${clearedQueueCount} cambio(s) pendiente(s) anteriores porque pertenecian a una version vieja del servidor.` : "Datos descargados de la nube correctamente.");
+      if (manual) {
+        if (localUnsyncedChanges) {
+          alert(requeuedMergedPatch
+            ? "Datos descargados y fusionados con cambios locales. Los cambios locales quedaron pendientes para subir sin pisar la nube."
+            : "Datos descargados y fusionados correctamente.");
+        } else {
+          alert(clearedQueueCount ? `Datos descargados de la nube correctamente. Se limpiaron ${clearedQueueCount} cambio(s) pendiente(s) anteriores porque pertenecian a una version vieja del servidor.` : "Datos descargados de la nube correctamente.");
+        }
+      }
     } catch (error) {
       const errorConfig = getCloudSyncConfig();
       errorConfig.lastError = "Descarga fallida " + formatTimestampShort(new Date().toISOString()) + ": " + error.message;
@@ -12075,7 +12121,7 @@
   function parseWhatsappOrder(text, clientId) {
     const items = [];
     const unmatched = [];
-    String(text || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean).forEach((line) => {
+    expandWhatsappOrderLines(text).forEach((line) => {
       if (shouldIgnoreOrderTextLine(line)) return;
       if (shouldIgnoreDetectedClientLine(line, clientId)) return;
       const parsed = parseOrderLine(line, clientId);
@@ -12096,6 +12142,78 @@
       });
     });
     return { items, unmatched };
+  }
+
+  function expandWhatsappOrderLines(text) {
+    const rawLines = String(text || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    const expanded = [];
+    rawLines.forEach((line) => {
+      const commaParts = line
+        .replace(/[;]+/g, ",")
+        .split(/\s*,+\s*/)
+        .map((part) => part.trim())
+        .filter(Boolean);
+      const parts = commaParts.length > 1 ? combineDetachedQuantitySegments(commaParts) : [line];
+      parts.forEach((part) => {
+        splitOrderLineByConjunction(part).forEach((segment) => {
+          const clean = segment.trim();
+          if (clean) expanded.push(clean);
+        });
+      });
+    });
+    return expanded;
+  }
+
+  function combineDetachedQuantitySegments(parts) {
+    const combined = [];
+    let pendingName = "";
+    parts.forEach((part) => {
+      const clean = part.trim();
+      if (!clean) return;
+      if (pendingName) {
+        if (segmentStartsWithQuantityOrUnit(clean) || segmentLooksLikeDetachedUnitQuantity(clean)) {
+          combined.push((pendingName + " " + clean).trim());
+          pendingName = "";
+          return;
+        }
+        combined.push(pendingName);
+        pendingName = "";
+      }
+      if (!segmentHasQuantity(clean) && segmentHasProductSignal(clean)) {
+        pendingName = clean;
+        return;
+      }
+      combined.push(clean);
+    });
+    if (pendingName) combined.push(pendingName);
+    return combined;
+  }
+
+  function splitOrderLineByConjunction(line) {
+    const parts = String(line || "").split(/\s+\by\b\s+/i).map((part) => part.trim()).filter(Boolean);
+    if (parts.length <= 1) return [line];
+    if (parts.every(segmentHasQuantity)) return parts;
+    return [line];
+  }
+
+  function segmentHasQuantity(value) {
+    const normalized = applyQuantityAliases(normalizeWhatsappOrderSyntax(value), "");
+    return normalized.split(/\s+/).map(cleanRawOrderToken).map(normalizeOrderTokenText).some(isQuantityToken);
+  }
+
+  function segmentStartsWithQuantityOrUnit(value) {
+    const tokens = normalizeWhatsappOrderSyntax(value).split(/\s+/).map(cleanRawOrderToken).map(normalizeOrderTokenText).filter(Boolean);
+    if (!tokens.length) return false;
+    return isQuantityToken(tokens[0]) || !!normalizeParsedUnit(tokens[0]);
+  }
+
+  function segmentLooksLikeDetachedUnitQuantity(value) {
+    const tokens = normalizeWhatsappOrderSyntax(value).split(/\s+/).map(cleanRawOrderToken).map(normalizeOrderTokenText).filter(Boolean);
+    return tokens.length <= 3 && tokens.some(isQuantityToken) && tokens.some((token) => !!normalizeParsedUnit(token));
+  }
+
+  function segmentHasProductSignal(value) {
+    return normalizeText(value).split(" ").filter((word) => word && !isOrderConnectorToken(word)).length > 0;
   }
 
   function parseOrderLine(line, clientId) {
@@ -12121,7 +12239,7 @@
       if (nextUnit) {
         unitType = nextUnit;
         remove.add(index + 1);
-        if (normalizeText(nextToken).startsWith("gr")) quantity = quantity / 1000;
+        if (isGramParsedUnitToken(nextToken)) quantity = quantity / 1000;
         if (normalizeText(nextToken).startsWith("un") && quantity >= 12 && quantity % 12 === 0) {
           quantity = quantity / 12;
           unitType = "docena";
@@ -12129,7 +12247,7 @@
       } else if (prevUnit) {
         unitType = prevUnit;
         remove.add(index - 1);
-        if (normalizeText(prevToken).startsWith("gr")) quantity = quantity / 1000;
+        if (isGramParsedUnitToken(prevToken)) quantity = quantity / 1000;
         if (normalizeText(prevToken).startsWith("un") && quantity >= 12 && quantity % 12 === 0) {
           quantity = quantity / 12;
           unitType = "docena";
@@ -12269,6 +12387,7 @@
     if (clean === "k" || clean === "klg") return "kg";
     if (clean.startsWith("kg")) return "kg";
     if (clean.startsWith("kil")) return "kg";
+    if (clean === "g") return "kg";
     if (clean.startsWith("gr")) return "kg";
     if (clean === "j" || clean === "jl" || clean.startsWith("jaul")) return "jaula";
     if (clean === "cj" || clean === "cjn" || clean.startsWith("caj")) return "cajon";
@@ -12283,6 +12402,11 @@
     return "";
   }
 
+  function isGramParsedUnitToken(value) {
+    const clean = normalizeText(value);
+    return clean === "g" || clean === "gr" || clean.startsWith("gram");
+  }
+
   function resolveParsedProductNameAndNote(nameTokens, rawNameTokens, unitType, clientId) {
     const cleanTokens = (nameTokens || []).filter(Boolean);
     if (!cleanTokens.length) return { name: "", note: "" };
@@ -12294,8 +12418,11 @@
       if (!match || !match.product) continue;
       const noteTokens = (rawNameTokens || []).slice(index);
       const note = cleanupParsedProductNote(noteTokens.join(" "));
-      const score = match.score - (note ? 0.5 : 0);
-      if (!best || score > best.score || (score === best.score && note && !best.note)) {
+      const noteClean = normalizeText(note);
+      const productText = normalizeText(match.product.name);
+      const noteLooksLikeProductTail = noteClean && noteClean.split(" ").every((word) => productText.includes(word));
+      const score = match.score - (note ? (noteLooksLikeProductTail ? 12 : 2) : 0);
+      if (!best || score > best.score || (score === best.score && !note && best.note)) {
         best = { name: candidateName, note, score };
       }
       if (match.exact && !note) break;
@@ -12320,8 +12447,6 @@
     const clean = normalizeText(name);
     if (!clean) return null;
     const unitText = normalizeText(unitType);
-    const unitSensitiveProduct = findUnitSensitiveParsedProduct(clean, unitText);
-    if (unitSensitiveProduct) return { product: unitSensitiveProduct, score: 118, exact: true };
     const clientAlias = state.clientProductAliases.find((alias) => alias.clientId === clientId && normalizeText(alias.alias) === clean);
     if (clientAlias) {
       const product = getProduct(clientAlias.productId);
@@ -12332,6 +12457,8 @@
       const product = getProduct(generalAlias.productId);
       return product ? { product, score: 115, exact: true } : null;
     }
+    const unitSensitiveProduct = findUnitSensitiveParsedProduct(clean, unitText, clientId);
+    if (unitSensitiveProduct) return { product: unitSensitiveProduct, score: 118, exact: true };
     const searchable = singularizeParsedProductText(clean).replace(/\bdc\b/g, "docena").replace(/\bk\b/g, "kg").replace(/\bl\b/g, "lechuga");
     const searchableWithUnit = [searchable, unitText].filter(Boolean).join(" ").trim();
     const exactCandidates = activeProducts().map((product) => {
@@ -12376,7 +12503,7 @@
     return candidates[0] && candidates[0].score > 0 ? candidates[0] : null;
   }
 
-  function findUnitSensitiveParsedProduct(cleanName, cleanUnit) {
+  function findUnitSensitiveParsedProduct(cleanName, cleanUnit, clientId) {
     const products = activeProducts();
     const nameSearch = singularizeParsedProductText(cleanName);
     const findByWords = (requiredWords, unitWords) => products.find((product) => {
@@ -12385,13 +12512,22 @@
       return requiredWords.every((word) => productName.includes(word))
         && unitWords.some((word) => productUnit === word || productName.includes(word));
     });
-    const findByBaseAndUnits = (unitWords) => products.find((product) => {
-      const productName = normalizeText(product.name);
-      const productBase = singularizeParsedProductText(stripTrailingProductUnitWords(productName));
-      const productUnit = normalizeText(product.unitType);
-      return productBase === nameSearch && unitWords.includes(productUnit);
-    });
+    const findByBaseAndUnits = (unitWords, preferClientHistory) => {
+      const matches = products.map((product) => {
+        const productName = normalizeText(product.name);
+        const productBase = singularizeParsedProductText(stripTrailingProductUnitWords(productName));
+        const productUnit = normalizeText(product.unitType);
+        if (productBase !== nameSearch || !unitWords.includes(productUnit)) return null;
+        return { product, preferred: !!getPreference(clientId, product.id), order: unitWords.indexOf(productUnit) };
+      }).filter(Boolean).sort((a, b) => {
+        if (preferClientHistory && a.preferred !== b.preferred) return Number(b.preferred) - Number(a.preferred);
+        return a.order - b.order;
+      });
+      return matches[0] ? matches[0].product : null;
+    };
     if (cleanUnit === "unidad" || !cleanUnit) {
+      const preferredProduct = !cleanUnit ? findByBaseAndUnits(["jaula", "cajon", "bolsa", "unidad", "docena"], true) : null;
+      if (preferredProduct && getPreference(clientId, preferredProduct.id)) return preferredProduct;
       const unitProduct = findByBaseAndUnits(["unidad"]);
       if (unitProduct) return unitProduct;
       const dozenProduct = findByBaseAndUnits(["docena"]);
