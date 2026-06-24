@@ -1,5 +1,19 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.8.38 - Media jaula de naranja preserva 0,5 (2026-06-23)
+
+### Frontend / Nuevo Pedido
+
+- Se corrigio la regla de `Pegar pedido de WhatsApp` para que `Naranja bolsa 1/2` se interprete como `Naranja Jaula 0,5`.
+- La unidad se sigue corrigiendo de `bolsa` a `jaula`, pero la cantidad original ya no se convierte a `1`.
+- La regla general de cantidad mantiene `1/2` como `0,5` para todos los productos.
+- No se hizo rollback al commit `a0475fe...` porque la correccion era puntual y no convenia perder las mejoras posteriores.
+- Commit funcional desplegado: `2425de808532ff1040ae0d02dfea9f49d3d61c9c`.
+- Verificacion: `node --check`, `git diff --check`, deploy de `app.js` y health VPS correcto.
+- Backups: PC pre-cambio `auditoria/repo-backup-20260623-pre-orange-half-fix.zip`; VPS pre-deploy `pare-carrito-code-pre-orange-half-fix_20260623_233955.tar.gz`; VPS post-deploy `pare-carrito-code-post-orange-half-fix_20260623_233955.tar.gz`.
+- No se registraron credenciales en documentacion ni reportes.
+
+---
 ## v12.8.37 - Etiquetas limpias en graficos y naranja jaula (2026-06-23)
 
 ### Frontend / Historiales y Nuevo Pedido

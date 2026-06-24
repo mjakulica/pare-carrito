@@ -362,20 +362,20 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 
 ## 12. Ultimo Cambio y Version
 
-**Version operativa:** 12.8.37
+**Version operativa:** 12.8.38
 **Fecha:** 2026-06-23
-**Commit GitHub del cambio funcional:** `2feb7b1db5f8519e26eeffae7bd26684fecf5b90`
+**Commit GitHub del cambio funcional:** `2425de808532ff1040ae0d02dfea9f49d3d61c9c`
 **Entorno actualizado:** VPS productivo `/opt/pare-carrito` con frontend estatico y API Docker Compose saludable.
 
 ### Detalle del ultimo cambio
 
-- Se ajustaron los graficos por producto de `Historiales` para que las etiquetas visibles de los puntos muestren solo cantidad/precio, sin fecha, y se oculten completamente cuando el grafico supera 10 puntos.
-- Se reforzo el parser de WhatsApp para que `Naranja bolsa 1/2` se interprete como `Naranja Jaula 1` y no como `Naranja Docena 0,5`.
+- Se corrigio el parser de WhatsApp para que `Naranja bolsa 1/2` preserve la cantidad `0,5` al convertir la unidad a `Naranja Jaula`.
+- Se elimino la excepcion incorrecta que transformaba cantidades menores a 1 en `1` para naranja.
 - No se modifico estructura de base de datos ni relaciones entre tablas.
 - No se registraron credenciales en este documento ni en el historial.
 
 ### Backups asociados
 
-- PC pre-cambio: `auditoria/repo-backup-20260623-pre-history-popup-labels-orange-fix.zip`.
-- VPS pre-deploy: `pare-carrito-code-pre-history-popup-labels-orange-fix_20260623_202616.tar.gz`.
-- VPS post-deploy: `pare-carrito-code-post-history-popup-labels-orange-fix_20260623_202616.tar.gz`.
+- PC pre-cambio: `auditoria/repo-backup-20260623-pre-orange-half-fix.zip`.
+- VPS pre-deploy: `pare-carrito-code-pre-orange-half-fix_20260623_233955.tar.gz`.
+- VPS post-deploy: `pare-carrito-code-post-orange-half-fix_20260623_233955.tar.gz`.
