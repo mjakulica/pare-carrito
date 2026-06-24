@@ -1173,6 +1173,16 @@
     }
   }
 
+  function clearPatchQueueAfterCloudPull(reason) {
+    const count = loadPatchQueue().length;
+    if (!count) return 0;
+    savePatchQueue([]);
+    pendingPatchBaseState = null;
+    pendingPatchBaseUpdatedAt = "";
+    ui.syncStatus = reason || "Datos descargados; cambios pendientes anteriores descartados";
+    return count;
+  }
+
   function queueCurrentStatePatch() {
     const config = getCloudSyncConfig();
     if (!config.lastSync || !lastSyncedState) return false;
@@ -1741,8 +1751,11 @@
       config.lastError = "";
       saveCloudSyncConfig(config);
       lastSyncedState = cloneSyncState(state);
-      pendingPatchBaseState = null;
-      pendingPatchBaseUpdatedAt = "";
+      const clearedQueueCount = clearPatchQueueAfterCloudPull("Datos descargados; cola pendiente anterior limpiada");
+      if (!clearedQueueCount) {
+        pendingPatchBaseState = null;
+        pendingPatchBaseUpdatedAt = "";
+      }
       currentUser = loadCurrentUser();
       const remoteOrdersAfter = Array.isArray(state.orders) ? state.orders.length : 0;
       if (remoteOrdersAfter < localOrdersBefore) {
@@ -1751,7 +1764,7 @@
         ui.lastOverwrite = null;
       }
       render();
-      if (manual) alert("Datos descargados de la nube correctamente.");
+      if (manual) alert(clearedQueueCount ? `Datos descargados de la nube correctamente. Se limpiaron ${clearedQueueCount} cambio(s) pendiente(s) anteriores porque pertenecian a una version vieja del servidor.` : "Datos descargados de la nube correctamente.");
     } catch (error) {
       const errorConfig = getCloudSyncConfig();
       errorConfig.lastError = "Descarga fallida " + formatTimestampShort(new Date().toISOString()) + ": " + error.message;
@@ -2335,10 +2348,12 @@
       const pending = loadPatchQueue().length;
       const label = ui.syncStatus || (pending ? pending + " cambio(s) pendiente(s)" : "");
       const config = getCloudSyncConfig();
-      const detail = String(config.lastError || "").trim();
+      let detail = String(config.lastError || "").trim();
+      if (!pending && /conflicto|pendiente/i.test(detail)) detail = "";
+      if (detail && normalizeText(detail) === normalizeText(label)) detail = "";
       const isConflict = /conflicto|409/i.test(label + " " + detail);
       const help = isConflict
-        ? `<div class="muted" style="margin-top:6px">Solucion: vaya a Configuracion &gt; Sincronizacion y use "Descargar datos ahora" para traer la version del servidor, o "Subir datos ahora" si esta seguro de que esta pantalla tiene la informacion correcta.</div>`
+        ? `<div class="muted" style="margin-top:6px">Solucion: use "Descargar datos ahora" para traer la version del servidor. Si se limpia la cola pendiente, vuelva a probar la accion que estaba realizando.</div>`
         : "";
       html += `<div class="alert ${pending || isConflict ? "warn" : ""}" style="margin-bottom:14px"><strong>Sincronizacion:</strong> ${escapeHtml(label)}${detail ? `<div style="margin-top:6px">${escapeHtml(detail)}</div>` : ""}${help}</div>`;
     }
@@ -10258,6 +10273,9 @@
 
   function renderBackup() {
     afterRender.push(bindBackup);
+    const cloudConfig = getCloudSyncConfig();
+    const cloudLastError = String(cloudConfig.lastError || "").trim();
+    const showPanelSyncError = cloudLastError && !((ui.syncStatus || loadPatchQueue().length) && /conflicto|pendiente/i.test(cloudLastError));
     return pageShell(
       "Backup",
       "Exportar e importar datos locales para pruebas, mudanza de navegador o despliegue.",
@@ -10279,7 +10297,7 @@
       <div class="panel" style="margin-top:14px">
         <h2 class="page-title" style="font-size:18px">Sincronización en la nube (Cloudflare)</h2>
         <p class="muted">Conecte el backend de la Opcion E (DEPLOYMENT.md) para compartir los datos entre dispositivos. Version de la app: <strong>${APP_VERSION}</strong>. Ultima sincronización: <strong id="cloud-sync-status">${escapeHtml(getCloudSyncConfig().lastSync ? formatTimestampShort(getCloudSyncConfig().lastSync) : "nunca")}</strong></p>
-        ${getCloudSyncConfig().lastError ? `<div class="alert">${escapeHtml(getCloudSyncConfig().lastError)}</div>` : ""}
+        ${showPanelSyncError ? `<div class="alert">${escapeHtml(cloudLastError)}</div>` : ""}
         <div class="form-grid" style="margin-top:10px">
           <div class="field span-2"><label>URL del backend</label><input id="cloud-sync-url" placeholder="https://api.sudominio.com o https://...workers.dev" value="${escapeAttr(getCloudSyncConfig().url || "")}" /></div>
           <div class="field"><label>Usuario (servidor propio)</label><input id="cloud-sync-username" placeholder="gerente" autocomplete="off" value="${escapeAttr(getCloudSyncConfig().username || "")}" /></div>
