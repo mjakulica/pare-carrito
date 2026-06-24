@@ -362,20 +362,21 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 
 ## 12. Ultimo Cambio y Version
 
-**Version operativa:** 12.8.38
-**Fecha:** 2026-06-23
-**Commit GitHub del cambio funcional:** `2425de808532ff1040ae0d02dfea9f49d3d61c9c`
+**Version operativa:** 12.8.39
+**Fecha:** 2026-06-24
+**Commit GitHub del cambio funcional:** `8543296fcb5674e86cf4a4ef496b31084c0f0512`
 **Entorno actualizado:** VPS productivo `/opt/pare-carrito` con frontend estatico y API Docker Compose saludable.
 
 ### Detalle del ultimo cambio
 
-- Se corrigio el parser de WhatsApp para que `Naranja bolsa 1/2` preserve la cantidad `0,5` al convertir la unidad a `Naranja Jaula`.
-- Se elimino la excepcion incorrecta que transformaba cantidades menores a 1 en `1` para naranja.
+- Se mejoro el parser de WhatsApp de `Nuevo Pedido` para reconocer plurales simples y resolver mejor presentaciones mayoristas y productos por docena.
+- Las presentaciones `cajon`, `jaula` y `bolsa` ahora priorizan la unidad mayorista real cargada para el mismo producto.
+- Las cantidades expresadas en unidades sueltas de productos que se venden por docena se convierten a docenas, manteniendo `6 unidades` como `0,5 docena`.
 - No se modifico estructura de base de datos ni relaciones entre tablas.
 - No se registraron credenciales en este documento ni en el historial.
 
 ### Backups asociados
 
-- PC pre-cambio: `auditoria/repo-backup-20260623-pre-orange-half-fix.zip`.
-- VPS pre-deploy: `pare-carrito-code-pre-orange-half-fix_20260623_233955.tar.gz`.
-- VPS post-deploy: `pare-carrito-code-post-orange-half-fix_20260623_233955.tar.gz`.
+- PC pre-cambio: `auditoria/repo-backup-20260624-pre-whatsapp-units-docena-wholesale.zip`.
+- VPS pre-deploy: `pare-carrito-code-pre-whatsapp-units-docena-wholesale_20260624_000510.tar.gz`.
+- VPS post-deploy: `pare-carrito-code-post-whatsapp-units-docena-wholesale_20260624_000510.tar.gz`.

@@ -1,5 +1,19 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.8.39 - Parser WhatsApp para docenas y mayoristas (2026-06-24)
+
+### Frontend / Nuevo Pedido
+
+- El parser de `Pegar pedido de WhatsApp` ahora singulariza plurales simples para reconocer mejor productos escritos como `naranjas`, `bananas`, `morrones rojos` o `mandarinas`.
+- Cuando el texto indica `cajon`, `jaula` o `bolsa`, el parser prioriza la presentacion mayorista real cargada para el mismo producto; por ejemplo `1/2 cajon de naranjas` se interpreta como `Naranja Jaula 0,5`.
+- Cuando el producto encontrado se vende por docena y el texto indica unidades sueltas, convierte la cantidad a docenas; por ejemplo `6 bananas`, `Banana 6 unidades` y `Mandarina 6 unidades` se interpretan como `0,5 docena`.
+- Si existe una presentacion por unidad para un producto escrito en plural, se prioriza esa unidad antes de caer en kilos; por ejemplo `2 morrones rojos` puede resolverse como `Morron Rojo Unidades 2` si esa presentacion esta cargada.
+- Commit funcional desplegado: `8543296fcb5674e86cf4a4ef496b31084c0f0512`.
+- Verificacion: `node --check`, `git diff --check`, escaneo de secretos, prueba local de parser, deploy de `app.js` y health VPS correcto.
+- Backups: PC pre-cambio `auditoria/repo-backup-20260624-pre-whatsapp-units-docena-wholesale.zip`; VPS pre-deploy `pare-carrito-code-pre-whatsapp-units-docena-wholesale_20260624_000510.tar.gz`; VPS post-deploy `pare-carrito-code-post-whatsapp-units-docena-wholesale_20260624_000510.tar.gz`.
+- No se registraron credenciales en documentacion ni reportes.
+
+---
 ## v12.8.38 - Media jaula de naranja preserva 0,5 (2026-06-23)
 
 ### Frontend / Nuevo Pedido
