@@ -1307,7 +1307,7 @@
     }, delay || 500);
   }
 
-  async function flushPatchQueue(manual) {
+  async function flushPatchQueue(manual, resolvingConflict) {
     const config = getCloudSyncConfig();
     if (!canWritePatchCloudSync()) {
       if (manual) alert("Este rol no usa sincronizacion completa. Sus acciones permitidas se envian por canales especificos.");
@@ -1335,12 +1335,15 @@
         body: JSON.stringify(op)
       });
       if (response.status === 409) {
+        const merged = !resolvingConflict && await mergePendingPatchConflictWithRemote(config, manual);
+        if (merged) return flushPatchQueue(manual, true);
         const detail = await readCloudErrorDetail(response);
-        config.lastError = "Conflicto al sincronizar cambio pendiente" + detail + ". Descargue datos antes de reintentar.";
+        config.lastError = "Conflicto al sincronizar cambio pendiente" + detail + ". Se conservo la informacion local y se reintentara la sincronizacion.";
         saveCloudSyncConfig(config);
         ui.syncStatus = "Conflicto de sincronización";
+        ui.syncStatus = "Cambios pendientes por sincronizar";
         if (manual) alert(config.lastError);
-        render();
+        schedulePatchFlush(6000);
         return false;
       }
       if (!response.ok) throw new Error("HTTP " + response.status + (await readCloudErrorDetail(response)));
@@ -1362,6 +1365,40 @@
       console.warn("Sincronización pendiente:", error.message);
       schedulePatchFlush(5000);
       if (manual) alert("No se pudo sincronizar todavía: " + error.message);
+      return false;
+    }
+  }
+
+  async function mergePendingPatchConflictWithRemote(config, manual) {
+    try {
+      const remoteResponse = await cloudRequest(config, "/state", { method: "GET" });
+      if (!remoteResponse.ok) return false;
+      const remotePayload = await remoteResponse.json();
+      if (!remotePayload || typeof remotePayload.data !== "object") return false;
+      backupLocalState("antes de fusion por conflicto de sincronizacion");
+      const remoteState = normalizeLoadedState({ ...seedState(), ...remotePayload.data }, seedState());
+      state = normalizeLoadedState({ ...seedState(), ...mergeCloudStates(remoteState, state) }, seedState());
+      writeLocalStateSnapshot(state, "No se pudo guardar la fusion local contra la nube.");
+      savePatchQueue([]);
+      config.lastSync = String(remotePayload.updatedAt || new Date().toISOString());
+      config.lastError = "";
+      saveCloudSyncConfig(config);
+      lastSyncedState = cloneSyncState(remoteState);
+      pendingPatchBaseState = lastSyncedState;
+      pendingPatchBaseUpdatedAt = config.lastSync;
+      const queued = queueCurrentStatePatch();
+      if (!queued) {
+        pendingPatchBaseState = null;
+        pendingPatchBaseUpdatedAt = "";
+        ui.syncStatus = "Guardado";
+        return true;
+      }
+      ui.syncStatus = "Cambios locales fusionados; sincronizando...";
+      ui.syncWarning = "Se fusiono la version del servidor con los cambios locales de esta computadora. Se reintentara la subida sin sobrescribir lo local.";
+      if (manual) alert("Se fusiono la version del servidor con los cambios locales de esta computadora. Ahora se reintentara subir la informacion local.");
+      return true;
+    } catch (error) {
+      console.warn("No se pudo fusionar conflicto pendiente:", error.message);
       return false;
     }
   }
@@ -1752,10 +1789,7 @@
         const msg = "Descarga automatica omitida: hay cambios locales pendientes. Primero se intentara subir o fusionar esos cambios.";
         ui.syncStatus = "Cambios pendientes por sincronizar";
         ui.syncWarning = msg;
-        config.lastError = msg;
-        saveCloudSyncConfig(config);
         schedulePatchFlush(1200);
-        render();
         return;
       }
       if (!manual && looksLikeSeedState(payload.data) && localStateIsRicherThanRemote(state, payload.data)) {

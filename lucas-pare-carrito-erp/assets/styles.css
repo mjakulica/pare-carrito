@@ -127,7 +127,7 @@ a {
   position: sticky;
   top: 0;
   align-self: start;
-  z-index: 5;
+  z-index: 140;
 }
 
 .brand {
@@ -3814,7 +3814,7 @@ tr:last-child td {
   max-width: calc(100vw - 44px);
   max-height: min(44vh, 340px);
   overflow: auto;
-  z-index: 130;
+  z-index: 120;
   box-shadow: 0 12px 34px rgba(23, 33, 46, 0.18);
 }
 
@@ -3847,7 +3847,7 @@ tr:last-child td {
     max-height: min(24vh, 188px);
     margin: 0;
     border-radius: var(--radius) var(--radius) 0 0;
-    z-index: 130;
+    z-index: 70;
   }
 }
 
