@@ -1,5 +1,21 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.8.42 - Parser WhatsApp y fusion segura de sync (2026-06-24)
+
+### Frontend / Nuevo Pedido / Sincronizacion
+
+- El parser de `Pegar pedido de WhatsApp` separa lineas con varios productos por comas o `y` solo cuando cada segmento parece un item con cantidad.
+- Se corrigio la deteccion de notas para que partes reales del nombre, como `Abeja` en `Miel de Abeja` o `Soja` en `Brote de Soja`, no queden cargadas como nota.
+- Se convierten gramos a kilos en entradas como `500g`, `500 g` o `500 gramos`.
+- Los alias especificos del cliente y sus favoritos se priorizan antes del match generico por unidad, evitando casos como `Naranja 1` a `Naranja Docena` cuando el cliente usa `Naranja Jaula`.
+- La descarga automatica de nube ya no reemplaza datos si hay cambios locales pendientes; la descarga manual fusiona nube y local y reencola las diferencias para subirlas sin pisar cambios.
+- Commit funcional desplegado: `0f83e0eee8b1d924f0ef34c72c22226214c2ae81`.
+- Verificacion: `node --check`, `git diff --check`, escaneo de secretos, deploy de `app.js` y health VPS correcto en API/DB.
+- Backups: PC post-cambio `auditoria/repo-backup-20260624-post-sync-parser-merge.zip`; VPS pre-deploy `pare-carrito-code-pre-sync-parser-merge-retry_20260624_104900.tar.gz`; VPS post-deploy `pare-carrito-code-post-sync-parser-merge_20260624_104900.tar.gz`.
+- No se registraron credenciales en documentacion ni reportes.
+
+---
+
 ## v12.8.41 - Sincronizacion robusta por rol (2026-06-24)
 
 ### Frontend / Backend / Sincronizacion

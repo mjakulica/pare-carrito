@@ -357,25 +357,27 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 - El servidor sigue siendo la fuente de verdad.
 - El rol Cliente no ejecuta sincronizacion completa contra `/state`; sus escrituras permitidas usan endpoints especificos (`/orders/customer` y `/transfers`) con cola local de reintento.
 - `/orders/customer` valida que el cliente del pedido este vinculado al usuario y registra pedido, saldo y caja dentro de una transaccion.
+- Desde la version 12.8.42, si hay cambios locales pendientes, la descarga automatica no reemplaza el estado local. La descarga manual fusiona la version del servidor con la version local y reencola las diferencias para subirlas, evitando perdidas por sobrescritura.
 
 ---
 
 ## 12. Ultimo Cambio y Version
 
-**Version operativa:** 12.8.41
+**Version operativa:** 12.8.42
 **Fecha:** 2026-06-24
-**Commit GitHub del cambio funcional:** `09844088277ae8f9b22bc847040e51b0ab637107`
+**Commit GitHub del cambio funcional:** `0f83e0eee8b1d924f0ef34c72c22226214c2ae81`
 **Entorno actualizado:** VPS productivo `/opt/pare-carrito` con frontend estatico y API Docker Compose saludable.
 
 ### Detalle del ultimo cambio
 
-- Se separo la sincronizacion por rol: `Cliente` queda en canales especificos, `Empleado` usa lectura de estado y parches chicos, y solo roles altos pueden subir el estado completo.
-- El backend fusiona parches operativos seguros de `Empleado` sobre la version actual del servidor para evitar conflictos globales por `baseUpdatedAt` viejo.
-- Se rebuildo la API Docker porque el cambio modifica `src/server.js`.
+- Se robustecio el parser de `Pegar pedido de WhatsApp` para separar pedidos pegados en una sola linea, convertir gramos a kilos, evitar notas falsas tomadas del nombre del producto y priorizar alias/favoritos del cliente.
+- Se bloqueo la descarga automatica de nube cuando hay cambios locales pendientes.
+- La descarga manual con cambios pendientes ahora fusiona servidor y local, y reencola el parche resultante para subirlo sin pisar informacion.
+- El cambio solo modifica frontend; no requirio rebuild de la API Docker.
 - No se registraron credenciales en este documento ni en el historial.
 
 ### Backups asociados
 
-- PC pre-cambio: `auditoria/repo-backup-20260624-pre-role-sync-hardening.zip`.
-- VPS pre-deploy: `pare-carrito-code-pre-role-sync-hardening_20260624_083412.tar.gz`.
-- VPS post-deploy: `pare-carrito-code-post-role-sync-hardening_20260624_083412.tar.gz`.
+- PC post-cambio: `auditoria/repo-backup-20260624-post-sync-parser-merge.zip`.
+- VPS pre-deploy: `pare-carrito-code-pre-sync-parser-merge-retry_20260624_104900.tar.gz`.
+- VPS post-deploy: `pare-carrito-code-post-sync-parser-merge_20260624_104900.tar.gz`.
