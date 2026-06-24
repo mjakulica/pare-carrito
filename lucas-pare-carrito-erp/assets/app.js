@@ -12121,10 +12121,10 @@
       return { unitType: "jaula", quantity };
     }
     if ((cleanName === "naranja" || cleanName === "naranjas") && cleanUnit === "bolsa") {
-      return { unitType: "jaula", quantity: quantity > 0 && quantity < 1 ? 1 : quantity };
+      return { unitType: "jaula", quantity };
     }
     if ((cleanName === "naranja bolsa" || cleanName === "naranjas bolsa") && (!cleanUnit || cleanUnit === "docena")) {
-      return { unitType: "jaula", quantity: quantity > 0 && quantity < 1 ? 1 : quantity };
+      return { unitType: "jaula", quantity };
     }
     return null;
   }
