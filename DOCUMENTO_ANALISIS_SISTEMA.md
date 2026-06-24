@@ -362,21 +362,20 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 
 ## 12. Ultimo Cambio y Version
 
-**Version operativa:** 12.8.39
+**Version operativa:** 12.8.40
 **Fecha:** 2026-06-24
-**Commit GitHub del cambio funcional:** `8543296fcb5674e86cf4a4ef496b31084c0f0512`
+**Commit GitHub del cambio funcional:** `646cd90ef67c640cc58fc5e0bae1665310199c48`
 **Entorno actualizado:** VPS productivo `/opt/pare-carrito` con frontend estatico y API Docker Compose saludable.
 
 ### Detalle del ultimo cambio
 
-- Se mejoro el parser de WhatsApp de `Nuevo Pedido` para reconocer plurales simples y resolver mejor presentaciones mayoristas y productos por docena.
-- Las presentaciones `cajon`, `jaula` y `bolsa` ahora priorizan la unidad mayorista real cargada para el mismo producto.
-- Las cantidades expresadas en unidades sueltas de productos que se venden por docena se convierten a docenas, manteniendo `6 unidades` como `0,5 docena`.
+- Se corrigio el flujo de sincronizacion para que `Descargar datos ahora` limpie parches locales pendientes que quedaron asociados a una version anterior del servidor.
+- Se redujo la duplicacion visual de mensajes de conflicto en el banner global y en la pantalla `Backup`.
 - No se modifico estructura de base de datos ni relaciones entre tablas.
 - No se registraron credenciales en este documento ni en el historial.
 
 ### Backups asociados
 
-- PC pre-cambio: `auditoria/repo-backup-20260624-pre-whatsapp-units-docena-wholesale.zip`.
-- VPS pre-deploy: `pare-carrito-code-pre-whatsapp-units-docena-wholesale_20260624_000510.tar.gz`.
-- VPS post-deploy: `pare-carrito-code-post-whatsapp-units-docena-wholesale_20260624_000510.tar.gz`.
+- PC pre-cambio: `auditoria/repo-backup-20260624-pre-sync-conflict-queue-fix.zip`.
+- VPS pre-deploy: `pare-carrito-code-pre-sync-conflict-queue-fix_20260624_081050.tar.gz`.
+- VPS post-deploy: `pare-carrito-code-post-sync-conflict-queue-fix_20260624_081050.tar.gz`.

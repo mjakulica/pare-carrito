@@ -1,5 +1,19 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.8.40 - Resolucion de cola pendiente en sincronizacion (2026-06-24)
+
+### Frontend / Sincronizacion
+
+- Se corrigio el conflicto circular donde `Descargar datos ahora` traia la version del servidor pero dejaba una cola local pendiente con `baseUpdatedAt` viejo.
+- Al descargar datos de la nube, si existian cambios pendientes anteriores, el sistema los limpia despues de generar el backup local previo a la descarga.
+- El mensaje manual de descarga informa cuantos cambios pendientes fueron limpiados por pertenecer a una version vieja del servidor.
+- El banner de sincronizacion evita repetir el mismo conflicto dos veces y la pantalla `Backup` ya no duplica `lastError` cuando el banner global ya lo muestra.
+- Commit funcional desplegado: `646cd90ef67c640cc58fc5e0bae1665310199c48`.
+- Verificacion: `node --check`, `git diff --check`, escaneo de secretos, deploy de `app.js` y health VPS correcto.
+- Backups: PC pre-cambio `auditoria/repo-backup-20260624-pre-sync-conflict-queue-fix.zip`; VPS pre-deploy `pare-carrito-code-pre-sync-conflict-queue-fix_20260624_081050.tar.gz`; VPS post-deploy `pare-carrito-code-post-sync-conflict-queue-fix_20260624_081050.tar.gz`.
+- No se registraron credenciales en documentacion ni reportes.
+
+---
 ## v12.8.39 - Parser WhatsApp para docenas y mayoristas (2026-06-24)
 
 ### Frontend / Nuevo Pedido
