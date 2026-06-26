@@ -2633,12 +2633,16 @@
     });
     return sum;
   }
+  function lastStockCountBefore(productId, date) {
+    const counts = stockMovementsFor(productId).filter((m) => m.type === "conteo" && m.date < date)
+      .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.createdAt || "").localeCompare(String(b.createdAt || "")));
+    return counts.length ? counts[counts.length - 1] : null;
+  }
   function getStockEstimated(productId, asOfDate) {
     const today = asOfDate || todayISO();
-    const last = lastStockCount(productId);
-    const from = last ? last.date : "0000-00-00";
-    const base = last ? Number(last.qty || 0) : 0;
-    return base + stockComprasBetween(productId, from, today) - stockOrdersBetween(productId, from, today);
+    const last = lastStockCountBefore(productId, today);
+    if (!last) return 0;
+    return Number(last.qty || 0) + stockComprasBetween(productId, last.date, today) - stockOrdersBetween(productId, last.date, today);
   }
   function getStockDemandToday(productId) {
     return stockOrdersBetween(productId, todayISO(), addDaysISO(todayISO(), 1));
@@ -2685,9 +2689,10 @@
   }
   function recordStockCount(productId, realValue) {
     const today = todayISO();
+    const hadPrior = !!lastStockCountBefore(productId, today);
     const estimated = getStockEstimated(productId, today);
     const real = Math.round(Number(realValue || 0) * 100) / 100;
-    const diff = Math.round((estimated - real) * 100) / 100;
+    const diff = hadPrior ? Math.round((estimated - real) * 100) / 100 : 0;
     state.stockMovements = (state.stockMovements || []).filter((m) => !(m.productId === productId && m.date === today && ["conteo", "merma", "ajuste"].includes(m.type)));
     const stamp = new Date().toISOString();
     const baseId = nextDatedId("STK", state.stockMovements);
