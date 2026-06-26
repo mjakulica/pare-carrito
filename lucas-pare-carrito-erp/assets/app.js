@@ -8020,7 +8020,10 @@
           <div class="form-grid payment-form-grid">
             <div class="field payment-client-field">
               <label>Cliente</label>
-              <select id="payment-client">${activeClients().map((client) => `<option value="${client.id}">${escapeHtml(client.id)} - ${escapeHtml(client.name)} - saldo ${formatMoney(getClientBalance(client.id))}</option>`).join("")}</select>
+              <input id="payment-client-search" list="payment-client-list" placeholder="Escribir o elegir cliente..." autocomplete="off" value="${activeClients()[0] ? escapeAttr(activeClients()[0].id + " - " + activeClients()[0].name) : ""}" />
+              <datalist id="payment-client-list">${activeClients().map((client) => `<option value="${escapeAttr(client.id + " - " + client.name)}"></option>`).join("")}</datalist>
+              <input type="hidden" id="payment-client" value="${activeClients()[0] ? escapeAttr(activeClients()[0].id) : ""}" />
+              <label id="payment-related-wrap" style="display:none;align-items:center;gap:6px;margin-top:6px"><input type="checkbox" id="payment-related-accounts" style="width:auto;min-height:auto" /> Cuentas relacionadas</label>
             </div>
             <div class="field payment-amount-field">
               <label>Monto recibido</label>
@@ -8038,7 +8041,7 @@
             </div>
             <div class="field payment-orders-field">
               <label>Pedidos relacionados</label>
-              <div id="payment-orders" class="grid">${renderPaymentOrderSelect("", activeClients()[0] ? activeClients()[0].id : "")}</div>
+              <div id="payment-orders" class="grid">${renderPaymentOrderSelect("", activeClients()[0] ? activeClients()[0].id : "", [], false)}</div>
               <div class="page-actions" style="margin-top:8px">
                 <button class="btn small ghost" type="button" data-add-payment-order>Agregar otro pedido</button>
                 <span class="muted" id="payment-orders-total">Total pedidos $0</span>
@@ -8075,8 +8078,8 @@
     );
   }
 
-  function renderPaymentOrderSelect(value, clientId, selectedIds) {
-    const allowed = getPaymentClientIds(clientId);
+  function renderPaymentOrderSelect(value, clientId, selectedIds, includeLinked) {
+    const allowed = getPaymentClientIds(clientId, includeLinked);
     const selected = new Set(selectedIds || []);
     return `
       <div class="payment-order-line" data-payment-order-row>
@@ -8113,14 +8116,13 @@
       const selectedIds = Array.from(document.querySelectorAll("[data-payment-order]")).map((select) => select.value).filter(Boolean);
       document.querySelectorAll("[data-payment-order]").forEach((select) => {
         const current = select.value;
-        select.innerHTML = renderPaymentOrderSelect(current, document.getElementById("payment-client").value, selectedIds).match(/<select data-payment-order>([\s\S]*?)<\/select>/)[1];
+        select.innerHTML = renderPaymentOrderSelect(current, document.getElementById("payment-client").value, selectedIds, document.getElementById("payment-related-accounts") ? document.getElementById("payment-related-accounts").checked : false).match(/<select data-payment-order>([\s\S]*?)<\/select>/)[1];
         select.value = current;
       });
     };
     const updatePaymentOrders = (syncAmount) => {
       const orderIds = Array.from(document.querySelectorAll("[data-payment-order]")).map((select) => select.value).filter(Boolean);
       const orders = orderIds.map((id) => getOrder(id)).filter(Boolean);
-      if (orders.length) document.getElementById("payment-client").value = orders[0].clientId;
       const total = orders.reduce((sum, order) => sum + Math.max(0, Number(order.totalAmount || 0) - Number(order.paymentReceived || 0)), 0);
       document.getElementById("payment-orders-total").textContent = "Total pedidos " + formatMoney(total);
       if (syncAmount !== false && total > 0) amountInput.value = formatAmountInput(total);
@@ -8133,10 +8135,25 @@
       refreshPaymentOrderOptions();
     };
     amountInput.addEventListener("input", () => updatePaymentOrders(false));
-    document.getElementById("payment-client").addEventListener("change", () => {
-      ordersBox.innerHTML = renderPaymentOrderSelect("", document.getElementById("payment-client").value);
+    const clientSearch = document.getElementById("payment-client-search");
+    const clientHidden = document.getElementById("payment-client");
+    const relatedWrap = document.getElementById("payment-related-wrap");
+    const relatedCheck = document.getElementById("payment-related-accounts");
+    const reloadPaymentOrders = () => {
+      ordersBox.innerHTML = renderPaymentOrderSelect("", clientHidden.value, [], relatedCheck ? relatedCheck.checked : false);
       updatePaymentOrders(true);
-    });
+    };
+    const syncRelatedVisibility = () => {
+      if (relatedWrap) relatedWrap.style.display = getPaymentClientIds(clientHidden.value).length > 1 ? "inline-flex" : "none";
+    };
+    const resolvePaymentClient = () => {
+      const val = clientSearch.value.trim();
+      const client = activeClients().find((c) => (c.id + " - " + c.name) === val) || activeClients().find((c) => c.id === val.split(" - ")[0].trim()) || activeClients().find((c) => normalizeText(c.name) === normalizeText(val));
+      if (client) clientHidden.value = client.id;
+    };
+    if (clientSearch) clientSearch.addEventListener("change", () => { resolvePaymentClient(); syncRelatedVisibility(); reloadPaymentOrders(); });
+    if (relatedCheck) relatedCheck.addEventListener("change", reloadPaymentOrders);
+    syncRelatedVisibility();
     ordersBox.addEventListener("change", () => updatePaymentOrders(true));
     ordersBox.addEventListener("click", (event) => {
       const button = event.target.closest("[data-remove-payment-order]");
@@ -8148,11 +8165,12 @@
     });
     document.querySelector("[data-add-payment-order]").addEventListener("click", () => {
       const selectedIds = Array.from(document.querySelectorAll("[data-payment-order]")).map((select) => select.value).filter(Boolean);
-      ordersBox.insertAdjacentHTML("beforeend", renderPaymentOrderSelect("", document.getElementById("payment-client").value, selectedIds));
+      ordersBox.insertAdjacentHTML("beforeend", renderPaymentOrderSelect("", document.getElementById("payment-client").value, selectedIds, document.getElementById("payment-related-accounts") ? document.getElementById("payment-related-accounts").checked : false));
       updatePaymentOrders(true);
     });
     document.getElementById("payment-form").addEventListener("submit", async (event) => {
       event.preventDefault();
+      resolvePaymentClient();
       const amount = parseAmount(document.getElementById("payment-amount").value);
       if (amount <= 0) return alert("Ingrese un monto mayor a cero.");
       let transferProofFile = "";
@@ -12570,7 +12588,8 @@
     return source.filter((order) => allowed.has(order.clientId) && !["cancelado", "anulado"].includes(order.status));
   }
 
-  function getPaymentClientIds(clientId) {
+  function getPaymentClientIds(clientId, includeLinked) {
+    if (includeLinked === false) return [clientId].filter(Boolean);
     const linkedUsers = state.users.filter((user) => user.role === "customer" && user.clientId === clientId);
     return Array.from(new Set([clientId, ...linkedUsers.flatMap((user) => user.linkedClientIds || [])].filter(Boolean)));
   }
