@@ -330,6 +330,7 @@
     { id: "comprobar-transferencias", label: "Comprobar Transferencias", icon: "CT", roles: ["manager", "admin", "contador"] },
     { id: "facturacion", label: "Facturación", icon: "FA", roles: ["manager", "admin", "contador"] },
     { id: "mis-pedidos", label: "Mis Pedidos", icon: "MP", roles: ["customer", "example"] },
+    { id: "mi-facturacion", label: "Facturación", icon: "FA", roles: ["customer", "example"] },
     { id: "lista-precios", label: "Lista de Precios", icon: "LP", roles: ["customer", "example"] },
     { id: "proveedores", label: "Proveedores", icon: "PV", roles: ["manager", "admin", "employee", "contador"] },
     { id: "usuarios", label: "Usuarios", icon: "US", roles: ["manager"] },
@@ -359,6 +360,7 @@
     "empleados",
     "horarios",
     "mis-pedidos",
+    "mi-facturacion",
     "lista-precios",
     "usuarios",
     "configuracion"
@@ -2433,6 +2435,7 @@
       "registrar-transferencia": renderCustomerTransferRegistration,
       "comprobar-transferencias": renderTransferApprovals,
       facturacion: renderFacturacion,
+      "mi-facturacion": renderCustomerBilling,
       "mis-pedidos": renderCustomerReports,
       "lista-precios": renderCustomerPriceList,
       proveedores: renderProviders,
@@ -9655,6 +9658,107 @@
     };
   }
 
+  function getCustomerBillingLogs(clientIds, from, to) {
+    return (state.billingLog || [])
+      .filter((log) => clientIds.indexOf(log.clientId) !== -1)
+      .filter((log) => {
+        const lf = String(log.from || (log.emittedAt || "")).slice(0, 10);
+        const lt = String(log.to || log.from || (log.emittedAt || "")).slice(0, 10);
+        return (!lf || lf <= to) && (!lt || lt >= from);
+      })
+      .sort((a, b) => String(b.emittedAt || b.from || "").localeCompare(String(a.emittedAt || a.from || "")));
+  }
+  function renderCustomerBilling() {
+    const clientIds = getCustomerVisibleClientIds();
+    if (ui.customerBillingClient !== "all" && clientIds.indexOf(ui.customerBillingClient) === -1) ui.customerBillingClient = "all";
+    const selectedIds = ui.customerBillingClient === "all" ? clientIds : [ui.customerBillingClient];
+    const from = ui.customerBillingFrom || getMonthStartISO(todayISO());
+    const to = ui.customerBillingTo || todayISO();
+    const logs = getCustomerBillingLogs(selectedIds, from, to);
+    const rows = logs.map((log) => `
+      <tr>
+        <td>${formatDate(String(log.from || (log.emittedAt || "")).slice(0, 10))}<br><span class="muted">${escapeHtml(log.clientName || log.clientId)}</span></td>
+        <td>${formatDate(log.from)} - ${formatDate(log.to)}</td>
+        <td class="num">${formatMoney(log.total)}</td>
+        <td>${log.cae ? `<span class="pill green">CAE ${escapeHtml(String(log.cae).trim())}</span>` : `<span class="pill amber">${escapeHtml(log.status || "")}</span>`}</td>
+        <td class="page-actions">
+          ${log.pdf ? `<a class="btn small ghost" href="${escapeAttr(log.pdf)}" target="_blank" rel="noopener" title="Ver / imprimir PDF">&#128424;</a>` : ""}
+          ${Array.isArray(log.orders) && log.orders.length ? `<button class="btn small ghost" type="button" data-billing-orders="${escapeAttr(log.id)}">Ver Pedidos</button>` : ""}
+        </td>
+      </tr>
+    `).join("");
+    afterRender.push(bindCustomerBilling);
+    return pageShell(
+      "Facturacion",
+      "Historial de facturas emitidas de sus cuentas.",
+      "",
+      `
+      <div class="tabs">
+        <button class="tab ${ui.customerBillingClient === "all" ? "active" : ""}" data-billing-client-tab="all">Todos</button>
+        ${clientIds.map((id) => { const c = getClient(id); return `<button class="tab ${ui.customerBillingClient === id ? "active" : ""}" data-billing-client-tab="${id}">${escapeHtml(c ? c.name : id)}</button>`; }).join("")}
+      </div>
+      <div class="panel" style="margin-bottom:14px">
+        <div class="form-grid balance-date-grid">
+          <div class="field balance-date-field"><label>Desde</label><input type="date" id="cbilling-from" value="${from}" /></div>
+          <div class="field balance-date-field"><label>Hasta</label><input type="date" id="cbilling-to" value="${to}" /></div>
+          <div class="field span-4 balance-range-buttons"><label>&nbsp;</label><div class="page-actions">
+            <button class="btn ghost" type="button" data-cbilling-range="this-month">Este mes</button>
+            <button class="btn ghost" type="button" data-cbilling-range="30-days">30 dias</button>
+            <button class="btn ghost" type="button" data-cbilling-range="this-year">Este ano</button>
+          </div></div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Fecha</th><th>Periodo</th><th>Total</th><th>Comprobante</th><th>Acciones</th></tr></thead>
+            <tbody>${rows || emptyRow(5, "No hay facturas emitidas en el rango seleccionado.")}</tbody>
+          </table>
+        </div>
+      </div>
+      `,
+      "mi-facturacion"
+    );
+  }
+  function openBillingOrdersModal(logId) {
+    const log = (state.billingLog || []).find((l) => l.id === logId);
+    if (!log) return;
+    const orderIds = Array.isArray(log.orders) ? log.orders : [];
+    const rows = orderIds.map((oid) => {
+      const order = getOrder(oid);
+      if (!order) return `<tr><td>${escapeHtml(oid)}</td><td class="muted">No disponible</td><td></td></tr>`;
+      return `<tr>
+        <td>${formatDate(order.date)}<br><span class="muted">${escapeHtml(order.id)}</span></td>
+        <td>${renderOrderInlineDetails(order, { summary: "Detalle" })}</td>
+        <td class="page-actions"><button class="btn small ghost" type="button" data-print-order-remito="${escapeAttr(order.id)}" title="Imprimir remito">&#128424;</button></td>
+      </tr>`;
+    }).join("");
+    showModal(
+      "Pedidos facturados " + formatDate(log.from) + " - " + formatDate(log.to),
+      `<div class="table-wrap"><table><thead><tr><th>Pedido</th><th>Detalle</th><th>Remito</th></tr></thead><tbody>${rows || emptyRow(3, "Sin pedidos en esta factura.")}</tbody></table></div>`,
+      () => {
+        document.querySelectorAll("[data-print-order-remito]").forEach((button) => button.addEventListener("click", () => printOrderRemitoDirect(button.dataset.printOrderRemito)));
+      },
+      { className: "wide" }
+    );
+  }
+  function bindCustomerBilling() {
+    document.querySelectorAll("[data-billing-client-tab]").forEach((button) => button.addEventListener("click", () => { ui.customerBillingClient = button.dataset.billingClientTab; render(); }));
+    const f = document.getElementById("cbilling-from");
+    const t = document.getElementById("cbilling-to");
+    if (f) f.addEventListener("change", () => { ui.customerBillingFrom = f.value || getMonthStartISO(todayISO()); render(); });
+    if (t) t.addEventListener("change", () => { ui.customerBillingTo = t.value || todayISO(); render(); });
+    document.querySelectorAll("[data-cbilling-range]").forEach((button) => button.addEventListener("click", () => {
+      const today = todayISO();
+      const r = button.dataset.cbillingRange;
+      if (r === "this-month") { ui.customerBillingFrom = getMonthStartISO(today); ui.customerBillingTo = today; }
+      else if (r === "30-days") { ui.customerBillingFrom = addDaysISO(today, -29); ui.customerBillingTo = today; }
+      else if (r === "this-year") { ui.customerBillingFrom = today.slice(0, 4) + "-01-01"; ui.customerBillingTo = today; }
+      render();
+    }));
+    document.querySelectorAll("[data-billing-orders]").forEach((button) => button.addEventListener("click", () => openBillingOrdersModal(button.dataset.billingOrders)));
+  }
+
   function renderFacturacion() {
     const today = todayISO();
     const defaultFrom = getMonthStartISO(today);
@@ -12228,6 +12332,11 @@
   }
 
   function pageVisibleForRole(item, role) {
+    if (item.id === "mi-facturacion") {
+      if (!isClientLikeRole(role)) return false;
+      const billingClient = currentUser ? getClient(currentUser.clientId) : null;
+      return !!(billingClient && billingClient.needsInvoice);
+    }
     if (role === "manager") return item.roles.includes("manager");
     const perm = rolePermissionFor(role);
     if (perm && perm.pages && Object.prototype.hasOwnProperty.call(perm.pages, item.id)) return !!perm.pages[item.id];
