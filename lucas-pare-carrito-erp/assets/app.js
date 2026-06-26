@@ -317,6 +317,7 @@
     { id: "rendimiento", label: "Rendimiento", icon: "RE", roles: ["manager"] },
     { id: "compras", label: "Compras/Gastos", icon: "CO", roles: ["manager", "admin", "employee"] },
     { id: "dividir", label: "Dividir Compras", icon: "DV", roles: ["manager", "admin", "employee"] },
+    { id: "stock", label: "Stock", icon: "ST", roles: ["manager", "admin", "employee"] },
     { id: "vehiculos", label: "Vehículos", icon: "VH", roles: ["manager", "admin", "employee"] },
     { id: "remitos", label: "Remitos", icon: "RM", roles: ["manager", "admin", "employee"] },
     { id: "unidades", label: "Unidades", icon: "UN", roles: ["manager", "admin", "employee"] },
@@ -345,6 +346,7 @@
     "rendimiento",
     "compras",
     "dividir",
+    "stock",
     "vehiculos",
     "remitos",
     "unidades",
@@ -627,6 +629,7 @@
       caja: [],
       payments: [],
       preferences: [],
+      stockMovements: [],
       createdAt: new Date().toISOString()
     };
   }
@@ -671,7 +674,8 @@
         cashBoxes: mergeCashBoxes(parsed.cashBoxes || []),
         caja: parsed.caja || [],
         payments: parsed.payments || [],
-        preferences: parsed.preferences || []
+        preferences: parsed.preferences || [],
+        stockMovements: parsed.stockMovements || []
       };
       const normalized = normalizeLoadedState(loaded, seeded);
       if (shouldPurgeOperationalRecords) {
@@ -1082,7 +1086,7 @@
     "attendance", "employeePayments", "employeeReimbursements", "performanceAdjustments",
     "clients", "products", "providers", "vehicles", "users", "cashBoxes",
     "preferences", "productAliases", "clientProductAliases", "quantityAliases", "clientQuantityAliases",
-    "costRelations", "productRelations", "billingLog"
+    "costRelations", "productRelations", "billingLog", "stockMovements"
   ];
   const PATCH_OBJECT_KEYS = ["prices", "appSettings"];
   const HISTORY_STATE_KEYS = ["productListPriceHistory", "productSalesQuantityHistory", "productPurchaseHistory"];
@@ -1685,7 +1689,7 @@
       "exampleOrders", "remitos", "saldos", "purchases", "payments", "caja",
       "providerLedger", "providerPayments", "clientTransfers", "vendorLedger",
       "attendance", "employeePayments", "employeeReimbursements", "performanceAdjustments",
-      "clients", "products", "providers", "vehicles", "users", "cashBoxes"
+      "clients", "products", "providers", "vehicles", "users", "cashBoxes", "stockMovements"
     ].forEach((key) => {
       merged[key] = unionByKey(remote[key], local[key], byId);
     });
@@ -2329,6 +2333,7 @@
       "rendimiento": '<path d="M4 20V10M10 20V4M16 20v-7M21 20H3"/>',
       "compras": '<circle cx="9" cy="20" r="1.5"/><circle cx="17" cy="20" r="1.5"/><path d="M3 4h2l2.5 11h10L20 8.5H7.5"/>',
       "dividir": '<path d="M4 4l7 7v9M20 4l-7 7"/><path d="M8.5 4H4v4.5M15.5 4H20v4.5"/>',
+      "stock": '<path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 7v10l9 4 9-4V7"/><path d="M12 11v10"/>',
       "vehiculos": '<path d="M1.5 6.5h12v9.5h-12z"/><path d="M13.5 10h4.5l3 3v3h-7.5"/><circle cx="6" cy="18.5" r="1.8"/><circle cx="17.5" cy="18.5" r="1.8"/>',
       "remitos": '<path d="M6 2.5h8l4 4v15H6z"/><path d="M14 2.5v4h4M9 12.5h6M9 16.5h6"/>',
       "unidades": '<path d="M12 3.5v17M5 7h14M8.5 20.5h7"/><path d="M5 7l-2.6 5.5a2.9 2.9 0 005.2 0L5 7zM19 7l-2.6 5.5a2.9 2.9 0 005.2 0L19 7z"/>',
@@ -2416,6 +2421,7 @@
       rendimiento: renderPerformance,
       compras: renderPurchases,
       dividir: renderDividePurchases,
+      stock: renderStock,
       vehiculos: renderVehicles,
       remitos: renderRemitos,
       unidades: renderUnits,
@@ -2590,8 +2596,218 @@
     );
   }
 
+  // ===================== STOCK DE PRODUCTOS FRACCIONADOS =====================
+  function getStockTrackedProductIds() {
+    const ids = [];
+    (state.productRelations || []).forEach((r) => {
+      if (r.retailProductId && ids.indexOf(r.retailProductId) === -1) ids.push(r.retailProductId);
+    });
+    return ids.filter((id) => { const p = getProduct(id); return p && p.isActive !== false; });
+  }
+  function getWholesaleParentsFor(retailId) {
+    return (state.productRelations || []).filter((r) => r.retailProductId === retailId && Number(r.retailPerWholesale) > 0);
+  }
+  function stockMovementsFor(productId) {
+    return (state.stockMovements || []).filter((m) => m.productId === productId);
+  }
+  function lastStockCount(productId) {
+    const counts = stockMovementsFor(productId).filter((m) => m.type === "conteo")
+      .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.createdAt || "").localeCompare(String(b.createdAt || "")));
+    return counts.length ? counts[counts.length - 1] : null;
+  }
+  function stockComprasBetween(productId, fromInc, toExc) {
+    let sum = 0;
+    (state.stockMovements || []).forEach((m) => {
+      if (m.productId !== productId || m.type !== "compra") return;
+      if (m.date < fromInc || m.date >= toExc) return;
+      sum += Number(m.qty || 0);
+    });
+    return sum;
+  }
+  function stockOrdersBetween(productId, fromInc, toExc) {
+    let sum = 0;
+    (state.orders || []).forEach((order) => {
+      if (["cancelado", "anulado"].includes(order.status)) return;
+      if (!order.date || order.date < fromInc || order.date >= toExc) return;
+      (order.items || []).forEach((item) => { if (item.productId === productId) sum += Number(item.quantity || 0); });
+    });
+    return sum;
+  }
+  function getStockEstimated(productId, asOfDate) {
+    const today = asOfDate || todayISO();
+    const last = lastStockCount(productId);
+    const from = last ? last.date : "0000-00-00";
+    const base = last ? Number(last.qty || 0) : 0;
+    return base + stockComprasBetween(productId, from, today) - stockOrdersBetween(productId, from, today);
+  }
+  function getStockDemandToday(productId) {
+    return stockOrdersBetween(productId, todayISO(), addDaysISO(todayISO(), 1));
+  }
+  function getStockDailyMap() {
+    if (!state.appSettings) state.appSettings = {};
+    if (!state.appSettings.stockDaily) state.appSettings.stockDaily = {};
+    return state.appSettings.stockDaily;
+  }
+  function getStockDailyEntry(date, productId) {
+    const map = getStockDailyMap();
+    return (map[date] && map[date][productId]) || {};
+  }
+  function setStockDailyEntry(productId, patch) {
+    const date = todayISO();
+    const map = getStockDailyMap();
+    if (!map[date]) map[date] = {};
+    map[date][productId] = Object.assign({}, map[date][productId] || {}, patch);
+    saveState();
+  }
+  function getStockCountToday(productId) {
+    return stockMovementsFor(productId).find((m) => m.type === "conteo" && m.date === todayISO()) || null;
+  }
+  function getStockSuggestion(productId) {
+    const today = todayISO();
+    const countToday = getStockCountToday(productId);
+    const stockReal = countToday ? Number(countToday.qty || 0) : getStockEstimated(productId, today);
+    const demand = getStockDemandToday(productId);
+    const faltante = Math.max(0, Math.round((demand - stockReal) * 100) / 100);
+    const entry = getStockDailyEntry(today, productId);
+    const parents = getWholesaleParentsFor(productId);
+    const parent = parents.find((p) => p.wholesaleProductId === entry.parentId) || parents[0] || null;
+    const out = { stockReal, demand, faltante, counted: !!countToday, retailOnly: !!entry.retail, parents, parent };
+    if (entry.retail || !parent) {
+      out.mode = "retail";
+    } else {
+      const factor = Number(parent.retailPerWholesale);
+      out.mode = "bultos";
+      out.factor = factor;
+      out.bultos = faltante > 0 ? Math.ceil(faltante / factor) : 0;
+      out.sobrante = Math.round((out.bultos * factor + stockReal - demand) * 100) / 100;
+    }
+    return out;
+  }
+  function recordStockCount(productId, realValue) {
+    const today = todayISO();
+    const estimated = getStockEstimated(productId, today);
+    const real = Math.round(Number(realValue || 0) * 100) / 100;
+    const diff = Math.round((estimated - real) * 100) / 100;
+    state.stockMovements = (state.stockMovements || []).filter((m) => !(m.productId === productId && m.date === today && ["conteo", "merma", "ajuste"].includes(m.type)));
+    const stamp = new Date().toISOString();
+    const baseId = nextDatedId("STK", state.stockMovements);
+    state.stockMovements.push({ id: baseId + "-c", date: today, productId, type: "conteo", qty: real, note: "", userId: currentUser.id, createdAt: stamp });
+    if (diff > 0.0001) state.stockMovements.push({ id: baseId + "-m", date: today, productId, type: "merma", qty: diff, note: "", userId: currentUser.id, createdAt: stamp });
+    else if (diff < -0.0001) state.stockMovements.push({ id: baseId + "-a", date: today, productId, type: "ajuste", qty: -diff, note: "", userId: currentUser.id, createdAt: stamp });
+    saveState();
+  }
+  function recordStockPurchaseMovements(purchase) {
+    if (!purchase || ["other_expense", "market_price", "provider_payment", "cash_movement", "prepared"].includes(purchase.expenseType)) return;
+    const items = Array.isArray(purchase.items) && purchase.items.length ? purchase.items : (purchase.productId ? [{ productId: purchase.productId, quantity: purchase.quantity }] : []);
+    const tracked = getStockTrackedProductIds();
+    const relations = state.productRelations || [];
+    const stamp = new Date().toISOString();
+    const add = (productId, qty) => {
+      if (!(Number(qty) > 0)) return;
+      state.stockMovements = state.stockMovements || [];
+      state.stockMovements.push({ id: nextDatedId("STK", state.stockMovements) + "-p", date: purchase.date || todayISO(), productId, type: "compra", qty: Number(qty), note: "Compra " + (purchase.id || ""), userId: currentUser.id, createdAt: stamp });
+    };
+    items.forEach((item) => {
+      if (!item.productId) return;
+      if (tracked.indexOf(item.productId) !== -1) add(item.productId, Number(item.quantity || 0));
+      relations.forEach((r) => {
+        if (r.wholesaleProductId === item.productId && Number(r.retailPerWholesale) > 0) add(r.retailProductId, Number(item.quantity || 0) * Number(r.retailPerWholesale));
+      });
+    });
+  }
+  function getStockMermaSummary(fromDate, toDate) {
+    const map = {};
+    (state.stockMovements || []).forEach((m) => {
+      if (m.type !== "merma" || m.date < fromDate || m.date > toDate) return;
+      if (!map[m.productId]) map[m.productId] = { productId: m.productId, units: 0 };
+      map[m.productId].units += Number(m.qty || 0);
+    });
+    return Object.values(map).map((row) => {
+      const product = getProduct(row.productId);
+      return { productId: row.productId, units: row.units, productName: product ? product.name : row.productId, unitType: product ? product.unitType : "", kg: row.units * getKgFactor(product) };
+    }).sort((a, b) => b.kg - a.kg);
+  }
+  function renderStock() {
+    const rows = getStockTrackedProductIds().map((id) => getProduct(id)).filter(Boolean)
+      .sort((a, b) => a.name.localeCompare(b.name)).map((product) => {
+        const sug = getStockSuggestion(product.id);
+        const parents = sug.parents;
+        const parentCell = parents.length > 1
+          ? `<select data-stock-parent="${product.id}">${parents.map((p) => { const wp = getProduct(p.wholesaleProductId); return `<option value="${p.wholesaleProductId}" ${sug.parent && sug.parent.wholesaleProductId === p.wholesaleProductId ? "selected" : ""}>${escapeHtml(wp ? wp.name : p.wholesaleProductId)} (x${formatNumber(p.retailPerWholesale)})</option>`; }).join("")}</select>`
+          : (parents.length === 1 ? escapeHtml((getProduct(parents[0].wholesaleProductId) || {}).name || "") : `<span class="muted">sin mayorista</span>`);
+        let sugText;
+        if (sug.mode === "retail") sugText = sug.faltante > 0 ? `Comprar <strong>${formatNumber(sug.faltante)} ${escapeHtml(product.unitType)}</strong> por menor` : `<span class="muted">Sin faltante</span>`;
+        else sugText = sug.bultos > 0 ? `Comprar <strong>${formatNumber(sug.bultos)}</strong> ${escapeHtml((getProduct(sug.parent.wholesaleProductId) || {}).name || "bulto")} <span class="muted">(sobran ${formatNumber(sug.sobrante)})</span>` : `<span class="muted">Sin faltante</span>`;
+        const countToday = getStockCountToday(product.id);
+        return `<tr>
+          <td>${escapeHtml(product.name)}<br><span class="muted">${escapeHtml(product.unitType)}</span></td>
+          <td class="num">${formatNumber(getStockEstimated(product.id, todayISO()))}</td>
+          <td><div class="input-with-button"><input data-stock-count="${product.id}" inputmode="decimal" placeholder="real" value="${countToday ? formatAmountInput(countToday.qty) : ""}" /><button class="btn small primary" type="button" data-stock-save="${product.id}">Guardar</button></div>${countToday ? `<span class="muted">Contado hoy</span>` : ""}</td>
+          <td class="num">${formatNumber(sug.demand)}</td>
+          <td><label style="display:inline-flex;gap:6px;align-items:center"><input type="checkbox" data-stock-retail="${product.id}" ${sug.retailOnly ? "checked" : ""} style="width:auto;min-height:auto" />por menor hoy</label></td>
+          <td>${parentCell}</td>
+          <td>${sugText}</td>
+        </tr>`;
+      }).join("");
+    const from = ui.stockMermaFrom || addDaysISO(todayISO(), -29);
+    const to = ui.stockMermaTo || todayISO();
+    const mermaRows = getStockMermaSummary(from, to).map((row) => `<tr><td>${escapeHtml(row.productName)}</td><td class="num">${formatNumber(row.units)} ${escapeHtml(row.unitType)}</td><td class="num">${formatNumber(row.kg)} kg</td></tr>`).join("");
+    afterRender.push(bindStock);
+    return pageShell(
+      "Stock",
+      "Conteo diario de productos fraccionados. El conteo real define la compra del dia y registra la merma.",
+      "",
+      `
+      <div class="panel">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Producto</th><th>Stock estimado</th><th>Stock real (conteo)</th><th>Demanda hoy</th><th>Por menor hoy</th><th>Bulto a usar</th><th>Sugerencia de compra</th></tr></thead>
+            <tbody>${rows || emptyRow(7, "No hay productos fraccionados. Asocia un mayorista en Productos (Cambiar distribucion de productos).")}</tbody>
+          </table>
+        </div>
+      </div>
+      <div class="panel" style="margin-top:14px">
+        <h2 class="page-title" style="font-size:18px">Merma / descarte</h2>
+        <div class="form-grid" style="margin-top:8px">
+          <div class="field"><label>Desde</label><input type="date" id="stock-merma-from" value="${from}" /></div>
+          <div class="field"><label>Hasta</label><input type="date" id="stock-merma-to" value="${to}" /></div>
+        </div>
+        <div class="table-wrap" style="margin-top:10px">
+          <table>
+            <thead><tr><th>Producto</th><th>Merma (unidades)</th><th>Merma (kg)</th></tr></thead>
+            <tbody>${mermaRows || emptyRow(3, "Sin merma registrada en el rango.")}</tbody>
+          </table>
+        </div>
+      </div>
+      `,
+      "stock"
+    );
+  }
+  function bindStock() {
+    document.querySelectorAll("[data-stock-save]").forEach((btn) => btn.addEventListener("click", () => {
+      const pid = btn.dataset.stockSave;
+      const input = document.querySelector('[data-stock-count="' + pid + '"]');
+      if (!input) return;
+      recordStockCount(pid, parseAmount(input.value));
+      render();
+    }));
+    document.querySelectorAll("[data-stock-retail]").forEach((chk) => chk.addEventListener("change", () => {
+      setStockDailyEntry(chk.dataset.stockRetail, { retail: chk.checked });
+      render();
+    }));
+    document.querySelectorAll("[data-stock-parent]").forEach((sel) => sel.addEventListener("change", () => {
+      setStockDailyEntry(sel.dataset.stockParent, { parentId: sel.value });
+      render();
+    }));
+    const mFrom = document.getElementById("stock-merma-from");
+    const mTo = document.getElementById("stock-merma-to");
+    if (mFrom) mFrom.addEventListener("change", () => { ui.stockMermaFrom = mFrom.value || addDaysISO(todayISO(), -29); render(); });
+    if (mTo) mTo.addEventListener("change", () => { ui.stockMermaTo = mTo.value || todayISO(); render(); });
+  }
+
   function getKgFactor(product) {
     if (!product) return 1;
+    if (Number(product.kgPerUnit) > 0) return Number(product.kgPerUnit);
     const unit = getUnitTypes().find((u) => u.name === String(product.unitType || "").toLowerCase());
     if (unit && Number(unit.weight) > 0) return Number(unit.weight);
     return 1;
@@ -2604,6 +2820,7 @@
     const sales = dates.map(() => 0);
     const kgs = dates.map(() => 0);
     const expenses = dates.map(() => 0);
+    const merma = dates.map(() => 0);
     state.orders.forEach((order) => {
       if (["cancelado", "anulado"].includes(order.status) || !index.has(order.date)) return;
       const position = index.get(order.date);
@@ -2618,7 +2835,11 @@
       if (["market_price", "prepared", "cash_movement"].includes(purchase.expenseType)) return;
       expenses[index.get(purchase.date)] += Number(purchase.totalCost || 0);
     });
-    return { dates, orders, sales, kgs, expenses, result: sales.map((value, position) => value - expenses[position]) };
+    (state.stockMovements || []).forEach((m) => {
+      if (m.type !== "merma" || !index.has(m.date)) return;
+      merma[index.get(m.date)] += Number(m.qty || 0) * getKgFactor(getProduct(m.productId));
+    });
+    return { dates, orders, sales, kgs, expenses, merma, result: sales.map((value, position) => value - expenses[position]) };
   }
 
   function cumulativeSeries(dates, entries, getDate, getDelta) {
@@ -2752,6 +2973,9 @@
       { title: "Gastos totales por dia", values: filterActiveDates(series.expenses), color: "#b42318", format: formatMoney },
       { title: "Kgs vendidos por dia", values: filterActiveDates(series.kgs), color: "#0f7a5d", format: formatKg }
     ];
+    if (["manager", "admin"].includes(currentUser.role)) {
+      charts.push({ title: "Kgs de merma por dia", values: filterActiveDates(series.merma), color: "#b42318", format: formatKg });
+    }
     if (isManager) {
       charts.push({ title: "Ventas totales por dia", values: filterActiveDates(series.sales), color: "#7a3bd0", format: formatMoney });
       charts.push({ title: "Resultado (ventas - gastos) por dia", values: filterActiveDates(series.result), color: "#a36300", format: formatMoney });
@@ -6216,6 +6440,7 @@
         userRole: currentUser.role
       };
       state.purchases.push(purchase);
+      recordStockPurchaseMovements(purchase);
       if (provider && items.length) rememberProviderProducts(provider.id, items);
       if (purchase.vendorName && items.length) rememberVendorProducts(purchase.vendorName, items, purchase.date);
       if (items.length && expenseType === "market_price") updateMarketPrices(items);
@@ -9639,6 +9864,16 @@
             <div class="field"><label>&nbsp;</label><button class="btn primary" type="button" id="add-unit-type">Agregar unidad</button></div>
           </div>
         </div>` : ""}
+        ${canManageUnitTypes ? `<div class="panel">
+          <h2 class="page-title" style="font-size:18px">Peso por producto (kg)</h2>
+          <p class="muted">Peso en kg por unidad de cada producto, usado en los graficos de Kgs vendidos y de merma. Si se deja vacio, se usa el peso del tipo de unidad.</p>
+          <div class="table-wrap" style="margin-top:10px">
+            <table>
+              <thead><tr><th>Producto</th><th>Unidad</th><th>Peso (kg) por unidad</th></tr></thead>
+              <tbody>${activeProducts().slice().sort((a, b) => a.name.localeCompare(b.name)).map((p) => `<tr><td>${escapeHtml(p.name)}</td><td>${escapeHtml(p.unitType)}</td><td><input data-product-kg="${p.id}" inputmode="decimal" style="max-width:120px" value="${Number(p.kgPerUnit) > 0 ? formatAmountInput(p.kgPerUnit) : ""}" placeholder="${formatNumber(getKgFactor(p))}" /></td></tr>`).join("")}</tbody>
+            </table>
+          </div>
+        </div>` : ""}
       </div>` : ""}
       ${currentUser.role === "manager" ? `
       <div class="panel" style="margin-top:14px">
@@ -9918,6 +10153,13 @@
   }
 
   function bindSettings() {
+    document.querySelectorAll("[data-product-kg]").forEach((input) => input.addEventListener("change", () => {
+      const product = getProduct(input.dataset.productKg);
+      if (!product) return;
+      const v = parseAmount(input.value);
+      product.kgPerUnit = v > 0 ? v : 0;
+      saveState();
+    }));
     bindRolePermissionsPanel();
     bindPrintTemplatesPanel();
     const settingsForm = document.getElementById("settings-form");
