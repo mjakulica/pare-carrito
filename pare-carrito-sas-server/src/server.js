@@ -24,6 +24,9 @@ const MOONSHOT_API_KEY = process.env.MOONSHOT_API_KEY || "";
 const MOONSHOT_API_URL = (process.env.MOONSHOT_API_URL || "https://api.moonshot.ai/v1/chat/completions").trim();
 const MOONSHOT_MODEL = process.env.MOONSHOT_MODEL || "kimi-k2.7";
 const MOONSHOT_VISION_MODEL = process.env.MOONSHOT_VISION_MODEL || "moonshot-v1-32k-vision-preview";
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || "";
+const OPENROUTER_API_URL = (process.env.OPENROUTER_API_URL || "https://openrouter.ai/api/v1/chat/completions").trim();
+const OPENROUTER_VISION_MODEL = process.env.OPENROUTER_VISION_MODEL || "openai/gpt-4o-mini";
 
 if (!JWT_SECRET) {
   console.error("FALTA JWT_SECRET en las variables de entorno. Genere uno con: openssl rand -hex 32");
@@ -877,50 +880,65 @@ app.post("/transfers", authenticate, requireRole("customer", "example"), async (
   }
 });
 
+async function visionOcrRequest(url, apiKey, model, image, prompt, extraHeaders) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: Object.assign({ "content-type": "application/json", authorization: "Bearer " + apiKey }, extraHeaders || {}),
+    body: JSON.stringify({
+      model: model,
+      temperature: 0,
+      max_tokens: 1600,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: prompt },
+            { type: "image_url", image_url: { url: image.dataUrl } }
+          ]
+        }
+      ]
+    })
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const detail = payload && (payload.error && (payload.error.message || payload.error) || payload.message);
+    throw new Error(sanitizeExternalApiError(detail) || ("HTTP " + response.status));
+  }
+  const text = payload && payload.choices && payload.choices[0] && payload.choices[0].message
+    ? String(payload.choices[0].message.content || "").trim()
+    : "";
+  if (!text) throw new Error("sin texto interpretable");
+  return text;
+}
+
 app.post("/ocr/order-image", authenticate, requireRole("manager", "admin", "employee"), async (req, res) => {
-  if (!MOONSHOT_API_KEY) {
-    return res.status(503).json({ error: "OCR por IA no configurado. Falta MOONSHOT_API_KEY en el servidor." });
+  if (!OPENROUTER_API_KEY && !MOONSHOT_API_KEY) {
+    return res.status(503).json({ error: "OCR por IA no configurado (falta OPENROUTER_API_KEY o MOONSHOT_API_KEY)." });
   }
   const image = parseImageDataUrl(req.body && req.body.imageData);
   if (!image) return res.status(400).json({ error: "Envíe una imagen PNG, JPG o WEBP en base64." });
   if (image.byteLength > 8 * 1024 * 1024) return res.status(413).json({ error: "La imagen supera el máximo de 8 MB." });
-  const prompt = "puedes leer lo que dice esa hoja? por favor contestame solo con el texto que puedes interpretar";
-  try {
-    const response = await fetch(MOONSHOT_API_URL, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: "Bearer " + MOONSHOT_API_KEY
-      },
-      body: JSON.stringify({
-        model: MOONSHOT_VISION_MODEL,
-        temperature: 0,
-        max_tokens: 1600,
-        messages: [
-          {
-            role: "user",
-            content: [
-              { type: "text", text: prompt },
-              { type: "image_url", image_url: { url: image.dataUrl } }
-            ]
-          }
-        ]
-      })
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      const detail = payload && (payload.error && (payload.error.message || payload.error) || payload.message);
-      const safeDetail = sanitizeExternalApiError(detail);
-      return res.status(502).json({ error: "Kimi no pudo interpretar la imagen" + (safeDetail ? ": " + safeDetail : ".") });
+  const prompt = (req.body && typeof req.body.prompt === "string" && req.body.prompt.trim())
+    ? req.body.prompt.trim()
+    : "transcribe el texto de esta imagen, es un pedido de frutas y verduras";
+  const errors = [];
+  if (OPENROUTER_API_KEY) {
+    try {
+      const text = await visionOcrRequest(OPENROUTER_API_URL, OPENROUTER_API_KEY, OPENROUTER_VISION_MODEL, image, prompt, { "HTTP-Referer": "https://parecarrito.app", "X-Title": "Pare Carrito" });
+      return res.json({ text });
+    } catch (error) {
+      errors.push("OpenRouter: " + error.message);
     }
-    const text = payload && payload.choices && payload.choices[0] && payload.choices[0].message
-      ? String(payload.choices[0].message.content || "").trim()
-      : "";
-    if (!text) return res.status(502).json({ error: "Kimi no devolvió texto interpretable." });
-    return res.json({ text });
-  } catch (error) {
-    return res.status(502).json({ error: "No se pudo conectar con Kimi: " + error.message });
   }
+  if (MOONSHOT_API_KEY) {
+    try {
+      const text = await visionOcrRequest(MOONSHOT_API_URL, MOONSHOT_API_KEY, MOONSHOT_VISION_MODEL, image, prompt);
+      return res.json({ text });
+    } catch (error) {
+      errors.push("Kimi: " + error.message);
+    }
+  }
+  return res.status(502).json({ error: "No se pudo interpretar la imagen. " + errors.join(" | ") });
 });
 
 // Espejo relacional: refresco transaccional completo (estados chicos, robustez maxima)

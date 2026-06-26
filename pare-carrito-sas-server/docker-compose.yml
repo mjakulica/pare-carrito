@@ -45,6 +45,9 @@ services:
       MOONSHOT_API_URL: ${MOONSHOT_API_URL:-https://api.moonshot.ai/v1/chat/completions}
       MOONSHOT_MODEL: ${MOONSHOT_MODEL:-kimi-k2.7}
       MOONSHOT_VISION_MODEL: ${MOONSHOT_VISION_MODEL:-moonshot-v1-32k-vision-preview}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_API_URL: ${OPENROUTER_API_URL:-https://openrouter.ai/api/v1/chat/completions}
+      OPENROUTER_VISION_MODEL: ${OPENROUTER_VISION_MODEL:-openai/gpt-4o-mini}
     volumes:
       - uploads:/data/uploads
 
