@@ -7785,8 +7785,8 @@
             <button class="btn small danger" type="button" data-remove-unit-order-item="${escapeAttr(order.id + "|" + item.id)}">X</button>
           </div>`).join("")}
         </div>
-        ${allowBulkUpdate ? `<div class="field"><label>Nueva cantidad</label><input data-unit-new-qty inputmode="decimal" value="${formatAmountInput(group.pendingQuantity || group.quantity)}" /></div>
-        <button class="btn small primary" type="button" data-update-unit-group="${escapeAttr(group.key)}">Actualizar</button>` : ""}
+        ${allowBulkUpdate ? `<div class="field"><label>Cantidad para TODOS los pedidos</label><input data-unit-new-qty inputmode="decimal" placeholder="Poner esta cantidad a todos" value="" /></div>
+        <button class="btn small primary" type="button" data-update-unit-group="${escapeAttr(group.key)}">Actualizar todos</button>` : ""}
       </div>
     `;
   }
@@ -7902,11 +7902,10 @@
 
   function updateUnitWeightGroup(key, date, newQuantity) {
     const group = getUnitWeightGroups(date).find((item) => item.key === key);
-    if (!group || group.pendingQuantity <= 0) return;
-    const ratio = newQuantity / group.pendingQuantity;
+    if (!group || !(newQuantity > 0)) return;
     const touchedOrders = new Set();
     group.pendingEntries.forEach(({ order, item }) => {
-      item.quantity = Number(item.quantity || 0) * ratio;
+      item.quantity = newQuantity;
       item.subtotal = item.quantity * Number(item.unitPrice || 0);
       item.ivaAmount = item.subtotal * (Number(item.ivaRate || 0) / 100);
       item.totalWithIva = item.subtotal + item.ivaAmount;
