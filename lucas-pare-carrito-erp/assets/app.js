@@ -5518,7 +5518,7 @@
     const rows = visiblePurchases.slice().reverse().map((purchase) => {
       const provider = getProvider(purchase.providerId);
       const origin = provider ? provider.name : purchase.providerName || (purchase.expenseType === "other_expense" ? "Gasto general" : "Gasto producto");
-      const itemText = purchaseItemsSummary(purchase);
+      const itemText = purchaseItemsCollapsible(purchase);
       const isAnnulled = purchase.status === "anulado";
       const annulButton = isManager && !isAnnulled ? `<button class="btn small danger" data-annul-purchase="${purchase.id}" title="Anular egreso">X</button>` : "";
       const annulledLabel = isAnnulled ? `<span class="pill gray">Anulado</span>` : "";
@@ -5764,12 +5764,14 @@
             </div>
             <div class="page-actions purchase-form-actions" style="margin-top:12px">
               <button class="btn small yellow" type="button" data-add-purchase-item>Agregar producto</button>
-              <button class="btn small primary" type="submit">Guardar egreso</button>
             </div>
             <div class="page-actions" style="margin-top:12px">
               <strong>Productos</strong>
             </div>
             <div id="required-purchase-grid">${renderRequiredPurchaseGrid()}</div>
+          </div>
+          <div class="page-actions purchase-submit-row" style="margin-top:12px">
+            <button class="btn small primary" type="submit">Guardar egreso</button>
           </div>
           <div id="vendor-favorites-wrap" class="panel" style="box-shadow:none;margin-top:12px">
             <div class="page-actions" style="justify-content:space-between">
@@ -13195,6 +13197,14 @@
     if (recorder) return getUserCashBoxId(recorder.id);
     const inferred = inferCashBoxId(purchase);
     return isDeprecatedCashBox({ id: inferred }) ? "cash-general" : inferred;
+  }
+
+  function purchaseItemsCollapsible(purchase) {
+    if (Array.isArray(purchase.items) && purchase.items.length > 1) {
+      const lines = purchase.items.map((item) => `<div><span>${escapeHtml(item.productName)}</span><span>${formatNumber(item.quantity)} x ${formatMoney(item.unitCost)} = ${formatMoney(item.totalCost)}</span></div>`).join("");
+      return `<details><summary>Detalle (${purchase.items.length})</summary><div class="mini-table">${lines}</div></details>`;
+    }
+    return purchaseItemsSummary(purchase);
   }
 
   function purchaseItemsSummary(purchase) {
