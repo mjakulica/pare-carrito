@@ -7780,13 +7780,12 @@
         <div class="unit-order-list">
           ${entries.map(({ order, item, client }) => `<div class="unit-order-line">
             <span>${escapeHtml(order.clientId)} - ${escapeHtml(client ? client.name : order.clientId)}</span>
-            <label class="unit-line-qty" style="margin-right:auto;display:inline-flex;align-items:center;gap:4px"><input data-unit-line-qty data-uo="${escapeAttr(order.id)}" data-uitem="${escapeAttr(item.id)}" inputmode="decimal" value="${formatAmountInput(item.quantity)}" style="max-width:64px" /> ${escapeHtml(item.unitType)}</label>
+            <label class="unit-line-qty" style="margin-right:auto;display:inline-flex;align-items:center;gap:4px"><input data-unit-line-qty data-uo="${escapeAttr(order.id)}" data-uitem="${escapeAttr(item.id)}" inputmode="decimal" value="${formatAmountInput(item.quantity)}" style="max-width:64px" /></label>
             <button class="btn small ghost" type="button" data-edit-unit-order="${escapeAttr(order.id)}" data-edit-unit-item="${escapeAttr(item.id)}">Editar</button>
+            <button class="btn small primary" type="button" data-send-unit-qty data-uo="${escapeAttr(order.id)}" data-uitem="${escapeAttr(item.id)}" title="Actualizar cantidad">&#10148;</button>
             <button class="btn small danger" type="button" data-remove-unit-order-item="${escapeAttr(order.id + "|" + item.id)}">X</button>
           </div>`).join("")}
         </div>
-        ${allowBulkUpdate ? `<div class="field"><label>Cantidad para TODOS los pedidos</label><input data-unit-new-qty inputmode="decimal" placeholder="Poner esta cantidad a todos" value="" /></div>
-        <button class="btn small primary" type="button" data-update-unit-group="${escapeAttr(group.key)}">Actualizar todos</button>` : ""}
       </div>
     `;
   }
@@ -7820,13 +7819,15 @@
     document.querySelectorAll("[data-edit-unit-order]").forEach((button) => {
       button.addEventListener("click", () => openOrderForm(button.dataset.editUnitOrder, button.dataset.editUnitItem));
     });
-    document.querySelectorAll("[data-unit-line-qty]").forEach((input) => {
-      input.addEventListener("change", () => {
-        const order = getOrder(input.dataset.uo);
+    document.querySelectorAll("[data-send-unit-qty]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const order = getOrder(button.dataset.uo);
         if (!order) return;
-        const item = order.items.find((entry) => entry.id === input.dataset.uitem);
+        const item = order.items.find((entry) => entry.id === button.dataset.uitem);
         if (!item) return;
-        const qty = parseAmount(input.value);
+        const line = button.closest(".unit-order-line");
+        const input = line && line.querySelector("[data-unit-line-qty]");
+        const qty = parseAmount(input ? input.value : item.quantity);
         if (qty <= 0) return;
         item.quantity = qty;
         item.subtotal = item.quantity * item.unitPrice;
@@ -7836,6 +7837,7 @@
         updateOrderAccounting(order);
         order.updatedAt = new Date().toISOString();
         saveState();
+        render();
       });
     });
     document.querySelectorAll("[data-remove-unit-order-item]").forEach((button) => {
