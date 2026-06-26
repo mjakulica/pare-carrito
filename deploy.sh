@@ -45,7 +45,7 @@ echo "==> 3/4 Cambios aplicados: ${BEFORE:0:7} -> ${AFTER:0:7}"
 if git diff --name-only "$BEFORE" "$AFTER" | grep -q "^pare-carrito-sas-server/"; then
   echo "    Cambio el BACKEND -> reinstalando dependencias y reconstruyendo contenedores..."
   cd "$SERVER_DIR"
-  npm ci
+  if command -v npm >/dev/null 2>&1; then npm ci; else echo "    (npm no esta en el host; las dependencias se instalan dentro del build de Docker)"; fi
   docker compose up -d --build
   docker compose ps
   cd "$PROJECT_DIR"
