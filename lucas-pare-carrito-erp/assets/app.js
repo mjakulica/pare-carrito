@@ -8020,7 +8020,7 @@
           <div class="form-grid payment-form-grid">
             <div class="field payment-client-field">
               <label>Cliente</label>
-              <input id="payment-client-search" list="payment-client-list" placeholder="Escribir o elegir cliente..." autocomplete="off" value="${activeClients()[0] ? escapeAttr(activeClients()[0].id + " - " + activeClients()[0].name) : ""}" />
+              <div class="input-with-button"><input id="payment-client-search" list="payment-client-list" placeholder="Buscar por nombre o numero" autocomplete="off" value="${activeClients()[0] ? escapeAttr(activeClients()[0].id + " - " + activeClients()[0].name) : ""}" /><button class="btn small ghost" id="payment-client-clear" type="button">X</button></div>
               <datalist id="payment-client-list">${activeClients().map((client) => `<option value="${escapeAttr(client.id + " - " + client.name)}"></option>`).join("")}</datalist>
               <input type="hidden" id="payment-client" value="${activeClients()[0] ? escapeAttr(activeClients()[0].id) : ""}" />
               <label id="payment-related-wrap" style="display:none;align-items:center;gap:6px;margin-top:6px"><input type="checkbox" id="payment-related-accounts" style="width:auto;min-height:auto" /> Cuentas relacionadas</label>
@@ -8146,12 +8146,42 @@
     const syncRelatedVisibility = () => {
       if (relatedWrap) relatedWrap.style.display = getPaymentClientIds(clientHidden.value).length > 1 ? "inline-flex" : "none";
     };
-    const resolvePaymentClient = () => {
-      const val = clientSearch.value.trim();
-      const client = activeClients().find((c) => (c.id + " - " + c.name) === val) || activeClients().find((c) => c.id === val.split(" - ")[0].trim()) || activeClients().find((c) => normalizeText(c.name) === normalizeText(val));
-      if (client) clientHidden.value = client.id;
+    const currentPaymentClientLabel = () => {
+      const c = getClient(clientHidden.value);
+      return c ? c.id + " - " + c.name : "";
     };
-    if (clientSearch) clientSearch.addEventListener("change", () => { resolvePaymentClient(); syncRelatedVisibility(); reloadPaymentOrders(); });
+    const applyPaymentClient = (clientId) => {
+      clientHidden.value = clientId;
+      syncRelatedVisibility();
+      reloadPaymentOrders();
+    };
+    const resolvePaymentClient = () => {
+      const found = findClientByInput(clientSearch ? clientSearch.value : "");
+      if (found) clientHidden.value = found.id;
+    };
+    if (clientSearch) {
+      clientSearch.addEventListener("focus", () => { clientSearch.value = ""; });
+      clientSearch.addEventListener("click", () => { if (clientSearch.value === currentPaymentClientLabel()) clientSearch.value = ""; });
+      clientSearch.addEventListener("input", () => {
+        const found = findClientByInput(clientSearch.value);
+        if (found) clientHidden.value = found.id;
+      });
+      const commitPaymentClient = () => {
+        const found = findClientByInput(clientSearch.value);
+        if (!found) { clientSearch.value = currentPaymentClientLabel(); return; }
+        clientSearch.value = found.id + " - " + found.name;
+        applyPaymentClient(found.id);
+      };
+      clientSearch.addEventListener("change", commitPaymentClient);
+      clientSearch.addEventListener("blur", commitPaymentClient);
+    }
+    const clearPaymentClientBtn = document.getElementById("payment-client-clear");
+    if (clearPaymentClientBtn) clearPaymentClientBtn.addEventListener("click", () => {
+      if (clientSearch) clientSearch.value = "";
+      clientHidden.value = "";
+      syncRelatedVisibility();
+      reloadPaymentOrders();
+    });
     if (relatedCheck) relatedCheck.addEventListener("change", reloadPaymentOrders);
     syncRelatedVisibility();
     ordersBox.addEventListener("change", () => updatePaymentOrders(true));
