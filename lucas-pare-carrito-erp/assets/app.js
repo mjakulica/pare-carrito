@@ -2666,6 +2666,22 @@
   function getStockCountToday(productId) {
     return stockMovementsFor(productId).find((m) => m.type === "conteo" && m.date === todayISO()) || null;
   }
+  function getStockDisabledIds() {
+    if (!Array.isArray(state.appSettings.stockDisabledIds)) state.appSettings.stockDisabledIds = [];
+    return state.appSettings.stockDisabledIds;
+  }
+  function isStockDisabled(productId) {
+    return getStockDisabledIds().indexOf(productId) !== -1;
+  }
+  function setStockDisabled(productId, disabled) {
+    const list = getStockDisabledIds();
+    const idx = list.indexOf(productId);
+    if (disabled && idx === -1) list.push(productId);
+    else if (!disabled && idx !== -1) list.splice(idx, 1);
+    state.appSettings.stockDisabledIds = list;
+    saveState();
+  }
+
   function getStockSuggestion(productId) {
     const today = todayISO();
     const countToday = getStockCountToday(productId);
@@ -2735,7 +2751,9 @@
     }).sort((a, b) => b.kg - a.kg);
   }
   function renderStock() {
+    const stockView = ui.stockView || "activos";
     const rows = getStockTrackedProductIds().map((id) => getProduct(id)).filter(Boolean)
+      .filter((product) => stockView === "inactivos" ? isStockDisabled(product.id) : !isStockDisabled(product.id))
       .sort((a, b) => a.name.localeCompare(b.name)).map((product) => {
         const sug = getStockSuggestion(product.id);
         const parents = sug.parents;
@@ -2754,6 +2772,7 @@
           <td><label style="display:inline-flex;gap:6px;align-items:center"><input type="checkbox" data-stock-retail="${product.id}" ${sug.retailOnly ? "checked" : ""} style="width:auto;min-height:auto" />por menor hoy</label></td>
           <td>${parentCell}</td>
           <td>${sugText}</td>
+          <td><button class="btn small ${isStockDisabled(product.id) ? "primary" : "danger"}" type="button" data-stock-toggle-active="${product.id}">${isStockDisabled(product.id) ? "Activar" : "Desactivar"}</button></td>
         </tr>`;
       }).join("");
     const from = ui.stockMermaFrom || addDaysISO(todayISO(), -29);
@@ -2763,13 +2782,14 @@
     return pageShell(
       "Stock",
       "Conteo diario de productos fraccionados. El conteo real define la compra del dia y registra la merma.",
-      "",
+      `<button class="btn ${stockView === "activos" ? "primary" : "ghost"}" type="button" data-stock-view="activos">Activos</button>
+       <button class="btn ${stockView === "inactivos" ? "primary" : "ghost"}" type="button" data-stock-view="inactivos">Inactivos</button>`,
       `
       <div class="panel">
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Producto</th><th>Stock estimado</th><th>Stock real (conteo)</th><th>Demanda hoy</th><th>Por menor hoy</th><th>Bulto a usar</th><th>Sugerencia de compra</th></tr></thead>
-            <tbody>${rows || emptyRow(7, "No hay productos fraccionados. Asocia un mayorista en Productos (Cambiar distribucion de productos).")}</tbody>
+            <thead><tr><th>Producto</th><th>Stock estimado</th><th>Stock real (conteo)</th><th>Demanda hoy</th><th>Por menor hoy</th><th>Bulto a usar</th><th>Sugerencia de compra</th><th>Estado</th></tr></thead>
+            <tbody>${rows || emptyRow(8, "No hay productos fraccionados " + (stockView === "inactivos" ? "inactivos." : "activos. Asocia un mayorista en Productos (Cambiar distribucion de productos).")) }</tbody>
           </table>
         </div>
       </div>
@@ -2791,6 +2811,8 @@
     );
   }
   function bindStock() {
+    document.querySelectorAll("[data-stock-view]").forEach((btn) => btn.addEventListener("click", () => { ui.stockView = btn.dataset.stockView; render(); }));
+    document.querySelectorAll("[data-stock-toggle-active]").forEach((btn) => btn.addEventListener("click", () => { setStockDisabled(btn.dataset.stockToggleActive, !isStockDisabled(btn.dataset.stockToggleActive)); render(); }));
     document.querySelectorAll("[data-stock-save]").forEach((btn) => btn.addEventListener("click", () => {
       const pid = btn.dataset.stockSave;
       const input = document.querySelector('[data-stock-count="' + pid + '"]');
@@ -5857,7 +5879,7 @@
     const date = todayISO();
     const groups = Object.values(getOrderProductGroups(date));
     const remaining = { ...getPurchasedQuantities(date) };
-    const trackedStockIds = new Set(getStockTrackedProductIds());
+    const trackedStockIds = new Set(getStockTrackedProductIds().filter((id) => !isStockDisabled(id)));
     const allItems = groups.map((group) => {
       const available = Number(remaining[group.productId] || 0);
       const purchasedQuantity = Math.min(available, Number(group.quantity || 0));
