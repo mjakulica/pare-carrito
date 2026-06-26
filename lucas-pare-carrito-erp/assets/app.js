@@ -2812,6 +2812,29 @@
     if (mTo) mTo.addEventListener("change", () => { ui.stockMermaTo = mTo.value || todayISO(); render(); });
   }
 
+  function getKgLegendDefaults() {
+    return ["manzana roja unidad", "manzana verde unidad", "pera unidad", "mango unidad", "berenjena unidad", "zapallo amarillo unidad", "pepino unidad", "palta madura unidad", "zanahoria unidad", "maracuya unidad", "queso criollo horma", "queso de cabra horma", "morron amarillo unidad", "morron rojo unidad", "morron verde unidad", "calabaza unidad", "zapallo negro unidad"];
+  }
+  function kgLegendBase(value) {
+    return normalizeText(value).replace(/unidades/g, "unidad");
+  }
+  function getKgLegendIds() {
+    if (!Array.isArray(state.appSettings.kgLegendProductIds)) {
+      const ids = [];
+      getKgLegendDefaults().forEach((name) => {
+        const target = kgLegendBase(name);
+        let prod = (state.products || []).find((p) => kgLegendBase(p.name) === target);
+        if (!prod) prod = (state.products || []).find((p) => kgLegendBase(p.name).indexOf(target) === 0 || target.indexOf(kgLegendBase(p.name)) === 0);
+        if (prod && ids.indexOf(prod.id) === -1) ids.push(prod.id);
+      });
+      state.appSettings.kgLegendProductIds = ids;
+    }
+    return state.appSettings.kgLegendProductIds;
+  }
+  function hasKgLegend(productId) {
+    return getKgLegendIds().indexOf(productId) !== -1;
+  }
+
   function getKgFactor(product) {
     if (!product) return 1;
     if (Number(product.kgPerUnit) > 0) return Number(product.kgPerUnit);
@@ -4194,7 +4217,7 @@
         <div class="mini-table">
           ${(order.items || []).map((item) => `<div>
             <span>${escapeHtml(item.productName)}${item.note ? `<br><small>${escapeHtml(item.note)}</small>` : ""}</span>
-            <span>${formatNumber(item.quantity)} ${escapeHtml(item.unitType)}${hideMoney ? "" : ` x ${formatMoney(item.unitPrice)} = ${formatMoney(item.totalWithIva || item.subtotal)}`}</span>
+            <span>${formatNumber(item.quantity)}${hasKgLegend(item.productId) ? " kg" : ""}${hideMoney ? "" : ` x ${formatMoney(item.unitPrice)} = ${formatMoney(item.totalWithIva || item.subtotal)}`}</span>
           </div>`).join("")}
         </div>
         ${hideMoney ? "" : `<div class="order-detail-total">
@@ -8255,7 +8278,7 @@
         <td>${formatDate(entry.date)}</td>
         ${showClientColumn ? `<td>${escapeHtml(entry.clientName)}</td>` : ""}
         <td>${escapeHtml(entry.type)}</td>
-        <td>${escapeHtml(entry.description)}</td>
+        <td>${entry.relatedEntityType === "order" && getOrder(entry.relatedEntityId) ? renderOrderInlineDetails(getOrder(entry.relatedEntityId), { summary: entry.description }) : escapeHtml(entry.description)}</td>
         <td class="num">${formatMoney(entry.amount)}</td>
         <td class="num">${formatMoney(entry.balance)}</td>
       </tr>
@@ -9934,6 +9957,15 @@
             </table>
           </div>
         </div>` : ""}
+        ${canManageUnitTypes ? `<div class="panel">
+          <h2 class="page-title" style="font-size:18px">Productos con leyenda "kg" (detalle de Remitos/Pedidos)</h2>
+          <p class="muted">En el detalle desplegable se oculta el tipo de unidad; estos productos muestran "kg".</p>
+          <div class="sidebar-order-list" style="margin-top:10px">${getKgLegendIds().map((pid) => { const prod = getProduct(pid); return `<div class="page-actions" style="justify-content:space-between"><span>${escapeHtml(prod ? prod.name : pid)}</span><button class="btn small danger" type="button" data-remove-kg-legend="${escapeAttr(pid)}">Quitar</button></div>`; }).join("") || `<span class="muted">Sin productos.</span>`}</div>
+          <div class="form-grid" style="margin-top:12px">
+            <div class="field span-2"><label>Agregar producto</label><select id="kg-legend-add">${activeProducts().slice().sort((a, b) => a.name.localeCompare(b.name)).map((p) => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join("")}</select></div>
+            <div class="field"><label>&nbsp;</label><button class="btn primary" type="button" id="kg-legend-add-btn">Agregar</button></div>
+          </div>
+        </div>` : ""}
       </div>` : ""}
       ${currentUser.role === "manager" ? `
       <div class="panel" style="margin-top:14px">
@@ -10219,6 +10251,21 @@
       const v = parseAmount(input.value);
       product.kgPerUnit = v > 0 ? v : 0;
       saveState();
+    }));
+    const kgLegendAddBtn = document.getElementById("kg-legend-add-btn");
+    if (kgLegendAddBtn) kgLegendAddBtn.addEventListener("click", () => {
+      const sel = document.getElementById("kg-legend-add");
+      if (!sel || !sel.value) return;
+      const list = getKgLegendIds();
+      if (list.indexOf(sel.value) === -1) list.push(sel.value);
+      state.appSettings.kgLegendProductIds = list;
+      saveState();
+      render();
+    });
+    document.querySelectorAll("[data-remove-kg-legend]").forEach((button) => button.addEventListener("click", () => {
+      state.appSettings.kgLegendProductIds = getKgLegendIds().filter((id) => id !== button.dataset.removeKgLegend);
+      saveState();
+      render();
     }));
     bindRolePermissionsPanel();
     bindPrintTemplatesPanel();
@@ -11808,7 +11855,7 @@
       <tr>
         <td>${formatDate(entry.date)}</td>
         <td>${escapeHtml(entry.type)}</td>
-        <td>${escapeHtml(entry.description)}</td>
+        <td>${entry.relatedEntityType === "order" && getOrder(entry.relatedEntityId) ? renderOrderInlineDetails(getOrder(entry.relatedEntityId), { summary: entry.description }) : escapeHtml(entry.description)}</td>
         <td class="num">${formatMoney(entry.amount)}</td>
         <td class="num">${formatMoney(entry.balance)}</td>
       </tr>
