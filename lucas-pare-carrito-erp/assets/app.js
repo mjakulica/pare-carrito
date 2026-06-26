@@ -7734,8 +7734,9 @@
     const unitItems = getUnitWeightGroups(date).filter((group) => group.unitProduct && group.pendingEntries.length);
     const missingPurchases = getProductPurchaseShortages(date);
     const todaysNotes = getProductNotesByDate(date);
-    const unitRows = unitItems.map((group) => renderUnitProductCard(group, true)).join("");
-    const shortageRows = missingPurchases.map((group) => renderUnitProductCard(group, false)).join("");
+    const omittedUnitCards = ui.omittedUnitCards || {};
+    const unitRows = unitItems.filter((group) => !omittedUnitCards[group.key]).map((group) => renderUnitProductCard(group, true)).join("");
+    const shortageRows = missingPurchases.filter((group) => !omittedUnitCards[group.key]).map((group) => renderUnitProductCard(group, false)).join("");
     afterRender.push(bindUnits);
     return pageShell(
       "Unidades",
@@ -7786,11 +7787,19 @@
             <button class="btn small danger" type="button" data-remove-unit-order-item="${escapeAttr(order.id + "|" + item.id)}">X</button>
           </div>`).join("")}
         </div>
+        <button class="btn small ghost" type="button" data-omit-unit-card="${escapeAttr(group.key)}" style="margin-top:6px">Omitir</button>
       </div>
     `;
   }
 
   function bindUnits() {
+    document.querySelectorAll("[data-omit-unit-card]").forEach((button) => {
+      button.addEventListener("click", () => {
+        ui.omittedUnitCards = ui.omittedUnitCards || {};
+        ui.omittedUnitCards[button.dataset.omitUnitCard] = true;
+        render();
+      });
+    });
     const dateInput = document.getElementById("units-date");
     if (dateInput) dateInput.addEventListener("change", () => {
       ui.unitsDate = dateInput.value || todayISO();
