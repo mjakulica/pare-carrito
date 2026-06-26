@@ -2669,7 +2669,9 @@
   function getStockSuggestion(productId) {
     const today = todayISO();
     const countToday = getStockCountToday(productId);
-    const stockReal = countToday ? Number(countToday.qty || 0) : getStockEstimated(productId, today);
+    const morning = countToday ? Number(countToday.qty || 0) : getStockEstimated(productId, today);
+    const comprasHoy = stockComprasBetween(productId, today, addDaysISO(today, 1));
+    const stockReal = morning + comprasHoy;
     const demand = getStockDemandToday(productId);
     const faltante = Math.max(0, Math.round((demand - stockReal) * 100) / 100);
     const entry = getStockDailyEntry(today, productId);
@@ -2746,7 +2748,7 @@
         const countToday = getStockCountToday(product.id);
         return `<tr>
           <td>${escapeHtml(product.name)}<br><span class="muted">${escapeHtml(product.unitType)}</span></td>
-          <td class="num">${formatNumber(getStockEstimated(product.id, todayISO()))}</td>
+          <td class="num">${formatNumber(sug.stockReal)}</td>
           <td><div class="input-with-button"><input data-stock-count="${product.id}" inputmode="decimal" placeholder="real" value="${countToday ? formatAmountInput(countToday.qty) : ""}" /><button class="btn small primary" type="button" data-stock-save="${product.id}">Guardar</button></div>${countToday ? `<span class="muted">Contado hoy</span>` : ""}</td>
           <td class="num">${formatNumber(sug.demand)}</td>
           <td><label style="display:inline-flex;gap:6px;align-items:center"><input type="checkbox" data-stock-retail="${product.id}" ${sug.retailOnly ? "checked" : ""} style="width:auto;min-height:auto" />por menor hoy</label></td>
