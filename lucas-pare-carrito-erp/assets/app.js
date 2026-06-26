@@ -5832,15 +5832,15 @@
     const date = todayISO();
     const groups = Object.values(getOrderProductGroups(date));
     const remaining = { ...getPurchasedQuantities(date) };
+    const trackedStockIds = new Set(getStockTrackedProductIds());
     const allItems = groups.map((group) => {
       const available = Number(remaining[group.productId] || 0);
       const purchasedQuantity = Math.min(available, Number(group.quantity || 0));
       remaining[group.productId] = available - purchasedQuantity;
-      return {
-        ...group,
-        purchasedQuantity,
-        shortageQuantity: Math.max(0, Number(group.quantity || 0) - purchasedQuantity)
-      };
+      const shortageQuantity = trackedStockIds.has(group.productId)
+        ? getStockSuggestion(group.productId).faltante
+        : Math.max(0, Number(group.quantity || 0) - purchasedQuantity);
+      return { ...group, purchasedQuantity, shortageQuantity };
     }).sort((a, b) => a.productName.localeCompare(b.productName));
 
     const todaysIds = new Set(groups.map((group) => group.productId));
@@ -6133,6 +6133,7 @@
         const parsed = parsePurchaseProviderValue(providerInput.value);
         if (parsed.type === "provider" && parsed.provider) return parsed.assigneeValue;
         if (parsed.type === "employee" && parsed.employee) return parsed.assigneeValue;
+        if (parsed.type === "all") return "all";
       }
       if (assignedEmployeeSelect && assignedEmployeeSelect.value) return "employee:" + assignedEmployeeSelect.value;
       return "";
