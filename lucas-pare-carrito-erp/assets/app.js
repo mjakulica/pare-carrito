@@ -12313,7 +12313,10 @@
         }
       }
       const nameTokens = tokens.filter((_, tokenIndex) => !remove.has(tokenIndex)).filter((token) => token && !isOrderConnectorToken(token));
-      const rawNameTokens = rawTokens.filter((_, tokenIndex) => !remove.has(tokenIndex)).filter((token) => !isOrderConnectorToken(normalizeOrderTokenText(token)));
+      const rawNameTokens = rawTokens.filter((_, tokenIndex) => !remove.has(tokenIndex)).filter((token) => {
+        const norm = normalizeOrderTokenText(token);
+        return norm && !isOrderConnectorToken(norm);
+      });
       const override = getParsedLineUnitQuantityOverride(nameTokens, unitType, quantity);
       if (override) {
         unitType = override.unitType || unitType;
@@ -12599,6 +12602,8 @@
       if (dozenProduct) return dozenProduct;
     }
     if (isWholesaleParsedUnit(cleanUnit)) {
+      const exactUnitProduct = findByBaseAndUnits([cleanUnit]);
+      if (exactUnitProduct) return exactUnitProduct;
       const wholesaleProduct = findByBaseAndUnits(["jaula", "cajon", "bolsa"]);
       if (wholesaleProduct) return wholesaleProduct;
     }
