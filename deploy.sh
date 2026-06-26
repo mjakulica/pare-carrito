@@ -13,9 +13,9 @@ cd "$PROJECT_DIR"
 
 echo "==> 1/4 Backup de la base de datos (comprimido)..."
 mkdir -p "$BACKUP_DIR"
-# Rotacion previa: conservar los 4 .gz mas nuevos (con el nuevo, 5) y limpiar dumps sin comprimir viejos
-ls -t "$BACKUP_DIR"/db_*.sql.gz 2>/dev/null | tail -n +5 | xargs -r rm -f
-ls -t "$BACKUP_DIR"/code_*.tar.gz 2>/dev/null | tail -n +3 | xargs -r rm -f
+# Rotacion previa (|| true para no abortar si no hay archivos que coincidan)
+{ ls -t "$BACKUP_DIR"/db_*.sql.gz 2>/dev/null | tail -n +5 | xargs -r rm -f; } || true
+{ ls -t "$BACKUP_DIR"/code_*.tar.gz 2>/dev/null | tail -n +3 | xargs -r rm -f; } || true
 if docker ps --format '{{.Names}}' | grep -q "^${DB_CONTAINER}$"; then
   if docker exec "$DB_CONTAINER" pg_dump -U parecarrito parecarrito | gzip > "$BACKUP_DIR/db_${DATE}.sql.gz"; then
     echo "    OK -> $BACKUP_DIR/db_${DATE}.sql.gz ($(du -h "$BACKUP_DIR/db_${DATE}.sql.gz" | cut -f1))"
@@ -27,7 +27,7 @@ else
   echo "    (contenedor de DB no encontrado, salteo el pg_dump)"
 fi
 # Rotacion final: como mucho 5 dumps comprimidos
-ls -t "$BACKUP_DIR"/db_*.sql.gz 2>/dev/null | tail -n +6 | xargs -r rm -f
+{ ls -t "$BACKUP_DIR"/db_*.sql.gz 2>/dev/null | tail -n +6 | xargs -r rm -f; } || true
 
 BEFORE="$(git rev-parse HEAD)"
 
