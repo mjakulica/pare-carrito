@@ -5883,12 +5883,28 @@
       return "Agregar";
     };
 
-    const cards = [...requiredItems, ...restItems].map((item) => `
-      <button class="assigned-product-card ${item.favorite ? "favorite" : ""}" type="button" data-employee-assigned-product="${item.productId}" data-default-qty="${formatAmountInput(item.shortageQuantity || item.quantity || 0)}">
-        <span>${escapeHtml(item.productName)}</span>
-        <strong>${labelFor(item)}</strong>
-      </button>
-    `).join("");
+    const cards = [...requiredItems, ...restItems].map((item) => {
+      let cardProductId = item.productId;
+      let cardName = item.productName;
+      let cardQty = item.shortageQuantity || item.quantity || 0;
+      let cardLabel = labelFor(item);
+      // Para fraccionados (salvo "por menor hoy"): mostrar el mayorista con los bultos sugeridos
+      if (trackedStockIds.has(item.productId) && item.favorite) {
+        const sug = getStockSuggestion(item.productId);
+        if (!sug.retailOnly && sug.parent && Number(sug.bultos) > 0) {
+          const wholesale = getProduct(sug.parent.wholesaleProductId);
+          cardProductId = sug.parent.wholesaleProductId;
+          cardName = wholesale ? wholesale.name : cardName;
+          cardQty = sug.bultos;
+          cardLabel = "Falta " + formatNumber(sug.bultos) + " " + escapeHtml(wholesale ? wholesale.unitType : "");
+        }
+      }
+      return `
+      <button class="assigned-product-card ${item.favorite ? "favorite" : ""}" type="button" data-employee-assigned-product="${cardProductId}" data-default-qty="${formatAmountInput(cardQty)}">
+        <span>${escapeHtml(cardName)}</span>
+        <strong>${cardLabel}</strong>
+      </button>`;
+    }).join("");
     return `<div class="assigned-products-grid">${cards || `<div class="empty compact">No hay productos pendientes de compra para hoy.</div>`}</div>`;
   }
 
