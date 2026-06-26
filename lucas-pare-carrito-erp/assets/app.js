@@ -6625,6 +6625,12 @@
          <button class="btn ghost" data-print-divide="all">PDF todos</button>
          <button class="btn ghost" data-print-divide="${escapeAttr(selected.join(","))}">PDF seleccionado</button>
        </div>
+       <div class="divide-page-actions">
+         <label class="divide-include-clients" style="display:inline-flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+           <input type="checkbox" id="divide-include-clients" checked style="width:auto;min-height:auto" />
+           Incluir &quot;Agrupado por cliente&quot; en el PDF
+         </label>
+       </div>
        <div class="divide-page-actions divide-whatsapp-actions">
          <button class="btn ghost" data-copy-divide="all">${WHATSAPP_SVG} Todos</button>
          <button class="btn ghost" data-copy-divide="${escapeAttr(selected.join(","))}">${WHATSAPP_SVG} Seleccionado</button>
@@ -6746,8 +6752,10 @@
     });
     const sorted = sortDivideGroupsByAssignee(Object.values(groups));
     return `<ul class="divide-print-list">${sorted.map((group) => {
-      const clients = Object.keys(group.clients).sort(compareClientIdStrings).map((clientId) => `${escapeHtml(clientId)}) ${formatNumber(group.clients[clientId])}`).join(", ");
-      return `<li><strong>${escapeHtml(group.productName)}${isAll ? " - " + escapeHtml(group.assigneeName) : ""}</strong>: ${clients} ${escapeHtml(group.unitType)}</li>`;
+      const clientIds = Object.keys(group.clients).sort(compareClientIdStrings);
+      const clients = clientIds.map((clientId) => `${escapeHtml(formatClientIdShort(clientId))}) ${formatDivideQty(group.clients[clientId])}`).join(" / ");
+      const total = clientIds.reduce((sum, clientId) => sum + Number(group.clients[clientId] || 0), 0);
+      return `<li><strong>${escapeHtml(group.productName)}${isAll ? " - " + escapeHtml(group.assigneeName) : ""}</strong>: ${clients} = ${formatDivideQty(total)} ${escapeHtml(group.unitType)}</li>`;
     }).join("")}</ul>`;
   }
 
@@ -6766,8 +6774,8 @@
     });
     return `<ul class="divide-print-list">${Object.keys(groups).sort(compareClientIdStrings).map((clientId) => {
       const group = groups[clientId];
-      const itemsHtml = group.items.map((item) => `<li>${formatNumber(item.quantity)} ${escapeHtml(item.unitType)} ${escapeHtml(item.productName)}${isAll ? " - " + escapeHtml(item.assigneeName) : ""}${item.note ? " (" + escapeHtml(item.note) + ")" : ""}</li>`).join("");
-      return `<li><strong>${escapeHtml(clientId)}) ${escapeHtml(group.clientName)}</strong><ul>${itemsHtml}</ul></li>`;
+      const itemsHtml = group.items.map((item) => `<li>${formatDivideQty(item.quantity)} ${escapeHtml(item.unitType)} ${escapeHtml(item.productName)}${isAll ? " - " + escapeHtml(item.assigneeName) : ""}${item.note ? " (" + escapeHtml(item.note) + ")" : ""}</li>`).join("");
+      return `<li><strong>${escapeHtml(formatClientIdShort(clientId))}) ${escapeHtml(group.clientName)}</strong><ul>${itemsHtml}</ul></li>`;
     }).join("")}</ul>`;
   }
 
@@ -6806,6 +6814,12 @@
       const entry = activeAssignees().find((a) => a.value === value);
       return entry ? entry.label : value;
     }).join(", "));
+    const includeClientsEl = document.getElementById("divide-include-clients");
+    const includeClients = includeClientsEl ? includeClientsEl.checked : true;
+    const clientSection = includeClients
+      ? `<h3 style="margin:10px 0 4px;font-size:12px">Agrupado por cliente</h3>
+        ${renderDivideClientList(assignables, isAll ? "all" : assigneeValues)}`
+      : "";
     const body = `
       <div class="print-compact">
         <h1 style="margin:0 0 2px;font-size:18px">${BUSINESS_NAME}</h1>
@@ -6813,8 +6827,7 @@
         <p style="margin:0 0 8px;font-size:11px">Fecha: ${formatDate(todayISO())}</p>
         <h3 style="margin:6px 0 4px;font-size:12px">Agrupado por producto</h3>
         ${renderDivideProductList(assignables, isAll ? "all" : assigneeValues)}
-        <h3 style="margin:10px 0 4px;font-size:12px">Agrupado por cliente</h3>
-        ${renderDivideClientList(assignables, isAll ? "all" : assigneeValues)}
+        ${clientSection}
       </div>
     `;
     const title = isAll
@@ -6828,6 +6841,18 @@
     const bn = Number(b);
     if (Number.isFinite(an) && Number.isFinite(bn) && an !== bn) return an - bn;
     return String(a).localeCompare(String(b));
+  }
+
+  function formatClientIdShort(clientId) {
+    const str = String(clientId == null ? "" : clientId).trim();
+    if (/^\d+$/.test(str)) return String(parseInt(str, 10));
+    return str.replace(/^0+(?=\d)/, "");
+  }
+
+  function formatDivideQty(value) {
+    const rounded = Math.round(Number(value || 0) * 10) / 10;
+    if (Number.isInteger(rounded)) return String(rounded);
+    return new Intl.NumberFormat("es-AR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(rounded);
   }
 
   function renderDividePrint(id) {
@@ -12433,6 +12458,12 @@
     if (clean.startsWith("band")) return "bandeja";
     if (clean.startsWith("rist") || clean.startsWith("riestr")) return "ristra";
     if (clean.startsWith("cabez")) return "cabeza";
+    // Envases / presentaciones que se venden por unidad (botella, frasco, pote, horma, paquete).
+    if (clean.startsWith("botel")) return "unidad";
+    if (clean.startsWith("frasc")) return "unidad";
+    if (clean.startsWith("pote")) return "unidad";
+    if (clean.startsWith("horma")) return "unidad";
+    if (clean === "pq" || clean.startsWith("paq")) return "unidad";
     return "";
   }
 
@@ -15088,6 +15119,12 @@
     if (clean.startsWith("band")) return "bandeja";
     if (clean.startsWith("rist")) return "ristra";
     if (clean.startsWith("cabez")) return "cabeza";
+    // Envases / presentaciones que se venden por unidad (botella, frasco, pote, horma, paquete).
+    if (clean.startsWith("botel")) return "unidad";
+    if (clean.startsWith("frasc")) return "unidad";
+    if (clean.startsWith("pote")) return "unidad";
+    if (clean.startsWith("horma")) return "unidad";
+    if (clean === "pq" || clean.startsWith("paq")) return "unidad";
     return "";
   }
 
