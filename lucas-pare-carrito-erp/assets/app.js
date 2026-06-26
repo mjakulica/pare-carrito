@@ -4568,7 +4568,7 @@
           </td>
           <td class="page-actions">
             ${canViewRemito ? `<button class="btn small ghost" data-view-customer-remito="${order.id}">Remito</button>` : `<span class="muted">Remito disponible 8:00</span>`}
-            ${canEdit ? `<button class="btn small ghost" data-edit-order="${order.id}">Editar</button>` : `<span class="muted">Cerrado</span>`}
+            ${canEdit ? `<button class="btn small ghost" data-edit-order="${order.id}">Editar</button>` : ""}
           </td>
         </tr>
       `;
@@ -5746,7 +5746,8 @@
       ? state.purchases.filter((purchase) => purchase.userRole === "employee" || purchase.recordedBy === currentUser.name)
       : state.purchases;
     const isManager = currentUser.role === "manager";
-    const rows = visiblePurchases.slice().reverse().map((purchase) => {
+    const purchasesLimit = Number(ui.purchasesLimit) || 30;
+    const rows = visiblePurchases.slice().reverse().slice(0, purchasesLimit).map((purchase) => {
       const provider = getProvider(purchase.providerId);
       const origin = provider ? provider.name : purchase.providerName || (purchase.expenseType === "other_expense" ? "Gasto general" : "Gasto producto");
       const itemText = purchaseItemsCollapsible(purchase);
@@ -5792,6 +5793,7 @@
         ${canUseProviders ? renderPurchaseTabs(purchaseTab) : ""}
         ${purchaseTab === "proveedores" ? renderProviderPaymentTab() : (roleFlag(currentUser.role, "registrarGastos") ? renderPurchaseRegisterTab(canUseProviders) : `<div class="panel empty">Su rol no tiene permiso para registrar compras o gastos.</div>`)}
         <div class="panel">
+          <div class="page-actions" style="justify-content:flex-end;margin-bottom:8px"><label style="display:inline-flex;gap:6px;align-items:center;font-size:13px">Mostrar <select id="purchases-limit">${[30, 60, 120, 100000].map((n) => `<option value="${n}" ${purchasesLimit === n ? "selected" : ""}>${n >= 100000 ? "Todos" : n}</option>`).join("")}</select></label></div>
           <div class="table-scroll-box">
             <div class="table-wrap">
               <table>
@@ -6117,6 +6119,8 @@
   }
 
   function bindPurchases() {
+    const purchasesLimitSel = document.getElementById("purchases-limit");
+    if (purchasesLimitSel) purchasesLimitSel.addEventListener("change", () => { ui.purchasesLimit = Number(purchasesLimitSel.value) || 30; render(); });
     const kind = document.getElementById("purchase-kind");
     const total = document.getElementById("purchase-total");
     const itemsWrap = document.getElementById("purchase-items-wrap");
@@ -7911,7 +7915,8 @@
   function renderPayments() {
     const methods = ["efectivo", "transferencia", "cheque"];
     const isManager = currentUser.role === "manager";
-    const paymentRows = state.payments.slice().reverse().map((payment) => {
+    const paymentsLimit = Number(ui.paymentsLimit) || 30;
+    const paymentRows = state.payments.slice().reverse().slice(0, paymentsLimit).map((payment) => {
       const client = getClient(payment.clientId);
       const isAnnulled = payment.status === "anulado";
       const annulButton = isManager && !isAnnulled ? `<button class="btn small danger" data-annul-payment="${payment.id}" title="Anular pago">X</button>` : "";
@@ -7983,6 +7988,7 @@
           </div>
         </form>
         <div class="panel payment-history-wrap">
+          <div class="page-actions" style="justify-content:flex-end;margin-bottom:8px"><label style="display:inline-flex;gap:6px;align-items:center;font-size:13px">Mostrar <select id="payments-limit">${[30, 60, 120, 100000].map((n) => `<option value="${n}" ${paymentsLimit === n ? "selected" : ""}>${n >= 100000 ? "Todos" : n}</option>`).join("")}</select></label></div>
           <div class="table-wrap">
             <table>
               <thead><tr><th>Fecha</th><th>Cliente</th><th>Recibio</th><th>Método</th><th>Caja</th><th>Monto</th><th>Comprobante</th><th>Notas</th><th>Acciones</th></tr></thead>
@@ -8018,6 +8024,8 @@
   }
 
   function bindPayments() {
+    const paymentsLimitSel = document.getElementById("payments-limit");
+    if (paymentsLimitSel) paymentsLimitSel.addEventListener("change", () => { ui.paymentsLimit = Number(paymentsLimitSel.value) || 30; render(); });
     const method = document.getElementById("payment-method");
     const uploadWrap = document.getElementById("transfer-upload-wrap");
     const updateUpload = () => {
@@ -14307,19 +14315,18 @@
   }
 
   function sortProductsForClient(clientId) {
-    const prefs = new Set(state.preferences.filter((pref) => pref.clientId === clientId).map((pref) => pref.productId));
-    const categoryRank = (category) => {
-      const rank = { FRUTAS: 1, VERDURAS: 2, HUEVOS: 3, OTROS: 4 }[String(category || "").toUpperCase()];
-      return rank || 99;
+    const prefByProduct = new Map(state.preferences.filter((pref) => pref.clientId === clientId).map((pref) => [pref.productId, pref]));
+    const lastKey = getClientLastPreferenceKey(clientId);
+    const tierOf = (product) => {
+      const pref = prefByProduct.get(product.id);
+      if (!pref) return 2;
+      if (lastKey && getPreferenceOrderKey(pref) === lastKey) return 0;
+      return 1;
     };
     return activeProducts().slice().sort((a, b) => {
-      const rankA = categoryRank(a.category);
-      const rankB = categoryRank(b.category);
-      if (rankA !== rankB) return rankA - rankB;
-      const pa = prefs.has(a.id);
-      const pb = prefs.has(b.id);
-      if (pa && !pb) return -1;
-      if (!pa && pb) return 1;
+      const ta = tierOf(a);
+      const tb = tierOf(b);
+      if (ta !== tb) return ta - tb;
       return (a.sortOrder || 0) - (b.sortOrder || 0);
     });
   }

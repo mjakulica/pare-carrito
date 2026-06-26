@@ -1342,12 +1342,21 @@ tr:last-child td {
 }
 
 .unit-order-line {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto auto;
-  gap: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
   align-items: center;
   border-top: 1px dashed var(--line);
   padding-top: 6px;
+}
+
+.unit-order-line > span {
+  flex: 1 1 100%;
+  min-width: 0;
+}
+
+.unit-order-line > strong {
+  margin-right: auto;
 }
 
 .unit-order-line small {
