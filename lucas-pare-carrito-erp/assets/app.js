@@ -6081,15 +6081,13 @@
             <div id="purchase-items" class="grid">
               ${renderPurchaseItemRow()}
             </div>
-            <div class="page-actions purchase-form-actions" style="margin-top:12px">
-              <button class="btn small yellow" type="button" data-add-purchase-item>Agregar producto</button>
-            </div>
             <div class="page-actions" style="margin-top:12px">
               <strong>Productos</strong>
             </div>
             <div id="required-purchase-grid">${renderRequiredPurchaseGrid()}</div>
           </div>
-          <div class="page-actions purchase-submit-row" style="margin-top:12px">
+          <div class="page-actions purchase-submit-row" style="margin-top:12px;justify-content:space-between">
+            <button class="btn small yellow" type="button" data-add-purchase-item id="purchase-add-item-btn">Agregar producto</button>
             <button class="btn small primary" type="submit">Guardar egreso</button>
           </div>
           <div id="vendor-favorites-wrap" class="panel" style="box-shadow:none;margin-top:12px">
@@ -6275,6 +6273,8 @@
       const isMarketPrice = kind.value === "market_price";
       const isCashMovement = kind.value === "cash_movement";
       itemsWrap.style.display = isOther || isProviderPayment || isCashMovement ? "none" : "grid";
+      const addItemBtnToggle = document.getElementById("purchase-add-item-btn");
+      if (addItemBtnToggle) addItemBtnToggle.style.display = (isOther || isProviderPayment || isCashMovement) ? "none" : "inline-flex";
       itemsContainer.classList.toggle("market-price-mode", isMarketPrice);
       descriptionWrap.style.display = isOther ? "grid" : "none";
       otherAmountWrap.style.display = isOther || isCashMovement ? "grid" : "none";
@@ -8374,13 +8374,14 @@
         <td>${formatDate(entry.date)}</td>
         ${showClientColumn ? `<td>${escapeHtml(entry.clientName)}</td>` : ""}
         <td>${escapeHtml(entry.type)}</td>
-        <td>${entry.relatedEntityType === "order" && getOrder(entry.relatedEntityId) ? renderOrderInlineDetails(getOrder(entry.relatedEntityId), { summary: entry.description }) + ` <button class="btn small ghost no-print" type="button" data-print-order-remito="${escapeAttr(entry.relatedEntityId)}" title="Imprimir remito">&#128424;</button>` : escapeHtml(entry.description)}</td>
+        <td>${entry.relatedEntityType === "order" && getOrder(entry.relatedEntityId) ? renderOrderInlineDetails(getOrder(entry.relatedEntityId), { summary: entry.description }) : escapeHtml(entry.description)}</td>
         <td class="num">${formatMoney(entry.amount)}</td>
         <td class="num">${formatMoney(entry.balance)}</td>
+        <td class="no-print">${entry.relatedEntityType === "order" && getOrder(entry.relatedEntityId) ? `<button class="btn small ghost" type="button" data-print-order-remito="${escapeAttr(entry.relatedEntityId)}" title="Imprimir remito">&#128424;</button>` : ""}</td>
       </tr>
     `).join("");
-    const movementHead = `<th>Fecha</th>${showClientColumn ? "<th>Cuenta</th>" : ""}<th>Tipo</th><th>Descripcion</th><th>Monto</th><th>Saldo</th>`;
-    const movementColumns = showClientColumn ? 6 : 5;
+    const movementHead = `<th>Fecha</th>${showClientColumn ? "<th>Cuenta</th>" : ""}<th>Tipo</th><th>Descripcion</th><th>Monto</th><th>Saldo</th><th class="no-print">Remito</th>`;
+    const movementColumns = showClientColumn ? 7 : 6;
     afterRender.push(() => {
       const fromInput = document.getElementById("balance-from");
       const toInput = document.getElementById("balance-to");
@@ -8422,6 +8423,7 @@
         }
         render();
       }));
+      document.querySelectorAll("[data-print-order-remito]").forEach((button) => button.addEventListener("click", () => printOrderRemitoDirect(button.dataset.printOrderRemito)));
       const printButton = document.getElementById("print-balance-movements");
       if (printButton) printButton.addEventListener("click", () => {
         const names = selectedIds.map((id) => {
@@ -10147,7 +10149,7 @@
         ${canManageUnitTypes ? `<div class="panel">
           <h2 class="page-title" style="font-size:18px">Peso por producto (kg)</h2>
           <p class="muted">Peso en kg por unidad de cada producto, usado en los graficos de Kgs vendidos y de merma. Si se deja vacio, se usa el peso del tipo de unidad.</p>
-          <div class="table-wrap" style="margin-top:10px">
+          <div class="table-wrap" style="margin-top:10px;max-height:320px;overflow:auto">
             <table>
               <thead><tr><th>Producto</th><th>Unidad</th><th>Peso (kg) por unidad</th></tr></thead>
               <tbody>${activeProducts().slice().sort((a, b) => a.name.localeCompare(b.name)).map((p) => `<tr><td>${escapeHtml(p.name)}</td><td>${escapeHtml(p.unitType)}</td><td><input data-product-kg="${p.id}" inputmode="decimal" style="max-width:120px" value="${Number(p.kgPerUnit) > 0 ? formatAmountInput(p.kgPerUnit) : ""}" placeholder="${formatNumber(getKgFactor(p))}" /></td></tr>`).join("")}</tbody>
@@ -10161,6 +10163,13 @@
           <div class="form-grid" style="margin-top:12px">
             <div class="field span-2"><label>Agregar producto</label><select id="kg-legend-add">${activeProducts().slice().sort((a, b) => a.name.localeCompare(b.name)).map((p) => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join("")}</select></div>
             <div class="field"><label>&nbsp;</label><button class="btn primary" type="button" id="kg-legend-add-btn">Agregar</button></div>
+          </div>
+        </div>` : ""}
+        ${canManageUnitTypes ? `<div class="panel">
+          <h2 class="page-title" style="font-size:18px">Prompt de IA (lectura de imagen)</h2>
+          <p class="muted">Texto que se envia a la IA al usar "Subir imagen" en cargar pedido de WhatsApp.</p>
+          <div class="form-grid" style="margin-top:8px">
+            <div class="field span-4"><label>Prompt</label><textarea id="ocr-prompt" rows="2">${escapeHtml(getOcrPrompt())}</textarea></div>
           </div>
         </div>` : ""}
       </div>` : ""}
@@ -10442,6 +10451,8 @@
   }
 
   function bindSettings() {
+    const ocrPromptInput = document.getElementById("ocr-prompt");
+    if (ocrPromptInput) ocrPromptInput.addEventListener("change", () => { state.appSettings.ocrPrompt = ocrPromptInput.value.trim(); saveState(); });
     document.querySelectorAll("[data-product-kg]").forEach((input) => input.addEventListener("change", () => {
       const product = getProduct(input.dataset.productKg);
       if (!product) return;
@@ -11973,7 +11984,7 @@
     const roleOptions = (currentUser.role === "admin"
       ? ["admin", "employee", "customer", "contador", "example"]
       : ["manager", "admin", "employee", "customer", "contador", "example"]
-    ).map((role) => `<option value="${role}" ${user && user.role === role ? "selected" : ""}>${escapeHtml(roleLabel(role))}</option>`).join("");
+    ).map((role) => `<option value="${role}" ${(user ? user.role === role : role === "customer") ? "selected" : ""}>${escapeHtml(roleLabel(role))}</option>`).join("");
     showModal(
       user ? "Editar usuario" : "Agregar usuario",
       `
@@ -15461,6 +15472,10 @@
     });
   }
 
+  function getOcrPrompt() {
+    const p = state.appSettings && state.appSettings.ocrPrompt;
+    return (p && String(p).trim()) || "transcribe el texto de esta imagen, es un pedido de frutas y verduras";
+  }
   async function recognizeOrderImageWithKimi(file, statusNode) {
     const config = getCloudSyncConfig();
     if (!cloudSyncReady(config)) throw new Error("Servidor no configurado para OCR por IA.");
@@ -15468,7 +15483,7 @@
     const imageData = await compressImageFile(file, 1600, 0.82);
     const response = await cloudRequest(config, "/ocr/order-image", {
       method: "POST",
-      body: JSON.stringify({ imageData })
+      body: JSON.stringify({ imageData, prompt: getOcrPrompt() })
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
@@ -15886,6 +15901,7 @@
     return `
       @page{size:${pageSize};margin:${pageMargin}}
       *{box-sizing:border-box}
+      .no-print{display:none !important}
       body{font-family:Arial,sans-serif;margin:0;color:#111;background:#fff}
       table{width:100%;border-collapse:collapse}
       th,td{padding:4px 6px;text-align:left}
