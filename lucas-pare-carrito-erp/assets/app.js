@@ -1028,8 +1028,11 @@
     }
   }
 
+  function localPersistRole() {
+    return !!(currentUser && ["manager", "admin"].includes(currentUser.role));
+  }
   function saveState() {
-    writeLocalStateSnapshot(state, "No se pudo guardar el estado completo en localStorage; se intentara sincronizar con el servidor.");
+    if (localPersistRole()) writeLocalStateSnapshot(state, "No se pudo guardar el estado completo en localStorage; se intentara sincronizar con el servidor.");
     const config = getCloudSyncConfig();
     if (canWritePatchCloudSync() && cloudSyncReady(config) && config.auto !== false) {
       if (!queueCurrentStatePatch()) scheduleCloudPush();
@@ -2447,6 +2450,7 @@
   }
 
   function renderSyncBanners() {
+    if (!localPersistRole()) return "";
     let html = "";
     if (ui.syncWarning) {
       html += `<div class="alert" style="margin-bottom:14px"><strong>Atencion sincronizacion:</strong> ${escapeHtml(ui.syncWarning)}</div>`;
