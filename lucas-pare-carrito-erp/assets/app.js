@@ -7780,8 +7780,8 @@
         <div class="unit-order-list">
           ${entries.map(({ order, item, client }) => `<div class="unit-order-line">
             <span>${escapeHtml(order.clientId)} - ${escapeHtml(client ? client.name : order.clientId)}</span>
-            <strong>${formatNumber(item.quantity)} ${escapeHtml(item.unitType)}</strong>
-            <button class="btn small ghost" type="button" data-edit-unit-order="${escapeAttr(order.id)}">Editar</button>
+            <label class="unit-line-qty" style="margin-right:auto;display:inline-flex;align-items:center;gap:4px"><input data-unit-line-qty data-uo="${escapeAttr(order.id)}" data-uitem="${escapeAttr(item.id)}" inputmode="decimal" value="${formatAmountInput(item.quantity)}" style="max-width:64px" /> ${escapeHtml(item.unitType)}</label>
+            <button class="btn small ghost" type="button" data-edit-unit-order="${escapeAttr(order.id)}" data-edit-unit-item="${escapeAttr(item.id)}">Editar</button>
             <button class="btn small danger" type="button" data-remove-unit-order-item="${escapeAttr(order.id + "|" + item.id)}">X</button>
           </div>`).join("")}
         </div>
@@ -7818,7 +7818,25 @@
       });
     });
     document.querySelectorAll("[data-edit-unit-order]").forEach((button) => {
-      button.addEventListener("click", () => openOrderForm(button.dataset.editUnitOrder));
+      button.addEventListener("click", () => openOrderForm(button.dataset.editUnitOrder, button.dataset.editUnitItem));
+    });
+    document.querySelectorAll("[data-unit-line-qty]").forEach((input) => {
+      input.addEventListener("change", () => {
+        const order = getOrder(input.dataset.uo);
+        if (!order) return;
+        const item = order.items.find((entry) => entry.id === input.dataset.uitem);
+        if (!item) return;
+        const qty = parseAmount(input.value);
+        if (qty <= 0) return;
+        item.quantity = qty;
+        item.subtotal = item.quantity * item.unitPrice;
+        item.ivaAmount = item.subtotal * ((item.ivaRate || 0) / 100);
+        item.totalWithIva = item.subtotal + item.ivaAmount;
+        recalcOrderTotals(order);
+        updateOrderAccounting(order);
+        order.updatedAt = new Date().toISOString();
+        saveState();
+      });
     });
     document.querySelectorAll("[data-remove-unit-order-item]").forEach((button) => {
       button.addEventListener("click", () => {
@@ -11493,7 +11511,7 @@
     );
   }
 
-  function openOrderForm(id) {
+  function openOrderForm(id, focusItemId) {
     const order = getOrder(id);
     if (!order) return;
     const isCustomerEdit = isClientLikeRole(currentUser.role);
@@ -11518,9 +11536,30 @@
           <div class="field span-4"><label>Notas pedido</label><textarea id="edit-order-notes">${escapeHtml(order.notes || "")}</textarea></div>
         </div>
         <div class="grid">${itemRows}</div>
+        <div class="grid" id="order-add-rows"></div>
+        <datalist id="order-add-prod-list">${activeProducts().map((p) => `<option value="${escapeAttr(p.name)}"></option>`).join("")}</datalist>
+        <div class="page-actions"><button class="btn small yellow" type="button" id="order-add-product-btn">Agregar producto</button></div>
       </form>
       `,
       () => {
+        const orderAddRows = document.getElementById("order-add-rows");
+        const orderAddBtn = document.getElementById("order-add-product-btn");
+        const appendOrderAddRow = () => {
+          const div = document.createElement("div");
+          div.className = "order-edit-line";
+          div.setAttribute("data-add-row", "1");
+          div.innerHTML = '<div class="field span-2"><label>Producto</label><input list="order-add-prod-list" data-add-name placeholder="Buscar producto" /></div><div class="field"><label>Cantidad</label><input data-add-qty inputmode="decimal" /></div><div class="field"><label>Nota</label><input data-add-note /></div><button class="btn small danger" type="button" data-add-remove>X</button>';
+          orderAddRows.appendChild(div);
+          div.querySelector("[data-add-remove]").addEventListener("click", () => div.remove());
+          const nameInput = div.querySelector("[data-add-name]");
+          if (nameInput) nameInput.focus();
+        };
+        if (orderAddBtn) orderAddBtn.addEventListener("click", appendOrderAddRow);
+        if (focusItemId) {
+          const focusRow = document.querySelector('[data-edit-order-item="' + focusItemId + '"]');
+          const focusQty = focusRow && focusRow.querySelector("[data-edit-qty]");
+          if (focusQty) { focusQty.focus(); if (focusQty.select) focusQty.select(); }
+        }
         document.getElementById("modal-save").addEventListener("click", () => {
           if (isCustomerEdit && !canCustomerEditOrder(order)) return alert("Este pedido ya no se puede editar desde el portal.");
           order.date = document.getElementById("edit-order-date").value || order.date;
@@ -11542,6 +11581,19 @@
             item.ivaRate = shouldApplyInvoiceVat(client) ? getIvaRate(product && product.ivaType) : 0;
             item.ivaAmount = item.subtotal * (item.ivaRate / 100);
             item.totalWithIva = item.subtotal + item.ivaAmount;
+          });
+          document.querySelectorAll("[data-add-row]").forEach((addRow) => {
+            const addName = addRow.querySelector("[data-add-name]").value.trim();
+            const addQty = parseAmount(addRow.querySelector("[data-add-qty]").value);
+            if (!addName || addQty <= 0) return;
+            const addProduct = activeProducts().find((p) => normalizeText(p.name) === normalizeText(addName));
+            if (!addProduct) return;
+            const addClient = getClient(order.clientId);
+            const addUnitPrice = getProductPrice(addProduct.id);
+            const addSubtotal = addQty * addUnitPrice;
+            const addIvaRate = shouldApplyInvoiceVat(addClient) ? getIvaRate(addProduct.ivaType) : 0;
+            const addIvaAmount = addSubtotal * (addIvaRate / 100);
+            order.items.push({ id: nextItemId(), productId: addProduct.id, productName: addProduct.name, quantity: addQty, unitType: addProduct.unitType, unitPrice: addUnitPrice, subtotal: addSubtotal, ivaRate: addIvaRate, ivaAmount: addIvaAmount, totalWithIva: addSubtotal + addIvaAmount, note: addRow.querySelector("[data-add-note]").value.trim(), assignedProviderId: "", assignedToType: "", assignedToId: "" });
           });
           recalcOrderTotals(order);
           order.updatedAt = new Date().toISOString();
