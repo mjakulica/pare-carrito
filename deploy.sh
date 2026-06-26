@@ -11,23 +11,23 @@ DATE="$(date +%Y%m%d_%H%M%S)"
 
 cd "$PROJECT_DIR"
 
-echo "==> 1/4 Backup de la base de datos..."
+echo "==> 1/4 Backup de la base de datos (comprimido)..."
 mkdir -p "$BACKUP_DIR"
-# Rotacion: liberar espacio antes del dump nuevo (conservar los 6 mas nuevos -> con el nuevo, 7)
-ls -t "$BACKUP_DIR"/db_*.sql 2>/dev/null | tail -n +7 | xargs -r rm -f
+# Rotacion previa: conservar los 4 .gz mas nuevos (con el nuevo, 5) y limpiar dumps sin comprimir viejos
+ls -t "$BACKUP_DIR"/db_*.sql.gz 2>/dev/null | tail -n +5 | xargs -r rm -f
 ls -t "$BACKUP_DIR"/code_*.tar.gz 2>/dev/null | tail -n +3 | xargs -r rm -f
 if docker ps --format '{{.Names}}' | grep -q "^${DB_CONTAINER}$"; then
-  if docker exec "$DB_CONTAINER" pg_dump -U parecarrito parecarrito > "$BACKUP_DIR/db_${DATE}.sql"; then
-    echo "    OK -> $BACKUP_DIR/db_${DATE}.sql"
+  if docker exec "$DB_CONTAINER" pg_dump -U parecarrito parecarrito | gzip > "$BACKUP_DIR/db_${DATE}.sql.gz"; then
+    echo "    OK -> $BACKUP_DIR/db_${DATE}.sql.gz ($(du -h "$BACKUP_DIR/db_${DATE}.sql.gz" | cut -f1))"
   else
-    echo "    WARN: fallo el pg_dump (revisar espacio en disco). Continuo igual."
-    rm -f "$BACKUP_DIR/db_${DATE}.sql"
+    echo "    WARN: fallo el pg_dump (revisar espacio). Continuo igual."
+    rm -f "$BACKUP_DIR/db_${DATE}.sql.gz"
   fi
 else
   echo "    (contenedor de DB no encontrado, salteo el pg_dump)"
 fi
-# Rotacion final: dejar como mucho 7 dumps
-ls -t "$BACKUP_DIR"/db_*.sql 2>/dev/null | tail -n +8 | xargs -r rm -f
+# Rotacion final: como mucho 5 dumps comprimidos
+ls -t "$BACKUP_DIR"/db_*.sql.gz 2>/dev/null | tail -n +6 | xargs -r rm -f
 
 BEFORE="$(git rev-parse HEAD)"
 
