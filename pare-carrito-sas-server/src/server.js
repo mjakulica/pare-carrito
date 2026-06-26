@@ -280,6 +280,15 @@ app.post("/auth/register", async (req, res) => {
   res.status(201).json({ ok: true, pending: true, clientId });
 });
 
+app.post("/clients/activation-email", authenticate, requireRole("manager", "admin"), async (req, res) => {
+  const to = String((req.body && req.body.email) || "").trim();
+  const name = String((req.body && req.body.name) || "").trim();
+  if (!to) return res.status(400).json({ error: "Falta el email del cliente." });
+  const sent = await sendMail(to, "Cuenta activada - Pare Carrito SAS",
+    `<p>Hola ${name || "cliente"},</p><p>Buenas noticias: su cuenta en Pare Carrito SAS ya esta <strong>activada</strong>. Ya puede ingresar y realizarnos su primer pedido.</p><p>Ante cualquier consulta, escribanos por WhatsApp al +54 9 387 456 6725.</p>`);
+  return res.json({ ok: true, sent });
+});
+
 // Notificacion de bienvenida al crear un usuario desde el ERP (manager/admin)
 app.post("/auth/welcome", async (req, res) => {
   const b = req.body || {};

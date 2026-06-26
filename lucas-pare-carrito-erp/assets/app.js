@@ -3372,7 +3372,7 @@
     const count = (state.users || []).filter((user) => user.isActive === false && (canSeeManagers || user.role !== "manager")).length;
     if (!count) return "";
     return `
-      <a class="pending-transfers-banner pending-users-banner" data-route="usuarios" title="Usuarios inactivos pendientes de activacion">
+      <a class="pending-transfers-banner pending-users-banner" data-route="${currentUser.role === 'admin' ? 'clientes' : 'usuarios'}" title="Usuarios inactivos pendientes de activacion">
         <span class="pending-transfers-count">${count}</span>
         <span class="pending-transfers-label">Usuarios inactivos</span>
       </a>
@@ -4804,7 +4804,7 @@
         saveState();
         render();
       }));
-      document.querySelectorAll("[data-admit-client-user]").forEach((button) => button.addEventListener("click", () => {
+      document.querySelectorAll("[data-admit-client-user]").forEach((button) => button.addEventListener("click", async () => {
         const pendingUser = state.users.find((x) => x.id === button.dataset.admitClientUser);
         if (!pendingUser) return;
         if (!confirm("Admitir al cliente " + (pendingUser.username || pendingUser.id) + "?")) return;
@@ -4813,6 +4813,17 @@
         const pendingClient = getClient(pendingUser.clientId);
         if (pendingClient) pendingClient.isActive = true;
         saveState();
+        const activationEmail = (pendingClient && pendingClient.email) || pendingUser.email || "";
+        if (activationEmail) {
+          const config = getCloudSyncConfig();
+          if (cloudSyncReady(config)) {
+            try {
+              await cloudRequest(config, "/clients/activation-email", { method: "POST", body: JSON.stringify({ email: activationEmail, name: (pendingClient && pendingClient.name) || pendingUser.name || "" }) });
+            } catch (mailError) {
+              console.warn("No se pudo enviar el correo de activacion:", mailError.message);
+            }
+          }
+        }
         render();
       }));
     });
