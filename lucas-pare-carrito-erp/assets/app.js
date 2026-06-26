@@ -2056,7 +2056,7 @@
           </div>
           <div class="field">
             <label>Contrasena</label>
-            <input id="login-password" type="password" autocomplete="current-password" placeholder="Ingrese su contraseña" />
+            <div class="input-with-button"><input id="login-password" type="password" autocomplete="current-password" placeholder="Ingrese su contraseña" /><button class="btn small ghost" type="button" id="toggle-login-password" aria-label="Ver contraseña">&#128065;</button></div>
           </div>
           <button class="btn primary full" type="submit">Ingresar</button>
         </form>
@@ -2215,6 +2215,11 @@
     bindLoginExtras();
     const loginForm = document.getElementById("login-form");
     if (!loginForm) return;
+    const toggleLoginPwd = document.getElementById("toggle-login-password");
+    if (toggleLoginPwd) toggleLoginPwd.addEventListener("click", () => {
+      const inp = document.getElementById("login-password");
+      if (inp) inp.type = inp.type === "password" ? "text" : "password";
+    });
     loginForm.addEventListener("submit", async (event) => {
       event.preventDefault();
       const username = document.getElementById("login-username").value.trim().toLowerCase();
@@ -4799,14 +4804,37 @@
         saveState();
         render();
       }));
+      document.querySelectorAll("[data-admit-client-user]").forEach((button) => button.addEventListener("click", () => {
+        const pendingUser = state.users.find((x) => x.id === button.dataset.admitClientUser);
+        if (!pendingUser) return;
+        if (!confirm("Admitir al cliente " + (pendingUser.username || pendingUser.id) + "?")) return;
+        pendingUser.isActive = true;
+        pendingUser.pendingApproval = false;
+        const pendingClient = getClient(pendingUser.clientId);
+        if (pendingClient) pendingClient.isActive = true;
+        saveState();
+        render();
+      }));
     });
 
+    const pendingClientUsers = (state.users || []).filter((u) => u.role === "customer" && u.pendingApproval);
+    const pendingPanel = pendingClientUsers.length ? `
+      <div class="panel highlight-panel" style="margin-bottom:14px">
+        <h2 class="page-title" style="font-size:18px">Clientes pendientes de aprobacion (${pendingClientUsers.length})</h2>
+        <div class="table-wrap" style="margin-top:10px">
+          <table>
+            <thead><tr><th>Usuario</th><th>Nombre / Local</th><th>Cuenta</th><th>Registrado</th><th>Accion</th></tr></thead>
+            <tbody>${pendingClientUsers.map((u) => { const c = getClient(u.clientId); return `<tr><td>${escapeHtml(u.username || "")}</td><td>${escapeHtml(u.name || (c ? c.name : ""))}<br><span class="muted">${escapeHtml(c ? c.address || "" : "")}</span></td><td>${escapeHtml(u.clientId || "")}${c ? " - " + escapeHtml(c.name) : ""}</td><td>${u.registeredAt ? formatDate(String(u.registeredAt).slice(0, 10)) : "-"}</td><td><button class="btn small primary" type="button" data-admit-client-user="${escapeAttr(u.id)}">Admitir</button></td></tr>`; }).join("")}</tbody>
+          </table>
+        </div>
+      </div>` : "";
     return pageShell(
       "Clientes",
       "Alta, edición, saldos y vehículo asignado.",
       `<button class="btn primary" data-add-client>Agregar cliente</button>`,
       `
       ${renderTabs()}
+      ${pendingPanel}
       <div class="panel">
         <div class="table-wrap">
           <table>
