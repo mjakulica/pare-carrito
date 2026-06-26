@@ -13,12 +13,21 @@ cd "$PROJECT_DIR"
 
 echo "==> 1/4 Backup de la base de datos..."
 mkdir -p "$BACKUP_DIR"
+# Rotacion: liberar espacio antes del dump nuevo (conservar los 6 mas nuevos -> con el nuevo, 7)
+ls -t "$BACKUP_DIR"/db_*.sql 2>/dev/null | tail -n +7 | xargs -r rm -f
+ls -t "$BACKUP_DIR"/code_*.tar.gz 2>/dev/null | tail -n +3 | xargs -r rm -f
 if docker ps --format '{{.Names}}' | grep -q "^${DB_CONTAINER}$"; then
-  docker exec "$DB_CONTAINER" pg_dump -U parecarrito parecarrito > "$BACKUP_DIR/db_${DATE}.sql" \
-    && echo "    OK -> $BACKUP_DIR/db_${DATE}.sql"
+  if docker exec "$DB_CONTAINER" pg_dump -U parecarrito parecarrito > "$BACKUP_DIR/db_${DATE}.sql"; then
+    echo "    OK -> $BACKUP_DIR/db_${DATE}.sql"
+  else
+    echo "    WARN: fallo el pg_dump (revisar espacio en disco). Continuo igual."
+    rm -f "$BACKUP_DIR/db_${DATE}.sql"
+  fi
 else
   echo "    (contenedor de DB no encontrado, salteo el pg_dump)"
 fi
+# Rotacion final: dejar como mucho 7 dumps
+ls -t "$BACKUP_DIR"/db_*.sql 2>/dev/null | tail -n +8 | xargs -r rm -f
 
 BEFORE="$(git rev-parse HEAD)"
 
