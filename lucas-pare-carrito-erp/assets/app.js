@@ -4614,6 +4614,7 @@
           <td class="page-actions">
             ${canViewRemito ? `<button class="btn small ghost" data-view-customer-remito="${order.id}">Remito</button>` : `<span class="muted">Remito disponible 8:00</span>`}
             ${canEdit ? `<button class="btn small ghost" data-edit-order="${order.id}">Editar</button>` : ""}
+            ${clientNeedsDailyInvoice(order.clientId) && getOrderInvoicePdf(order.id) ? `<a class="btn small ghost" href="${escapeAttr(getOrderInvoicePdf(order.id))}" target="_blank" rel="noopener">Factura</a>` : ""}
           </td>
         </tr>
       `;
@@ -4699,6 +4700,27 @@
       `,
       "pedidos"
     );
+  }
+
+  function clientNeedsDailyInvoice(clientId) {
+    const c = getClient(clientId);
+    return !!(c && c.needsInvoice && c.invoiceFrequency === "diaria");
+  }
+  function getOrderInvoicePdf(orderId) {
+    const log = (state.billingLog || []).filter((l) => l.status === "ok" && l.pdf && Array.isArray(l.orders) && l.orders.indexOf(orderId) !== -1).pop();
+    return log ? log.pdf : "";
+  }
+  function printOrderRemitoDirect(orderId) {
+    const order = getOrder(orderId);
+    if (!order) return;
+    if (order.exampleOnly) {
+      const fakeRemito = { id: "REM-" + order.id, orderId: order.id, date: order.date, clientId: order.clientId };
+      printHtmlDocument("Remito " + order.id, `<section class="print-page remito-print-page">${renderRemitoPrintSheetForOrder(order, fakeRemito)}</section>`);
+      return;
+    }
+    const remito = generateRemito(order.id);
+    saveState();
+    printHtmlDocument("Remito " + order.id, `<section class="print-page remito-print-page">${renderRemitoPrintSheet(remito.id)}</section>`);
   }
 
   function openCustomerRemitoModal(orderId) {
@@ -8282,6 +8304,7 @@
         render();
       }));
       document.querySelectorAll("[data-show-balance]").forEach((button) => button.addEventListener("click", () => openBalanceHistory(button.dataset.showBalance)));
+      document.querySelectorAll("[data-print-order-remito]").forEach((button) => button.addEventListener("click", () => printOrderRemitoDirect(button.dataset.printOrderRemito)));
     });
     return pageShell(
       "Saldos",
@@ -8348,7 +8371,7 @@
         <td>${formatDate(entry.date)}</td>
         ${showClientColumn ? `<td>${escapeHtml(entry.clientName)}</td>` : ""}
         <td>${escapeHtml(entry.type)}</td>
-        <td>${entry.relatedEntityType === "order" && getOrder(entry.relatedEntityId) ? renderOrderInlineDetails(getOrder(entry.relatedEntityId), { summary: entry.description }) : escapeHtml(entry.description)}</td>
+        <td>${entry.relatedEntityType === "order" && getOrder(entry.relatedEntityId) ? renderOrderInlineDetails(getOrder(entry.relatedEntityId), { summary: entry.description }) + ` <button class="btn small ghost no-print" type="button" data-print-order-remito="${escapeAttr(entry.relatedEntityId)}" title="Imprimir remito">&#128424;</button>` : escapeHtml(entry.description)}</td>
         <td class="num">${formatMoney(entry.amount)}</td>
         <td class="num">${formatMoney(entry.balance)}</td>
       </tr>
