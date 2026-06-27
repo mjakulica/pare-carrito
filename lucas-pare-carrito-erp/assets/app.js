@@ -12830,7 +12830,8 @@
         unmatched.push(line);
         return;
       }
-      const product = findProductForParsedLine(parsed.name, parsed.unitType, clientId);
+      let product = findProductForParsedLine(parsed.name, parsed.unitType, clientId);
+      product = applyParsedProductLineOverrides(product, line, parsed, clientId);
       if (!product) {
         unmatched.push(line);
         return;
@@ -12849,12 +12850,16 @@
     const rawLines = String(text || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
     const expanded = [];
     rawLines.forEach((line) => {
-      const commaParts = line
+      const protectedLine = line
+        .replace(/(\d)\s*,\s*(\d)/g, "$1\u0001$2")
+        .replace(/(\d)\s*\.\s*(\d)/g, "$1\u0002$2")
+        .replace(/\.\s+/g, ", ");
+      const commaParts = protectedLine
         .replace(/[;]+/g, ",")
         .split(/\s*,+\s*/)
-        .map((part) => part.trim())
+        .map((part) => part.replace(/\u0001/g, ",").replace(/\u0002/g, ".").trim())
         .filter(Boolean);
-      const parts = commaParts.length > 1 ? combineDetachedQuantitySegments(commaParts) : [line];
+      const parts = commaParts.length > 1 ? combineDetachedQuantitySegments(commaParts) : [commaParts[0] || line];
       parts.forEach((part) => {
         splitOrderLineByConjunction(part).forEach((segment) => {
           const clean = segment.trim();
@@ -13114,7 +13119,7 @@
 
   function isGramParsedUnitToken(value) {
     const clean = normalizeText(value);
-    return clean === "g" || clean === "gr" || clean.startsWith("gram");
+    return ["g", "gr", "grs", "grms"].includes(clean) || clean.startsWith("gram");
   }
 
   function resolveParsedProductNameAndNote(nameTokens, rawNameTokens, unitType, clientId) {
@@ -13178,7 +13183,9 @@
       const productWithoutUnitSearch = singularizeParsedProductText(productWithoutUnit);
       const preferred = !!getPreference(clientId, product.id);
       const unitMatches = !unitText || normalizeText(product.unitType) === unitText || productText.endsWith(" " + unitText);
-      const exact = productSearchText === searchable || productSearchText === searchableWithUnit || (productWithoutUnitSearch === searchable && unitMatches);
+      const sortWords = (t) => t.split(" ").filter(Boolean).sort().join(" ");
+      const sameWordSet = sortWords(productSearchText) === sortWords(searchable) || (sortWords(productWithoutUnitSearch) === sortWords(searchable) && unitMatches);
+      const exact = productSearchText === searchable || productSearchText === searchableWithUnit || (productWithoutUnitSearch === searchable && unitMatches) || sameWordSet;
       if (!exact) return null;
       return {
         product,
@@ -13208,9 +13215,12 @@
       const preferenceBonus = preferred ? 4 : 0;
       const extraWordPenalty = Math.max(0, productWords.length - words.length) * 0.35;
       const noNamePenalty = hasNameSignal ? 0 : 20;
-      return { product, score: wordScore + unitScore + exactBonus + firstWordBonus + preferenceBonus - extraWordPenalty - noNamePenalty, preferred };
+      return { product, score: wordScore + unitScore + exactBonus + firstWordBonus + preferenceBonus - extraWordPenalty - noNamePenalty, preferred, hasNameSignal, firstWordBonus, exactBonus };
     }).sort((a, b) => b.score - a.score);
-    return candidates[0] && candidates[0].score > 0 ? candidates[0] : null;
+    const top = candidates[0];
+    if (!top || top.score <= 0) return null;
+    if (!top.hasNameSignal || (top.firstWordBonus <= 0 && top.exactBonus <= 0)) return null;
+    return top;
   }
 
   function findUnitSensitiveParsedProduct(cleanName, cleanUnit, clientId) {
@@ -13227,7 +13237,7 @@
         const productName = normalizeText(product.name);
         const productBase = singularizeParsedProductText(stripTrailingProductUnitWords(productName));
         const productUnit = normalizeText(product.unitType);
-        if (productBase !== nameSearch || !unitWords.includes(productUnit)) return null;
+        if (!parsedBaseEquivalent(productBase, nameSearch) || !unitWords.includes(productUnit)) return null;
         return { product, preferred: !!getPreference(clientId, product.id), order: unitWords.indexOf(productUnit) };
       }).filter(Boolean).sort((a, b) => {
         if (preferClientHistory && a.preferred !== b.preferred) return Number(b.preferred) - Number(a.preferred);
@@ -13273,6 +13283,58 @@
     return (nameTokens || []).some((token) => singularizeParsedWord(token) !== normalizeText(token));
   }
 
+  function findMielVariant(kind) {
+    return activeProducts().find((product) => {
+      const n = normalizeText(product.name);
+      return n.includes("miel") && n.includes(kind);
+    }) || null;
+  }
+
+  function parsedBaseEquivalent(a, b) {
+    if (a === b) return true;
+    if (!a || !b) return false;
+    const wa = a.split(" ").filter(Boolean);
+    const wb = b.split(" ").filter(Boolean);
+    if (wa.length !== wb.length) return false;
+    return wa.every((word, i) => {
+      const other = wb[i];
+      if (word === other) return true;
+      const long = word.length >= other.length ? word : other;
+      const short = word.length >= other.length ? other : word;
+      return long.length - short.length <= 1 && long.length >= 4 && levenshtein(word, other) <= 1;
+    });
+  }
+
+  function applyParsedProductLineOverrides(product, line, parsed, clientId) {
+    const lc = normalizeText(line);
+    if (lc.includes("miel")) {
+      if (/\bbotell/.test(lc)) return findMielVariant("cana") || product;
+      if (/\bpote\b|\bfrasc/.test(lc)) return findMielVariant("abeja") || product;
+    }
+    if (lc.includes("uva") && /\brosad/.test(lc)) {
+      const rosa = activeProducts().find((p) => {
+        const n = normalizeText(p.name);
+        return n.includes("uva") && n.includes("rosa");
+      });
+      if (rosa) return rosa;
+    }
+    const base = singularizeParsedProductText(stripTrailingProductUnitWords(normalizeText(parsed.name)));
+    if (/\batad/.test(lc)) {
+      const sib = activeProducts().find((p) => normalizeText(p.name).includes("atado")
+        && parsedBaseEquivalent(singularizeParsedProductText(stripTrailingProductUnitWords(normalizeText(p.name))), base));
+      if (sib) return sib;
+    }
+    if (!parsed.unitType && isLikelyLooseUnitCountName((parsed.name || "").split(" "))) {
+      const unidadSib = activeProducts().find((p) => {
+        const n = normalizeText(p.name);
+        return (n.endsWith(" unidad") || n.endsWith(" unidades"))
+          && parsedBaseEquivalent(singularizeParsedProductText(stripTrailingProductUnitWords(n)), base);
+      });
+      if (unidadSib) return unidadSib;
+    }
+    return product;
+  }
+
   function singularizeParsedProductText(value) {
     return normalizeText(value).split(" ").filter(Boolean).map(singularizeParsedWord).join(" ");
   }
@@ -13286,7 +13348,7 @@
   }
 
   function stripTrailingProductUnitWords(value) {
-    const units = new Set(DEFAULT_UNIT_TYPES.map((unit) => normalizeText(unit.name)).concat(["kg", "kilo", "kilos", "unidad", "unidades", "cajon", "cajones"]));
+    const units = new Set(DEFAULT_UNIT_TYPES.map((unit) => normalizeText(unit.name)).concat(["kg", "kilo", "kilos", "unidad", "unidades", "cajon", "cajones", "atado", "atados", "bolsas", "jaulas", "docenas"]));
     const words = normalizeText(value).split(" ").filter(Boolean);
     while (words.length > 1 && units.has(words[words.length - 1])) words.pop();
     return words.join(" ");
