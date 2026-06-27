@@ -1,0 +1,18 @@
+{
+  "name": "pare-carrito-whatsapp-bot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Bot de WhatsApp (Cloud API) para recibir pedidos y cargarlos en el ERP Pare Carrito.",
+  "type": "commonjs",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
