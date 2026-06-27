@@ -51,6 +51,7 @@ Deploy (cambió el backend): `cd /opt/pare-carrito && ./deploy.sh`
 
 ## Notas
 - Solo sincroniza lo **nuevo desde la activación** (no carga para atrás el histórico).
-- "Compra Hoy" actualiza **cost** y **market price** del producto (el efecto de una compra sobre
-  el precio); no genera un movimiento de caja (no hay cantidad, solo precio).
+- "Compra Hoy" actualiza el **costo**, el **market price** y **recalcula el precio de venta**
+  manteniendo el margen del producto (igual que una compra). No genera movimiento de caja (no hay
+  cantidad, solo precio). El nuevo Costo y Venta se reflejan de vuelta en la planilla.
 - En Apps Script → **Ejecuciones** ves los POST recibidos/enviados y los productos "sinColumna".

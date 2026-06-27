@@ -1656,12 +1656,20 @@ app.post("/external/compra-hoy", externalAuth, async (req, res) => {
     const product = matchProductBySheetName(data, body.producto);
     if (!product) return { error: "Producto no encontrado: " + body.producto, status: 404 };
     data.prices = data.prices || {};
-    const rec = data.prices[product.id] || { productId: product.id, price: Number(product.salePrice || 0), cost: 0, marketPrice: 0, marginPct: 0 };
+    const rec = data.prices[product.id] || { productId: product.id, price: Number(product.salePrice || 0), cost: Number(product.baseCost || 0), marketPrice: 0, marginPct: 25 };
+    const calcMargin = (c, pr) => { c = Number(c || 0); pr = Number(pr || 0); return c ? ((pr - c) / c) * 100 : 0; };
+    const round1 = (v) => Math.round(Number(v || 0) * 10) / 10;
+    // Mantener el margen del producto y recalcular el precio de venta, igual que una compra.
+    const margin = Number.isFinite(Number(rec.marginPct)) ? Number(rec.marginPct) : calcMargin(rec.cost, rec.price);
     rec.cost = value;
     rec.marketPrice = value;
+    rec.marginPct = round1(margin);
+    rec.price = Math.ceil(value * (1 + margin / 100));
     rec.date = new Date().toISOString().slice(0, 10);
     data.prices[product.id] = rec;
-    return { ok: true, productId: product.id, productName: product.name, cost: value, venta: Number(rec.price || product.salePrice || 0) };
+    product.baseCost = rec.cost;
+    product.salePrice = rec.price;
+    return { ok: true, productId: product.id, productName: product.name, cost: rec.cost, venta: rec.price };
   });
   if (out.error) return res.status(out.status || 500).json({ error: out.error });
   // Reflejar el Costo actualizado en el sheet (NO toca la columna Compra Hoy).
