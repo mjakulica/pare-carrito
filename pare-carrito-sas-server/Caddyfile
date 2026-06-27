@@ -18,5 +18,13 @@
 
 # Acceso directo a la API (opcional, util para integraciones externas)
 {$API_DOMAIN} {
-	reverse_proxy api:3000
+	# Webhook del bot de WhatsApp: Meta apunta a https://API_DOMAIN/wa/webhook
+	# (handle_path saca el prefijo /wa, asi el bot recibe /webhook)
+	handle_path /wa/* {
+		reverse_proxy whatsapp-bot:8090
+	}
+
+	handle {
+		reverse_proxy api:3000
+	}
 }

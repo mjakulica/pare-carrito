@@ -51,6 +51,32 @@ services:
     volumes:
       - uploads:/data/uploads
 
+  whatsapp-bot:
+    build: ../whatsapp-bot
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      PORT: 8090
+      TZ: ${TZ:-America/Argentina/Salta}
+      WHATSAPP_TOKEN: ${WHATSAPP_TOKEN:-}
+      WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
+      WHATSAPP_VERIFY_TOKEN: ${WHATSAPP_VERIFY_TOKEN:-pare-carrito-webhook}
+      WHATSAPP_APP_SECRET: ${WHATSAPP_APP_SECRET:-}
+      NOTIFY_NUMBERS: ${NOTIFY_NUMBERS:-}
+      OWNER_NUMBER: ${OWNER_NUMBER:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_API_URL: ${OPENROUTER_API_URL:-https://openrouter.ai/api/v1/chat/completions}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-openai/gpt-4o-mini}
+      # El bot le habla a la API por la red interna de Docker (no pasa por Caddy):
+      ERP_BASE_URL: ${WABOT_ERP_BASE_URL:-http://api:3000}
+      ERP_API_KEY: ${EXTERNAL_API_KEY:-}
+      ADD_DIRECT_BEFORE: ${ADD_DIRECT_BEFORE:-05:30}
+      ADD_CONFIRM1_UNTIL: ${ADD_CONFIRM1_UNTIL:-07:30}
+      ADD_CONFIRM2_UNTIL: ${ADD_CONFIRM2_UNTIL:-10:00}
+    volumes:
+      - wabot_data:/app/data
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
@@ -73,3 +99,4 @@ volumes:
   uploads:
   caddy_data:
   caddy_config:
+  wabot_data:

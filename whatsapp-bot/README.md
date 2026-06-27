@@ -53,22 +53,38 @@ npm start
 Faltan los **endpoints externos en el ERP** (ver `ERP_ENDPOINTS.md`). El bot ya está escrito
 contra ese contrato; cuando se implementen en `pare-carrito-sas-server`, queda operativo.
 
-## Deploy sugerido (junto al ERP)
+## Deploy (junto al ERP)
 
-Agregar un servicio al `docker-compose.yml` del servidor (o un compose propio):
+Ya está integrado en `pare-carrito-sas-server/docker-compose.yml` (servicio `whatsapp-bot`) y en
+el `Caddyfile`. El bot le habla a la API por la red interna de Docker (`http://api:3000`), así que
+no necesitás `ERP_BASE_URL` salvo que quieras apuntar a otro lado.
 
-```yaml
-  whatsapp-bot:
-    build: ../whatsapp-bot
-    restart: unless-stopped
-    env_file: ../whatsapp-bot/.env
-    # exponer detras de Caddy en /webhook del dominio del bot
+La config del bot se toma del mismo `.env` del servidor (en `pare-carrito-sas-server/.env`). Agregá ahí:
+
+```
+WHATSAPP_TOKEN=...
+WHATSAPP_PHONE_NUMBER_ID=...
+WHATSAPP_VERIFY_TOKEN=pare-carrito-webhook
+WHATSAPP_APP_SECRET=...
+NOTIFY_NUMBERS=549387...,549387...
+OWNER_NUMBER=549387...
+OPENROUTER_API_KEY=...
+EXTERNAL_API_KEY=...   # ya deberia existir; lo usa el bot como ERP_API_KEY
 ```
 
-Y rutear `https://TU_DOMINIO/webhook` al puerto del bot (8090) desde Caddy.
+Deploy:
+
+```bash
+cd /opt/pare-carrito && ./deploy.sh      # backup, git pull y rebuild del backend + bot
+# o manualmente:
+cd /opt/pare-carrito/pare-carrito-sas-server && docker compose up -d --build
+```
+
+**Webhook en Meta:** URL `https://API_DOMAIN/wa/webhook` y el mismo `WHATSAPP_VERIFY_TOKEN`.
+Caddy enruta `/wa/*` al bot (sacando el prefijo `/wa`), así que el bot recibe `/webhook`.
 
 ## Estado
 
 Esqueleto funcional (v0.1): webhook + clasificación IA + reglas de horario + confirmaciones +
-notificaciones. Falta: endpoints del ERP, alta de Meta Cloud API, y pruebas con números reales.
-No probado contra WhatsApp real todavía.
+notificaciones. Endpoints del ERP implementados (ver `ERP_ENDPOINTS.md`). Falta: alta de Meta
+Cloud API y pruebas con números reales.
