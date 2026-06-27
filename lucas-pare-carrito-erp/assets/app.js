@@ -3502,7 +3502,7 @@
     return pageShell(
       "Nuevo Pedido",
       isCustomerOrder ? "Cargue su pedido. Los precios se calculan internamente para la cuenta." : "Carga rápida con favoritos por cliente.",
-      `<button class="btn ghost" data-route="pedidos">${isCustomerOrder ? "Ver mis pedidos" : "Ver pedidos"}</button>`,
+      `<button class="btn ghost" data-route="pedidos">${isCustomerOrder ? "Ver mis pedidos" : "Ver pedidos"}</button>${isCustomerOrder ? "" : `<button class="btn ghost" id="order-holidays-btn" type="button">Feriados</button>`}`,
       `
       <form id="new-order-form" class="grid ${isCustomerOrder ? "customer-order-form" : "admin-order-form"}">
         <div class="order-main-layout">
@@ -3825,6 +3825,8 @@
       clientSelect.value = "";
       ui.selectedClientId = "";
     });
+    const orderHolidaysBtn = document.getElementById("order-holidays-btn");
+    if (orderHolidaysBtn) orderHolidaysBtn.addEventListener("click", openHolidaysModal);
     document.querySelectorAll("[data-order-view]").forEach((button) => button.addEventListener("click", () => {
       ui.orderView = button.dataset.orderView || "grid";
       render();
@@ -3917,6 +3919,11 @@
     const handleDateChange = () => {
       if (rejectSunday(dateInput.value)) {
         alert("No se pueden crear pedidos para domingo");
+        dateInput.value = previousDate;
+        return;
+      }
+      if (isApprovedHoliday(dateInput.value)) {
+        alert("Esa fecha esta bloqueada por feriado" + (holidayNameFor(dateInput.value) ? ": " + holidayNameFor(dateInput.value) : "") + ".");
         dateInput.value = previousDate;
         return;
       }
@@ -10228,6 +10235,14 @@
             <div class="field span-4"><label>Prompt</label><textarea id="ocr-prompt" rows="2">${escapeHtml(getOcrPrompt())}</textarea></div>
           </div>
         </div>` : ""}
+        ${(currentUser.role === "manager" || currentUser.role === "admin") ? `<div class="panel">
+          <h2 class="page-title" style="font-size:18px">Aviso de feriados (WhatsApp)</h2>
+          <p class="muted">Texto que se manda a los clientes al bloquear un feriado. Podes usar {fecha} y {feriado}.</p>
+          <div class="form-grid" style="margin-top:8px">
+            <div class="field span-4"><label>Mensaje</label><textarea id="holiday-message" rows="2">${escapeHtml(getHolidayMessageText())}</textarea></div>
+            <div class="field span-2"><label>Nombre de plantilla Meta</label><input id="holiday-template" value="${escapeAttr((state.appSettings && state.appSettings.holidayTemplateName) || "")}" placeholder="ej: aviso_feriado" /></div>
+          </div>
+        </div>` : ""}
       </div>` : ""}
       ${currentUser.role === "manager" ? `
       <div class="panel" style="margin-top:14px">
@@ -10509,6 +10524,10 @@
   function bindSettings() {
     const ocrPromptInput = document.getElementById("ocr-prompt");
     if (ocrPromptInput) ocrPromptInput.addEventListener("change", () => { state.appSettings.ocrPrompt = ocrPromptInput.value.trim(); saveState(); });
+    const holidayMessageInput = document.getElementById("holiday-message");
+    if (holidayMessageInput) holidayMessageInput.addEventListener("change", () => { state.appSettings.holidayMessage = holidayMessageInput.value.trim(); saveState(); });
+    const holidayTemplateInput = document.getElementById("holiday-template");
+    if (holidayTemplateInput) holidayTemplateInput.addEventListener("change", () => { state.appSettings.holidayTemplateName = holidayTemplateInput.value.trim(); saveState(); });
     document.querySelectorAll("[data-product-kg]").forEach((input) => input.addEventListener("change", () => {
       const product = getProduct(input.dataset.productKg);
       if (!product) return;
@@ -11380,6 +11399,70 @@
       id = base + "-" + counter;
     }
     return id;
+  }
+
+  function getHolidays() {
+    if (!Array.isArray(state.holidays)) state.holidays = [];
+    return state.holidays;
+  }
+  function isApprovedHoliday(dateISO) {
+    return getHolidays().some((h) => h.date === dateISO && h.status === "aprobado");
+  }
+  function holidayNameFor(dateISO) {
+    const h = getHolidays().find((x) => x.date === dateISO);
+    return h ? h.name : "";
+  }
+  function getHolidayMessageText() {
+    return (state.appSettings && state.appSettings.holidayMessage) || "Hola! Te recordamos que el {fecha} ({feriado}) no hay reparto por feriado. Hace tu pedido con anticipacion. Gracias!";
+  }
+  function canApproveHolidays() {
+    return currentUser.role === "admin" || currentUser.role === "manager";
+  }
+  function openHolidaysModal() {
+    const canApprove = canApproveHolidays();
+    const today = todayISO();
+    const list = getHolidays().slice().sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    const rows = list.map((h) => `
+      <tr>
+        <td>${escapeHtml(h.date)}</td>
+        <td>${escapeHtml(h.name || "")}</td>
+        <td>${h.status === "aprobado" ? '<span class="pill green">Aprobado</span>' : '<span class="pill gray">Pendiente</span>'}</td>
+        <td>
+          ${canApprove && h.status !== "aprobado" ? `<button class="btn small green" data-holiday-approve="${h.id}" type="button">Aprobar</button> ` : ""}
+          ${canApprove ? `<button class="btn small danger" data-holiday-del="${h.id}" type="button">Quitar</button>` : ""}
+        </td>
+      </tr>`).join("") || '<tr><td colspan="4" class="muted">Sin feriados cargados.</td></tr>';
+    showModal("Feriados", `
+      <div class="grid">
+        <div class="form-grid">
+          <div class="field"><label>Fecha</label><input type="date" id="holiday-date" min="${today}" /></div>
+          <div class="field span-2"><label>Nombre del feriado</label><input id="holiday-name" placeholder="Ej: Dia de la Independencia" /></div>
+          <div class="field" style="align-self:end"><button class="btn yellow" type="button" id="holiday-add">${canApprove ? "Agregar y bloquear" : "Proponer"}</button></div>
+        </div>
+        <p class="muted">${canApprove ? "Al agregar, se bloquea la fecha en el calendario de pedidos." : "Tu propuesta queda pendiente de aprobacion de un administrador o gerente."}</p>
+        <div class="table-wrap"><table class="compact-table"><thead><tr><th>Fecha</th><th>Feriado</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>${rows}</tbody></table></div>
+      </div>
+    `, () => {
+      const addBtn = document.getElementById("holiday-add");
+      if (addBtn) addBtn.addEventListener("click", () => {
+        const date = document.getElementById("holiday-date").value;
+        const name = document.getElementById("holiday-name").value.trim();
+        if (!date) return alert("Elegi una fecha.");
+        if (getHolidays().some((h) => h.date === date)) return alert("Esa fecha ya esta cargada.");
+        getHolidays().push({ id: "FER-" + Date.now(), date, name, status: canApprove ? "aprobado" : "pendiente", proposedBy: currentUser.id, approvedBy: canApprove ? currentUser.id : "", notified: false });
+        saveState();
+        openHolidaysModal();
+      });
+      document.querySelectorAll("[data-holiday-approve]").forEach((b) => b.addEventListener("click", () => {
+        const h = getHolidays().find((x) => x.id === b.dataset.holidayApprove);
+        if (h) { h.status = "aprobado"; h.approvedBy = currentUser.id; saveState(); openHolidaysModal(); }
+      }));
+      document.querySelectorAll("[data-holiday-del]").forEach((b) => b.addEventListener("click", () => {
+        state.holidays = getHolidays().filter((x) => x.id !== b.dataset.holidayDel);
+        saveState();
+        openHolidaysModal();
+      }));
+    });
   }
 
   function openClientForm(id) {
