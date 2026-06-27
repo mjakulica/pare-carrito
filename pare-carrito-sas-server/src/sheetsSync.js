@@ -68,7 +68,7 @@ function syncSheetsFromStateDiff(beforeData, afterData) {
       if (!o || beforeIds.has(o.id) || o.exampleOnly) return;
       if (["cancelado", "anulado"].includes(o.status)) return;
       const items = (o.items || [])
-        .map((it) => ({ producto: it.productName, cantidad: Number(it.quantity || 0) }))
+        .map((it) => ({ producto: it.productName, cantidad: Number(it.quantity || 0), nota: String(it.note || "").trim() }))
         .filter((it) => it.producto && it.cantidad > 0);
       if (!items.length) return;
       pedidos.push({

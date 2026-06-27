@@ -43,6 +43,28 @@ var OVERRIDES = {
   "papines": "Papines por kg"
 };
 
+/**
+ * Productos "Unidad/Unidades" que NO tienen columna propia: se cargan en la columna del
+ * producto base (Kg) pero con la cantidad + " uni". Clave = nombre del sistema (minuscula,
+ * sin acentos). Valor = encabezado del sheet donde va.
+ */
+var UNIT_OVERRIDES = {
+  "morron amarillo unidades": "Morron Amarillo",
+  "morron rojo unidades": "Morron Rojo Kg",
+  "morron verde unidades": "Morron Verde Kg",
+  "manzana roja unidades": "Manzana Roja Kg",
+  "manzana verde unidades": "Manzana Verde Kg",
+  "pera unidades": "Pera Kg",
+  "palta madura unidad": "Palta Madura por Kg",
+  "pepino unidad": "Pepino kg",
+  "mango unidad": "Mango kg",
+  "berenjena unidad": "Berenjena Kg",
+  "calabaza unidad": "Calabaza kg",
+  "zapallo negro unidad": "Zapallo negro Kg",
+  "zapallo amarillo unidades": "Zapallo Amarillo Kg",
+  "zanahoria unidad": "Zanahoria por Kg"
+};
+
 var NOISE = { "por": 1, "x": 1, "de": 1, "del": 1 };
 
 function normFlat(s) {
@@ -92,6 +114,12 @@ function headerColMap(sheet) {
   return map;
 }
 
+function resolveItemColumn(map, producto) {
+  var flat = normFlat(producto);
+  if (UNIT_OVERRIDES[flat]) return { col: map[normSet(UNIT_OVERRIDES[flat])], uni: true };
+  return { col: map[resolveKey(producto)], uni: false };
+}
+
 function writePedidos(pedidos) {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(PEDIDOS_SHEET);
   var map = headerColMap(sheet);
@@ -103,9 +131,20 @@ function writePedidos(pedidos) {
     row[COL_TIMESTAMP - 1] = p.timestamp ? new Date(p.timestamp) : new Date();
     row[COL_CLIENTE - 1] = p.cliente || "";
     (p.items || []).forEach(function (it) {
-      var col = map[resolveKey(it.producto)];
-      if (col) row[col - 1] = it.cantidad;
-      else skipped[it.producto] = 1;
+      var res = resolveItemColumn(map, it.producto);
+      if (!res.col) { skipped[it.producto] = 1; return; }
+      var nota = it.nota ? String(it.nota).trim() : "";
+      var val;
+      if (res.uni || nota) {
+        val = String(it.cantidad);
+        if (res.uni) val += " uni";
+        if (nota) val += " (" + nota + ")";
+      } else {
+        val = it.cantidad;
+      }
+      var idx = res.col - 1;
+      if (row[idx] === "" || row[idx] === null) row[idx] = val;
+      else row[idx] = String(row[idx]) + " + " + String(val);
     });
     sheet.appendRow(row);
   });
