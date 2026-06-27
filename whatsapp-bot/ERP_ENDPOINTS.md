@@ -1,11 +1,16 @@
-# Endpoints externos que el bot necesita en el ERP (parte "a")
+# Endpoints externos del ERP que usa el bot (parte "a")
 
-Estos endpoints hay que **agregarlos al servidor** `pare-carrito-sas-server/src/server.js`.
+Estos endpoints están **implementados** en `pare-carrito-sas-server/src/server.js`.
 Van protegidos por la `EXTERNAL_API_KEY` (que ya existe en el `.env` del servidor), validando
-el header `x-api-key`. Operan sobre el `app_state` (clientes, pedidos) igual que el resto del ERP.
+el header `x-api-key`. Operan sobre el `app_state` (clientes, pedidos) igual que el resto del ERP
+y re-espejan a las tablas (`mirrorStateToTables`) en la misma transacción.
 
-> Todavia NO existen: hay que implementarlos. Acá queda el contrato que espera el bot
-> (`src/erp.js`). Cuando los implementemos, el bot funciona end-to-end.
+> ✅ Implementados. El matcheo de producto por nombre es **heurístico** (alias exacto → nombre
+> exacto → sin unidades → coincidencia parcial por primera palabra, eligiendo el nombre más corto).
+> Lo que no matchea queda anotado en `notes` del pedido como "Sin matchear: ...". Como los pedidos
+> se revisan en el ERP antes del reparto, esto es seguro; aun así conviene mirar los pedidos creados
+> por el bot las primeras semanas. Por ejemplo "tomate" puede resolver a "Tomate Cajon" y no a un
+> "Tomate ... Kg" si existieran ambos.
 
 ## Autenticación
 Todos requieren: `x-api-key: <EXTERNAL_API_KEY>`. Si no coincide → 401.
@@ -42,10 +47,4 @@ Saca items del pedido (o cancela todo si `items` vacio).
 Lista de nombres de productos activos (para ayudar a la IA a matchear).
 - 200 → `{ "products": ["Tomate Perita Kg", "Bananas Docena", ...] }`
 
-## Notas de implementación
-- Reutilizar la logica de matcheo de productos del parser de WhatsApp (`findProductForParsedLine`)
-  para convertir `producto` (texto) → productId. Idealmente exponerla en el servidor o
-  replicarla.
-- Marcar los items de `round: 2` con un flag (ej. `item.segundaRonda = true`) para que en
-  "Dividir compras" / remitos se vean como segunda ronda.
-- Cada cambio debe impactar el `app_state` y re-mirror a las tablas, igual que el resto.
+## Notas de implementac

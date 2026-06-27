@@ -1318,6 +1318,281 @@ app.post("/external/transfers/:id/:action", externalAuth, async (req, res) => {
   }
 });
 
+// ---------- API externa: pedidos por WhatsApp (bot) ----------
+function normTxt(s) {
+  return String(s || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+const UNIT_WORDS = /\b(kg|kilo|kilos|docena|cajon|unidad|unid|uni|atado|bolsa|jaula|caja|paquete|paq)\b/g;
+
+// Busca un producto activo que coincida con el texto del cliente.
+function findProductByText(data, text) {
+  const products = (data.products || []).filter((p) => p.isActive !== false);
+  const qRaw = normTxt(text);
+  if (!qRaw) return null;
+  // 1) alias exacto (sobre texto crudo: hay alias que incluyen unidades, ej. "pepino uni")
+  for (const a of data.productAliases || []) {
+    if (normTxt(a.alias) === qRaw) {
+      const p = products.find((x) => x.id === a.productId);
+      if (p) return p;
+    }
+  }
+  // 2) nombre exacto
+  let best = products.find((p) => normTxt(p.name) === qRaw);
+  if (best) return best;
+  // 3) limpiar numeros y unidades sueltas (ej. "2 kg tomate" -> "tomate")
+  const q = qRaw.replace(/\b\d+([.,]\d+)?\b/g, " ").replace(UNIT_WORDS, " ").replace(/\s+/g, " ").trim();
+  if (!q) return null;
+  best = products.find((p) => normTxt(p.name).replace(UNIT_WORDS, " ").replace(/\s+/g, " ").trim() === q);
+  if (best) return best;
+  // 4) coincidencia parcial: el nombre empieza con lo pedido, o comparten la primera palabra
+  const first = q.split(" ")[0];
+  const cands = products.filter((p) => {
+    const n = normTxt(p.name);
+    const nNoUnit = n.replace(UNIT_WORDS, " ").replace(/\s+/g, " ").trim();
+    return nNoUnit.startsWith(q) || q.startsWith(nNoUnit) || (first && n.split(" ")[0] === first);
+  });
+  if (cands.length === 1) return cands[0];
+  if (cands.length > 1) {
+    cands.sort((a, b) => a.name.length - b.name.length);
+    return cands[0];
+  }
+  return null;
+}
+
+function productUnitPrice(data, product, client) {
+  const priced = (data.prices && data.prices[product.id]) || null;
+  let base = Number((priced && priced.price) || product.salePrice || 0);
+  const adj = Number((client && client.priceAdjustmentPct) || 0);
+  if (adj) base = base * (1 + adj / 100);
+  return Math.round(base * 100) / 100;
+}
+
+function newItemIdExt() {
+  return "ITEM-" + Math.random().toString(36).slice(2, 9).toUpperCase();
+}
+
+function buildOrderItemExt(data, product, qty, note, client, round) {
+  const unitPrice = productUnitPrice(data, product, client);
+  const quantity = Number(qty) || 0;
+  const needsInvoice = !!(client && client.needsInvoice);
+  const ivaRate = needsInvoice ? Number(product.ivaType) || 0 : 0;
+  const subtotal = Math.round(unitPrice * quantity * 100) / 100;
+  const ivaAmount = Math.round(subtotal * ivaRate) / 100;
+  const item = {
+    id: newItemIdExt(),
+    productId: product.id,
+    productName: product.name,
+    unitType: product.unitType || "",
+    quantity,
+    unitPrice,
+    subtotal,
+    ivaRate,
+    ivaAmount,
+    totalWithIva: Math.round((subtotal + ivaAmount) * 100) / 100,
+    note: note || "",
+    assignedToId: product.assignedToId || "",
+    assignedToType: product.assignedToType || "",
+    assignedProviderId: ""
+  };
+  if (Number(round) === 2) item.segundaRonda = true;
+  return item;
+}
+
+function recomputeOrderTotalsExt(order) {
+  const items = order.items || [];
+  order.subtotalAmount = Math.round(items.reduce((s, i) => s + Number(i.subtotal || 0), 0) * 100) / 100;
+  order.ivaAmount = Math.round(items.reduce((s, i) => s + Number(i.ivaAmount || 0), 0) * 100) / 100;
+  order.totalAmount = Math.round((order.subtotalAmount + order.ivaAmount) * 100) / 100;
+  order.updatedAt = new Date().toISOString();
+}
+
+function genOrderIdExt(data, dateISO) {
+  const compact = dateISO.replace(/-/g, "");
+  let n = (data.orders || []).filter((o) => o.date === dateISO).length + 1;
+  let id;
+  do {
+    id = "ORD-" + compact + "-" + String(n).padStart(3, "0");
+    n++;
+  } while ((data.orders || []).some((o) => o.id === id));
+  return id;
+}
+
+// Ejecuta un update transaccional sobre app_state y re-espeja a las tablas.
+async function withStateExt(updater) {
+  const db = await pool.connect();
+  try {
+    await db.query("BEGIN");
+    const row = await db.query("SELECT data FROM app_state WHERE id = 'main' FOR UPDATE");
+    if (!row.rows.length) {
+      await db.query("ROLLBACK");
+      return { error: "Sin datos.", status: 404 };
+    }
+    const data = row.rows[0].data;
+    const result = await updater(data);
+    if (result && result.error) {
+      await db.query("ROLLBACK");
+      return result;
+    }
+    await db.query("UPDATE app_state SET data = $1, updated_at = now(), updated_by = 'whatsapp-bot' WHERE id = 'main'", [data]);
+    await mirrorStateToTables(db, data);
+    await db.query("COMMIT");
+    return result;
+  } catch (error) {
+    await db.query("ROLLBACK").catch(() => {});
+    return { error: error.message, status: 500 };
+  } finally {
+    db.release();
+  }
+}
+
+app.get("/external/clients/by-phone/:phone", externalAuth, async (req, res) => {
+  const stored = await loadStateData();
+  if (!stored) return res.status(404).json({ error: "Sin datos." });
+  const digits = String(req.params.phone || "").replace(/\D/g, "");
+  const tail = digits.slice(-8);
+  const client = (stored.data.clients || []).find((c) => {
+    const cd = String(c.phone || "").replace(/\D/g, "");
+    return cd && (cd === digits || (tail && cd.slice(-8) === tail));
+  });
+  if (!client) return res.json({ client: null });
+  res.json({
+    client: {
+      id: client.id,
+      name: client.name,
+      needsInvoice: !!client.needsInvoice,
+      priceTier: client.priceTier || "general",
+      priceAdjustmentPct: Number(client.priceAdjustmentPct || 0),
+      isActive: client.isActive !== false
+    }
+  });
+});
+
+app.get("/external/orders/today/:clientId", externalAuth, async (req, res) => {
+  const stored = await loadStateData();
+  if (!stored) return res.status(404).json({ error: "Sin datos." });
+  const today = nowArt().dateISO;
+  const order = (stored.data.orders || []).find(
+    (o) => o.clientId === req.params.clientId && o.date === today && !["cancelado", "anulado"].includes(o.status) && !o.exampleOnly
+  );
+  if (!order) return res.json({ order: null });
+  res.json({
+    order: {
+      id: order.id,
+      date: order.date,
+      status: order.status,
+      totalAmount: order.totalAmount,
+      items: (order.items || []).map((i) => ({ productId: i.productId, productName: i.productName, quantity: i.quantity, unitType: i.unitType }))
+    }
+  });
+});
+
+app.get("/external/products/names", externalAuth, async (req, res) => {
+  const stored = await loadStateData();
+  if (!stored) return res.status(404).json({ error: "Sin datos." });
+  res.json({ products: (stored.data.products || []).filter((p) => p.isActive !== false).map((p) => p.name) });
+});
+
+app.post("/external/orders", externalAuth, async (req, res) => {
+  const { clientId, items, source } = req.body || {};
+  if (!clientId || !Array.isArray(items)) return res.status(400).json({ error: "clientId e items son requeridos." });
+  const out = await withStateExt((data) => {
+    const client = (data.clients || []).find((c) => c.id === clientId);
+    if (!client) return { error: "Cliente no encontrado.", status: 404 };
+    const built = [];
+    const unmatched = [];
+    for (const it of items) {
+      const p = findProductByText(data, it.producto || it.productName || "");
+      if (!p) {
+        unmatched.push(it.producto || it.productName || "");
+        continue;
+      }
+      built.push(buildOrderItemExt(data, p, it.cantidad != null ? it.cantidad : it.quantity, it.nota || it.note, client, 1));
+    }
+    const today = nowArt().dateISO;
+    const order = {
+      id: genOrderIdExt(data, today),
+      date: today,
+      clientId,
+      userId: "whatsapp-bot",
+      status: "pendiente",
+      items: built,
+      notes: (source ? "[" + source + "] " : "") + (unmatched.length ? "Sin matchear: " + unmatched.join(", ") : ""),
+      priceTier: client.priceTier || "general",
+      priceAdjustmentPct: Number(client.priceAdjustmentPct || 0),
+      deliveryVehicleId: client.vehicleId || "",
+      exampleOnly: false,
+      paymentStatus: "pending",
+      paymentReceived: 0,
+      remitoPrinted: false,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    recomputeOrderTotalsExt(order);
+    data.orders = data.orders || [];
+    data.orders.push(order);
+    return { ok: true, orderId: order.id, matched: built.length, unmatched };
+  });
+  if (out.error) return res.status(out.status || 500).json({ error: out.error });
+  res.json(out);
+});
+
+app.post("/external/orders/:orderId/items", externalAuth, async (req, res) => {
+  const { items, round } = req.body || {};
+  if (!Array.isArray(items)) return res.status(400).json({ error: "items son requeridos." });
+  const out = await withStateExt((data) => {
+    const order = (data.orders || []).find((o) => o.id === req.params.orderId);
+    if (!order) return { error: "Pedido no encontrado.", status: 404 };
+    const client = (data.clients || []).find((c) => c.id === order.clientId) || {};
+    const unmatched = [];
+    let added = 0;
+    order.items = order.items || [];
+    for (const it of items) {
+      const p = findProductByText(data, it.producto || it.productName || "");
+      if (!p) {
+        unmatched.push(it.producto || it.productName || "");
+        continue;
+      }
+      order.items.push(buildOrderItemExt(data, p, it.cantidad != null ? it.cantidad : it.quantity, it.nota || it.note, client, Number(round) === 2 ? 2 : 1));
+      added++;
+    }
+    recomputeOrderTotalsExt(order);
+    return { ok: true, added, unmatched, round: Number(round) === 2 ? 2 : 1 };
+  });
+  if (out.error) return res.status(out.status || 500).json({ error: out.error });
+  res.json(out);
+});
+
+app.post("/external/orders/:orderId/cancel", externalAuth, async (req, res) => {
+  const items = Array.isArray((req.body || {}).items) ? req.body.items : [];
+  const out = await withStateExt((data) => {
+    const order = (data.orders || []).find((o) => o.id === req.params.orderId);
+    if (!order) return { error: "Pedido no encontrado.", status: 404 };
+    if (!items.length) {
+      order.status = "anulado";
+      order.updatedAt = new Date().toISOString();
+      return { ok: true, cancelledOrder: true };
+    }
+    const before = (order.items || []).length;
+    const targets = items.map((it) => normTxt(it.producto || it.productName || "")).filter(Boolean);
+    order.items = (order.items || []).filter((i) => {
+      const n = normTxt(i.productName);
+      return !targets.some((t) => n === t || n.includes(t) || t.includes(n.split(" ")[0]));
+    });
+    recomputeOrderTotalsExt(order);
+    return { ok: true, removed: before - order.items.length };
+  });
+  if (out.error) return res.status(out.status || 500).json({ error: out.error });
+  res.json(out);
+});
+
+
 async function loadBillingLastRunDate() {
   try {
     const { rows } = await pool.query("SELECT data->>'billingLastRunDate' AS d FROM app_state WHERE id = 'main'");
