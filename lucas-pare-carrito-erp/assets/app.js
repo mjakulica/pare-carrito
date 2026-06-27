@@ -11396,6 +11396,7 @@
         <div class="field"><label>Horario apertura</label><input id="client-opening-time" type="time" value="${escapeAttr(client ? client.openingTime || "" : "")}" /></div>
         <div class="field"><label>Entrega max.</label><input id="client-max-delivery-time" type="time" value="${escapeAttr(client ? client.maxDeliveryTime || "" : "")}" /></div>
         <div class="field"><label>Telefono</label><input id="client-phone" value="${escapeAttr(client ? client.phone : "")}" /></div>
+        <div class="field span-2"><label>Telefonos adicionales (separados por coma)</label><input id="client-phones" value="${escapeAttr(client && Array.isArray(client.phones) ? client.phones.join(", ") : "")}" placeholder="Otros numeros de WhatsApp de este cliente" /></div>
         <div class="field span-2"><label>Correo</label><input id="client-email" type="email" value="${escapeAttr(client ? client.email || "" : "")}" /></div>
         <div class="field span-2"><label>Correo facturacion</label><input id="client-billing-email" type="email" value="${escapeAttr(client ? client.billingEmail || "" : "")}" /></div>
         <div class="field"><label>Tipo pago</label><select id="client-payment">${["cuenta_corriente", "contado", "semanal", "contra_factura"].map((type) => `<option value="${type}" ${client && client.paymentType === type ? "selected" : ""}>${escapeHtml(paymentTypeLabel(type))}</option>`).join("")}</select></div>
@@ -11441,6 +11442,7 @@
             openingTime: document.getElementById("client-opening-time").value,
             maxDeliveryTime: document.getElementById("client-max-delivery-time").value,
             phone: document.getElementById("client-phone").value.trim(),
+            phones: (document.getElementById("client-phones").value || "").split(",").map((t) => t.trim()).filter(Boolean),
             email: document.getElementById("client-email").value.trim(),
             billingEmail: document.getElementById("client-billing-email").value.trim(),
             contactName: "",

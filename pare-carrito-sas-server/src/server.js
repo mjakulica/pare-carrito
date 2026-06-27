@@ -1461,8 +1461,11 @@ app.get("/external/clients/by-phone/:phone", externalAuth, async (req, res) => {
   const digits = String(req.params.phone || "").replace(/\D/g, "");
   const tail = digits.slice(-8);
   const client = (stored.data.clients || []).find((c) => {
-    const cd = String(c.phone || "").replace(/\D/g, "");
-    return cd && (cd === digits || (tail && cd.slice(-8) === tail));
+    const candidates = [c.phone].concat(Array.isArray(c.phones) ? c.phones : []);
+    return candidates.some((ph) => {
+      const cd = String(ph || "").replace(/\D/g, "");
+      return cd && (cd === digits || (tail && cd.slice(-8) === tail));
+    });
   });
   if (!client) return res.json({ client: null });
   res.json({
