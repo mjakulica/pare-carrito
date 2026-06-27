@@ -18,33 +18,39 @@ Todos requieren: `x-api-key: <EXTERNAL_API_KEY>`. Si no coincide → 401.
 ## Endpoints
 
 ### GET /external/clients/by-phone/:phone
-Busca el cliente cuyo telefono coincide con `:phone` (solo digitos).
-- 200 → `{ "client": { "id": "021", "name": "Estacion Belgrano", "needsInvoice": false } }`
+Busca el cliente cuyo telefono coincide con `:phone` (solo digitos; compara los ultimos 8 digitos).
+- 200 → `{ "client": { "id": "021", "name": "Estacion Belgrano", "needsInvoice": false, "priceTier": "general", "priceAdjustmentPct": 0, "isActive": true } }`
 - 200 → `{ "client": null }` si no hay match.
 
 ### GET /external/orders/today/:clientId
 Pedido de hoy del cliente (o null).
-- 200 → `{ "order": { "id": "ORD-...", "items": [ ... ] } }` o `{ "order": null }`.
+- 200 → `{ "order": { "id": "ORD-...", "date": "...", "status": "pendiente", "totalAmount": 0, "items": [ { "productId": "", "productName": "", "quantity": 0, "unitType": "" } ] } }`
+- 200 → `{ "order": null }`.
 
 ### POST /external/orders
 Crea un pedido nuevo para hoy.
 - body: `{ "clientId": "021", "items": [ { "producto": "Tomate", "cantidad": 2, "unidad": "kg", "nota": "" } ], "source": "whatsapp-bot" }`
-- Debe resolver cada `producto` a un productId del catalogo (reusar el matcher del parser de
-  WhatsApp que ya existe en el front/servidor), calcular precios, y crear el pedido.
-- 200 → `{ "ok": true, "orderId": "ORD-..." }`
+- Resuelve cada `producto` a un productId (matcher), calcula precio (segun tier/ajuste del cliente) e IVA.
+- 200 → `{ "ok": true, "orderId": "ORD-...", "matched": 3, "unmatched": [] }`
 
 ### POST /external/orders/:orderId/items
-Agrega items a un pedido. `round` = 1 (normal) o 2 (segunda ronda de envios).
+Agrega items a un pedido. `round` = 1 (normal) o 2 (segunda ronda → marca `segundaRonda: true` en cada item).
 - body: `{ "items": [ ... ], "round": 1 }`
-- 200 → `{ "ok": true }`
+- 200 → `{ "ok": true, "added": 2, "unmatched": [], "round": 1 }`
 
 ### POST /external/orders/:orderId/cancel
-Saca items del pedido (o cancela todo si `items` vacio).
+Saca items del pedido (o anula todo el pedido si `items` vacio → `status: "anulado"`).
 - body: `{ "items": [ ... ] }`
-- 200 → `{ "ok": true }`
+- 200 → `{ "ok": true, "removed": 1 }`  (o `{ "ok": true, "cancelledOrder": true }`)
 
 ### GET /external/products/names
 Lista de nombres de productos activos (para ayudar a la IA a matchear).
-- 200 → `{ "products": ["Tomate Perita Kg", "Bananas Docena", ...] }`
+- 200 → `{ "products": ["Tomate Cajon", "Bananas Docena", ...] }`
 
-## Notas de implementac
+## Notas de implementación
+- El matcher (`findProductByText`) usa: alias exacto (`productAliases`) → nombre exacto → texto sin
+  numeros/unidades → coincidencia parcial por primera palabra (elige el nombre mas corto).
+- Precio: `prices[productId].price` (o `salePrice`), ajustado por `client.priceAdjustmentPct`.
+- IVA: `Number(product.ivaType)` solo si el cliente `needsInvoice`; si no, 0.
+- Los items de `round: 2` llevan `segundaRonda: true` para distinguirlos en remitos / "Dividir compras".
+- Toda escritura impacta `app_state` y re-espeja a las tablas en la misma transacción (`withStateExt`).
