@@ -10,6 +10,7 @@ const { Pool } = require("pg");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { billingConfig, nowArt, computeDueInvoices, runBilling } = require("./billing");
+const { syncSheetsFromStateDiff } = require("./sheetsSync");
 
 const PORT = Number(process.env.PORT || 3000);
 const DATABASE_URL = process.env.DATABASE_URL || "postgres://parecarrito:parecarrito@localhost:5432/parecarrito";
@@ -662,6 +663,7 @@ app.put("/state", authenticate, requireRole(...SYNC_ROLES), async (req, res) => 
       [req.user.username, beforeCounts.orders, afterCounts.orders, beforeCounts.clients, afterCounts.clients, beforeCounts.products, afterCounts.products, afterCounts.orders - beforeCounts.orders]
     );
     await clientDb.query("COMMIT");
+    syncSheetsFromStateDiff(beforeData, cleanData);
     res.json({ ok: true, updatedAt: saved.rows[0].updated_at.toISOString() });
   } catch (error) {
     await clientDb.query("ROLLBACK").catch(() => {});
@@ -715,6 +717,7 @@ app.post("/state/patch", authenticate, requireRole(...PATCH_SYNC_ROLES), async (
     await mirrorStateToTables(clientDb, nextData);
     await syncUsersFromState(clientDb, nextData);
     await clientDb.query("COMMIT");
+    syncSheetsFromStateDiff(beforeData, nextData);
     res.json({ ok: true, updatedAt: saved.rows[0].updated_at.toISOString() });
   } catch (error) {
     await clientDb.query("ROLLBACK").catch(() => {});
