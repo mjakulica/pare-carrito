@@ -1,23 +1,27 @@
 /**
- * Pare Carrito -> Google Sheets
- * Pega este codigo en Apps Script (Extensiones > Apps Script) de TU planilla,
- * publicalo como "App web" (Implementar > Nueva implementacion > App web,
- * "Ejecutar como: yo", "Quien tiene acceso: cualquiera") y copia la URL.
- * Esa URL va en GOOGLE_SHEETS_WEBHOOK_URL del .env del servidor, y el mismo
- * SECRET_TOKEN de abajo va en GOOGLE_SHEETS_TOKEN.
+ * Pare Carrito <-> Google Sheets
+ *
+ * Que hace:
+ *  - Pedidos nuevos del sistema  -> agrega fila en la pestania "pedidos".
+ *  - Cambios de Venta / Costo en el sistema -> actualiza la fila en "precios".
+ *  - "Compra Hoy" (que cargas VOS en el sheet) -> avisa al sistema para actualizar
+ *    el COSTO del producto (como una compra). El script NO escribe "Compra Hoy".
+ *
+ * Instalacion: pega esto en Apps Script de tu planilla, completa las constantes,
+ * publica como App web, y crea el disparador (ver SETUP.md).
  */
 
-var SECRET_TOKEN = "CAMBIAR_POR_UN_TOKEN_LARGO_Y_SECRETO";
+var SECRET_TOKEN = "CAMBIAR_POR_UN_TOKEN_LARGO_Y_SECRETO"; // = GOOGLE_SHEETS_TOKEN del servidor
 var PEDIDOS_SHEET = "pedidos";
 var PRECIOS_SHEET = "precios";
-var COL_TIMESTAMP = 1; // columna A = Marca temporal
-var COL_CLIENTE = 2;   // columna B = Cliente
+var COL_TIMESTAMP = 1; // A = Marca temporal
+var COL_CLIENTE = 2;   // B = Cliente
 
-/**
- * Equivalencias para productos cuyo nombre en el sistema NO coincide con el
- * encabezado del sheet. Clave = nombre del sistema en minuscula sin acentos
- * (en su orden natural). Valor = encabezado tal cual en el sheet. Edita libremente.
- */
+// Para que "Compra Hoy" actualice el costo en el sistema:
+var ERP_BASE_URL = "https://TU_API_DOMAIN";       // dominio del API del sistema
+var ERP_API_KEY  = "LA_EXTERNAL_API_KEY_DEL_SERVIDOR"; // = EXTERNAL_API_KEY del .env
+
+/** Equivalencias sistema -> encabezado del sheet (para nombres que no coinciden). */
 var OVERRIDES = {
   "champinon": "Champignones",
   "albahaca seca kg": "Albahaca seca",
@@ -41,7 +45,6 @@ var OVERRIDES = {
 
 var NOISE = { "por": 1, "x": 1, "de": 1, "del": 1 };
 
-// Normaliza y CONSERVA el orden (para claves de OVERRIDES).
 function normFlat(s) {
   return String(s || "")
     .toLowerCase()
@@ -50,22 +53,19 @@ function normFlat(s) {
     .split(/\s+/).filter(function (w) { return w && !NOISE[w]; })
     .join(" ");
 }
-
-// Normaliza y ORDENA las palabras (para matchear producto <-> columna sin importar el orden).
 function normSet(s) {
   return normFlat(s).split(" ").filter(Boolean).sort().join(" ");
 }
-
 function resolveKey(name) {
   var flat = normFlat(name);
   if (OVERRIDES[flat]) return normSet(OVERRIDES[flat]);
   return normSet(name);
 }
-
 function json(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
 }
 
+/** Recibe pedidos/precios desde el sistema. */
 function doPost(e) {
   var out = { ok: false };
   try {
@@ -76,13 +76,8 @@ function doPost(e) {
     var skipped = [];
     if (pedidos.length) skipped = writePedidos(pedidos);
     if (precios.length) writePrecios(precios);
-    out.ok = true;
-    out.pedidos = pedidos.length;
-    out.precios = precios.length;
-    out.sinColumna = skipped;
-  } catch (err) {
-    out.error = String(err);
-  }
+    out.ok = true; out.pedidos = pedidos.length; out.precios = precios.length; out.sinColumna = skipped;
+  } catch (err) { out.error = String(err); }
   return json(out);
 }
 
@@ -117,6 +112,7 @@ function writePedidos(pedidos) {
   return Object.keys(skipped);
 }
 
+/** Actualiza Venta y Costo. NO toca "Compra Hoy". */
 function writePrecios(precios) {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(PRECIOS_SHEET);
   var lastRow = sheet.getLastRow();
@@ -125,7 +121,6 @@ function writePrecios(precios) {
   var colProducto = headers.indexOf(normSet("Producto")) + 1 || 1;
   var colVenta = headers.indexOf(normSet("Venta")) + 1;
   var colCosto = headers.indexOf(normSet("Costo")) + 1;
-  var colCompra = headers.indexOf(normSet("Compra Hoy")) + 1;
   var rowByKey = {};
   if (lastRow > 1) {
     var names = sheet.getRange(2, colProducto, lastRow - 1, 1).getValues();
@@ -137,13 +132,47 @@ function writePrecios(precios) {
   precios.forEach(function (pr) {
     var key = resolveKey(pr.producto);
     var r = rowByKey[key];
-    if (!r) {
-      r = sheet.getLastRow() + 1;
-      sheet.getRange(r, colProducto).setValue(pr.producto);
-      rowByKey[key] = r;
-    }
+    if (!r) { r = sheet.getLastRow() + 1; sheet.getRange(r, colProducto).setValue(pr.producto); rowByKey[key] = r; }
     if (colVenta > 0 && pr.venta != null) sheet.getRange(r, colVenta).setValue(pr.venta);
     if (colCosto > 0 && pr.costo != null) sheet.getRange(r, colCosto).setValue(pr.costo);
-    if (colCompra > 0 && pr.compraHoy != null) sheet.getRange(r, colCompra).setValue(pr.compraHoy);
+    // "Compra Hoy" NO se escribe: es de entrada manual.
   });
+}
+
+/**
+ * Disparador al editar: si cambiaste "Compra Hoy" en "precios", manda el valor al
+ * sistema para que actualice el COSTO del producto (como una compra).
+ * Hay que crear un disparador INSTALABLE (ver SETUP.md o correr crearTriggerCompraHoy una vez).
+ */
+function onEditCompraHoy(e) {
+  try {
+    if (!e || !e.range) return;
+    var sheet = e.range.getSheet();
+    if (sheet.getName() !== PRECIOS_SHEET) return;
+    var lastCol = sheet.getLastColumn();
+    var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(normSet);
+    var colCompra = headers.indexOf(normSet("Compra Hoy")) + 1;
+    var colProducto = headers.indexOf(normSet("Producto")) + 1 || 1;
+    if (colCompra <= 0 || e.range.getColumn() !== colCompra || e.range.getRow() === 1) return;
+    var value = e.range.getValue();
+    if (value === "" || value === null) return;
+    var producto = sheet.getRange(e.range.getRow(), colProducto).getValue();
+    if (!producto) return;
+    UrlFetchApp.fetch(ERP_BASE_URL.replace(/\/+$/, "") + "/external/compra-hoy", {
+      method: "post",
+      contentType: "application/json",
+      headers: { "x-api-key": ERP_API_KEY },
+      payload: JSON.stringify({ producto: String(producto), costo: Number(value) }),
+      muteHttpExceptions: true
+    });
+  } catch (err) { console.error(err); }
+}
+
+/** Corre esto UNA vez (boton Ejecutar) para crear el disparador instalable. */
+function crearTriggerCompraHoy() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === "onEditCompraHoy") ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger("onEditCompraHoy").forSpreadsheet(ss).onEdit().create();
 }

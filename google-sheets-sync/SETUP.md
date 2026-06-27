@@ -1,52 +1,56 @@
-# Sincronización Pare Carrito → Google Sheets
+# Sincronización Pare Carrito ⇄ Google Sheets
 
-Cuando cargás un **pedido** en sistema.parecarrito.com.ar se agrega una fila en la pestaña
-**pedidos** (columna A = fecha, B = cliente, y la cantidad debajo de la columna de cada producto).
-Cuando cambiás un **precio de venta** o cargás una **compra**, se actualiza la fila del producto
-en la pestaña **precios** (Venta / Costo / Compra Hoy).
+**Del sistema al sheet:**
+- Cargás un **pedido** → se agrega una fila en **pedidos** (A = fecha, B = cliente, y la cantidad
+  debajo de la columna de cada producto).
+- Cambiás **precio de venta** o **costo** → se actualiza la fila del producto en **precios**
+  (columnas **Venta** y **Costo**).
+
+**Del sheet al sistema:**
+- Lo que cargás en la columna **Compra Hoy** (de la pestaña precios) actualiza el **costo de
+  compra** del producto en el sistema, igual que una compra/gasto. El script **no escribe**
+  "Compra Hoy": solo la observa.
 
 Planilla: https://docs.google.com/spreadsheets/d/1VFKMdgNBC1sTkZU3xa6dQvM43S-9Tp2fFDP2v9mwXqI/edit
 
 ## 1) Instalar el Apps Script
-1. Abrí la planilla → menú **Extensiones → Apps Script**.
-2. Borrá lo que haya y pegá el contenido de `Code.gs` (este repo).
-3. Arriba de todo, cambiá `SECRET_TOKEN` por un texto largo y secreto (inventalo, ej. 40 caracteres).
-4. Guardá (ícono del disquete).
+1. Planilla → **Extensiones → Apps Script**. Pegá `Code.gs` (este repo).
+2. Completá las constantes de arriba:
+   - `SECRET_TOKEN`: un texto largo y secreto (el mismo irá en `GOOGLE_SHEETS_TOKEN`).
+   - `ERP_BASE_URL`: el dominio del API del sistema (ej. `https://api.tudominio`).
+   - `ERP_API_KEY`: la `EXTERNAL_API_KEY` del `.env` del servidor.
+3. Guardá.
 
-## 2) Publicar como App web
-1. **Implementar → Nueva implementación**.
-2. Tipo: **App web**.
-3. **Ejecutar como: Yo** · **Quién tiene acceso: Cualquiera**.
-4. **Implementar** → autorizá los permisos (te va a pedir confirmar tu cuenta).
-5. Copiá la **URL de la app web** (termina en `/exec`).
+## 2) Publicar como App web (sistema → sheet)
+1. **Implementar → Nueva implementación → App web**.
+2. **Ejecutar como: Yo** · **Acceso: Cualquiera** → **Implementar** → autorizá.
+3. Copiá la URL (`/exec`).
 
-## 3) Configurar el servidor
-En el `.env` del servidor (`pare-carrito-sas-server/.env`) agregá:
+## 3) Crear el disparador de "Compra Hoy" (sheet → sistema)
+1. En Apps Script, abrí la función `crearTriggerCompraHoy` y tocá **Ejecutar** una vez
+   (autorizá permisos). Eso crea el disparador instalable que detecta ediciones.
+   - (Alternativa manual: ⏰ **Activadores → Añadir activador** → función `onEditCompraHoy`,
+     fuente "Desde la hoja de cálculo", tipo "Al editar".)
 
+## 4) Configurar el servidor
+En `pare-carrito-sas-server/.env`:
 ```
-GOOGLE_SHEETS_WEBHOOK_URL=https://script.google.com/macros/s/XXXXXXXX/exec
-GOOGLE_SHEETS_TOKEN=el-mismo-SECRET_TOKEN-que-pusiste-en-el-script
+GOOGLE_SHEETS_WEBHOOK_URL=https://script.google.com/macros/s/XXXX/exec
+GOOGLE_SHEETS_TOKEN=el-mismo-SECRET_TOKEN
+EXTERNAL_API_KEY=la-misma-que-pusiste-en-ERP_API_KEY-del-script
 ```
+Deploy (cambió el backend): `cd /opt/pare-carrito && ./deploy.sh`
 
-Y desplegá (cambió el backend):
-
-```
-cd /opt/pare-carrito && ./deploy.sh
-```
-
-## Cómo se mapean los productos (para que no se crucen)
+## Mapeo de productos (para que no se crucen)
 - Se compara por **conjunto de palabras normalizado** (ignora mayúsculas, acentos, orden y
-  palabras de relleno como "de/por/x"). Ej.: "Jaula de Lechuga Repollada" ↔ "Lechuga Repollada Jaula".
-- Para los renombres que no coinciden solos hay una **tabla `OVERRIDES`** en el `Code.gs`
-  (ej. `champinon → Champignones`, `lentejas kg → Lenteja por Kg`). Podés agregar más ahí.
-- **129 de ~158 productos** mapean automáticamente. Los que **no tienen columna** en el sheet
-  (variantes "Unidad/Unidades" nuevas y varias especias) **se omiten** (no se escriben), así
-  nunca cae una cantidad en la columna equivocada. Si querés sumarlos, agregá la columna en el
-  sheet o una entrada en `OVERRIDES`.
+  "de/por/x"). Más una **tabla `OVERRIDES`** editable para renombres
+  (ej. `champinon → Champignones`, `lentejas kg → Lenteja por Kg`).
+- **129 de ~158** productos mapean solos. Los que no tienen columna (variantes "Unidad/Unidades"
+  nuevas y varias especias) **se omiten** (no se escriben), para que nunca caiga una cantidad en
+  la columna equivocada. La misma tabla se usa en los dos sentidos.
 
 ## Notas
-- Solo se sincronizan pedidos/precios **nuevos a partir de la activación** (no se cargan para
-  atrás los 2400 pedidos históricos).
-- Si algo no aparece, en Apps Script → **Ejecuciones** podés ver los POST recibidos y los
-  productos que quedaron "sinColumna".
-- El token evita que cualquiera escriba en tu planilla; mantenelo secreto.
+- Solo sincroniza lo **nuevo desde la activación** (no carga para atrás el histórico).
+- "Compra Hoy" actualiza **cost** y **market price** del producto (el efecto de una compra sobre
+  el precio); no genera un movimiento de caja (no hay cantidad, solo precio).
+- En Apps Script → **Ejecuciones** ves los POST recibidos/enviados y los productos "sinColumna".

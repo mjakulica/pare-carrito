@@ -10,7 +10,7 @@ const { Pool } = require("pg");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { billingConfig, nowArt, computeDueInvoices, runBilling } = require("./billing");
-const { syncSheetsFromStateDiff } = require("./sheetsSync");
+const { syncSheetsFromStateDiff, pushPrecio } = require("./sheetsSync");
 
 const PORT = Number(process.env.PORT || 3000);
 const DATABASE_URL = process.env.DATABASE_URL || "postgres://parecarrito:parecarrito@localhost:5432/parecarrito";
@@ -1595,6 +1595,79 @@ app.post("/external/orders/:orderId/cancel", externalAuth, async (req, res) => {
   res.json(out);
 });
 
+
+// ---------- Sheets -> ERP: "Compra Hoy" actualiza el costo del producto ----------
+const SHEET_NOISE = new Set(["por", "x", "de", "del"]);
+function sheetNormFlat(s) {
+  return String(s || "")
+    .toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s\/]/g, " ").replace(/\//g, " ")
+    .split(/\s+/).filter((w) => w && !SHEET_NOISE.has(w)).join(" ");
+}
+function sheetNormSet(s) {
+  return sheetNormFlat(s).split(" ").filter(Boolean).sort().join(" ");
+}
+// erp (nombre normalizado plano) -> encabezado del sheet. Igual que en el Apps Script.
+const SHEET_OVERRIDES = {
+  "champinon": "Champignones",
+  "albahaca seca kg": "Albahaca seca",
+  "laurel atado": "Laurel",
+  "tanjarina jaula": "Tanjarina",
+  "quinoa kg": "Quinoa",
+  "nabos atado": "Nabos",
+  "maracuya unidad": "Maracuya",
+  "hongos pino kg": "Hongos de Pino",
+  "esparragos kg": "Esparragos",
+  "repollos brucelas kg": "Repollos de Brucelas",
+  "habas kg": "Habas",
+  "garbanzo kg": "Garbanzo",
+  "lentejas kg": "Lenteja por Kg",
+  "oregano kg": "Oregano",
+  "uva rosa kg": "Uva Rosa",
+  "zapallo amarillo": "Zapallo Amarillo Kg",
+  "lechuga mantecosa": "Lechuga Mantecosa unidad",
+  "papines": "Papines por kg"
+};
+function matchProductBySheetName(data, sheetName) {
+  const target = sheetNormSet(sheetName);
+  if (!target) return null;
+  const active = (data.products || []).filter((p) => p.isActive !== false);
+  let p = active.find((pr) => sheetNormSet(pr.name) === target);
+  if (p) return p;
+  for (const erpFlat in SHEET_OVERRIDES) {
+    if (sheetNormSet(SHEET_OVERRIDES[erpFlat]) === target) {
+      const prod = active.find((pr) => sheetNormFlat(pr.name) === erpFlat);
+      if (prod) return prod;
+    }
+  }
+  return null;
+}
+
+// El valor de "Compra Hoy" del sheet actualiza el costo del producto (cost + marketPrice),
+// igual que el efecto de una compra/gasto sobre el precio del producto.
+app.post("/external/compra-hoy", externalAuth, async (req, res) => {
+  const body = req.body || {};
+  const value = Number(body.costo != null ? body.costo : body.compraHoy);
+  if (!body.producto || !Number.isFinite(value) || value <= 0) {
+    return res.status(400).json({ error: "Se espera { producto, costo }." });
+  }
+  const out = await withStateExt((data) => {
+    const product = matchProductBySheetName(data, body.producto);
+    if (!product) return { error: "Producto no encontrado: " + body.producto, status: 404 };
+    data.prices = data.prices || {};
+    const rec = data.prices[product.id] || { productId: product.id, price: Number(product.salePrice || 0), cost: 0, marketPrice: 0, marginPct: 0 };
+    rec.cost = value;
+    rec.marketPrice = value;
+    rec.date = new Date().toISOString().slice(0, 10);
+    data.prices[product.id] = rec;
+    return { ok: true, productId: product.id, productName: product.name, cost: value, venta: Number(rec.price || product.salePrice || 0) };
+  });
+  if (out.error) return res.status(out.status || 500).json({ error: out.error });
+  // Reflejar el Costo actualizado en el sheet (NO toca la columna Compra Hoy).
+  pushPrecio(out.productName, out.venta, out.cost);
+  res.json(out);
+});
 
 async function loadBillingLastRunDate() {
   try {

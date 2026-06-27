@@ -89,8 +89,8 @@ function syncSheetsFromStateDiff(beforeData, afterData) {
       const a = afterP[pid];
       const b = beforeP[pid];
       if (!b) return;
-      if (a.venta !== b.venta || a.costo !== b.costo || a.compraHoy !== b.compraHoy) {
-        precios.push({ producto: a.name, venta: a.venta, costo: a.costo, compraHoy: a.compraHoy });
+      if (a.venta !== b.venta || a.costo !== b.costo) {
+        precios.push({ producto: a.name, venta: a.venta, costo: a.costo });
       }
     });
   }
@@ -100,4 +100,10 @@ function syncSheetsFromStateDiff(beforeData, afterData) {
   }
 }
 
-module.exports = { syncSheetsFromStateDiff };
+// Empuja una fila de precios puntual (usado al actualizar costo desde "Compra Hoy").
+function pushPrecio(producto, venta, costo) {
+  if (!webhookUrl()) return;
+  postBatch([], [{ producto: producto, venta: venta, costo: costo }]).catch((e) => console.warn("Sheets sync:", e.message));
+}
+
+module.exports = { syncSheetsFromStateDiff, pushPrecio };
