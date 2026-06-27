@@ -1373,6 +1373,23 @@ tr:last-child td {
   padding: 10px;
 }
 
+.edit-note-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.edit-note-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.edit-note-row .edit-remove-btn {
+  flex: 0 0 auto;
+  padding: 6px 9px;
+  line-height: 1;
+}
+
 .compact-table table,
 .customer-orders-table table {
   min-width: 620px;

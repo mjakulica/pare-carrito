@@ -3830,18 +3830,31 @@
       render();
     }));
     const applySelectedClient = (clientId, shouldRender) => {
+      const previousClientId = ui.selectedClientId;
+      const pasteEl = document.getElementById("order-whatsapp-paste");
+      const pasteText = pasteEl ? pasteEl.value : "";
+      const hasDraftItems = ui.orderDraft && Object.keys(ui.orderDraft).length > 0;
+      // Si no habia cliente y ya hay pedido cargado o texto de WhatsApp, no borrarlos al elegir cliente.
+      const preserveContent = !previousClientId && (hasDraftItems || pasteText.trim().length > 0);
       clientSelect.value = clientId;
       ui.selectedClientId = clientId;
       if (shouldRender) {
-        ui.orderDraft = {};
+        if (!preserveContent) ui.orderDraft = {};
         ui.orderRenderedLimit = orderBatchLimit();
       }
       const client = getClient(clientId);
       const vehicleSelect = document.getElementById("order-vehicle");
       if (client && vehicleSelect) vehicleSelect.value = client.vehicleId;
       updateOrderPricesForClient(client);
-      if (shouldRender) render();
-      else recalc();
+      if (shouldRender) {
+        render();
+        if (preserveContent && pasteText) {
+          const restoredPaste = document.getElementById("order-whatsapp-paste");
+          if (restoredPaste) restoredPaste.value = pasteText;
+        }
+      } else {
+        recalc();
+      }
     };
     const clientSearch = document.getElementById("order-client-search");
     if (clientSearch) {
@@ -11830,7 +11843,7 @@
         <div class="field"><label>Cantidad</label><input data-edit-qty inputmode="decimal" value="${formatAmountInput(item.quantity)}" /></div>
         ${isCustomerEdit ? `<input type="hidden" data-edit-unit value="${escapeAttr(item.unitType)}" />` : `<div class="field"><label>Unidad</label><select data-edit-unit>${unitOptions(item.unitType)}</select></div>`}
         ${isCustomerEdit ? `<input type="hidden" data-edit-price value="${formatAmountInput(item.unitPrice)}" />` : `<div class="field"><label>Precio</label><input data-edit-price inputmode="decimal" value="${formatAmountInput(item.unitPrice)}" /></div>`}
-        <div class="field"><label>Nota</label><input data-edit-note value="${escapeAttr(item.note || "")}" /></div>
+        <div class="field"><label>Nota</label><div class="edit-note-row"><input data-edit-note value="${escapeAttr(item.note || "")}" /><button class="btn small danger edit-remove-btn" type="button" data-edit-remove title="Quitar producto">X</button></div></div>
       </div>
     `).join("");
     showModal(
@@ -11863,6 +11876,15 @@
           if (nameInput) nameInput.focus();
         };
         if (orderAddBtn) orderAddBtn.addEventListener("click", appendOrderAddRow);
+        const removedItemIds = new Set();
+        document.querySelectorAll("[data-edit-remove]").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const row = btn.closest("[data-edit-order-item]");
+            if (!row) return;
+            removedItemIds.add(row.dataset.editOrderItem);
+            row.remove();
+          });
+        });
         if (focusItemId) {
           const focusRow = document.querySelector('[data-edit-order-item="' + focusItemId + '"]');
           const focusQty = focusRow && focusRow.querySelector("[data-edit-qty]");
@@ -11903,6 +11925,7 @@
             const addIvaAmount = addSubtotal * (addIvaRate / 100);
             order.items.push({ id: nextItemId(), productId: addProduct.id, productName: addProduct.name, quantity: addQty, unitType: addProduct.unitType, unitPrice: addUnitPrice, subtotal: addSubtotal, ivaRate: addIvaRate, ivaAmount: addIvaAmount, totalWithIva: addSubtotal + addIvaAmount, note: addRow.querySelector("[data-add-note]").value.trim(), assignedProviderId: "", assignedToType: "", assignedToId: "" });
           });
+          if (removedItemIds.size) order.items = order.items.filter((entry) => !removedItemIds.has(entry.id));
           recalcOrderTotals(order);
           order.updatedAt = new Date().toISOString();
           if (!order.exampleOnly) updateOrderAccounting(order);
