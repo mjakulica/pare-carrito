@@ -11430,6 +11430,7 @@
         <td>
           ${canApprove && h.status !== "aprobado" ? `<button class="btn small green" data-holiday-approve="${h.id}" type="button">Aprobar</button> ` : ""}
           ${canApprove ? `<button class="btn small danger" data-holiday-del="${h.id}" type="button">Quitar</button>` : ""}
+          ${canApprove && h.status === "aprobado" ? ` <button class="btn small blue" data-holiday-notify="${h.id}" type="button">${h.notified ? "Reenviar aviso" : "Avisar a clientes"}</button>` : ""}
         </td>
       </tr>`).join("") || '<tr><td colspan="4" class="muted">Sin feriados cargados.</td></tr>';
     showModal("Feriados", `
@@ -11462,7 +11463,30 @@
         saveState();
         openHolidaysModal();
       }));
+      document.querySelectorAll("[data-holiday-notify]").forEach((b) => b.addEventListener("click", () => notifyHolidayClients(b.dataset.holidayNotify)));
     });
+  }
+
+  async function notifyHolidayClients(holidayId) {
+    const h = getHolidays().find((x) => x.id === holidayId);
+    if (!h) return;
+    if (!confirm("Avisar por WhatsApp a todos los clientes activos del feriado " + (h.name || h.date) + "?")) return;
+    const config = getCloudSyncConfig();
+    if (!cloudSyncReady(config)) return alert("Servidor no configurado.");
+    try {
+      const response = await cloudRequest(config, "/clients/holiday-broadcast", {
+        method: "POST",
+        body: JSON.stringify({ date: h.date, name: h.name })
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) return alert(payload.error || "No se pudo enviar el aviso.");
+      h.notified = true;
+      saveState();
+      alert("Aviso enviado a " + (payload.sent || 0) + " de " + (payload.total || 0) + " numero(s)." + (payload.failed ? " Fallaron: " + payload.failed + "." : ""));
+      openHolidaysModal();
+    } catch (error) {
+      alert("Error al enviar: " + error.message);
+    }
   }
 
   function openClientForm(id) {

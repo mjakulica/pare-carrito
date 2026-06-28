@@ -104,4 +104,37 @@ function extractIncomingMessages(payload) {
   return out;
 }
 
-module.exports = { sendText, notifyTeam, notifyOwner, verifyWebhook, validateSignature, extractIncomingMessages };
+// Envia una plantilla aprobada (para avisos fuera de la ventana de 24hs, ej. feriados).
+async function sendTemplate(to, templateName, lang, bodyParams) {
+  if (!config.whatsapp.token || !config.whatsapp.phoneNumberId) {
+    console.log("[wa desactivado] plantilla", templateName, "->", to);
+    return false;
+  }
+  const url = `${GRAPH}/${config.whatsapp.apiVersion}/${config.whatsapp.phoneNumberId}/messages`;
+  const components = (bodyParams && bodyParams.length)
+    ? [{ type: "body", parameters: bodyParams.map((t) => ({ type: "text", text: String(t) })) }]
+    : [];
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer " + config.whatsapp.token },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        to: String(to).replace(/[^\d]/g, ""),
+        type: "template",
+        template: { name: templateName, language: { code: lang || "es" }, components }
+      })
+    });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "");
+      console.error("WA template error", res.status, detail.slice(0, 300));
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.error("WA template exception:", error.message);
+    return false;
+  }
+}
+
+module.exports = { sendText, sendTemplate, notifyTeam, notifyOwner, verifyWebhook, validateSignature, extractIncomingMessages };

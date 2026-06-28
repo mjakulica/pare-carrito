@@ -29,6 +29,20 @@ async function getProductNames() {
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
+// Envio masivo por plantilla (lo llama el ERP, ej. aviso de feriado). Auth por clave compartida.
+app.post("/broadcast", async (req, res) => {
+  if (String(req.get("x-broadcast-key") || "") !== (process.env.BROADCAST_KEY || "")) return res.sendStatus(401);
+  const { numbers, templateName, lang, params } = req.body || {};
+  if (!Array.isArray(numbers) || !templateName) return res.status(400).json({ error: "Se espera { numbers, templateName }." });
+  let sent = 0;
+  let failed = 0;
+  for (const n of numbers) {
+    const ok = await wa.sendTemplate(n, templateName, lang, params || []);
+    if (ok) sent += 1; else failed += 1;
+  }
+  res.json({ ok: true, sent, failed });
+});
+
 // Verificacion del webhook (Meta).
 app.get("/webhook", (req, res) => {
   const challenge = wa.verifyWebhook(req.query);

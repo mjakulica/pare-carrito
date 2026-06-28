@@ -1680,6 +1680,45 @@ app.post("/external/compra-hoy", externalAuth, async (req, res) => {
   res.json(out);
 });
 
+// Aviso de feriado: junta los telefonos de clientes activos y los manda por el bot (plantilla).
+app.post("/clients/holiday-broadcast", authenticate, requireRole("manager", "admin"), async (req, res) => {
+  const botUrl = process.env.BOT_BROADCAST_URL || "";
+  const botKey = process.env.BROADCAST_KEY || "";
+  if (!botUrl) return res.status(503).json({ error: "Aviso por WhatsApp no configurado (BOT_BROADCAST_URL)." });
+  const stored = await loadStateData();
+  if (!stored) return res.status(404).json({ error: "Sin datos." });
+  const d = stored.data || {};
+  const settings = d.appSettings || {};
+  const templateName = settings.holidayTemplateName || "";
+  if (!templateName) return res.status(400).json({ error: "Configura el nombre de la plantilla de Meta en Configuracion." });
+  const lang = settings.holidayTemplateLang || "es";
+  const date = String((req.body || {}).date || "");
+  const name = String((req.body || {}).name || "");
+  let msg = settings.holidayMessage || "Te recordamos que el {fecha} ({feriado}) no hay reparto por feriado.";
+  msg = msg.replace(/{fecha}/g, date).replace(/{feriado}/g, name);
+  const numbers = [];
+  (d.clients || []).filter((c) => c.isActive !== false).forEach((c) => {
+    [c.phone].concat(Array.isArray(c.phones) ? c.phones : []).forEach((ph) => {
+      const cd = String(ph || "").replace(/\D/g, "");
+      if (cd) numbers.push(cd);
+    });
+  });
+  const unique = Array.from(new Set(numbers));
+  if (!unique.length) return res.json({ ok: true, sent: 0, failed: 0, note: "No hay numeros cargados." });
+  try {
+    const r = await fetch(botUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-broadcast-key": botKey },
+      body: JSON.stringify({ numbers: unique, templateName, lang, params: [msg] })
+    });
+    const payload = await r.json().catch(() => ({}));
+    if (!r.ok) return res.status(502).json({ error: payload.error || "El bot no pudo enviar." });
+    res.json({ ok: true, sent: payload.sent || 0, failed: payload.failed || 0, total: unique.length });
+  } catch (error) {
+    res.status(502).json({ error: "No se pudo contactar al bot: " + error.message });
+  }
+});
+
 async function loadBillingLastRunDate() {
   try {
     const { rows } = await pool.query("SELECT data->>'billingLastRunDate' AS d FROM app_state WHERE id = 'main'");
