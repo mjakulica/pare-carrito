@@ -34,6 +34,9 @@ Planilla: https://docs.google.com/spreadsheets/d/1VFKMdgNBC1sTkZU3xa6dQvM43S-9Tp
      que trae datos de otra pestaña, y onEdit no detecta cambios de fórmulas.
    - La primera corrida toma los valores actuales como base (no avisa); avisa a partir del
      siguiente cambio.
+   - Frecuencia: escanea **cada 1 minuto entre las 7 y las 9** y **cada 10 minutos** el resto del
+     dia. La franja usa la zona horaria del proyecto de Apps Script: verifica en Apps Script
+     (Configuracion del proyecto / Project Settings) que la **zona horaria** sea la de Argentina.
 
 ## 4) Configurar el servidor
 En `pare-carrito-sas-server/.env`:

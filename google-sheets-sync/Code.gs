@@ -225,6 +225,12 @@ function writePrecios(precios) {
  * Se activa con un disparador POR TIEMPO (correr crearTriggerCompraHoy una vez).
  */
 function scanCompraHoy() {
+  // Frecuencia segun horario: 7-9am cada 1 min; el resto del dia cada 10 min.
+  // (el disparador corre cada 1 min, pero salimos al toque si no toca escanear)
+  var now = new Date();
+  var h = now.getHours();
+  var enVentanaPico = (h >= 7 && h < 9);
+  if (!enVentanaPico && (now.getMinutes() % 10 !== 0)) return;
   var sheet = getSheet(PRECIOS_SHEET);
   if (!sheet) return;
   var lastRow = sheet.getLastRow();
@@ -260,11 +266,11 @@ function scanCompraHoy() {
   }
 }
 
-/** Corre esto UNA vez (boton Ejecutar) para crear el disparador por tiempo (cada 5 min). */
+/** Corre esto UNA vez (boton Ejecutar) para crear el disparador por tiempo (cada 1 min;\n *  internamente escanea cada 1 min entre 7-9am y cada 10 min el resto del dia). */
 function crearTriggerCompraHoy() {
   ScriptApp.getProjectTriggers().forEach(function (t) {
     var h = t.getHandlerFunction();
     if (h === "onEditCompraHoy" || h === "scanCompraHoy") ScriptApp.deleteTrigger(t);
   });
-  ScriptApp.newTrigger("scanCompraHoy").timeBased().everyMinutes(5).create();
+  ScriptApp.newTrigger("scanCompraHoy").timeBased().everyMinutes(1).create();
 }
