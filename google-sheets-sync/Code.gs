@@ -88,6 +88,19 @@ function json(obj) {
 }
 
 /** Recibe pedidos/precios desde el sistema. */
+// Busca una pestania por nombre tolerando mayusculas/acentos/espacios.
+function getSheet(name) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var direct = ss.getSheetByName(name);
+  if (direct) return direct;
+  var target = normFlat(name);
+  var all = ss.getSheets();
+  for (var i = 0; i < all.length; i++) {
+    if (normFlat(all[i].getName()) === target) return all[i];
+  }
+  return null;
+}
+
 function doPost(e) {
   var out = { ok: false };
   try {
@@ -144,7 +157,8 @@ function buildItemValues(map, items, skipped) {
 // Upsert por numero de pedido: si ya se cargo (guardado en Properties) actualiza esa fila;
 // si no, agrega una fila nueva y recuerda en que fila quedo.
 function writePedidos(pedidos) {
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(PEDIDOS_SHEET);
+  var sheet = getSheet(PEDIDOS_SHEET);
+  if (!sheet) throw new Error("No se encontro la pestania \"" + PEDIDOS_SHEET + "\".");
   var map = headerColMap(sheet);
   var lastCol = sheet.getLastColumn();
   var props = PropertiesService.getDocumentProperties();
@@ -178,7 +192,8 @@ function writePedidos(pedidos) {
 
 /** Actualiza Venta y Costo. NO toca "Compra Hoy". */
 function writePrecios(precios) {
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(PRECIOS_SHEET);
+  var sheet = getSheet(PRECIOS_SHEET);
+  if (!sheet) throw new Error("No se encontro la pestania \"" + PRECIOS_SHEET + "\".");
   var lastRow = sheet.getLastRow();
   var lastCol = sheet.getLastColumn();
   var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(normSet);
@@ -212,7 +227,7 @@ function onEditCompraHoy(e) {
   try {
     if (!e || !e.range) return;
     var sheet = e.range.getSheet();
-    if (sheet.getName() !== PRECIOS_SHEET) return;
+    if (normFlat(sheet.getName()) !== normFlat(PRECIOS_SHEET)) return;
     var lastCol = sheet.getLastColumn();
     var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(normSet);
     var colCompra = headers.indexOf(normSet("Compra Hoy")) + 1;

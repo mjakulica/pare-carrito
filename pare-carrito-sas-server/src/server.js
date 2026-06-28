@@ -651,7 +651,7 @@ app.put("/state", authenticate, requireRole(...SYNC_ROLES), async (req, res) => 
       "DELETE FROM state_history WHERE id NOT IN (SELECT id FROM state_history ORDER BY id DESC LIMIT $1)",
       [STATE_HISTORY_KEEP]
     );
-    await mirrorStateToTables(clientDb, cleanData);
+    await mirrorStateToTables(clientDb, cleanData, beforeData);
     await syncUsersFromState(clientDb, cleanData);
     const afterCounts = {
       orders: Array.isArray(cleanData.orders) ? cleanData.orders.length : 0,
@@ -714,7 +714,7 @@ app.post("/state/patch", authenticate, requireRole(...PATCH_SYNC_ROLES), async (
     await clientDb.query("INSERT INTO state_operations (operation_id, operation_type, base_updated_at, applied_by, patch) VALUES ($1,$2,$3,$4,$5)", [String(body.operationId), String(body.operationType || "patch"), body.baseUpdatedAt, req.user.username, body.patch]);
     await clientDb.query("INSERT INTO state_history (data, updated_by) VALUES ($1, $2)", [nextData, req.user.username]);
     await clientDb.query("DELETE FROM state_history WHERE id NOT IN (SELECT id FROM state_history ORDER BY id DESC LIMIT $1)", [STATE_HISTORY_KEEP]);
-    await mirrorStateToTables(clientDb, nextData);
+    await mirrorStateToTables(clientDb, nextData, beforeData);
     await syncUsersFromState(clientDb, nextData);
     await clientDb.query("COMMIT");
     syncSheetsFromStateDiff(beforeData, nextData);
@@ -954,30 +954,36 @@ app.post("/ocr/order-image", authenticate, requireRole("manager", "admin", "empl
 });
 
 // Espejo relacional: refresco transaccional completo (estados chicos, robustez maxima)
-async function mirrorStateToTables(db, data) {
+async function mirrorStateToTables(db, data, beforeData) {
   const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
-  await db.query("DELETE FROM order_items");
-  await db.query("DELETE FROM orders");
-  await db.query("DELETE FROM purchase_items");
-  await db.query("DELETE FROM purchases");
-  await db.query("DELETE FROM payments");
-  await db.query("DELETE FROM clients");
-  await db.query("DELETE FROM products");
-  for (const c of Array.isArray(data.clients) ? data.clients : []) {
+  // Solo reconstruye las tablas cuya seccion del estado cambio (evita reescribir miles de filas
+  // en cada guardado chico). Si no se pasa beforeData, reconstruye todo (comportamiento previo).
+  const changed = (key) => !beforeData || JSON.stringify(beforeData[key]) !== JSON.stringify(data[key]);
+  const skipClients = !changed("clients");
+  const skipProducts = !changed("products");
+  const skipOrders = !changed("orders");
+  const skipPurchases = !changed("purchases");
+  const skipPayments = !changed("payments");
+  if (!skipClients) await db.query("DELETE FROM clients");
+  if (!skipProducts) await db.query("DELETE FROM products");
+  if (!skipOrders) { await db.query("DELETE FROM order_items"); await db.query("DELETE FROM orders"); }
+  if (!skipPurchases) { await db.query("DELETE FROM purchase_items"); await db.query("DELETE FROM purchases"); }
+  if (!skipPayments) await db.query("DELETE FROM payments");
+  for (const c of skipClients ? [] : (Array.isArray(data.clients) ? data.clients : [])) {
     if (!c || !c.id) continue;
     await db.query(
       "INSERT INTO clients (id, name, address, phone, payment_type, price_tier, vehicle_id, is_active) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (id) DO NOTHING",
       [c.id, c.name || "", c.address || "", c.phone || "", c.paymentType || "", c.priceTier || "", c.vehicleId || "", c.isActive !== false]
     );
   }
-  for (const p of Array.isArray(data.products) ? data.products : []) {
+  for (const p of skipProducts ? [] : (Array.isArray(data.products) ? data.products : [])) {
     if (!p || !p.id) continue;
     await db.query(
       "INSERT INTO products (id, name, category, unit_type, base_cost, sale_price, is_active) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (id) DO NOTHING",
       [p.id, p.name || "", p.category || "", p.unitType || "", num(p.baseCost), num(p.salePrice), p.isActive !== false]
     );
   }
-  for (const o of Array.isArray(data.orders) ? data.orders : []) {
+  for (const o of skipOrders ? [] : (Array.isArray(data.orders) ? data.orders : [])) {
     if (!o || !o.id || !o.date) continue;
     await db.query(
       "INSERT INTO orders (id, date, client_id, vehicle_id, status, subtotal, iva, total, payment_received, created_by, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT (id) DO NOTHING",
@@ -993,7 +999,7 @@ async function mirrorStateToTables(db, data) {
       );
     }
   }
-  for (const p of Array.isArray(data.purchases) ? data.purchases : []) {
+  for (const p of skipPurchases ? [] : (Array.isArray(data.purchases) ? data.purchases : [])) {
     if (!p || !p.id || !p.date) continue;
     await db.query(
       "INSERT INTO purchases (id, date, expense_type, provider_id, provider_name, total_cost, payment_status, recorded_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (id) DO NOTHING",
@@ -1009,7 +1015,7 @@ async function mirrorStateToTables(db, data) {
       );
     }
   }
-  for (const pay of Array.isArray(data.payments) ? data.payments : []) {
+  for (const pay of skipPayments ? [] : (Array.isArray(data.payments) ? data.payments : [])) {
     if (!pay || !pay.id) continue;
     await db.query(
       "INSERT INTO payments (id, date, client_id, amount, method, received_by) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (id) DO NOTHING",
