@@ -5113,6 +5113,8 @@
         const marketPrice = parseAmount(row.querySelector("[data-market-price]").value);
         const marginPct = parseAmount(row.querySelector("[data-margin-pct]").value);
         const price = Math.ceil(parseAmount(row.querySelector("[data-sale-price]").value));
+        const previousPrice = state.prices[productId] || {};
+        const costChanged = Number(previousPrice.cost || 0) !== cost;
         state.prices[productId] = {
           productId,
           date: todayISO(),
@@ -5126,7 +5128,9 @@
           product.baseCost = cost;
           product.salePrice = price;
         }
-        applyCostRelations({ productId, unitCost: cost, relationUnits: 0 }, marginPct || calcMargin(cost, price));
+        // Solo propagar a productos relacionados si cambio el costo de ESTA fila
+        // (evita que al guardar se pisen precios editados a mano de productos derivados).
+        if (costChanged) applyCostRelations({ productId, unitCost: cost, relationUnits: 0 }, marginPct || calcMargin(cost, price));
       });
       saveState();
       alert("Precios guardados.");

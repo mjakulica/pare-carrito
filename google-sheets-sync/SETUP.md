@@ -26,11 +26,14 @@ Planilla: https://docs.google.com/spreadsheets/d/1VFKMdgNBC1sTkZU3xa6dQvM43S-9Tp
 2. **Ejecutar como: Yo** · **Acceso: Cualquiera** → **Implementar** → autorizá.
 3. Copiá la URL (`/exec`).
 
-## 3) Crear el disparador de "Compra Hoy" (sheet → sistema)
+## 3) Activar el escaneo de "Compra Hoy" (sheet → sistema)
 1. En Apps Script, abrí la función `crearTriggerCompraHoy` y tocá **Ejecutar** una vez
-   (autorizá permisos). Eso crea el disparador instalable que detecta ediciones.
-   - (Alternativa manual: ⏰ **Activadores → Añadir activador** → función `onEditCompraHoy`,
-     fuente "Desde la hoja de cálculo", tipo "Al editar".)
+   (autorizá permisos). Crea un disparador **por tiempo** (cada 5 min) que escanea la columna
+   "Compra Hoy" y, cuando un valor cambia, actualiza el costo en el sistema.
+   - Se usa escaneo por tiempo (no "al editar") porque "Compra Hoy" suele ser una **fórmula**
+     que trae datos de otra pestaña, y onEdit no detecta cambios de fórmulas.
+   - La primera corrida toma los valores actuales como base (no avisa); avisa a partir del
+     siguiente cambio.
 
 ## 4) Configurar el servidor
 En `pare-carrito-sas-server/.env`:

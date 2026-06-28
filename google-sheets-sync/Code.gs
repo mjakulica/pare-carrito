@@ -219,39 +219,52 @@ function writePrecios(precios) {
 }
 
 /**
- * Disparador al editar: si cambiaste "Compra Hoy" en "precios", manda el valor al
- * sistema para que actualice el COSTO del producto (como una compra).
- * Hay que crear un disparador INSTALABLE (ver SETUP.md o correr crearTriggerCompraHoy una vez).
+ * Escaneo periodico de "Compra Hoy": como esa columna suele ser una FORMULA (trae datos de
+ * otra pagina), no sirve un disparador onEdit. Este escaneo compara los valores actuales con
+ * los ultimos vistos y, cuando cambian, avisa al sistema para actualizar el costo del producto.
+ * Se activa con un disparador POR TIEMPO (correr crearTriggerCompraHoy una vez).
  */
-function onEditCompraHoy(e) {
-  try {
-    if (!e || !e.range) return;
-    var sheet = e.range.getSheet();
-    if (normFlat(sheet.getName()) !== normFlat(PRECIOS_SHEET)) return;
-    var lastCol = sheet.getLastColumn();
-    var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(normSet);
-    var colCompra = headers.indexOf(normSet("Compra Hoy")) + 1;
-    var colProducto = headers.indexOf(normSet("Producto")) + 1 || 1;
-    if (colCompra <= 0 || e.range.getColumn() !== colCompra || e.range.getRow() === 1) return;
-    var value = e.range.getValue();
-    if (value === "" || value === null) return;
-    var producto = sheet.getRange(e.range.getRow(), colProducto).getValue();
-    if (!producto) return;
-    UrlFetchApp.fetch(ERP_BASE_URL.replace(/\/+$/, "") + "/external/compra-hoy", {
-      method: "post",
-      contentType: "application/json",
-      headers: { "x-api-key": ERP_API_KEY },
-      payload: JSON.stringify({ producto: String(producto), costo: Number(value) }),
-      muteHttpExceptions: true
-    });
-  } catch (err) { console.error(err); }
+function scanCompraHoy() {
+  var sheet = getSheet(PRECIOS_SHEET);
+  if (!sheet) return;
+  var lastRow = sheet.getLastRow();
+  var lastCol = sheet.getLastColumn();
+  if (lastRow < 2) return;
+  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(normSet);
+  var colProducto = headers.indexOf(normSet("Producto")) + 1 || 1;
+  var colCompra = headers.indexOf(normSet("Compra Hoy")) + 1;
+  if (colCompra <= 0) return;
+  var n = lastRow - 1;
+  var productos = sheet.getRange(2, colProducto, n, 1).getValues();
+  var compras = sheet.getRange(2, colCompra, n, 1).getValues();
+  var props = PropertiesService.getDocumentProperties();
+  for (var i = 0; i < n; i++) {
+    var prod = String(productos[i][0] || "").trim();
+    if (!prod) continue;
+    var val = Number(compras[i][0]);
+    if (!isFinite(val) || val <= 0) continue;
+    var key = "ch_" + normSet(prod);
+    var prev = props.getProperty(key);
+    if (prev === null) { props.setProperty(key, String(val)); continue; } // baseline: no avisa la 1ra vez
+    if (Number(prev) === val) continue; // sin cambios
+    try {
+      UrlFetchApp.fetch(ERP_BASE_URL.replace(/\/+$/, "") + "/external/compra-hoy", {
+        method: "post",
+        contentType: "application/json",
+        headers: { "x-api-key": ERP_API_KEY },
+        payload: JSON.stringify({ producto: prod, costo: val }),
+        muteHttpExceptions: true
+      });
+      props.setProperty(key, String(val));
+    } catch (err) { console.error(err); }
+  }
 }
 
-/** Corre esto UNA vez (boton Ejecutar) para crear el disparador instalable. */
+/** Corre esto UNA vez (boton Ejecutar) para crear el disparador por tiempo (cada 5 min). */
 function crearTriggerCompraHoy() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
   ScriptApp.getProjectTriggers().forEach(function (t) {
-    if (t.getHandlerFunction() === "onEditCompraHoy") ScriptApp.deleteTrigger(t);
+    var h = t.getHandlerFunction();
+    if (h === "onEditCompraHoy" || h === "scanCompraHoy") ScriptApp.deleteTrigger(t);
   });
-  ScriptApp.newTrigger("onEditCompraHoy").forSpreadsheet(ss).onEdit().create();
+  ScriptApp.newTrigger("scanCompraHoy").timeBased().everyMinutes(5).create();
 }
