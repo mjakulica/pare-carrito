@@ -4,3 +4,8 @@
 node_modules/
 uploads/
 project.tar.gz
+
+# Datos reales / scratch (no subir)
+app_state_now.json
+backups/
+*.NUEVO-*.js
