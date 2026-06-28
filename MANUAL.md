@@ -134,3 +134,38 @@ cd /opt/pare-carrito && ./deploy.sh
 2. En el VPS: `cd /opt/pare-carrito && ./deploy.sh`.
    - Si solo cambió el frontend, alcanza con `git pull` y Ctrl+F5 en el navegador.
    - Si cambió el backend (bot, endpoints, sheets), `deploy.sh` reconstruye los contenedores.
+
+---
+
+# PARTE D — Feriados y aviso masivo a clientes
+
+## Qué hace
+- En **Nuevo Pedido** hay un botón **"Feriados"** (roles empleado, admin y gerente).
+- **Admin/Gerente**: agregan un feriado (fecha + nombre) y queda **aprobado** al instante, lo que
+  **bloquea esa fecha** en el calendario de pedidos (no se pueden cargar pedidos ese día).
+- **Empleado**: puede **proponer** un feriado; queda **pendiente** hasta que un admin/gerente lo apruebe.
+- El **texto del aviso** se configura en **Configuración** (admin/gerente), con los comodines
+  `{fecha}` y `{feriado}`.
+- Para avisar a los clientes: en el modal de Feriados, botón **"Avisar a clientes"** (admin/gerente)
+  manda el mensaje por WhatsApp a **todos los números de los clientes activos**.
+
+## Requisito: plantilla de Meta (obligatorio para el aviso)
+WhatsApp no deja mandar texto libre masivo. Hay que crear una **plantilla** en Meta:
+1. Meta Business → WhatsApp Manager → **Plantillas de mensajes → Crear plantilla**.
+2. Categoría: **Utility/Utilidad**. Idioma: Español.
+3. Cuerpo con UNA variable, ej.: `📢 {{1}}` (el sistema manda el texto ya armado como {{1}}).
+4. Esperá la **aprobación** de Meta (suele ser rápido).
+5. En el sistema → **Configuración**: poné el **nombre de la plantilla** (ej. `aviso_feriado`).
+
+## Configuración en el servidor (.env)
+```
+BROADCAST_KEY=una-clave-secreta-compartida   # misma en api y bot (ya esta en docker-compose)
+# BOT_BROADCAST_URL ya viene por defecto: http://whatsapp-bot:8090/broadcast
+```
+El bot tiene que estar activo (PARTE A) para que el aviso salga.
+
+## Sincronización de pedidos editados (Google Sheets)
+Además de los pedidos nuevos, ahora **editar un pedido** en el sistema actualiza su fila en la
+planilla, y **cancelarlo** vacía sus cantidades. El Apps Script recuerda en qué fila quedó cada
+pedido (por su número), así que no hace falta una columna de N° de pedido. Importante: no
+reordenes/borres manualmente filas de la pestaña pedidos, porque se pierde esa referencia.
