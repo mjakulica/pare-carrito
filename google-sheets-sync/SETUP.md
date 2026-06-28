@@ -34,8 +34,9 @@ Planilla: https://docs.google.com/spreadsheets/d/1VFKMdgNBC1sTkZU3xa6dQvM43S-9Tp
      que trae datos de otra pestaña, y onEdit no detecta cambios de fórmulas.
    - La primera corrida toma los valores actuales como base (no avisa); avisa a partir del
      siguiente cambio.
-   - Frecuencia: escanea **cada 1 minuto entre las 7 y las 9** y **cada 10 minutos** el resto del
-     dia. La franja usa la zona horaria del proyecto de Apps Script: verifica en Apps Script
+   - Frecuencia por franja horaria: 06:00-06:30 cada 5 min, 06:30-10:00 cada 1 min,
+     10:00-12:00 cada 5 min, 12:00-14:00 cada 10 min, 14:00-06:00 cada 1 hora.
+     Las franjas usan la zona horaria del proyecto de Apps Script: verifica en Apps Script
      (Configuracion del proyecto / Project Settings) que la **zona horaria** sea la de Argentina.
 
 ## 4) Configurar el servidor
