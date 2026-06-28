@@ -120,33 +120,58 @@ function resolveItemColumn(map, producto) {
   return { col: map[resolveKey(producto)], uni: false };
 }
 
+// Construye {colIndex: valor} para los items de un pedido (aplica "uni", notas y combina).
+function buildItemValues(map, items, skipped) {
+  var values = {};
+  (items || []).forEach(function (it) {
+    var res = resolveItemColumn(map, it.producto);
+    if (!res.col) { if (skipped) skipped[it.producto] = 1; return; }
+    var nota = it.nota ? String(it.nota).trim() : "";
+    var val;
+    if (res.uni || nota) {
+      val = String(it.cantidad);
+      if (res.uni) val += " uni";
+      if (nota) val += " (" + nota + ")";
+    } else {
+      val = it.cantidad;
+    }
+    if (values[res.col] === undefined) values[res.col] = val;
+    else values[res.col] = String(values[res.col]) + " + " + String(val);
+  });
+  return values;
+}
+
+// Upsert por numero de pedido: si ya se cargo (guardado en Properties) actualiza esa fila;
+// si no, agrega una fila nueva y recuerda en que fila quedo.
 function writePedidos(pedidos) {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(PEDIDOS_SHEET);
   var map = headerColMap(sheet);
   var lastCol = sheet.getLastColumn();
+  var props = PropertiesService.getDocumentProperties();
   var skipped = {};
   pedidos.forEach(function (p) {
-    var row = [];
-    for (var i = 0; i < lastCol; i++) row.push("");
-    row[COL_TIMESTAMP - 1] = p.timestamp ? new Date(p.timestamp) : new Date();
-    row[COL_CLIENTE - 1] = p.cliente || "";
-    (p.items || []).forEach(function (it) {
-      var res = resolveItemColumn(map, it.producto);
-      if (!res.col) { skipped[it.producto] = 1; return; }
-      var nota = it.nota ? String(it.nota).trim() : "";
-      var val;
-      if (res.uni || nota) {
-        val = String(it.cantidad);
-        if (res.uni) val += " uni";
-        if (nota) val += " (" + nota + ")";
-      } else {
-        val = it.cantidad;
-      }
-      var idx = res.col - 1;
-      if (row[idx] === "" || row[idx] === null) row[idx] = val;
-      else row[idx] = String(row[idx]) + " + " + String(val);
-    });
-    sheet.appendRow(row);
+    var values = buildItemValues(map, p.items, skipped);
+    var key = p.numero ? ("pedido_" + p.numero) : "";
+    var existingRow = key ? Number(props.getProperty(key) || 0) : 0;
+    if (existingRow >= 2 && existingRow <= sheet.getLastRow()) {
+      // Actualizar la fila existente (reescribe toda la fila preservando la marca temporal).
+      var ts = sheet.getRange(existingRow, COL_TIMESTAMP).getValue() || new Date();
+      var cli = p.cliente || sheet.getRange(existingRow, COL_CLIENTE).getValue() || "";
+      var row = [];
+      for (var i = 0; i < lastCol; i++) row.push("");
+      row[COL_TIMESTAMP - 1] = ts;
+      row[COL_CLIENTE - 1] = cli;
+      Object.keys(values).forEach(function (c) { row[Number(c) - 1] = values[c]; });
+      sheet.getRange(existingRow, 1, 1, lastCol).setValues([row]);
+    } else {
+      var newRow = [];
+      for (var j = 0; j < lastCol; j++) newRow.push("");
+      newRow[COL_TIMESTAMP - 1] = p.timestamp ? new Date(p.timestamp) : new Date();
+      newRow[COL_CLIENTE - 1] = p.cliente || "";
+      Object.keys(values).forEach(function (c) { newRow[Number(c) - 1] = values[c]; });
+      sheet.appendRow(newRow);
+      if (key) props.setProperty(key, String(sheet.getLastRow()));
+    }
   });
   return Object.keys(skipped);
 }

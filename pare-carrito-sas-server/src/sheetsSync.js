@@ -61,23 +61,39 @@ function syncSheetsFromStateDiff(beforeData, afterData) {
   const pedidos = [];
   const beforeOrders = Array.isArray(beforeData.orders) ? beforeData.orders : [];
   const afterOrders = Array.isArray(afterData.orders) ? afterData.orders : [];
-  // Solo empujamos pedidos NUEVOS y nunca en el baseline inicial (evita backfill masivo).
+  // Empuja pedidos NUEVOS y EDITADOS (nunca en el baseline inicial, para evitar backfill masivo).
+  // El Apps Script hace upsert por numero de pedido (recuerda en que fila quedo cada uno).
   if (beforeOrders.length > 0) {
-    const beforeIds = new Set(beforeOrders.map((o) => o.id));
+    const beforeById = {};
+    beforeOrders.forEach((o) => { if (o) beforeById[o.id] = o; });
+    const isCancelled = (o) => ["cancelado", "anulado"].includes(o && o.status);
+    const itemsSig = (o) => (o.items || []).map((it) => it.productId + ":" + it.quantity + ":" + (it.note || "")).join("|") + "|" + (o.status || "");
+    const mapItems = (o) => (o.items || [])
+      .map((it) => ({ producto: it.productName, cantidad: Number(it.quantity || 0), nota: String(it.note || "").trim() }))
+      .filter((it) => it.producto && it.cantidad > 0);
+    const baseOrder = (o) => ({
+      timestamp: o.createdAt || (o.date ? o.date + "T08:00:00" : new Date().toISOString()),
+      cliente: clientNameOf(afterData, o.clientId),
+      numero: o.id,
+      total: Number(o.totalAmount || 0)
+    });
     afterOrders.forEach((o) => {
-      if (!o || beforeIds.has(o.id) || o.exampleOnly) return;
-      if (["cancelado", "anulado"].includes(o.status)) return;
-      const items = (o.items || [])
-        .map((it) => ({ producto: it.productName, cantidad: Number(it.quantity || 0), nota: String(it.note || "").trim() }))
-        .filter((it) => it.producto && it.cantidad > 0);
-      if (!items.length) return;
-      pedidos.push({
-        timestamp: o.createdAt || (o.date ? o.date + "T08:00:00" : new Date().toISOString()),
-        cliente: clientNameOf(afterData, o.clientId),
-        numero: o.id,
-        total: Number(o.totalAmount || 0),
-        items
-      });
+      if (!o || o.exampleOnly) return;
+      const before = beforeById[o.id];
+      if (!before) {
+        if (isCancelled(o)) return;
+        const items = mapItems(o);
+        if (!items.length) return;
+        pedidos.push({ ...baseOrder(o), items });
+        return;
+      }
+      if (isCancelled(o) && !isCancelled(before)) {
+        pedidos.push({ ...baseOrder(o), items: [] });
+        return;
+      }
+      if (!isCancelled(o) && itemsSig(o) !== itemsSig(before)) {
+        pedidos.push({ ...baseOrder(o), items: mapItems(o) });
+      }
     });
   }
 
