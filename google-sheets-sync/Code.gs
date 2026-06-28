@@ -191,29 +191,52 @@ function writePedidos(pedidos) {
 }
 
 /** Actualiza Venta y Costo. NO toca "Compra Hoy". */
+function findPreciosLayout(sheet) {
+  var lastCol = sheet.getLastColumn();
+  var maxScan = Math.min(10, sheet.getLastRow());
+  var target = normSet("Producto");
+  for (var r = 1; r <= maxScan; r++) {
+    var rowVals = sheet.getRange(r, 1, 1, lastCol).getValues()[0].map(normSet);
+    var cp = rowVals.indexOf(target);
+    if (cp >= 0) {
+      return {
+        headerRow: r,
+        dataStart: r + 1,
+        colProducto: cp + 1,
+        colVenta: rowVals.indexOf(normSet("Venta")) + 1,
+        colCosto: rowVals.indexOf(normSet("Costo")) + 1,
+        colCompra: rowVals.indexOf(normSet("Compra Hoy")) + 1
+      };
+    }
+  }
+  return null;
+}
+
 function writePrecios(precios) {
   var sheet = getSheet(PRECIOS_SHEET);
   if (!sheet) throw new Error("No se encontro la pestania \"" + PRECIOS_SHEET + "\".");
+  var L = findPreciosLayout(sheet);
+  if (!L) throw new Error("No se encontro el encabezado 'Producto' en la pestania precios.");
   var lastRow = sheet.getLastRow();
-  var lastCol = sheet.getLastColumn();
-  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(normSet);
-  var colProducto = headers.indexOf(normSet("Producto")) + 1 || 1;
-  var colVenta = headers.indexOf(normSet("Venta")) + 1;
-  var colCosto = headers.indexOf(normSet("Costo")) + 1;
   var rowByKey = {};
-  if (lastRow > 1) {
-    var names = sheet.getRange(2, colProducto, lastRow - 1, 1).getValues();
-    for (var i = 0; i < names.length; i++) {
+  if (lastRow >= L.dataStart) {
+    var n = lastRow - L.dataStart + 1;
+    var names = sheet.getRange(L.dataStart, L.colProducto, n, 1).getValues();
+    for (var i = 0; i < n; i++) {
       var k = normSet(names[i][0]);
-      if (k && rowByKey[k] === undefined) rowByKey[k] = i + 2;
+      if (k && rowByKey[k] === undefined) rowByKey[k] = L.dataStart + i;
     }
   }
   precios.forEach(function (pr) {
     var key = resolveKey(pr.producto);
     var r = rowByKey[key];
-    if (!r) { r = sheet.getLastRow() + 1; sheet.getRange(r, colProducto).setValue(pr.producto); rowByKey[key] = r; }
-    if (colVenta > 0 && pr.venta != null) sheet.getRange(r, colVenta).setValue(pr.venta);
-    if (colCosto > 0 && pr.costo != null) sheet.getRange(r, colCosto).setValue(pr.costo);
+    if (!r) {
+      r = Math.max(sheet.getLastRow() + 1, L.dataStart);
+      sheet.getRange(r, L.colProducto).setValue(pr.producto);
+      rowByKey[key] = r;
+    }
+    if (L.colVenta > 0 && pr.venta != null) sheet.getRange(r, L.colVenta).setValue(pr.venta);
+    if (L.colCosto > 0 && pr.costo != null) sheet.getRange(r, L.colCosto).setValue(pr.costo);
     // "Compra Hoy" NO se escribe: es de entrada manual.
   });
 }
@@ -241,16 +264,13 @@ function scanCompraHoy() {
   if (mins % compraHoyIntervalo(mins) !== 0) return; // no toca escanear en este minuto
   var sheet = getSheet(PRECIOS_SHEET);
   if (!sheet) return;
+  var L = findPreciosLayout(sheet);
+  if (!L || L.colCompra <= 0) return;
   var lastRow = sheet.getLastRow();
-  var lastCol = sheet.getLastColumn();
-  if (lastRow < 2) return;
-  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(normSet);
-  var colProducto = headers.indexOf(normSet("Producto")) + 1 || 1;
-  var colCompra = headers.indexOf(normSet("Compra Hoy")) + 1;
-  if (colCompra <= 0) return;
-  var n = lastRow - 1;
-  var productos = sheet.getRange(2, colProducto, n, 1).getValues();
-  var compras = sheet.getRange(2, colCompra, n, 1).getValues();
+  if (lastRow < L.dataStart) return;
+  var n = lastRow - L.dataStart + 1;
+  var productos = sheet.getRange(L.dataStart, L.colProducto, n, 1).getValues();
+  var compras = sheet.getRange(L.dataStart, L.colCompra, n, 1).getValues();
   var props = PropertiesService.getDocumentProperties();
   for (var i = 0; i < n; i++) {
     var prod = String(productos[i][0] || "").trim();
