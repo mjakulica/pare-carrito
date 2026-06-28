@@ -31,7 +31,8 @@ app.get("/health", (_req, res) => res.json({ ok: true }));
 
 // Envio masivo por plantilla (lo llama el ERP, ej. aviso de feriado). Auth por clave compartida.
 app.post("/broadcast", async (req, res) => {
-  if (String(req.get("x-broadcast-key") || "") !== (process.env.BROADCAST_KEY || "")) return res.sendStatus(401);
+  const broadcastKey = process.env.BROADCAST_KEY || "";
+  if (!broadcastKey || req.get("x-broadcast-key") !== broadcastKey) return res.sendStatus(401);
   const { numbers, templateName, lang, params } = req.body || {};
   if (!Array.isArray(numbers) || !templateName) return res.status(400).json({ error: "Se espera { numbers, templateName }." });
   let sent = 0;
