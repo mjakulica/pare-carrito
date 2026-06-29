@@ -16274,10 +16274,10 @@
       .remito-brand{text-align:right;font-size:10px;line-height:1.45}
       .remito-logo{width:78px;height:78px;display:block;margin:0 6px 6px auto}
       .remito-client{font-size:17px;font-weight:800;margin:12px 0 8px}
-      .remito-table{font-size:10.5px}
-      .remito-table thead th{border-top:1px solid #b8b8b8;border-bottom:1px solid #b8b8b8;color:#17228a;font-weight:800}
+      .remito-table{font-size:10.5px;line-height:1;border-collapse:collapse}
+      .remito-table thead th{border-top:1px solid #b8b8b8;border-bottom:1px solid #b8b8b8;color:#17228a;font-weight:800;padding:1px 3px;line-height:1.05}
       .remito-table tbody tr:nth-child(odd){background:#ededed}
-      .remito-table td{height:12px;line-height:1.1;border:0}
+      .remito-table td{height:auto;line-height:1.05;padding:0.4px 3px;border:0}
       .remito-table .blank-row td{color:transparent}
       .remito-footer{display:grid;grid-template-columns:1fr 230px;gap:10px;align-items:end;border-top:1px solid #c7c7c7;margin-top:6px;padding-top:6px;font-size:10px}
       .remito-footer .received{color:#3043cf;margin-top:18px}
