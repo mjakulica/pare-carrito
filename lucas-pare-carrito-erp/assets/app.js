@@ -9749,7 +9749,8 @@
       neto: orders.reduce((sum, order) => sum + Number(order.subtotalAmount || Math.max(0, Number(order.totalAmount || 0) - Number(order.ivaAmount || 0))), 0),
       total: orders.reduce((sum, order) => sum + Number(order.totalAmount || 0), 0),
       iva: orders.reduce((sum, order) => sum + Number(order.ivaAmount || 0), 0),
-      orders: orders.length
+      orders: orders.length,
+      orderList: orders
     };
   }
 
@@ -9854,6 +9855,62 @@
       { className: "wide" }
     );
   }
+  function getBillingPendingOrdersSorted(client) {
+    const from = ui.billingFrom || getMonthStartISO(todayISO());
+    const to = ui.billingTo || todayISO();
+    const pending = getBillingPendingForClient(client, from, to);
+    const orders = (pending.orderList || []).slice().sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.id).localeCompare(String(b.id)));
+    return { from, to, pending, orders };
+  }
+  function openBillingPendingModal(clientId) {
+    const client = getClient(clientId);
+    if (!client) return;
+    const { from, to, pending, orders } = getBillingPendingOrdersSorted(client);
+    const rows = orders.map((order) => `<tr>
+        <td>${formatDate(order.date)}<br><span class="muted">${escapeHtml(order.id)}</span></td>
+        <td>${renderOrderInlineDetails(order, { summary: (order.items ? order.items.length : 0) + " productos" })}</td>
+        <td class="num">${formatMoney(getOrderTotal(order))}<br><span class="muted">IVA ${formatMoney(getOrderIva(order))}</span></td>
+        <td class="page-actions"><button class="btn small ghost" type="button" data-print-order-remito="${escapeAttr(order.id)}" title="Imprimir remito">&#128424;</button></td>
+      </tr>`).join("");
+    const totalsRow = orders.length ? `<tr class="billing-pending-totals"><td colspan="2" class="num"><strong>Totales (${orders.length} pedidos)</strong></td><td class="num"><strong>${formatMoney(pending.total)}</strong><br><span class="muted">IVA ${formatMoney(pending.iva)}</span></td><td></td></tr>` : "";
+    showModal(
+      "Pedidos que acumulan IVA - " + (client.name || client.id) + " (" + formatDate(from) + " - " + formatDate(to) + ")",
+      `<div class="page-actions" style="justify-content:flex-end;margin-bottom:8px"><button class="btn ghost" type="button" data-print-billing-pending="${escapeAttr(client.id)}">&#128424; Imprimir todo</button></div>
+       <div class="table-wrap"><table><thead><tr><th>Pedido</th><th>Detalle</th><th class="num">Total</th><th>Remito</th></tr></thead><tbody>${rows || emptyRow(4, "Sin pedidos que acumulen en el periodo.")}${totalsRow}</tbody></table></div>`,
+      () => {
+        document.querySelectorAll("[data-print-order-remito]").forEach((button) => button.addEventListener("click", () => printOrderRemitoDirect(button.dataset.printOrderRemito)));
+        document.querySelectorAll("[data-print-billing-pending]").forEach((button) => button.addEventListener("click", () => printBillingPendingDetail(button.dataset.printBillingPending)));
+      },
+      { className: "wide" }
+    );
+  }
+  function printBillingPendingDetail(clientId) {
+    const client = getClient(clientId);
+    if (!client) return;
+    const { from, to, pending, orders } = getBillingPendingOrdersSorted(client);
+    const orderBlocks = orders.map((order) => {
+      const itemRows = (order.items || []).map((item) => `<tr>
+          <td>${escapeHtml(item.productName)}${item.note ? ` <span class="muted">(${escapeHtml(item.note)})</span>` : ""}</td>
+          <td class="num">${formatNumber(item.quantity)}${hasKgLegend(item.productId) ? " kg" : ""}</td>
+          <td class="num">${formatMoney(item.unitPrice)}</td>
+          <td class="num">${formatMoney(item.totalWithIva || item.subtotal)}</td>
+        </tr>`).join("");
+      return `<div class="billing-detail-order">
+        <h3 style="margin:10px 0 2px;font-size:12px">${formatDate(order.date)} - Pedido ${escapeHtml(order.id)}</h3>
+        <table class="print-table"><thead><tr><th>Producto</th><th class="num">Cant.</th><th class="num">P. unit.</th><th class="num">Importe</th></tr></thead><tbody>${itemRows}</tbody></table>
+        <p style="margin:2px 0 0;font-size:11px;text-align:right">IVA ${formatMoney(getOrderIva(order))} - Total ${formatMoney(getOrderTotal(order))}</p>
+      </div>`;
+    }).join("");
+    const body = `<div class="print-compact">
+      <h1 style="margin:0 0 2px;font-size:18px">${BUSINESS_NAME}</h1>
+      <h2 style="margin:0 0 2px;font-size:14px">Detalle de pedidos a facturar</h2>
+      <p style="margin:0 0 2px;font-size:11px"><strong>${escapeHtml(client.id)} - ${escapeHtml(client.name)}</strong>${client.legalName ? " - " + escapeHtml(client.legalName) : ""}${client.cuit ? " - CUIT " + escapeHtml(client.cuit) : ""}</p>
+      <p style="margin:0 0 8px;font-size:11px">Periodo: ${formatDate(from)} - ${formatDate(to)} (${orders.length} pedidos)</p>
+      ${orderBlocks || `<p class="muted">Sin pedidos en el periodo.</p>`}
+      <div class="order-detail-total" style="margin-top:10px"><div><span>Neto</span><strong>${formatMoney(pending.neto)}</strong></div><div><span>IVA</span><strong>${formatMoney(pending.iva)}</strong></div><div><span>Total</span><strong>${formatMoney(pending.total)}</strong></div></div>
+    </div>`;
+    printHtmlDocument(fileDate(todayISO()) + " Detalle " + (client.name || client.id), body);
+  }
   function bindCustomerBilling() {
     document.querySelectorAll("[data-billing-client-tab]").forEach((button) => button.addEventListener("click", () => { ui.customerBillingClient = button.dataset.billingClientTab; render(); }));
     const f = document.getElementById("cbilling-from");
@@ -9900,7 +9957,7 @@
           <td>${escapeHtml(client.cuit || "")}<br><span class="muted">${escapeHtml(client.invoiceType)}</span></td>
           <td>${escapeHtml(client.invoiceFrequency || "mensual")}</td>
           <td>${escapeHtml(client.billingEmail || client.email || "")}</td>
-          <td>${formatDate(pending.from)}<br><span class="muted">${pending.orders} pedidos</span></td>
+          <td>${formatDate(pending.from)}<br><button class="btn small ghost" type="button" data-billing-pending="${escapeAttr(client.id)}" title="Ver pedidos que acumulan IVA">${pending.orders} pedidos</button></td>
           <td class="num">${formatMoney(totalForBilling)}<br><span class="muted">Neto ${formatMoney(pending.neto)}</span></td>
           <td class="num"><input class="billing-iva-input" data-billing-iva="${escapeAttr(client.id)}" value="${escapeAttr(overrideText === "" || overrideText == null ? formatAmountInput(pending.iva) : String(overrideText))}" inputmode="decimal" /></td>
         </tr>
@@ -9984,6 +10041,7 @@
         render();
       }));
       document.querySelectorAll("[data-billing-pdf]").forEach((button) => button.addEventListener("click", () => abrirFacturaPdf(button.dataset.pdfInv, button.dataset.pdfNum)));
+      document.querySelectorAll("[data-billing-pending]").forEach((button) => button.addEventListener("click", () => openBillingPendingModal(button.dataset.billingPending)));
       document.querySelectorAll("[data-billing-run]").forEach((button) => button.addEventListener("click", async () => {
         const simulate = button.dataset.billingRun === "simulate";
         const cfg = getCloudSyncConfig();
