@@ -11,6 +11,7 @@
  * ALGUNA de sus filas tiene contenido en la columna B.
  */
 
+var REMITOS_SPREADSHEET_ID = "1sJtIXEKSpbPlP_um4A7XI_tM5PioO6PUA3qM9Ni7IOk"; // archivo Remitos (con pestañas FC/FL)
 var DATOS_SPREADSHEET_ID = "1ne4ycBoH8QXx_rzuB69uS_4X7bFecukiXPqF0w7UHRo";
 var DATOS_SHEET = "Datos";
 var FILA_DESDE = 7;
@@ -44,7 +45,7 @@ function paginasAImprimir() {
 
 function imprimirRemitos() {
   var ui = SpreadsheetApp.getUi();
-  var ss = SpreadsheetApp.getActiveSpreadsheet(); // archivo Remitos (donde está el botón)
+  var ss = SpreadsheetApp.openById(REMITOS_SPREADSHEET_ID); // archivo Remitos (por ID, no importa donde este el boton)
   var pages = paginasAImprimir();
   if (!pages.length) { ui.alert("No hay páginas con contenido para imprimir."); return; }
 
@@ -67,7 +68,7 @@ function imprimirRemitos() {
 
   try {
     // La pestaña activa tiene que quedar visible: activamos una de las que se imprimen.
-    toPrint[0].activate();
+    try { toPrint[0].activate(); } catch (e) {}
     allSheets.forEach(function (s) {
       if (printIds[s.getSheetId()]) { if (s.isSheetHidden()) s.showSheet(); }
       else { if (!s.isSheetHidden()) s.hideSheet(); }
@@ -113,4 +114,12 @@ function exportarPdfLibro(ssId) {
     + "&top_margin=" + m + "&bottom_margin=" + m + "&left_margin=" + m + "&right_margin=" + m;
   var resp = UrlFetchApp.fetch(url, { headers: { Authorization: "Bearer " + ScriptApp.getOAuthToken() } });
   return resp.getBlob();
+}
+
+// Diagnóstico: muestra los nombres EXACTOS de las pestañas del archivo Remitos.
+// Corré esta función (botón Ejecutar) y compará con lo que dice la columna C de Datos.
+function listarPestanas() {
+  var ss = SpreadsheetApp.openById(REMITOS_SPREADSHEET_ID);
+  var nombres = ss.getSheets().map(function (s) { return '"' + s.getName() + '"'; });
+  SpreadsheetApp.getUi().alert("Pestañas del archivo Remitos (" + nombres.length + "):\n\n" + nombres.join("\n"));
 }
