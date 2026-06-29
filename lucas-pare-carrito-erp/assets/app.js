@@ -13150,6 +13150,22 @@
       const adjusted = adjustParsedQuantityAndUnitForProduct(quantity, unitType, product, nameTokens);
       return { name: resolved.name, quantity: adjusted.quantity, unitType: adjusted.unitType, note: resolved.note };
     }
+    // Sin cantidad explicita: si el texto matchea un producto, cantidad por defecto 1.
+    const noQtyRaw = rawTokens.filter((t) => {
+      const nrm = normalizeOrderTokenText(t);
+      return nrm && !isOrderConnectorToken(nrm) && !isQuantityToken(nrm);
+    });
+    const noQtyTokens = noQtyRaw.map(normalizeOrderTokenText).filter(Boolean);
+    if (noQtyTokens.length) {
+      const resolved = resolveParsedProductNameAndNote(noQtyTokens, noQtyRaw, "", clientId);
+      if (resolved.name) {
+        const product = findProductForParsedLine(resolved.name, "", clientId);
+        if (product) {
+          const adjusted = adjustParsedQuantityAndUnitForProduct(1, "", product, noQtyTokens);
+          return { name: resolved.name, quantity: adjusted.quantity, unitType: adjusted.unitType, note: resolved.note };
+        }
+      }
+    }
     return null;
   }
 
@@ -13196,6 +13212,8 @@
       .replace(/\bkilos?\s+de\b/gi, "kg de")
       .replace(/\bkgs?\s+de\b/gi, "kg de")
       .replace(/\bbolsas?\s+de\b/gi, "bolsa de")
+      .replace(/\bun poquito\b|\bpoquito\b|\bun poco\b/gi, " 0,2 ")
+      .replace(/\s+x\s+(kg|kgs|kilos?|cajon(?:es)?|caja|bolsas?|plantas?|unidad(?:es)?|docenas?|jaula|atados?|grs?|gramos)\b/gi, " $1 ")
       .replace(/\s+/g, " ")
       .trim();
   }
@@ -13312,8 +13330,13 @@
       const productText = normalizeText(match.product.name);
       const noteLooksLikeProductTail = noteClean && noteClean.split(" ").every((word) => productText.includes(word));
       const score = match.score - (note ? (noteLooksLikeProductTail ? 12 : 2) : 0);
-      if (!best || score > best.score || (score === best.score && !note && best.note)) {
+      const TIE_EPS = 0.5;
+      if (!best || score > best.score + TIE_EPS) {
         best = { name: candidateName, note, score };
+      } else if (Math.abs(score - best.score) <= TIE_EPS) {
+        // Empate (o casi): preferir el candidato SIN nota, es decir el match
+        // de nombre mas completo (ej. "queso cabra" antes que "queso" + nota "cabra").
+        if (!note && best.note) best = { name: candidateName, note, score };
       }
       if (match.exact && !note) break;
     }
@@ -13334,7 +13357,8 @@
   }
 
   function matchProductForParsedLine(name, unitType, clientId) {
-    const clean = normalizeText(name);
+    let clean = normalizeText(name);
+    clean = clean.replace(/\bpimientos?\b/g, "morron").replace(/\bmolido\b/g, "polvo");
     if (!clean) return null;
     const unitText = normalizeText(unitType);
     const clientAlias = state.clientProductAliases.find((alias) => alias.clientId === clientId && normalizeText(alias.alias) === clean);
