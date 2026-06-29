@@ -4006,6 +4006,7 @@
     if (aliasButton) aliasButton.addEventListener("click", () => openOrderAliasesModal(clientSelect.value));
     const parseButton = document.getElementById("parse-whatsapp-order");
     if (parseButton) parseButton.addEventListener("click", () => {
+      ui.pendingWhatsappText = String(pasteInput.value || "").trim();
       const detectedClient = detectClientFromOrderText(pasteInput.value);
       if (detectedClient && detectedClient.id !== clientSelect.value) {
         applySelectedClient(detectedClient.id, false);
@@ -4085,6 +4086,10 @@
       if (ui.pendingHandwritten) {
         order.handwrittenImage = { name: fileDate(date) + " Pedido " + client.name + " " + order.id, data: ui.pendingHandwritten };
         ui.pendingHandwritten = "";
+      }
+      if (ui.pendingWhatsappText) {
+        order.whatsappText = { name: fileDate(date) + " Pedido " + client.name + " " + order.id, text: ui.pendingWhatsappText };
+        ui.pendingWhatsappText = "";
       }
       if (currentUser.role === "example") {
         state.exampleOrders = state.exampleOrders || [];
@@ -4326,6 +4331,7 @@
             ${["manager", "admin", "employee"].includes(currentUser.role) ? `<button class="btn small ghost" data-edit-order="${order.id}">Editar</button>` : ""}
             ${["manager", "admin", "employee"].includes(currentUser.role) ? `<button class="btn small ghost" data-print-order-remito="${order.id}" title="Imprimir" aria-label="Imprimir">&#128424;</button>` : ""}
             ${order.handwrittenImage ? `<button class="btn small ghost" data-view-handwritten="${order.id}" title="Ver pedido manuscrito" aria-label="Pedido manuscrito">&#128196;</button>` : ""}
+            ${order.whatsappText ? `<button class="btn small ghost" data-view-whatsapp="${order.id}" title="Ver texto interpretado" aria-label="Texto del pedido">&#128221;</button>` : ""}
             ${["manager", "admin"].includes(currentUser.role) ? (annulledView ? `<button class="btn small primary" data-restore-order="${order.id}">Restaurar</button>` : `<button class="btn small danger" data-annul-order="${order.id}" title="Anular pedido" aria-label="Anular">X</button>`) : ""}
             ${currentUser.role === "manager" ? `<button class="btn small danger" data-delete-order="${order.id}" title="Eliminar pedido" aria-label="Eliminar">&#128465;</button>` : ""}
             ${currentUser.role === "employee" ? `<button class="btn small ghost" data-route="vehiculos">Vehículo</button>` : ""}
@@ -4474,6 +4480,20 @@
            <div class="page-actions" style="margin-top:10px"><a class="btn blue" href="${escapeAttr(order.handwrittenImage.data)}" download="${escapeAttr((order.handwrittenImage.name || "pedido") + ".jpg")}">Descargar imagen</a></div>`,
           null,
           { cancelLabel: "Cerrar", hideSave: true, className: "wide" }
+        );
+      });
+    });
+    document.querySelectorAll("[data-view-whatsapp]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const order = getOrder(button.dataset.viewWhatsapp);
+        if (!order || !order.whatsappText) return;
+        const txt = order.whatsappText.text || "";
+        showModal(
+          order.whatsappText.name || "Texto del pedido",
+          `<pre style="white-space:pre-wrap;font-family:inherit;background:var(--surface,#f6f6f6);padding:10px;border-radius:8px;max-height:60vh;overflow:auto;margin:0">${escapeHtml(txt)}</pre>
+           <div class="page-actions" style="margin-top:10px"><a class="btn blue" href="data:text/plain;charset=utf-8,${encodeURIComponent(txt)}" download="${escapeAttr((order.whatsappText.name || "pedido") + ".txt")}">Descargar texto</a></div>`,
+          null,
+          { cancelLabel: "Cerrar", hideSave: true }
         );
       });
     });
