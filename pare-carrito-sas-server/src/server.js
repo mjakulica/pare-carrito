@@ -9,7 +9,7 @@ const express = require("express");
 const { Pool } = require("pg");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-const { billingConfig, nowArt, computeDueInvoices, runBilling } = require("./billing");
+const { billingConfig, nowArt, computeDueInvoices, runBilling, regeneratePdf } = require("./billing");
 const { syncSheetsFromStateDiff, pushPrecio } = require("./sheetsSync");
 
 const PORT = Number(process.env.PORT || 3000);
@@ -1722,6 +1722,23 @@ app.post("/clients/holiday-broadcast", authenticate, requireRole("manager", "adm
     res.json({ ok: true, sent: payload.sent || 0, failed: payload.failed || 0, total: unique.length });
   } catch (error) {
     res.status(502).json({ error: "No se pudo contactar al bot: " + error.message });
+  }
+});
+
+// Regenera (URL fresca) el PDF de una factura ya emitida en TusFacturas. La URL del alta caduca.
+app.post("/billing/regenerate-pdf", authenticate, requireRole("manager", "admin", "contador"), async (req, res) => {
+  const cfg = billingConfig();
+  if (!cfg.enabled) return res.status(503).json({ error: "TusFacturas no esta configurado en el servidor." });
+  const body = req.body || {};
+  const tComp = String(body.tipo || body.invoiceType || "").trim();
+  const numero = String(body.numero || "").trim();
+  if (!tComp || !numero) return res.status(400).json({ error: "Se espera { invoiceType (o tipo), numero }." });
+  try {
+    const url = await regeneratePdf(cfg, { tipo: tComp, operacion: "V", numeroCompleto: numero });
+    if (!url) return res.status(502).json({ error: "TusFacturas no devolvio un PDF." });
+    res.json({ ok: true, url });
+  } catch (error) {
+    res.status(502).json({ error: error.message });
   }
 });
 

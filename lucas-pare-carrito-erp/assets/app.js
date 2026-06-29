@@ -9771,7 +9771,7 @@
         <td class="num">${formatMoney(log.total)}</td>
         <td>${log.cae ? `<span class="pill green">CAE ${escapeHtml(String(log.cae).trim())}</span>` : `<span class="pill amber">${escapeHtml(log.status || "")}</span>`}</td>
         <td class="page-actions">
-          ${log.pdf ? `<a class="btn small ghost" href="${escapeAttr(log.pdf)}" target="_blank" rel="noopener" title="Ver / imprimir PDF">&#128424;</a>` : ""}
+          ${log.numero ? `<button class="btn small ghost" type="button" data-billing-pdf data-pdf-inv="${escapeAttr(log.invoiceType || "")}" data-pdf-num="${escapeAttr(log.numero)}" title="Ver / imprimir PDF">&#128424;</button>` : (log.pdf ? `<a class="btn small ghost" href="${escapeAttr(log.pdf)}" target="_blank" rel="noopener" title="Ver / imprimir PDF">&#128424;</a>` : "")}
           ${Array.isArray(log.orders) && log.orders.length ? `<button class="btn small ghost" type="button" data-billing-orders="${escapeAttr(log.id)}">Ver Pedidos</button>` : ""}
         </td>
       </tr>
@@ -9809,6 +9809,23 @@
       "mi-facturacion"
     );
   }
+  async function abrirFacturaPdf(invoiceType, numero) {
+    if (!numero) return alert("Sin datos del comprobante para regenerar el PDF.");
+    const config = getCloudSyncConfig();
+    if (!cloudSyncReady(config)) return alert("Servidor no configurado.");
+    try {
+      const response = await cloudRequest(config, "/billing/regenerate-pdf", {
+        method: "POST",
+        body: JSON.stringify({ invoiceType: invoiceType || "", numero: numero })
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.url) return alert(payload.error || "No se pudo obtener el PDF de la factura.");
+      window.open(payload.url, "_blank");
+    } catch (error) {
+      alert("Error al obtener el PDF: " + error.message);
+    }
+  }
+
   function openBillingOrdersModal(logId) {
     const log = (state.billingLog || []).find((l) => l.id === logId);
     if (!log) return;
@@ -9846,6 +9863,7 @@
       render();
     }));
     document.querySelectorAll("[data-billing-orders]").forEach((button) => button.addEventListener("click", () => openBillingOrdersModal(button.dataset.billingOrders)));
+    document.querySelectorAll("[data-billing-pdf]").forEach((button) => button.addEventListener("click", () => abrirFacturaPdf(button.dataset.pdfInv, button.dataset.pdfNum)));
   }
 
   function renderFacturacion() {
@@ -9889,7 +9907,7 @@
         <td>${formatDate(log.from)} - ${formatDate(log.to)}</td>
         <td class="num">${formatMoney(log.total)}</td>
         <td>${log.status === "ok" ? `<span class="pill green">Emitida</span>` : log.status === "simulada" ? `<span class="pill amber">Simulada</span>` : `<span class="pill red">Error</span>`}</td>
-        <td>${log.cae ? "CAE " + escapeHtml(log.cae) + (log.pdf ? ` - <a href="${escapeAttr(log.pdf)}" target="_blank" rel="noopener">PDF</a>` : "") : escapeHtml(log.detail || "")}</td>
+        <td>${log.cae ? "CAE " + escapeHtml(log.cae) + (log.numero ? ` - <button class="btn small ghost" type="button" data-billing-pdf data-pdf-inv="${escapeAttr(log.invoiceType || "")}" data-pdf-num="${escapeAttr(log.numero)}">PDF</button>` : (log.pdf ? ` - <a href="${escapeAttr(log.pdf)}" target="_blank" rel="noopener">PDF</a>` : "")) : escapeHtml(log.detail || "")}</td>
       </tr>
     `).join("");
     afterRender.push(() => {
@@ -9959,6 +9977,7 @@
         }
         render();
       }));
+      document.querySelectorAll("[data-billing-pdf]").forEach((button) => button.addEventListener("click", () => abrirFacturaPdf(button.dataset.pdfInv, button.dataset.pdfNum)));
       document.querySelectorAll("[data-billing-run]").forEach((button) => button.addEventListener("click", async () => {
         const simulate = button.dataset.billingRun === "simulate";
         const cfg = getCloudSyncConfig();
@@ -16163,7 +16182,7 @@
       @page{size:${pageSize};margin:${pageMargin}}
       *{box-sizing:border-box}
       .no-print{display:none !important}
-      body{font-family:Arial,sans-serif;margin:0;color:#111;background:#fff}
+      body{font-family:Arial,sans-serif;margin:0;color:#111;background:#fff;font-size:11px}
       table{width:100%;border-collapse:collapse}
       th,td{padding:4px 6px;text-align:left}
       .num{text-align:right}
@@ -16193,19 +16212,19 @@
       .history-chart-print-page .line-chart-meta{display:flex;justify-content:space-between;font-size:10px;color:#475467}
       .provider-print-page{margin:0;padding:0}
       .provider-print-sheet .print-title{margin-bottom:6px}
-      .provider-print-sheet .print-table{font-size:10px}
+      .provider-print-sheet .print-table{font-size:11px}
       .provider-print-sheet .print-table th,.provider-print-sheet .print-table td{border:1px solid #ddd;padding:3px 4px}
       .assigned-group{break-inside:avoid;page-break-inside:avoid;border:0;padding:2px 0;margin:0 0 4px}
       .assigned-group span{color:#475467}
       .divide-client-spacer{height:8px}
       .print-sheet{break-inside:avoid;page-break-inside:avoid;margin:0 0 12mm}
       .print-sheet:last-child{margin-bottom:0}
-      .print-compact{font-size:10px}
-      .print-compact .print-table{font-size:10px}
+      .print-compact{font-size:11px}
+      .print-compact .print-table{font-size:11px}
       .print-compact .print-title h1{font-size:16px}
-      .borderless-table th,.borderless-table td{border:0 !important;border-bottom:1px solid #ececec !important;padding:2px 5px;font-size:10px}
+      .borderless-table th,.borderless-table td{border:0 !important;border-bottom:1px solid #ececec !important;padding:2px 5px;font-size:11px}
       .borderless-table th{background:transparent;border-bottom:1px solid #999 !important;text-transform:uppercase;font-size:9px;color:#333}
-      .divide-print-list,.vehicle-print-list{list-style:none;padding:0;margin:0;font-size:10px}
+      .divide-print-list,.vehicle-print-list{list-style:none;padding:0;margin:0;font-size:11px}
       .divide-print-list li,.vehicle-print-list li{padding:2px 0;border-bottom:1px solid #ececec}
       .divide-print-list ul,.vehicle-print-list ul{list-style:none;padding-left:14px;margin:2px 0 4px}
       .divide-print-list li:last-child,.vehicle-print-list li:last-child{border-bottom:0}
@@ -16214,7 +16233,7 @@
       .vehicle-print-sub{font-size:9px;color:#475467;margin:1px 0 2px}
       .divide-two-col{display:grid;grid-template-columns:1fr 1fr;gap:2px 18px;align-items:start}
       .divide-two-col .assigned-group{break-inside:avoid;page-break-inside:avoid}
-      .product-sum-grid{column-count:2;column-gap:22px;font-size:10px}
+      .product-sum-grid{column-count:2;column-gap:22px;font-size:11px}
       .product-sum-line{display:flex;justify-content:flex-start;gap:6px;break-inside:avoid;padding:1px 0}
       .product-sum-line strong{white-space:nowrap}
       .print-title{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111;padding-bottom:6px;margin-bottom:8px}

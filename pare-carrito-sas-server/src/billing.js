@@ -7,6 +7,7 @@ const Decimal = require("decimal.js");
 
 const TF_URL = "https://www.tusfacturas.app/app/api/v2/facturacion/nuevo";
 const TF_AFIP_INFO_URL = "https://www.tusfacturas.app/app/api/v2/clientes/afip-info";
+const TF_REGEN_PDF_URL = "https://www.tusfacturas.app/app/api/v2/facturacion/regenerar_pdf";
 const TF_ITEMS_PER_INVOICE = 130;
 const TF_TIMEOUT_MS = 30000;
 const TF_RETRIES = 3;
@@ -578,6 +579,41 @@ async function runBilling({ pool, force = false, simulate = false, onlyClientId 
   return { ran: true, simulate, count: results.length, results, lastRunDate: newLastRunDate };
 }
 
+// Regenera el PDF de un comprobante ya emitido y devuelve una URL fresca (la del alta caduca).
+// numeroCompleto puede venir como "00003-00000022" (punto_venta-numero) o solo el numero.
+async function regeneratePdf(cfg, { tipo, operacion, numeroCompleto, puntoVenta, numero }, fetchImpl = fetch) {
+  let pv = puntoVenta;
+  let nro = numero;
+  if (numeroCompleto && (pv == null || nro == null)) {
+    const parts = String(numeroCompleto).split("-");
+    if (parts.length === 2) { pv = parts[0]; nro = parts[1]; }
+    else { nro = numeroCompleto; }
+  }
+  if (pv == null) pv = cfg.puntoVenta || "1";
+  pv = parseInt(String(pv).replace(/\D/g, ""), 10);
+  nro = parseInt(String(nro).replace(/\D/g, ""), 10);
+  const tComp = String(tipo || "").trim().toUpperCase();
+  if (!tComp || !Number.isFinite(pv) || !Number.isFinite(nro)) {
+    throw new Error("Faltan datos para regenerar (tipo / punto de venta / numero).");
+  }
+  const payload = {
+    usertoken: cfg.usertoken,
+    apikey: cfg.apikey,
+    apitoken: cfg.apitoken,
+    comprobante: { tipo: tComp, operacion: operacion || "V", punto_venta: String(pv), numero: String(nro) }
+  };
+  const response = await fetchWithRetry(TF_REGEN_PDF_URL, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload)
+  }, fetchImpl);
+  const body = await response.json().catch(() => ({}));
+  if (body.error && String(body.error).toUpperCase() !== "N") {
+    throw new Error((body.errores || ["Error de TusFacturas al regenerar PDF"]).filter(Boolean).join(" | "));
+  }
+  return body.comprobante_pdf_url || "";
+}
+
 module.exports = {
   billingConfig,
   nowArt,
@@ -590,5 +626,6 @@ module.exports = {
   endOfMonthISO,
   nextDayISO,
   validateCuit,
-  cleanCuit
+  cleanCuit,
+  regeneratePdf
 };
