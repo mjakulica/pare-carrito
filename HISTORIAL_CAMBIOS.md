@@ -1,5 +1,61 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.3 - Impresion, parser de pedidos y dividir compras (2026-06-29)
+
+### Frontend / Impresion / Parser / Dividir / Facturacion / Remitos (Apps Script)
+
+- Impresion: el texto interno de todos los documentos (Vehiculos, Saldos, Dividir Compras, Proveedores, etc.) pasa a 11px; los titulos conservan su tamano. Commit `4f73e53`.
+- Facturacion: el boton PDF ahora regenera la URL en TusFacturas (`regenerar_pdf`) en lugar de reutilizar la URL del alta que caduca (error ERRT001). Backend `regeneratePdf` en `billing.js` + endpoint `/billing/regenerate-pdf`; frontend `abrirFacturaPdf`. Commit `4f73e53`.
+- Pedidos: al usar `Cargar` en `Pegar pedido de WhatsApp` se guarda el texto interpretado, con un boton para verlo/descargarlo (simetrico al de la imagen del pedido manuscrito). Commit `adf232c`.
+- Parser de pedidos (casos reales #19/#30/#48): productos sin cantidad asumen cantidad 1; `un poquito`/`un poco` -> 0,2; `pimiento` mapea a `morron`; `aji molido` mapea al molido/`en polvo` (no al picante); `queso de cabra` resuelve al producto de cabra (match por nombre completo, no pela la palabra como nota); `x kg`/`x cajon`/`x planta` se interpretan como unidad y no como nota basura; `nuez moscada` queda sin match en vez de caer en `Pera`. Commit `e579ded`.
+- Remitos: interlineado de la tabla al minimo legible (line-height 1.05, padding de fila reducido, border-collapse). Commit `78be0a0`.
+- Dividir compras: el agrupado se hace por nombre de producto normalizado (fusiona `Menta` que aparecia duplicada y separa `Chaucha` que se perdia por colision de id); total por producto visible en pantalla y en el export de WhatsApp; numeros de cliente sin ceros a la izquierda y cantidades enteras sin decimal; el export de WhatsApp respeta el toggle `Agrupado por cliente`. Commit `adaee20`.
+- Scripts de Remitos (Apps Script, repo `remitos-impresion/`): boton para imprimir a PDF horizontal (margenes 0.59cm) las paginas con contenido segun la tabla `Datos A7:C44`, apertura automatica del PDF y correccion del archivo destino por ID. Commits `3b72e48`, `5ee1ec6`, `c336d1a`, `9f8cc58`, `832aa33`.
+
+---
+
+## v12.9.2 - Feriados, aviso masivo y sincronizacion robusta de Sheets (2026-06-28)
+
+### Frontend / Backend / Google Sheets (Apps Script) / Seguridad
+
+- Feriados: recuadro con alta y aprobacion (el empleado propone, admin/gerente aprueban), bloqueo de la fecha en el calendario y texto del aviso configurable. Commit `5e2c08f`.
+- Aviso masivo de feriado por WhatsApp a clientes activos via plantilla aprobada de Meta: bot `/broadcast` + `sendTemplate`, endpoint ERP `/clients/holiday-broadcast`, boton `Avisar a clientes`, env `BOT_BROADCAST_URL`/`BROADCAST_KEY`. Commit `f72f44f`.
+- Telefonos adicionales por cliente: campo en la ficha y el bot reconoce cualquiera de los numeros del cliente. Commit `c6aee0e`.
+- Sincronizacion de edicion de pedidos: el backend detecta pedidos editados/cancelados y el Apps Script hace upsert por numero (recuerda la fila en Properties) actualizando o vaciando la fila. Commit `d6dfad1`.
+- Compra Hoy se observa por escaneo periodico (soporta formulas, no solo onEdit); frecuencia escalonada por franjas horarias (6-6:30 cada 5min, 6:30-10 cada 1min, 10-12 cada 5min, 12-14 cada 10min, 14-6 cada 1h). Commits `c6e46a5`, `2b1c48c`, `b9ac4b2`.
+- Precios: `Guardar precios` ya no pisa precios editados a mano de productos derivados (solo propaga relaciones si cambio el costo de la fila). La busqueda de la fila de encabezados ya no asume fila 1 (soporta encabezados en fila 2 y productos en columna B). Busqueda de pestania sin importar mayusculas. Commits `c6e46a5`, `c500143`, `f7248af`.
+- Rendimiento: `mirrorStateToTables` solo reconstruye las tablas que cambiaron, acelerando los guardados chicos. Commit `f7248af`.
+- Seguridad: el `/broadcast` del bot rechaza el pedido si `BROADCAST_KEY` esta vacio (no queda accesible via Caddy `/wa/`). Commit `7afa530`.
+- Documentacion y operacion: manual de feriados/aviso/sync, checklist de deploy y `.gitignore` para datos reales. Commits `cbddd83`, `83dafb9`, `3751070`.
+
+---
+
+## v12.9.1 - Bot de WhatsApp, endpoints externos y sync inicial a Sheets (2026-06-27)
+
+### Backend / Integraciones / Parser
+
+- Proyecto nuevo `whatsapp-bot`: bot WhatsApp Cloud API (webhook, clasificacion con IA OpenRouter, reglas de horario y confirmacion de equipo, notificaciones). Integrado en docker-compose con ruta `/wa/webhook` en Caddy. Commits `d8e6ed6`, `b632123`, `278ee1c`, `80ed983`.
+- Endpoints externos del ERP para el bot (`/external/clients/by-phone`, `/external/orders/today`, `/external/products/names`, crear/agregar/cancelar pedido) con matcher de productos, precios+IVA por tier y segunda ronda, espejando a tablas en transaccion. Commit `4615287`.
+- Sync a Google Sheets via Apps Script webhook: pedidos nuevos a la pestania `pedidos` (formato ancho, cliente en columna B) y precios/costo/compra-hoy a la pestania `precios`, con mapeo por nombre normalizado + overrides y diff en backend al guardar estado. Commits `d49e84f`, `6f5f69f`, `9cedb83`, `ba36575`.
+- Compra Hoy es de entrada: el sheet no la escribe; al editarla actualiza el costo del producto y recalcula el precio de venta manteniendo el margen (como una compra). El sistema solo escribe Venta y Costo. Commits `6f5f69f`, `9cedb83`.
+- Parser de pedidos de WhatsApp: gramos -> kg, coma/punto decimal no se parte (0,5), punto como separador de items, match por conjunto de palabras (`Papa Premium Bolsa`), variantes Unidad/Atado en conteo suelto, envases (botella/frasco/pote/horma) como unidad, guard de match debil. Commits `51888b0`, `a242476`, `302ef57`.
+- Pedidos: al elegir cliente no se borra el carrito ni el texto de `Pegar pedido de WhatsApp`; en el popup de editar pedido el input Nota es mas chico y hay un boton X para quitar el producto de la fila. Commit `b8b4c73`.
+
+---
+
+## v12.9.0 - Subsistema de Stock, lote rapido de mejoras y Facturacion (2026-06-26)
+
+### Frontend / Backend / Stock / Facturacion / Despliegue
+
+- Subsistema de stock de fraccionados: pagina Stock, conteo diario, merma, sugerencia de compra en bultos (con override por menor y multi-bulto), peso por producto en Config, hook de compra y grafico de merma en kg en Inicio. Activar/desactivar por producto. Commits `0705b86`, `1077f71`, `43e8fa9`, `a879d28`, `8ef5e45`, `63accf0`.
+- Facturacion para clientes que la requieren: pagina con cuentas vinculadas + rango, historial de emisiones con CAE/PDF imprimible y `Ver Pedidos` con remito directo y detalle desplegable; boton Factura en Mis Pedidos; OCR de imagen por OpenRouter con prompt configurable (API key solo por env). Commits `5f368f6`, `e83eb96`, `f8ac4cb`, `0ee79c5`.
+- Compras: boton Guardar siempre visible (incluye `Otro gasto`), detalle de productos colapsable, y el stock impacta en los faltantes sugeridos. Commits `2cc17a2`, `a879d28`, `8ef5e45`.
+- Lote rapido de mejoras de UX (#1-#15): edicion inline de cantidades en Unidades, modal de pedido con `Agregar producto` y foco en cantidad, boton enviar/omitir por linea, set absoluto en `Actualizar todos`, orden por favoritos/ultima compra, dropdown `mostrar N`, combobox de cliente en Pagos, detalle desplegable en Saldos, kg solo para productos configurables, admision de clientes pendientes desde Clientes y correo de activacion. Commits `baa640c`, `97913f9`, `14f2f79`, `3555d87`, `dad347b`, `954d255`, `3fa7839`, `3094502`, `f041078`, `6abe6c2`.
+- Roles: cliente/empleado/contador trabajan online (sin snapshot en localStorage ni banners de sync); localStorage completo solo para admin y gerente. Commit `7e3492b`.
+- Despliegue: `deploy.sh` (pull + backup + rebuild condicional) para `/opt/pare-carrito`, dumps comprimidos con rotacion y backup no bloqueante. Commits `fcd1785`, `306745f`, `23db3b6`, `bfbca19`, `bb2499d`, `115134d`.
+
+---
+
 ## v12.8.42 - Parser WhatsApp y fusion segura de sync (2026-06-24)
 
 ### Frontend / Nuevo Pedido / Sincronizacion

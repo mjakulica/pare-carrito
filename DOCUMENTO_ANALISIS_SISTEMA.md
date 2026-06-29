@@ -361,19 +361,54 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 
 ---
 
-## 12. Ultimo Cambio y Version
+## 12. Modulos y subsistemas agregados (2026-06-26 a 2026-06-29)
 
-**Version operativa:** 12.8.42
-**Fecha:** 2026-06-24
-**Commit GitHub del cambio funcional:** `0f83e0eee8b1d924f0ef34c72c22226214c2ae81`
+### 12.1 Subsistema de Stock de fraccionados
+- Pagina `Stock` con conteo diario por producto, calculo de merma (kg) y sugerencia de compra en bultos. Soporta override por menor, multi-bulto y activar/desactivar producto del calculo.
+- Config incluye el peso (kg) por producto. Las compras del dia impactan en el stock disponible y en los faltantes sugeridos. Inicio muestra un grafico de merma en kg por dia.
+- Sin conteo previo el estimado es 0 y el primer conteo no genera merma falsa.
+
+### 12.2 Facturacion (TusFacturas)
+- Pagina `Facturacion` para clientes que requieren factura: cuentas vinculadas + rango, historial de emisiones con CAE y PDF imprimible, `Ver Pedidos` con remito directo y detalle desplegable.
+- El boton PDF regenera la URL del comprobante con el endpoint `regenerar_pdf` de TusFacturas (la URL del alta caduca). Backend: `regeneratePdf` en `billing.js` + `/billing/regenerate-pdf`.
+- OCR de imagen de pedido por OpenRouter, con prompt configurable; la API key se toma solo de la env `OPENROUTER_API_KEY`.
+
+### 12.3 Bot de WhatsApp (`whatsapp-bot/`)
+- Servicio Node aparte (webhook Cloud API, clasificacion con IA OpenRouter, reglas de horario y confirmacion de equipo, notificaciones). Integrado en docker-compose con ruta `/wa/webhook` en Caddy.
+- Endpoints externos del ERP que consume el bot: `/external/clients/by-phone`, `/external/orders/today`, `/external/products/names`, y crear/agregar/cancelar pedido (matcher de productos, precios+IVA por tier, segunda ronda).
+- Endpoint `/broadcast` para avisos masivos por plantilla aprobada de Meta (rechaza si `BROADCAST_KEY` esta vacio). Telefonos adicionales por cliente: el bot reconoce cualquiera de los numeros del cliente.
+
+### 12.4 Sincronizacion con Google Sheets (Apps Script)
+- Webhook de Apps Script (`google-sheets-sync/Code.gs`) que recibe diffs del backend: pedidos nuevos/editados/cancelados a la pestania `pedidos` (upsert por numero, recuerda fila en Properties) y precios/costo a la pestania `precios` (mapeo por nombre normalizado + overrides, busca la fila de encabezados sin asumir fila 1).
+- `Compra Hoy` es de ENTRADA: el sheet no la escribe; se observa por escaneo periodico (soporta formulas) con frecuencia escalonada por franjas horarias. Al cambiar, actualiza el costo del producto y recalcula el precio de venta manteniendo el margen (endpoint `/external/compra-hoy`). El sistema solo escribe Venta y Costo.
+- `mirrorStateToTables` reconstruye solo las tablas que cambiaron para acelerar los guardados chicos. El acceso del web app debe ser "Cualquiera" y republicarse como "Nueva version".
+
+### 12.5 Feriados
+- Recuadro de feriados (boton en Nuevo Pedido) con alta y aprobacion: el empleado propone, admin/gerente aprueban. Bloquea la fecha en el calendario y permite avisar por WhatsApp a los clientes activos. El texto del aviso es configurable.
+
+### 12.6 Parser de pedidos y Dividir compras
+- Parser de `Pegar pedido de WhatsApp`: separa items pegados, convierte gramos a kg, no toma partes del nombre como nota, prioriza alias/favoritos, interpreta envases como unidad, `pimiento`->`morron`, `molido`->`en polvo`, `un poquito`->0,2, `x <unidad>` como unidad, sin cantidad -> 1, y descarta matches debiles (ej. `nuez moscada` no cae en `Pera`). Se guarda el texto interpretado por pedido.
+- Dividir compras: agrupa por nombre de producto normalizado (evita duplicados y colisiones por id), muestra total por producto en pantalla, PDF y WhatsApp, formatea numeros de cliente sin ceros y cantidades enteras, y el export de WhatsApp respeta el toggle `Agrupado por cliente`.
+
+### 12.7 Impresion y Remitos
+- El texto interno de los documentos imprimibles es 11px (titulos sin cambios). Los remitos usan interlineado minimo legible.
+- Scripts de Apps Script en `remitos-impresion/` para imprimir a PDF horizontal (margenes 0.59cm) las paginas con contenido segun la tabla `Datos A7:C44`, con apertura automatica del PDF.
+
+---
+
+## 13. Ultimo Cambio y Version
+
+**Version operativa:** 12.9.3
+**Fecha:** 2026-06-29
+**Commit GitHub del cambio funcional:** `adaee20`
 **Entorno actualizado:** VPS productivo `/opt/pare-carrito` con frontend estatico y API Docker Compose saludable.
 
 ### Detalle del ultimo cambio
 
-- Se robustecio el parser de `Pegar pedido de WhatsApp` para separar pedidos pegados en una sola linea, convertir gramos a kilos, evitar notas falsas tomadas del nombre del producto y priorizar alias/favoritos del cliente.
-- Se bloqueo la descarga automatica de nube cuando hay cambios locales pendientes.
-- La descarga manual con cambios pendientes ahora fusiona servidor y local, y reencola el parche resultante para subirlo sin pisar informacion.
-- El cambio solo modifica frontend; no requirio rebuild de la API Docker.
+- Correcciones del parser de pedidos para casos reales (#19/#30/#48): cantidad por defecto 1, `un poquito`->0,2, `pimiento`->`morron`, `aji molido`->`en polvo`, `queso de cabra` por nombre completo, `x <unidad>` como unidad y descarte de matches debiles. Commit `e579ded`.
+- Remitos con interlineado minimo legible. Commit `78be0a0`.
+- Dividir compras: agrupado por nombre (fusiona duplicados, separa los que se perdian), total por producto en pantalla/PDF/WhatsApp, numeros de cliente sin ceros y cantidades enteras, y export de WhatsApp respetando el toggle de cliente. Commit `adaee20`.
+- Estos cambios son de frontend (`assets/app.js`); el deploy de frontend no requiere rebuild de la API (solo `git pull` en el VPS). Los cambios de backend/billing previos (`4f73e53`) si requieren `./deploy.sh`.
 - No se registraron credenciales en este documento ni en el historial.
 
 ### Backups asociados
