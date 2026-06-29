@@ -204,7 +204,8 @@ function buildPeriod(state, client, freq, from, to) {
     iva: round2(iva),
     neto: round2(neto),
     items: grouped,
-    orders: orders.length
+    orders: orders.length,
+    orderIds: orders.map((o) => o.id)
   };
 }
 
@@ -476,6 +477,8 @@ function buildBillingEntry(invoice, emittedAt, periodResult, simulate, cfg) {
     neto: invoice.neto,
     manualIvaOverride: invoice.manualIvaOverride == null ? null : invoice.manualIvaOverride,
     orders: invoice.orders,
+    orderIds: Array.isArray(invoice.orderIds) ? invoice.orderIds : [],
+    email: String((invoice.client && (invoice.client.billingEmail || invoice.client.email)) || "").trim(),
     emittedAt: emittedAt.toISOString()
   };
   if (simulate) {

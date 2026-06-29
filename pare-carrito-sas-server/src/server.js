@@ -57,18 +57,120 @@ function getMailTransport() {
   return mailTransport;
 }
 
-async function sendMail(to, subject, html) {
+async function sendMail(to, subject, html, attachments) {
   const transport = getMailTransport();
   if (!transport) {
-    console.log("[mail desactivado] Para:", to, "| Asunto:", subject);
+    console.log("[mail desactivado] Para:", to, "| Asunto:", subject, attachments && attachments.length ? "| Adjuntos: " + attachments.length : "");
     return false;
   }
   try {
-    await transport.sendMail({ from: process.env.MAIL_FROM || process.env.SMTP_USER, to, subject, html });
+    const message = { from: process.env.MAIL_FROM || process.env.SMTP_USER, to, subject, html };
+    if (Array.isArray(attachments) && attachments.length) message.attachments = attachments;
+    await transport.sendMail(message);
     return true;
   } catch (error) {
-    console.error("Error envíando mail a", to, ":", error.message);
+    console.error("Error enviando mail a", to, ":", error.message);
     return false;
+  }
+}
+
+function billingMoney(value) {
+  return "$" + Number(value || 0).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function buildBillingDetailPdf(client, entry, orders) {
+  return new Promise((resolve, reject) => {
+    let PDFDocument;
+    try {
+      PDFDocument = require("pdfkit");
+    } catch (e) {
+      return reject(new Error("pdfkit no instalado: " + e.message));
+    }
+    const doc = new PDFDocument({ size: "A4", margin: 40 });
+    const chunks = [];
+    doc.on("data", (c) => chunks.push(c));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+
+    doc.fontSize(16).text("Pare Carrito SAS", { align: "left" });
+    doc.fontSize(12).fillColor("#444").text("Detalle de pedidos facturados");
+    doc.moveDown(0.4).fillColor("#000").fontSize(10);
+    doc.text(`${client.id || ""} - ${client.name || ""}${client.legalName ? " - " + client.legalName : ""}`);
+    if (client.cuit) doc.text("CUIT: " + client.cuit);
+    doc.text(`Periodo: ${entry.from} a ${entry.to}  (${orders.length} pedidos)`);
+    if (entry.numero) doc.text("Comprobante: " + entry.numero + (entry.cae ? "  CAE " + entry.cae : ""));
+    doc.moveDown(0.6);
+
+    orders.forEach((order) => {
+      const orderTotal = Number(order.totalAmount || 0);
+      const orderIva = Number(order.ivaAmount || 0);
+      doc.fontSize(10).fillColor("#17228a").text(`${order.date}  -  Pedido ${order.id}`);
+      doc.fillColor("#000").fontSize(9);
+      (order.items || []).forEach((item) => {
+        const qty = Number(item.quantity || 0);
+        const imp = Number(item.totalWithIva != null ? item.totalWithIva : (item.subtotal || 0));
+        const name = item.productName + (item.note ? " (" + item.note + ")" : "");
+        doc.text(`    ${name}   x${qty}   ${billingMoney(item.unitPrice)}   =   ${billingMoney(imp)}`);
+      });
+      doc.fillColor("#444").text(`    Total pedido: ${billingMoney(orderTotal)}   (IVA ${billingMoney(orderIva)})`, { align: "right" });
+      doc.fillColor("#000").moveDown(0.4);
+    });
+
+    doc.moveDown(0.4);
+    doc.fontSize(11).text(`Neto: ${billingMoney(entry.neto)}     IVA: ${billingMoney(entry.iva)}     Total: ${billingMoney(entry.total)}`, { align: "right" });
+    doc.end();
+  });
+}
+
+async function fetchPdfAttachment(url, filename) {
+  if (!url) return null;
+  try {
+    const r = await fetch(url);
+    if (!r.ok) return null;
+    const ab = await r.arrayBuffer();
+    return { filename, content: Buffer.from(ab), contentType: "application/pdf" };
+  } catch (e) {
+    console.warn("No se pudo descargar la factura PDF:", e.message);
+    return null;
+  }
+}
+
+async function emailBillingResults(results) {
+  const entries = (results || []).filter((e) => e && e.status === "ok" && String(e.freq || "") !== "diaria" && e.email);
+  if (!entries.length) return;
+  const stateRow = await pool.query("SELECT data FROM app_state WHERE id = 'main'");
+  const data = stateRow.rows.length ? stateRow.rows[0].data : { clients: [], orders: [] };
+  const clientsById = {};
+  (data.clients || []).forEach((c) => { clientsById[c.id] = c; });
+  const ordersById = {};
+  (data.orders || []).forEach((o) => { ordersById[o.id] = o; });
+  for (const entry of entries) {
+    try {
+      const client = clientsById[entry.clientId] || { id: entry.clientId, name: entry.clientName };
+      const orders = (entry.orderIds || []).map((id) => ordersById[id]).filter(Boolean);
+      const attachments = [];
+      try {
+        const pdf = await buildBillingDetailPdf(client, entry, orders);
+        attachments.push({ filename: `detalle-${entry.clientId}-${entry.from}_${entry.to}.pdf`, content: pdf, contentType: "application/pdf" });
+      } catch (e) {
+        console.error("No se pudo generar el PDF de detalle:", e.message);
+      }
+      const facturaUrls = entry.pdf
+        ? [entry.pdf]
+        : (Array.isArray(entry.partials) ? entry.partials.map((p) => p.pdf).filter(Boolean) : []);
+      for (let i = 0; i < facturaUrls.length; i += 1) {
+        const att = await fetchPdfAttachment(facturaUrls[i], `factura-${entry.numero || entry.clientId}-${i + 1}.pdf`);
+        if (att) attachments.push(att);
+      }
+      const html = `<p>Hola,</p>
+        <p>Adjuntamos el detalle de los pedidos facturados del período <strong>${entry.from}</strong> a <strong>${entry.to}</strong> (${(entry.orderIds || []).length} pedidos) junto con la factura correspondiente.</p>
+        <p>Total: <strong>${billingMoney(entry.total)}</strong> (IVA ${billingMoney(entry.iva)}).</p>
+        ${facturaUrls.length ? `<p>Factura: <a href="${facturaUrls[0]}">ver PDF</a></p>` : ""}
+        <p>Pare Carrito SAS</p>`;
+      await sendMail(entry.email, `Factura y detalle de pedidos ${entry.from} - ${entry.to}`, html, attachments);
+    } catch (e) {
+      console.error("Fallo el envío de detalle de facturación a", entry.email, ":", e.message);
+    }
   }
 }
 
@@ -1182,6 +1284,7 @@ app.post("/billing/run", authenticate, requireRole("manager", "admin", "contador
       : [];
     const ivaOverrides = body.ivaOverrides && typeof body.ivaOverrides === "object" ? body.ivaOverrides : {};
     const result = await runBilling({ pool, force: true, simulate: body.simulate === true, onlyClientId: String(body.clientId || ""), onlyClientIds: clientIds, ivaOverrides });
+    try { await emailBillingResults(result.results); } catch (e) { console.error("emailBillingResults:", e.message); }
     res.json(result);
   } catch (error) {
     res.status(500).json({ error: "Fallo la facturacion: " + error.message });
@@ -1773,6 +1876,7 @@ function startBillingScheduler() {
       const art = nowArt();
       if (art.hour >= 23 && billingLastRunDate !== art.dateISO) {
         const result = await runBilling({ pool, lastRunDate: billingLastRunDate });
+        try { await emailBillingResults(result.results); } catch (e) { console.error("emailBillingResults:", e.message); }
         if (result.lastRunDate) {
           billingLastRunDate = result.lastRunDate;
           await saveBillingLastRunDate(billingLastRunDate);
