@@ -372,6 +372,8 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 - Pagina `Facturacion` para clientes que requieren factura: cuentas vinculadas + rango, historial de emisiones con CAE y PDF imprimible, `Ver Pedidos` con remito directo y detalle desplegable.
 - El boton PDF regenera la URL del comprobante con el endpoint `regenerar_pdf` de TusFacturas (la URL del alta caduca). Backend: `regeneratePdf` en `billing.js` + `/billing/regenerate-pdf`.
 - OCR de imagen de pedido por OpenRouter, con prompt configurable; la API key se toma solo de la env `OPENROUTER_API_KEY`.
+- La cantidad de pedidos de cada cliente abre un popup con los pedidos del periodo que acumulan IVA (detalle desplegable, total/IVA por pedido, impresion de remito por pedido y "Imprimir todo" para enviar al cliente).
+- Al emitir la factura de clientes semanal/quincenal/mensual (automatica o manual) se envia al correo de facturacion un PDF de detalle de pedidos (generado con `pdfkit` en el servidor) y la factura de TusFacturas adjunta. Funciones backend: `buildBillingDetailPdf`, `fetchPdfAttachment`, `emailBillingResults`; `sendMail` admite adjuntos. Requiere SMTP en `.env`.
 
 ### 12.3 Bot de WhatsApp (`whatsapp-bot/`)
 - Servicio Node aparte (webhook Cloud API, clasificacion con IA OpenRouter, reglas de horario y confirmacion de equipo, notificaciones). Integrado en docker-compose con ruta `/wa/webhook` en Caddy.
@@ -398,14 +400,15 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 
 ## 13. Ultimo Cambio y Version
 
-**Version operativa:** 12.9.3
+**Version operativa:** 12.9.4
 **Fecha:** 2026-06-29
-**Commit GitHub del cambio funcional:** `adaee20`
+**Commit GitHub del cambio funcional:** `5e00f18`
 **Entorno actualizado:** VPS productivo `/opt/pare-carrito` con frontend estatico y API Docker Compose saludable.
 
 ### Detalle del ultimo cambio
 
-- Correcciones del parser de pedidos para casos reales (#19/#30/#48): cantidad por defecto 1, `un poquito`->0,2, `pimiento`->`morron`, `aji molido`->`en polvo`, `queso de cabra` por nombre completo, `x <unidad>` como unidad y descarte de matches debiles. Commit `e579ded`.
+- Facturacion: popup de pedidos que acumulan IVA con impresion de remitos y "Imprimir todo", y envio automatico por correo (PDF de detalle + factura de TusFacturas) a clientes semanal/quincenal/mensual. Commits `9bac557`, `5e00f18`.
+- (Previo) Correcciones del parser de pedidos para casos reales (#19/#30/#48): cantidad por defecto 1, `un poquito`->0,2, `pimiento`->`morron`, `aji molido`->`en polvo`, `queso de cabra` por nombre completo, `x <unidad>` como unidad y descarte de matches debiles. Commit `e579ded`.
 - Remitos con interlineado minimo legible. Commit `78be0a0`.
 - Dividir compras: agrupado por nombre (fusiona duplicados, separa los que se perdian), total por producto en pantalla/PDF/WhatsApp, numeros de cliente sin ceros y cantidades enteras, y export de WhatsApp respetando el toggle de cliente. Commit `adaee20`.
 - Estos cambios son de frontend (`assets/app.js`); el deploy de frontend no requiere rebuild de la API (solo `git pull` en el VPS). Los cambios de backend/billing previos (`4f73e53`) si requieren `./deploy.sh`.

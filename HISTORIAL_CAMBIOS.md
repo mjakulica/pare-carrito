@@ -1,5 +1,16 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.4 - Facturacion: detalle de pedidos y envio automatico por correo (2026-06-29)
+
+### Frontend / Backend / Facturacion
+
+- En la tabla de Facturacion, la cantidad de pedidos de cada cliente ahora es un boton: abre un popup con los pedidos del periodo que acumulan IVA, con detalle desplegable por pedido, total e IVA por pedido, fila de totales y un boton para imprimir el remito de cada pedido. Commit `9bac557`.
+- El popup incluye un boton "Imprimir todo" que arma un documento (encabezado del cliente, periodo y detalle de cada pedido con totales) para enviarselo al cliente. Commit `9bac557`.
+- Envio automatico por correo: al emitir la factura (corrida automatica de las 23hs y tambien "Emitir pendientes ahora") de clientes semanal/quincenal/mensual, se envia al correo de facturacion un PDF con el detalle de los pedidos incluidos (generado en el servidor con pdfkit) y la factura fiscal de TusFacturas adjunta (descargada al momento del envio). Los clientes diarios quedan excluidos. Commit `5e00f18`.
+- Backend: `sendMail` admite adjuntos; nuevas funciones `buildBillingDetailPdf`, `fetchPdfAttachment` y `emailBillingResults`; las entradas de facturacion ahora incluyen `orderIds` y `email`. Requiere SMTP configurado en el `.env` y rebuild (`./deploy.sh`, instala `pdfkit`). Commit `5e00f18`.
+
+---
+
 ## v12.9.3 - Impresion, parser de pedidos y dividir compras (2026-06-29)
 
 ### Frontend / Impresion / Parser / Dividir / Facturacion / Remitos (Apps Script)
