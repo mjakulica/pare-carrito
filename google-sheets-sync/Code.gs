@@ -262,6 +262,18 @@ function scanCompraHoy() {
   var now = new Date();
   var mins = now.getHours() * 60 + now.getMinutes();
   if (mins % compraHoyIntervalo(mins) !== 0) return; // no toca escanear en este minuto
+  scanCompraHoyCore(false);
+}
+
+// PRUEBA MANUAL: ignora el filtro de horario. Manda solo lo que cambio desde la ultima vez
+// (acordate: la 1ra corrida toma base y no manda; despues de cambiar un valor, corre de nuevo).
+function probarCompraHoy() { scanCompraHoyCore(false); }
+
+// FORZAR: empuja al sistema TODOS los valores actuales de Compra Hoy (ignora "sin cambios").
+// Util para la primera sincronizacion o para probar de una. Correr a mano.
+function forzarTodosCompraHoy() { scanCompraHoyCore(true); }
+
+function scanCompraHoyCore(forceAll) {
   var sheet = getSheet(PRECIOS_SHEET);
   if (!sheet) return;
   var L = findPreciosLayout(sheet);
@@ -279,8 +291,10 @@ function scanCompraHoy() {
     if (!isFinite(val) || val <= 0) continue;
     var key = "ch_" + normSet(prod);
     var prev = props.getProperty(key);
-    if (prev === null) { props.setProperty(key, String(val)); continue; } // baseline: no avisa la 1ra vez
-    if (Number(prev) === val) continue; // sin cambios
+    if (!forceAll) {
+      if (prev === null) { props.setProperty(key, String(val)); continue; } // baseline: no avisa la 1ra vez
+      if (Number(prev) === val) continue; // sin cambios
+    }
     try {
       UrlFetchApp.fetch(ERP_BASE_URL.replace(/\/+$/, "") + "/external/compra-hoy", {
         method: "post",
