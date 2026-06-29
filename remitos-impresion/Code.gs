@@ -78,10 +78,18 @@ function imprimirRemitos() {
     var nombre = "Remitos " + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm") + ".pdf";
     var file = DriveApp.createFile(blob).setName(nombre);
 
-    var msg = "Páginas impresas: " + toPrint.map(function (s) { return s.getName(); }).join(", ");
-    if (faltan.length) msg += "\n\nNo se encontraron estas pestañas (revisá el nombre): " + faltan.join(", ");
-    msg += "\n\nPDF:\n" + file.getUrl();
-    ui.alert("PDF generado", msg, ui.ButtonSet.OK);
+    var pdfUrl = file.getUrl();
+    var info = "Impresas: " + toPrint.map(function (s) { return s.getName(); }).join(", ")
+      + (faltan.length ? "  |  No encontradas: " + faltan.join(", ") : "");
+    var html = HtmlService.createHtmlOutput(
+      '<div style="font-family:Arial,sans-serif;font-size:13px">'
+      + '<p>PDF generado. Si no se abrió solo, hacé clic:</p>'
+      + '<p><a href="' + pdfUrl + '" target="_blank" rel="noopener">Abrir PDF</a></p>'
+      + '<p style="color:#666;font-size:11px">' + info.replace(/[<>]/g, "") + '</p>'
+      + '</div>'
+      + '<script>window.open(' + JSON.stringify(pdfUrl) + ',"_blank");</script>'
+    ).setWidth(380).setHeight(160);
+    ui.showModalDialog(html, "Remitos - PDF");
   } finally {
     // Restaurar visibilidad original SIEMPRE (aunque falle algo)
     allSheets.forEach(function (s, idx) {
