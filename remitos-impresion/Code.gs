@@ -11,7 +11,7 @@
  * ALGUNA de sus filas tiene contenido en la columna B.
  */
 
-var REMITOS_SPREADSHEET_ID = "1sJtIXEKSpbPlP_um4A7XI_tM5PioO6PUA3qM9Ni7IOk"; // archivo Remitos (con pestañas FC/FL)
+var REMITOS_SPREADSHEET_ID = "1ne4ycBoH8QXx_rzuB69uS_4X7bFecukiXPqF0w7UHRo"; // archivo con las pestañas FC/FL a imprimir (mismo que Datos)
 var DATOS_SPREADSHEET_ID = "1ne4ycBoH8QXx_rzuB69uS_4X7bFecukiXPqF0w7UHRo";
 var DATOS_SHEET = "Datos";
 var FILA_DESDE = 7;
