@@ -4899,6 +4899,13 @@
     );
   }
 
+  function countProductReferences(productId) {
+    let n = 0;
+    (state.orders || []).forEach((o) => { if ((o.items || []).some((it) => it.productId === productId)) n += 1; });
+    (state.deletedOrders || []).forEach((o) => { if ((o.items || []).some((it) => it.productId === productId)) n += 1; });
+    return n;
+  }
+
   function renderProducts() {
     const products = state.products.filter((product) => ui.tab === "inactivos" ? !product.isActive : product.isActive);
     const assignees = activeAssignees();
@@ -4922,6 +4929,7 @@
           <td class="page-actions">
             <button class="btn small ghost" data-edit-product="${product.id}">Editar</button>
             <button class="btn small ${product.isActive ? "danger" : "primary"}" data-toggle-product="${product.id}">${product.isActive ? "Desactivar" : "Activar"}</button>
+            ${product.isActive ? "" : `<button class="btn small danger" data-delete-product="${product.id}">Eliminar</button>`}
           </td>
         </tr>
       `;
@@ -4933,6 +4941,17 @@
         const product = getProduct(button.dataset.toggleProduct);
         if (!product) return;
         product.isActive = !product.isActive;
+        saveState();
+        render();
+      }));
+      document.querySelectorAll("[data-delete-product]").forEach((button) => button.addEventListener("click", () => {
+        const product = getProduct(button.dataset.deleteProduct);
+        if (!product) return;
+        const refs = countProductReferences(product.id);
+        if (refs > 0) { alert(`No se puede eliminar "${product.name}": esta usado en ${refs} pedido(s). Solo se puede desactivar.`); return; }
+        if (!confirm(`Eliminar definitivamente "${product.name}"? Esta accion no se puede deshacer.`)) return;
+        state.products = state.products.filter((p) => p.id !== product.id);
+        state.preferences = (state.preferences || []).filter((pref) => pref.productId !== product.id);
         saveState();
         render();
       }));
