@@ -140,13 +140,18 @@ function buildItemValues(map, items, skipped) {
     var res = resolveItemColumn(map, it.producto);
     if (!res.col) { if (skipped) skipped[it.producto] = 1; return; }
     var nota = it.nota ? String(it.nota).trim() : "";
+    var qty = Number(it.cantidad);
+    var isInt = isFinite(qty) && Math.floor(qty) === qty;
+    // Productos "uni": si la cantidad es entera mostramos "N uni"; si es decimal
+    // (un peso en kg cargado a mano) dejamos solo el numero para que la planilla lo
+    // sume (sin la palabra "uni" ni separador que la vuelva texto).
     var val;
-    if (res.uni || nota) {
+    if (nota || (res.uni && isInt)) {
       val = String(it.cantidad);
-      if (res.uni) val += " uni";
+      if (res.uni && isInt) val += " uni";
       if (nota) val += " (" + nota + ")";
     } else {
-      val = it.cantidad;
+      val = isFinite(qty) ? qty : it.cantidad;
     }
     if (values[res.col] === undefined) values[res.col] = val;
     else values[res.col] = String(values[res.col]) + " + " + String(val);
