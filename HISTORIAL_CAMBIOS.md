@@ -1,5 +1,13 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.8 - Eliminar productos inactivos (2026-06-30)
+
+### Frontend / Productos
+
+- En la pagina Productos, los productos inactivos tienen un boton "Eliminar" que los borra definitivamente del catalogo. Esta bloqueado (con aviso) si el producto figura en algun pedido, para no romper historiales. Util para limpiar duplicados (ej. la Remolacha inactiva PROD-040). Commit pendiente en este push.
+
+---
+
 ## v12.9.7 - Agrupar variantes de producto en todas las listas (2026-06-30)
 
 ### Frontend / Orden de productos
