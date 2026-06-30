@@ -12965,7 +12965,12 @@
   }
 
   function getEffectiveItemAssigneeValue(item) {
-    return getProductAssigneeValue(item.productId) || getItemAssigneeValue(item);
+    let productId = item.productId;
+    if (!productId || !getProduct(productId)) {
+      const byName = activeProducts().find((p) => normalizeText(p.name) === normalizeText(item.productName));
+      if (byName) productId = byName.id;
+    }
+    return getProductAssigneeValue(productId) || getItemAssigneeValue(item);
   }
 
   function getAssigneeByValue(value) {
@@ -13474,7 +13479,7 @@
       const productWords = productText.split(" ");
       const preferred = !!getPreference(clientId, product.id);
       const wordScore = words.reduce((sum, word) => {
-        if (productText.includes(word)) return sum + 2;
+        if (productWords.includes(word)) return sum + 2;
         if (productWords.some((pword) => pword.startsWith(word) || word.startsWith(pword))) return sum + 1;
         if (word.length > 3 && productWords.some((pword) => Math.abs(pword.length - word.length) <= 2 && levenshtein(pword, word) <= (word.length <= 5 ? 1 : 2))) return sum + 1.5;
         return sum - 1;
@@ -13484,9 +13489,10 @@
       const hasNameSignal = wordScore > 0 || firstWordBonus > 0 || exactBonus > 0;
       const unitScore = !hasNameSignal ? 0 : unitType && (product.unitType === unitType || productText.endsWith(" " + unitText)) ? 8 : unitType ? -6 : 0;
       const preferenceBonus = preferred ? 4 : 0;
+      const unitWordBonus = hasNameSignal && unitText && productText.endsWith(" " + unitText) ? 1.5 : 0;
       const extraWordPenalty = Math.max(0, productWords.length - words.length) * 0.35;
       const noNamePenalty = hasNameSignal ? 0 : 20;
-      return { product, score: wordScore + unitScore + exactBonus + firstWordBonus + preferenceBonus - extraWordPenalty - noNamePenalty, preferred, hasNameSignal, firstWordBonus, exactBonus };
+      return { product, score: wordScore + unitScore + exactBonus + firstWordBonus + preferenceBonus + unitWordBonus - extraWordPenalty - noNamePenalty, preferred, hasNameSignal, firstWordBonus, exactBonus };
     }).sort((a, b) => b.score - a.score);
     const top = candidates[0];
     if (!top || top.score <= 0) return null;
@@ -15026,7 +15032,7 @@
       const ta = tierOf(a);
       const tb = tierOf(b);
       if (ta !== tb) return ta - tb;
-      return (a.sortOrder || 0) - (b.sortOrder || 0);
+      return normalizeText(a.name).localeCompare(normalizeText(b.name)) || (a.sortOrder || 0) - (b.sortOrder || 0);
     });
   }
 
@@ -16335,7 +16341,7 @@
       .vehicle-print-sub{font-size:9px;color:#475467;margin:1px 0 2px}
       .divide-two-col{display:grid;grid-template-columns:1fr 1fr;gap:2px 18px;align-items:start}
       .divide-two-col .assigned-group{break-inside:avoid;page-break-inside:avoid}
-      .product-sum-grid{column-count:2;column-gap:22px;font-size:11px}
+      .product-sum-grid{column-count:2;column-gap:22px;font-size:10px}
       .product-sum-line{display:flex;justify-content:flex-start;gap:6px;break-inside:avoid;padding:1px 0}
       .product-sum-line strong{white-space:nowrap}
       .print-title{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111;padding-bottom:6px;margin-bottom:8px}
