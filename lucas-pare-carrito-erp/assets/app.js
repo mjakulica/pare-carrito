@@ -13276,6 +13276,8 @@
       .replace(/\bkilos?\s+de\b/gi, "kg de")
       .replace(/\bkgs?\s+de\b/gi, "kg de")
       .replace(/\bbolsas?\s+de\b/gi, "bolsa de")
+      .replace(/(\d+(?:[.,]\d+)?)\s*(kg|kgs|k|kilos?|kilo|grs?|gramos)\s+y\s+medi[oa]\b/gi, (mm, n, u) => (parseFloat(String(n).replace(",", ".")) + 0.5).toString().replace(".", ",") + " " + u)
+      .replace(/(\d+(?:[.,]\d+)?)\s+y\s+medi[oa]\b/gi, (mm, n) => (parseFloat(String(n).replace(",", ".")) + 0.5).toString().replace(".", ","))
       .replace(/\bun poquito\b|\bpoquito\b|\bun poco\b/gi, " 0,2 ")
       .replace(/\s+x\s+(kg|kgs|kilos?|cajon(?:es)?|caja|bolsas?|plantas?|unidad(?:es)?|docenas?|jaula|atados?|grs?|gramos)\b/gi, " $1 ")
       .replace(/\s+/g, " ")
@@ -13382,30 +13384,37 @@
   function resolveParsedProductNameAndNote(nameTokens, rawNameTokens, unitType, clientId) {
     const cleanTokens = (nameTokens || []).filter(Boolean);
     if (!cleanTokens.length) return { name: "", note: "" };
-    let best = null;
-    for (let index = cleanTokens.length; index >= 1; index -= 1) {
+    const fullName = cleanTokens.join(" ").trim();
+    const fullMatch = matchProductForParsedLine(fullName, unitType, clientId);
+    // Si la frase completa matchea un producto, solo pelamos palabras finales como
+    // nota cuando NO son discriminantes: el prefijo mas corto matchea el MISMO
+    // producto y las palabras restantes no forman parte del nombre del producto.
+    // Asi "tomate cherry" no cae en "tomate" + nota "cherry", pero "palta para
+    // ensalada" si toma "para ensalada" como nota.
+    if (fullMatch && fullMatch.product) {
+      const productText = normalizeText(fullMatch.product.name);
+      for (let index = 1; index < cleanTokens.length; index += 1) {
+        const candidateName = cleanTokens.slice(0, index).join(" ").trim();
+        if (!candidateName) continue;
+        const match = matchProductForParsedLine(candidateName, unitType, clientId);
+        if (!match || !match.product || match.product.id !== fullMatch.product.id) continue;
+        const restTokens = cleanTokens.slice(index);
+        const restAllInName = restTokens.every((word) => productText.includes(word));
+        if (restAllInName) continue; // las palabras restantes son parte del nombre: no pelar
+        return { name: candidateName, note: cleanupParsedProductNote((rawNameTokens || []).slice(index).join(" ")) };
+      }
+      return { name: fullName, note: "" };
+    }
+    // La frase completa no matchea: probar prefijos de mayor a menor y quedarnos
+    // con el primero que matchee, dejando el resto como nota.
+    for (let index = cleanTokens.length - 1; index >= 1; index -= 1) {
       const candidateName = cleanTokens.slice(0, index).join(" ").trim();
       if (!candidateName) continue;
       const match = matchProductForParsedLine(candidateName, unitType, clientId);
       if (!match || !match.product) continue;
-      const noteTokens = (rawNameTokens || []).slice(index);
-      const note = cleanupParsedProductNote(noteTokens.join(" "));
-      const noteClean = normalizeText(note);
-      const productText = normalizeText(match.product.name);
-      const noteLooksLikeProductTail = noteClean && noteClean.split(" ").every((word) => productText.includes(word));
-      const score = match.score - (note ? (noteLooksLikeProductTail ? 12 : 2) : 0);
-      const TIE_EPS = 0.5;
-      if (!best || score > best.score + TIE_EPS) {
-        best = { name: candidateName, note, score };
-      } else if (Math.abs(score - best.score) <= TIE_EPS) {
-        // Empate (o casi): preferir el candidato SIN nota, es decir el match
-        // de nombre mas completo (ej. "queso cabra" antes que "queso" + nota "cabra").
-        if (!note && best.note) best = { name: candidateName, note, score };
-      }
-      if (match.exact && !note) break;
+      return { name: candidateName, note: cleanupParsedProductNote((rawNameTokens || []).slice(index).join(" ")) };
     }
-    if (best) return { name: best.name, note: best.note };
-    return { name: cleanTokens.join(" ").trim(), note: "" };
+    return { name: fullName, note: "" };
   }
 
   function cleanupParsedProductNote(value) {
@@ -13422,7 +13431,7 @@
 
   function matchProductForParsedLine(name, unitType, clientId) {
     let clean = normalizeText(name);
-    clean = clean.replace(/\bpimientos?\b/g, "morron").replace(/\bmolido\b/g, "polvo");
+    clean = clean.replace(/\bpimientos?\b/g, "morron").replace(/\bmolido\b/g, "polvo").replace(/\bzucc?h?ini\b/g, "zapallito");
     if (!clean) return null;
     const unitText = normalizeText(unitType);
     const clientAlias = state.clientProductAliases.find((alias) => alias.clientId === clientId && normalizeText(alias.alias) === clean);
