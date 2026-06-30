@@ -1,5 +1,13 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.7 - Agrupar variantes de producto en todas las listas (2026-06-30)
+
+### Frontend / Orden de productos
+
+- El orden de productos agrupa las variantes del mismo tipo una al lado de la otra (ej. Banana Docena junto a Banana Cajon; Manzana Roja Kg/Unidad/Bandeja/Caja juntas) en: Dividir compras (agrupado por producto: ordena por producto primero y responsable despues), la lista de productos/precios y Nuevo Pedido. Commit `e233674`.
+
+---
+
 ## v12.9.6 - Match por palabra, Palta Kg, dividir y formato de cantidades en Sheets (2026-06-30)
 
 ### Frontend / Parser / Dividir / Sincronizacion
