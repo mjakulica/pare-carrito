@@ -383,7 +383,7 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 ### 12.4 Sincronizacion con Google Sheets (Apps Script)
 - Webhook de Apps Script (`google-sheets-sync/Code.gs`) que recibe diffs del backend: pedidos nuevos/editados/cancelados a la pestania `pedidos` (upsert por numero, recuerda fila en Properties) y precios/costo a la pestania `precios` (mapeo por nombre normalizado + overrides, busca la fila de encabezados sin asumir fila 1).
 - `Compra Hoy` es de ENTRADA: el sheet no la escribe; se observa por escaneo periodico (soporta formulas) con frecuencia escalonada por franjas horarias. Al cambiar, actualiza el costo del producto y recalcula el precio de venta manteniendo el margen (endpoint `/external/compra-hoy`). El sistema solo escribe Venta y Costo.
-- `mirrorStateToTables` reconstruye solo las tablas que cambiaron para acelerar los guardados chicos. El acceso del web app debe ser "Cualquiera" y republicarse como "Nueva version".
+- `mirrorStateToTables` reconstruye solo las tablas que cambiaron para acelerar los guardados chicos. El acceso del web app debe ser "Cualquiera" y republicarse como "Nueva version". La celda de cliente en los pedidos se escribe como "NNN) Nombre" (numero + nombre).
 
 ### 12.5 Feriados
 - Recuadro de feriados (boton en Nuevo Pedido) con alta y aprobacion: el empleado propone, admin/gerente aprueban. Bloquea la fecha en el calendario y permite avisar por WhatsApp a los clientes activos. El texto del aviso es configurable.
@@ -400,14 +400,15 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 
 ## 13. Ultimo Cambio y Version
 
-**Version operativa:** 12.9.4
-**Fecha:** 2026-06-29
-**Commit GitHub del cambio funcional:** `5e00f18`
+**Version operativa:** 12.9.5
+**Fecha:** 2026-06-30
+**Commit GitHub del cambio funcional:** `602c7c6`
 **Entorno actualizado:** VPS productivo `/opt/pare-carrito` con frontend estatico y API Docker Compose saludable.
 
 ### Detalle del ultimo cambio
 
-- Facturacion: popup de pedidos que acumulan IVA con impresion de remitos y "Imprimir todo", y envio automatico por correo (PDF de detalle + factura de TusFacturas) a clientes semanal/quincenal/mensual. Commits `9bac557`, `5e00f18`.
+- Parser: resolver que no pela palabras discriminantes (tomate cherry), "N kg y medio" -> N,5, zuccini -> zapallito (`44d5398`). Dividir: suma por unidad canonica (Huevos Maple, Remolacha atado) y "agrupado por cliente" en 3 columnas a 10px (`d8522fb`). Vehiculos: sin hoja vacia inicial, N de orden arriba y total al final, 3 columnas a 10px (`5618a29`). Sheets: cliente como "NNN) Nombre" (`602c7c6`).
+- (Previo) Facturacion: popup de pedidos que acumulan IVA con impresion de remitos y "Imprimir todo", y envio automatico por correo (PDF de detalle + factura de TusFacturas) a clientes semanal/quincenal/mensual. Commits `9bac557`, `5e00f18`.
 - (Previo) Correcciones del parser de pedidos para casos reales (#19/#30/#48): cantidad por defecto 1, `un poquito`->0,2, `pimiento`->`morron`, `aji molido`->`en polvo`, `queso de cabra` por nombre completo, `x <unidad>` como unidad y descarte de matches debiles. Commit `e579ded`.
 - Remitos con interlineado minimo legible. Commit `78be0a0`.
 - Dividir compras: agrupado por nombre (fusiona duplicados, separa los que se perdian), total por producto en pantalla/PDF/WhatsApp, numeros de cliente sin ceros y cantidades enteras, y export de WhatsApp respetando el toggle de cliente. Commit `adaee20`.

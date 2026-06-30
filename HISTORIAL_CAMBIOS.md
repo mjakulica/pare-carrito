@@ -1,5 +1,19 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.5 - Parser, dividir, vehiculos y formato de cliente en Sheets (2026-06-30)
+
+### Frontend / Parser / Dividir / Vehiculos / Sincronizacion
+
+- Parser de pedidos: resolver de nombre/nota mas robusto, no pela palabras discriminantes. "tomate cherry" ya no cae en "tomate perita" (toma Tomate Cherry), pero notas reales como "(para ensalada)" o "pequeñas" se conservan. Commit `44d5398`.
+- Parser: "N kg y medio" / "N k y medio" se interpreta como N,5 (ej. "Cherry 1kg y medio" -> 1,5 kg; "Zuccini 1k y medio" -> 1,5). "zuccini"/"zucchini" mapea a "zapallito". Commit `44d5398`.
+- Dividir compras: el agrupado por producto usa la unidad canonica del producto, asi "Huevos Maple" de dos pedidos se suman en una linea aunque la unidad escrita difiera, y "Remolacha" (cargada como atado) ya no aparece como kg. Commit `d8522fb`.
+- Dividir compras: el "Agrupado por cliente" impreso se muestra en 3 columnas (minimo margen) y todo el contenido a tamaño 10. Commit `d8522fb`.
+- Vehiculos: "Imprimir todos" ya no genera una primera hoja vacia con solo titulos (se saltean los vehiculos sin pedidos y se quita la portada). Commit `5618a29`.
+- Vehiculos ("sin dividir" e "imprimir todos"): el numero de orden va arriba del nombre del cliente y el total al final del pedido (misma columna); los pedidos se muestran en 3 columnas (minimo margen) y el contenido a tamaño 10. Commit `5618a29`.
+- Sincronizacion con Google Sheets: al escribir los pedidos, la celda de cliente ahora es "NNN) Nombre" (ej. "015) H Villa Vicuna", "012) Estacion Belgrano 2") en vez de solo el nombre. Requiere rebuild (`./deploy.sh`). Commit `602c7c6`.
+
+---
+
 ## v12.9.4 - Facturacion: detalle de pedidos y envio automatico por correo (2026-06-29)
 
 ### Frontend / Backend / Facturacion
