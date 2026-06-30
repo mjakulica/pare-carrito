@@ -7438,13 +7438,11 @@
 
   function renderVehiclePrint(vehicleId) {
     if (vehicleId === "flat") return renderVehicleFlatPrint(ui.vehicleDate || todayISO());
-    const ids = vehicleId === "all" ? activeVehicles().map((vehicle) => vehicle.id) : [vehicleId];
-    const sheets = ids.map((id) => renderVehiclePrintSheet(id, ui.vehicleDate || todayISO())).join("");
-    const allHeader = vehicleId === "all" ? `
-      <div class="print-title">
-        <div><h1>${BUSINESS_NAME.toUpperCase()}</h1><strong>Todos los vehículos</strong></div>
-        <div>Fecha: ${formatDate(ui.vehicleDate || todayISO())}</div>
-      </div>` : "";
+    const printDate = ui.vehicleDate || todayISO();
+    let ids = vehicleId === "all" ? activeVehicles().map((vehicle) => vehicle.id) : [vehicleId];
+    if (vehicleId === "all") ids = ids.filter((id) => getVehicleTotals(id, printDate).orders.length);
+    const sheets = ids.map((id) => renderVehiclePrintSheet(id, printDate)).join("");
+    const allHeader = "";
     return `
       <section class="print-page">
         <div class="print-controls no-print">
@@ -7473,14 +7471,12 @@
     const orderItems = orders.map((order) => {
       const client = getClient(order.clientId);
       return `
-        <li>
-          <div class="vehicle-print-line">
-            <strong>${escapeHtml(client ? client.name : order.clientId)}</strong>
-            <span>${escapeHtml(order.id)}</span>
-            <span>${escapeHtml(getVehicleName(order.deliveryVehicleId))}</span>
-            <strong class="num">${formatMoney(order.totalAmount)}</strong>
-          </div>
+        <li class="vehicle-print-order">
+          <div class="vehicle-print-num">N° ${escapeHtml(order.id)}</div>
+          <strong>${escapeHtml(client ? client.name : order.clientId)}</strong>
+          <div class="vehicle-print-sub">${escapeHtml(getVehicleName(order.deliveryVehicleId))}</div>
           <ul>${order.items.map((item) => `<li>${escapeHtml(item.productName)}: ${formatNumber(item.quantity)} ${escapeHtml(item.unitType)}${item.note ? " (" + escapeHtml(item.note) + ")" : ""}</li>`).join("")}</ul>
+          <div class="vehicle-print-total"><span>Total</span> <strong>${formatMoney(order.totalAmount)}</strong></div>
         </li>
       `;
     }).join("");
@@ -7495,7 +7491,7 @@
             <div><h1>${BUSINESS_NAME.toUpperCase()}</h1><strong>${escapeHtml(tplGet("vehiculos", "tituloSinDividir", "Pedidos sin dividir"))}</strong></div>
             <div>Fecha: ${formatDate(date)}</div>
           </div>
-          <ul class="vehicle-print-list">${orderItems || "<li>Sin pedidos</li>"}</ul>
+          <ul class="vehicle-print-list vehicle-print-cols">${orderItems || "<li>Sin pedidos</li>"}</ul>
           <h2 style="font-size:14px;margin:8px 0 4px">Sumatoria total de productos</h2>
           ${renderProductSumColumns(productTotals)}
         </article>
@@ -7510,15 +7506,13 @@
     const orderItems = totals.orders.map((order) => {
       const client = getClient(order.clientId);
       return `
-        <li>
-          <div class="vehicle-print-line">
-            <strong>${escapeHtml(client ? client.name : order.clientId)}</strong>
-            <span>${escapeHtml(order.id)}</span>
-            <strong class="num">${formatMoney(order.totalAmount)}</strong>
-          </div>
+        <li class="vehicle-print-order">
+          <div class="vehicle-print-num">N° ${escapeHtml(order.id)}</div>
+          <strong>${escapeHtml(client ? client.name : order.clientId)}</strong>
           ${client && client.address ? `<div class="vehicle-print-sub">${escapeHtml(client.address)}</div>` : ""}
           ${order.notes ? `<div class="vehicle-print-sub">Nota: ${escapeHtml(order.notes)}</div>` : ""}
           <ul>${order.items.map((item) => `<li>${escapeHtml(item.productName)}: ${formatNumber(item.quantity)} ${escapeHtml(item.unitType)}${item.note ? " (" + escapeHtml(item.note) + ")" : ""}</li>`).join("")}</ul>
+          <div class="vehicle-print-total"><span>Total</span> <strong>${formatMoney(order.totalAmount)}</strong></div>
         </li>
       `;
     }).join("");
@@ -7534,7 +7528,7 @@
             <div>Conductor: ${escapeHtml(vehicle && vehicle.driverName ? vehicle.driverName : "-")}</div>
           </div>
         </div>
-        <ul class="vehicle-print-list">${orderItems || "<li>Sin pedidos</li>"}</ul>
+        <ul class="vehicle-print-list vehicle-print-cols">${orderItems || "<li>Sin pedidos</li>"}</ul>
         <h2 style="font-size:14px;margin:8px 0 4px">Suma de productos</h2>
         ${renderProductSumColumns(productTotals)}
       </article>
@@ -16333,6 +16327,10 @@
       .divide-print-list ul,.vehicle-print-list ul{list-style:none;padding-left:14px;margin:2px 0 4px}
       .divide-print-list li:last-child,.vehicle-print-list li:last-child{border-bottom:0}
       .vehicle-print-line{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
+      .vehicle-print-cols{column-count:3;column-gap:6px}
+      .vehicle-print-cols>li{-webkit-column-break-inside:avoid;page-break-inside:avoid;break-inside:avoid;border-bottom:1px solid #ececec;padding:2px 0 4px;margin-bottom:2px}
+      .vehicle-print-num{font-weight:700}
+      .vehicle-print-total{display:flex;justify-content:space-between;border-top:1px solid #ddd;margin-top:2px;padding-top:1px}
       .vehicle-print-line span{color:#475467}
       .vehicle-print-sub{font-size:9px;color:#475467;margin:1px 0 2px}
       .divide-two-col{display:grid;grid-template-columns:1fr 1fr;gap:2px 18px;align-items:start}
