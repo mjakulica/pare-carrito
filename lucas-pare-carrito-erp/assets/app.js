@@ -7103,6 +7103,11 @@
     });
   }
 
+  function divideItemUnit(item) {
+    const product = item && item.productId ? getProduct(item.productId) : null;
+    return (product && product.unitType) || (item ? item.unitType : "") || "";
+  }
+
   function renderDivideProductGroups(assignables, assigneeValues) {
     const filtered = filterDivideAssignables(assignables, assigneeValues);
     if (!filtered.length) return `<div class="empty compact">Sin productos asignados para esta vista.</div>`;
@@ -7110,9 +7115,9 @@
     const groups = {};
     filtered.forEach(({ order, item }) => {
       const assigned = getAssigneeByValue(getEffectiveItemAssigneeValue(item));
-      const key = normalizeText(item.productName) + "|" + normalizeText(item.unitType) + "|" + (assigned ? assigned.value : "");
+      const key = normalizeText(item.productName) + "|" + (assigned ? assigned.value : "");
       if (!groups[key]) {
-        groups[key] = { productName: item.productName, unitType: item.unitType, assigneeName: assigned ? assigned.name : "Sin asignar", clients: {} };
+        groups[key] = { productName: item.productName, unitType: divideItemUnit(item), assigneeName: assigned ? assigned.name : "Sin asignar", clients: {} };
       }
       groups[key].clients[order.clientId] = (groups[key].clients[order.clientId] || 0) + Number(item.quantity || 0);
     });
@@ -7142,7 +7147,7 @@
         <div class="assigned-group">
           <strong>Pedido del cliente ${escapeHtml(formatClientIdShort(clientId))})</strong>
           <span>${escapeHtml(group.clientName)}</span>
-          <div>${group.items.map((item) => `${formatDivideQty(item.quantity)} ${escapeHtml(item.unitType)} ${escapeHtml(item.productName)}${isAll ? " - " + escapeHtml(item.assigneeName) : ""}${item.note ? " (" + escapeHtml(item.note) + ")" : ""}`).join("<br>")}</div>
+          <div>${group.items.map((item) => `${formatDivideQty(item.quantity)} ${escapeHtml(divideItemUnit(item))} ${escapeHtml(item.productName)}${isAll ? " - " + escapeHtml(item.assigneeName) : ""}${item.note ? " (" + escapeHtml(item.note) + ")" : ""}`).join("<br>")}</div>
           <div class="divide-client-spacer" aria-hidden="true">&nbsp;</div>
         </div>
       `;
@@ -7156,9 +7161,9 @@
     const groups = {};
     filtered.forEach(({ order, item }) => {
       const assigned = getAssigneeByValue(getEffectiveItemAssigneeValue(item));
-      const key = normalizeText(item.productName) + "|" + normalizeText(item.unitType) + "|" + (assigned ? assigned.value : "");
+      const key = normalizeText(item.productName) + "|" + (assigned ? assigned.value : "");
       if (!groups[key]) {
-        groups[key] = { productName: item.productName, unitType: item.unitType, assigneeName: assigned ? assigned.name : "Sin asignar", clients: {} };
+        groups[key] = { productName: item.productName, unitType: divideItemUnit(item), assigneeName: assigned ? assigned.name : "Sin asignar", clients: {} };
       }
       groups[key].clients[order.clientId] = (groups[key].clients[order.clientId] || 0) + Number(item.quantity || 0);
     });
@@ -7173,7 +7178,7 @@
 
   function renderDivideClientList(assignables, assigneeValues) {
     const filtered = filterDivideAssignables(assignables, assigneeValues);
-    if (!filtered.length) return `<p class="muted" style="font-size:11px;margin:0">Sin productos asignados para esta vista.</p>`;
+    if (!filtered.length) return `<p class="muted" style="font-size:10px;margin:0">Sin productos asignados para esta vista.</p>`;
     const isAll = !Array.isArray(assigneeValues) || assigneeValues.includes("all");
     const groups = {};
     filtered.forEach(({ order, item }) => {
@@ -7184,9 +7189,9 @@
       const assigned = getAssigneeByValue(getEffectiveItemAssigneeValue(item));
       groups[order.clientId].items.push({ ...item, assigneeName: assigned ? assigned.name : "Sin asignar" });
     });
-    return `<ul class="divide-print-list">${Object.keys(groups).sort(compareClientIdStrings).map((clientId) => {
+    return `<ul class="divide-print-list divide-print-cols">${Object.keys(groups).sort(compareClientIdStrings).map((clientId) => {
       const group = groups[clientId];
-      const itemsHtml = group.items.map((item) => `<li>${formatDivideQty(item.quantity)} ${escapeHtml(item.unitType)} ${escapeHtml(item.productName)}${isAll ? " - " + escapeHtml(item.assigneeName) : ""}${item.note ? " (" + escapeHtml(item.note) + ")" : ""}</li>`).join("");
+      const itemsHtml = group.items.map((item) => `<li>${formatDivideQty(item.quantity)} ${escapeHtml(divideItemUnit(item))} ${escapeHtml(item.productName)}${isAll ? " - " + escapeHtml(item.assigneeName) : ""}${item.note ? " (" + escapeHtml(item.note) + ")" : ""}</li>`).join("");
       return `<li><strong>${escapeHtml(formatClientIdShort(clientId))}) ${escapeHtml(group.clientName)}</strong><ul>${itemsHtml}</ul></li>`;
     }).join("")}</ul>`;
   }
@@ -7203,11 +7208,11 @@
     const byClient = {};
     assignables.forEach(({ order, item }) => {
       const assigned = getAssigneeByValue(getEffectiveItemAssigneeValue(item));
-      const productKey = normalizeText(item.productName) + "|" + normalizeText(item.unitType) + "|" + (assigned ? assigned.name : "Sin asignar");
-      if (!byProduct[productKey]) byProduct[productKey] = { name: item.productName, unitType: item.unitType, assigneeName: assigned ? assigned.name : "Sin asignar", clients: {} };
+      const productKey = normalizeText(item.productName) + "|" + (assigned ? assigned.name : "Sin asignar");
+      if (!byProduct[productKey]) byProduct[productKey] = { name: item.productName, unitType: divideItemUnit(item), assigneeName: assigned ? assigned.name : "Sin asignar", clients: {} };
       byProduct[productKey].clients[order.clientId] = (byProduct[productKey].clients[order.clientId] || 0) + Number(item.quantity || 0);
       if (!byClient[order.clientId]) byClient[order.clientId] = [];
-      byClient[order.clientId].push(`${formatDivideQty(item.quantity)} ${item.unitType} ${item.productName}${isAll ? " - " + (assigned ? assigned.name : "Sin asignar") : ""}`);
+      byClient[order.clientId].push(`${formatDivideQty(item.quantity)} ${divideItemUnit(item)} ${item.productName}${isAll ? " - " + (assigned ? assigned.name : "Sin asignar") : ""}`);
     });
     const productGroups = Object.values(byProduct);
     sortDivideGroupsByAssignee(productGroups);
@@ -16321,7 +16326,9 @@
       .print-compact .print-title h1{font-size:16px}
       .borderless-table th,.borderless-table td{border:0 !important;border-bottom:1px solid #ececec !important;padding:2px 5px;font-size:11px}
       .borderless-table th{background:transparent;border-bottom:1px solid #999 !important;text-transform:uppercase;font-size:9px;color:#333}
-      .divide-print-list,.vehicle-print-list{list-style:none;padding:0;margin:0;font-size:11px}
+      .divide-print-list,.vehicle-print-list{list-style:none;padding:0;margin:0;font-size:10px}
+      .divide-print-cols{column-count:3;column-gap:6px}
+      .divide-print-cols>li{-webkit-column-break-inside:avoid;page-break-inside:avoid;break-inside:avoid}
       .divide-print-list li,.vehicle-print-list li{padding:2px 0;border-bottom:1px solid #ececec}
       .divide-print-list ul,.vehicle-print-list ul{list-style:none;padding-left:14px;margin:2px 0 4px}
       .divide-print-list li:last-child,.vehicle-print-list li:last-child{border-bottom:0}
