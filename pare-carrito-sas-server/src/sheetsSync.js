@@ -15,7 +15,9 @@ function webhookToken() {
 
 function clientNameOf(data, clientId) {
   const c = (data.clients || []).find((x) => x.id === clientId);
-  return c ? c.name : String(clientId || "");
+  // Formato para la planilla: "015) H Villa Vicuna" (numero de cliente + nombre).
+  if (c) return c.id + ") " + c.name;
+  return String(clientId || "");
 }
 
 function priceSnapshot(data) {
