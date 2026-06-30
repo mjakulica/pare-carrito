@@ -400,14 +400,15 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 
 ## 13. Ultimo Cambio y Version
 
-**Version operativa:** 12.9.5
+**Version operativa:** 12.9.6
 **Fecha:** 2026-06-30
-**Commit GitHub del cambio funcional:** `602c7c6`
+**Commit GitHub del cambio funcional:** `64e272c`
 **Entorno actualizado:** VPS productivo `/opt/pare-carrito` con frontend estatico y API Docker Compose saludable.
 
 ### Detalle del ultimo cambio
 
-- Parser: resolver que no pela palabras discriminantes (tomate cherry), "N kg y medio" -> N,5, zuccini -> zukini (`44d5398`). Dividir: suma por unidad canonica (Huevos Maple, Remolacha atado) y "agrupado por cliente" en 3 columnas a 10px (`d8522fb`). Vehiculos: sin hoja vacia inicial, N de orden arriba y total al final, 3 columnas a 10px (`5618a29`). Sheets: cliente como "NNN) Nombre" (`602c7c6`).
+- Parser: match por palabra completa (no substring), "Palta 1kg" -> Palta Madura Kg, bonus por unidad en el nombre (`e73afc6`). Dividir: agrupa resolviendo producto por nombre (suma Menta sin productId) (`e73afc6`). Orden de productos agrupa variantes (`e73afc6`). Sheets: cantidades decimales como numero sin "uni" (`64e272c`).
+- (Previo) Parser: resolver que no pela palabras discriminantes (tomate cherry), "N kg y medio" -> N,5, zuccini -> zukini (`44d5398`). Dividir: suma por unidad canonica (Huevos Maple, Remolacha atado) y "agrupado por cliente" en 3 columnas a 10px (`d8522fb`). Vehiculos: sin hoja vacia inicial, N de orden arriba y total al final, 3 columnas a 10px (`5618a29`). Sheets: cliente como "NNN) Nombre" (`602c7c6`).
 - (Previo) Facturacion: popup de pedidos que acumulan IVA con impresion de remitos y "Imprimir todo", y envio automatico por correo (PDF de detalle + factura de TusFacturas) a clientes semanal/quincenal/mensual. Commits `9bac557`, `5e00f18`.
 - (Previo) Correcciones del parser de pedidos para casos reales (#19/#30/#48): cantidad por defecto 1, `un poquito`->0,2, `pimiento`->`morron`, `aji molido`->`en polvo`, `queso de cabra` por nombre completo, `x <unidad>` como unidad y descarte de matches debiles. Commit `e579ded`.
 - Remitos con interlineado minimo legible. Commit `78be0a0`.

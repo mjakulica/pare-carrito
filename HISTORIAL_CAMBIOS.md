@@ -1,5 +1,18 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.6 - Match por palabra, Palta Kg, dividir y formato de cantidades en Sheets (2026-06-30)
+
+### Frontend / Parser / Dividir / Sincronizacion
+
+- Parser: el match de productos ahora compara por palabra completa (antes hacia substring), asi "ni" de una nota ya no cae dentro de "uNIdad". Esto corrige "Palta 1kg (NI BLANDAS...)" que tomaba "Palta Madura Unidad" y ahora toma "Palta Madura Kg", conservando la nota completa. Commit `e73afc6`.
+- Parser: bonus cuando el nombre del producto termina en la unidad pedida, para desempatar variantes con la misma unitType (ej. "Palta 1kg" prefiere "Palta Madura Kg" sobre "Palta Madura Unidad"). Commit `e73afc6`.
+- Dividir compras: el agrupado resuelve el producto por nombre cuando el item no trae productId, asi dos pedidos del mismo producto (ej. Menta) se suman en una sola linea aunque uno se haya cargado como texto libre. Commit `e73afc6`.
+- Orden de productos (Nuevo Pedido): dentro de cada grupo de preferencia se ordena por nombre, agrupando las variantes del mismo producto una al lado de la otra (ej. Banana Docena junto a Banana Cajon; Manzana Roja Kg/Unidad/Bandeja/Caja juntas). Commit `e73afc6`.
+- Impresion: la sumatoria de productos en los PDF de Dividir y Vehiculos pasa a 10px. Commit `e73afc6`.
+- Sincronizacion con Google Sheets: las cantidades decimales (un peso en kg editado a mano sobre un producto "uni") se escriben como numero, sin la palabra "uni", para que la planilla las reconozca y sume; las cantidades enteras de unidades siguen como "N uni". Requiere republicar el Apps Script. Commit `64e272c`.
+
+---
+
 ## v12.9.5 - Parser, dividir, vehiculos y formato de cliente en Sheets (2026-06-30)
 
 ### Frontend / Parser / Dividir / Vehiculos / Sincronizacion
