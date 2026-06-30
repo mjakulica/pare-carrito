@@ -4902,7 +4902,7 @@
   function renderProducts() {
     const products = state.products.filter((product) => ui.tab === "inactivos" ? !product.isActive : product.isActive);
     const assignees = activeAssignees();
-    const rows = products.sort((a, b) => a.sortOrder - b.sortOrder).map((product) => {
+    const rows = products.sort((a, b) => normalizeText(a.name).localeCompare(normalizeText(b.name)) || (a.sortOrder || 0) - (b.sortOrder || 0)).map((product) => {
       const price = getProductPrice(product.id);
       const assignedValue = product.assignedToType && product.assignedToId ? product.assignedToType + ":" + product.assignedToId : "";
       return `
@@ -7095,11 +7095,11 @@
   }
 
   function sortDivideGroupsByAssignee(groups) {
+    // Ordena por nombre de producto (agrupa variantes del mismo tipo una al lado de
+    // la otra, ej. Banana Docena junto a Banana Cajon) y luego por responsable.
     return groups.slice().sort((a, b) => {
-      const an = a.assigneeName || "";
-      const bn = b.assigneeName || "";
-      if (an !== bn) return an.localeCompare(bn);
-      return (a.productName || "").localeCompare(b.productName || "");
+      return normalizeText(a.productName).localeCompare(normalizeText(b.productName))
+        || (a.assigneeName || "").localeCompare(b.assigneeName || "");
     });
   }
 
