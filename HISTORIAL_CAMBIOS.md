@@ -5,7 +5,7 @@
 ### Frontend / Parser / Dividir / Vehiculos / Sincronizacion
 
 - Parser de pedidos: resolver de nombre/nota mas robusto, no pela palabras discriminantes. "tomate cherry" ya no cae en "tomate perita" (toma Tomate Cherry), pero notas reales como "(para ensalada)" o "pequeñas" se conservan. Commit `44d5398`.
-- Parser: "N kg y medio" / "N k y medio" se interpreta como N,5 (ej. "Cherry 1kg y medio" -> 1,5 kg; "Zuccini 1k y medio" -> 1,5). "zuccini"/"zucchini" mapea a "zapallito". Commit `44d5398`.
+- Parser: "N kg y medio" / "N k y medio" se interpreta como N,5 (ej. "Cherry 1kg y medio" -> 1,5 kg; "Zuccini 1k y medio" -> 1,5). "zuccini"/"zucchini"/"zuchini" mapea a "zukini" (Zukini Kg). Commit `44d5398`.
 - Dividir compras: el agrupado por producto usa la unidad canonica del producto, asi "Huevos Maple" de dos pedidos se suman en una linea aunque la unidad escrita difiera, y "Remolacha" (cargada como atado) ya no aparece como kg. Commit `d8522fb`.
 - Dividir compras: el "Agrupado por cliente" impreso se muestra en 3 columnas (minimo margen) y todo el contenido a tamaño 10. Commit `d8522fb`.
 - Vehiculos: "Imprimir todos" ya no genera una primera hoja vacia con solo titulos (se saltean los vehiculos sin pedidos y se quita la portada). Commit `5618a29`.

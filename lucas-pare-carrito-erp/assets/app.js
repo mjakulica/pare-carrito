@@ -13430,7 +13430,7 @@
 
   function matchProductForParsedLine(name, unitType, clientId) {
     let clean = normalizeText(name);
-    clean = clean.replace(/\bpimientos?\b/g, "morron").replace(/\bmolido\b/g, "polvo").replace(/\bzucc?h?ini\b/g, "zapallito");
+    clean = clean.replace(/\bpimientos?\b/g, "morron").replace(/\bmolido\b/g, "polvo").replace(/\bzucc?h?ini\b/g, "zukini");
     if (!clean) return null;
     const unitText = normalizeText(unitType);
     const clientAlias = state.clientProductAliases.find((alias) => alias.clientId === clientId && normalizeText(alias.alias) === clean);
