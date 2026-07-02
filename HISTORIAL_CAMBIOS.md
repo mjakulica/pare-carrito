@@ -1,5 +1,15 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.17 - Proveedores: productos que vende, detalle de movimientos y fix impresion mobile (2026-07-01)
+
+### Frontend / Proveedores / Impresion
+
+- Proveedores: al seleccionar un proveedor en el dropdown, aparece un panel "Productos que vende" que lista sus productos; para quien puede editar proveedores es editable (checkboxes con filtro, se guarda al instante), y para el rol proveedor es solo lectura. Commit pendiente en este push.
+- Proveedores: en la tabla de movimientos, la descripcion de cada movimiento se despliega (click) mostrando los productos que componen esa compra (cantidad, costo unitario y total). Commit pendiente en este push.
+- Impresion mobile: en mobile, "Exportar PDF remitos de hoy" (Remitos y Unidades) y "Imprimir movimientos" (Saldos) ahora imprimen solo su contenido en una pestania dedicada, en vez de imprimir la pagina completa o no disparar el dialogo. Se activa automaticamente el modo pestania en pantallas <=760px. Commit pendiente en este push.
+
+---
+
 ## v12.9.16 - Proveedor: contador de recambios en Inicio (2026-07-01)
 
 ### Frontend / Rol Proveedor
