@@ -621,6 +621,7 @@
       providerLedger: [],
       providerPayments: [],
       clientTransfers: [],
+      replacements: [],
       billingLog: [],
       attendance: [],
       employeePayments: [],
@@ -874,6 +875,7 @@
       providerLedger: [],
       providerPayments: [],
       clientTransfers: [],
+      replacements: [],
       billingLog: [],
       attendance: [],
       employeePayments: [],
@@ -1086,7 +1088,7 @@
   const SYNC_KEY = "lpc_cloud_sync_v1";
   const PATCH_QUEUE_KEY = "lpc_offline_patch_queue_v1";
   const PATCH_ARRAY_KEYS = [
-    "orders", "deletedOrders", "exampleOrders", "remitos", "saldos", "purchases", "payments", "caja",
+    "orders", "deletedOrders", "exampleOrders", "remitos", "saldos", "purchases", "payments", "caja", "replacements",
     "providerLedger", "providerPayments", "clientTransfers", "vendorLedger",
     "attendance", "employeePayments", "employeeReimbursements", "performanceAdjustments",
     "clients", "products", "providers", "vehicles", "users", "cashBoxes",
@@ -1691,7 +1693,7 @@
       });
     }
     [
-      "exampleOrders", "remitos", "saldos", "purchases", "payments", "caja",
+      "exampleOrders", "remitos", "saldos", "purchases", "payments", "caja", "replacements",
       "providerLedger", "providerPayments", "clientTransfers", "vendorLedger",
       "attendance", "employeePayments", "employeeReimbursements", "performanceAdjustments",
       "clients", "products", "providers", "vehicles", "users", "cashBoxes", "stockMovements"
@@ -1713,7 +1715,7 @@
 
   function stateHasOperationalData(data) {
     return [
-      "orders", "purchases", "saldos", "caja", "payments", "remitos",
+      "orders", "purchases", "saldos", "caja", "payments", "remitos", "replacements",
       "providerLedger", "providerPayments", "clientTransfers", "attendance",
       "employeePayments", "employeeReimbursements", "billingLog", "vendorLedger"
     ].some((key) => Array.isArray(data[key]) && data[key].length);
@@ -2546,6 +2548,7 @@
       `
       ${renderPendingTransfersBanner()}
       ${renderPendingUsersBanner()}
+      ${renderPendingReplacementsBanner()}
       <div class="grid four dash-metrics-grid">
         ${metricCard("Pedidos de hoy", todaysOrders.length, "Pedidos activos cargados")}
         ${metricCard("Caja", formatMoney(cajaBalance), "Ingresos menos egresos")}
@@ -3353,6 +3356,120 @@
     `;
   }
 
+  function recentOrdersForRecambio() {
+    const minDate = addDaysISO(todayISO(), -3);
+    let list = (state.orders || []).filter((o) => o && o.date >= minDate && !["cancelado", "anulado"].includes(o.status));
+    if (isClientLikeRole(currentUser.role)) {
+      const ids = getCustomerVisibleClientIds();
+      list = list.filter((o) => ids.includes(o.clientId));
+    }
+    return list.sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+  }
+
+  function openRecambioModal() {
+    const orders = recentOrdersForRecambio();
+    if (!orders.length) return alert("No hay pedidos de los ultimos 3 dias para pedir recambio.");
+    const body = `
+      <div class="field"><label>Pedido</label><select id="recambio-order"><option value="">Elegir pedido...</option>${orders.map((o) => { const c = getClient(o.clientId); return `<option value="${escapeAttr(o.id)}">${formatDate(o.date)} - ${escapeHtml(o.id)} - ${escapeHtml(c ? c.name : o.clientId)}</option>`; }).join("")}</select></div>
+      <div id="recambio-products" style="margin-top:8px"></div>
+      <div id="recambio-selected" style="margin-top:10px"></div>
+      <div class="field" style="margin-top:10px"><label>Reponer en</label><select id="recambio-when"><option value="proximo">Proximo pedido</option><option value="manana">Manana</option></select></div>
+    `;
+    showModal("Pedir recambio", body, bindRecambioModal, { className: "wide" });
+  }
+
+  function bindRecambioModal() {
+    const orderSel = document.getElementById("recambio-order");
+    const prodBox = document.getElementById("recambio-products");
+    const selBox = document.getElementById("recambio-selected");
+    const selected = {};
+    function itemKeyOf(it, idx) { return it.id || (it.productId + "-" + idx); }
+    function renderProducts() {
+      const order = getOrder(orderSel.value);
+      if (!order) { prodBox.innerHTML = ""; return; }
+      prodBox.innerHTML = `<strong>Productos del pedido:</strong><div class="mini-table">${(order.items || []).map((it, idx) => `<div><span>${escapeHtml(it.productName)} <small class="muted">(${formatNumber(it.quantity)} ${escapeHtml(it.unitType || "")})</small></span><button type="button" class="btn small ghost" data-recambio-add="${escapeAttr(itemKeyOf(it, idx))}">+</button></div>`).join("")}</div>`;
+      prodBox.querySelectorAll("[data-recambio-add]").forEach((btn) => btn.addEventListener("click", () => {
+        const order2 = getOrder(orderSel.value); if (!order2) return;
+        const key = btn.dataset.recambioAdd;
+        const it = (order2.items || []).find((x, i) => itemKeyOf(x, i) === key);
+        if (!it) return;
+        if (!selected[key]) selected[key] = { productId: it.productId, productName: it.productName, unitType: it.unitType, originalQty: Number(it.quantity || 0), qty: Number(it.quantity || 0), photo: "" };
+        renderSelected();
+      }));
+    }
+    function renderSelected() {
+      const keys = Object.keys(selected);
+      selBox.innerHTML = keys.length ? `<strong>Recambio de:</strong>${keys.map((k) => { const r = selected[k]; return `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:4px 0"><span style="flex:1;min-width:120px">${escapeHtml(r.productName)} <small class="muted">(pedido: ${formatNumber(r.originalQty)} ${escapeHtml(r.unitType || "")})</small></span><input type="number" min="0" step="0.1" value="${r.qty}" data-recambio-qty="${escapeAttr(k)}" style="width:80px" /><input type="file" accept="image/*" capture="environment" data-recambio-photo="${escapeAttr(k)}" /><span data-recambio-photook="${escapeAttr(k)}" style="color:#16a34a">${r.photo ? "&#10003;" : ""}</span><button type="button" class="btn small danger" data-recambio-del="${escapeAttr(k)}">X</button></div>`; }).join("")}` : "";
+      selBox.querySelectorAll("[data-recambio-qty]").forEach((inp) => inp.addEventListener("change", () => {
+        const k = inp.dataset.recambioQty; let v = parseAmount(inp.value);
+        if (v > selected[k].originalQty) { v = selected[k].originalQty; inp.value = formatAmountInput(v); alert("La cantidad de recambio no puede superar la del pedido."); }
+        selected[k].qty = v;
+      }));
+      selBox.querySelectorAll("[data-recambio-photo]").forEach((inp) => inp.addEventListener("change", async () => {
+        const k = inp.dataset.recambioPhoto;
+        if (inp.files && inp.files[0]) { try { selected[k].photo = await compressImageFile(inp.files[0], 1100, 0.7); const ok = selBox.querySelector(`[data-recambio-photook="${cssEscape(k)}"]`); if (ok) ok.innerHTML = "&#10003;"; } catch (e) { console.warn("foto recambio:", e.message); } }
+      }));
+      selBox.querySelectorAll("[data-recambio-del]").forEach((btn) => btn.addEventListener("click", () => { delete selected[btn.dataset.recambioDel]; renderSelected(); }));
+    }
+    if (orderSel) orderSel.addEventListener("change", renderProducts);
+    const saveBtn = document.getElementById("modal-save");
+    if (saveBtn) saveBtn.addEventListener("click", () => {
+      const order = getOrder(orderSel.value);
+      if (!order) return alert("Elegi un pedido.");
+      const keys = Object.keys(selected);
+      if (!keys.length) return alert("Seleccioná al menos un producto para recambio.");
+      for (const k of keys) { if (!selected[k].photo) return alert("Falta la foto de: " + selected[k].productName); if (selected[k].qty <= 0) return alert("Cantidad invalida en: " + selected[k].productName); }
+      const when = document.getElementById("recambio-when").value === "manana" ? "manana" : "proximo";
+      state.replacements = state.replacements || [];
+      state.replacements.push({ id: nextDatedId("REC", state.replacements), clientId: order.clientId, sourceOrderId: order.id, when, status: "pendiente", createdAt: new Date().toISOString(), createdDate: todayISO(), items: keys.map((k) => ({ productId: selected[k].productId, productName: selected[k].productName, unitType: selected[k].unitType, originalQty: selected[k].originalQty, qty: selected[k].qty, photo: selected[k].photo })) });
+      saveState();
+      generatePendingReplacements();
+      closeModal();
+      alert("Recambio registrado.");
+      render();
+    });
+  }
+
+  function replacementOrderItems(rep) {
+    return rep.items.map((it) => ({ id: nextItemId(), productId: it.productId, productName: it.productName, quantity: it.qty, unitType: it.unitType, unitPrice: 0, subtotal: 0, ivaRate: 0, ivaAmount: 0, totalWithIva: 0, note: "(reposición)", assignedProviderId: "", assignedToType: "", assignedToId: "" }));
+  }
+
+  function generateReplacementOrder(rep, date) {
+    const client = getClient(rep.clientId);
+    const order = { id: nextDatedId("ORD", (state.orders || []).concat(state.deletedOrders || [])), userId: currentUser.id, date, clientId: rep.clientId, deliveryVehicleId: client ? client.vehicleId : "", status: "pendiente", items: replacementOrderItems(rep), subtotalAmount: 0, ivaAmount: 0, totalAmount: 0, priceTier: client ? client.priceTier : "general", priceAdjustmentPct: client ? Number(client.priceAdjustmentPct || 0) : 0, paymentReceived: 0, paymentStatus: "paid", remitoPrinted: false, notes: "Reposición", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    state.orders.push(order);
+    rep.status = "generado"; rep.generatedOrderId = order.id;
+    return order;
+  }
+
+  function generatePendingReplacements() {
+    (state.replacements || []).filter((r) => r.status === "pendiente" && r.when === "manana").forEach((r) => {
+      generateReplacementOrder(r, addDaysISO(r.createdDate || todayISO(), 1));
+    });
+    saveState();
+  }
+
+  function attachProximoReplacements(order) {
+    const pend = (state.replacements || []).filter((r) => r.status === "pendiente" && r.when === "proximo" && r.clientId === order.clientId);
+    if (!pend.length) return;
+    pend.forEach((r) => {
+      replacementOrderItems(r).forEach((it) => order.items.push(it));
+      r.status = "generado"; r.generatedOrderId = order.id;
+    });
+  }
+
+  function renderPendingReplacementsBanner() {
+    if (!["manager", "admin", "employee"].includes(currentUser.role)) return "";
+    const count = (state.replacements || []).filter((r) => r.status === "pendiente").length;
+    if (!count) return "";
+    return `
+      <a class="pending-transfers-banner" data-route="pedidos" title="Productos de reposicion pendientes">
+        <span class="pending-transfers-count">${count}</span>
+        <span class="pending-transfers-label">Prod reposición</span>
+      </a>
+    `;
+  }
+
   function renderPendingTransfersBanner() {
     const count = Array.isArray(state.clientTransfers)
       ? state.clientTransfers.filter((transfer) => transfer.status === "pending").length
@@ -4105,6 +4222,7 @@
         return;
       }
       state.orders.push(order);
+      attachProximoReplacements(order);
       addSaldoEntry({
         clientId: client.id,
         type: "pedido",
@@ -4345,12 +4463,13 @@
     const headers = `<th>Pedido</th><th>Cliente</th><th>Productos</th><th>Total</th>${canEditStatus ? "<th>Estado</th>" : "<th>Cobrado</th><th>Estado</th>"}${showActions ? "<th>Acciones</th>" : ""}`;
 
     afterRender.push(bindOrders);
+    afterRender.push(() => document.querySelectorAll("[data-open-recambio]").forEach((b) => b.addEventListener("click", openRecambioModal)));
     return pageShell(
       "Pedidos",
       currentUser.role === "employee" ? "Pedidos para reparto y cobranza segun el rango seleccionado." : isClientLikeRole(currentUser.role) ? "Pedidos de su cuenta." : "Lista de pedidos y estados.",
-      ["manager", "admin"].includes(currentUser.role)
+      (["manager", "admin"].includes(currentUser.role)
         ? `<button class="btn primary" data-route="nuevo-pedido">Nuevo pedido</button>`
-        : currentUser.role === "employee" ? `<button class="btn primary" data-route="nuevo-pedido">Nuevo Pedido</button><button class="btn blue" data-route="pagos">Registrar pago</button>` : "",
+        : currentUser.role === "employee" ? `<button class="btn primary" data-route="nuevo-pedido">Nuevo Pedido</button><button class="btn blue" data-route="pagos">Registrar pago</button>` : "") + `<button class="btn ghost" data-open-recambio>Pedir recambio</button>`,
       `
       ${showTrashTabs ? `<div class="tabs"><button class="tab ${!annulledView && !deletedView ? "active" : ""}" data-orders-tab="activos">Pedidos</button><button class="tab ${annulledView ? "active" : ""}" data-orders-tab="anulados">Anulados</button><button class="tab ${deletedView ? "active" : ""}" data-orders-tab="eliminados">Eliminados</button></div>` : ""}
       <div class="panel" style="margin-bottom:14px">
@@ -4715,10 +4834,11 @@
       document.querySelectorAll("[data-view-customer-remito]").forEach((button) => button.addEventListener("click", () => openCustomerRemitoModal(button.dataset.viewCustomerRemito)));
       document.querySelectorAll("[data-edit-order]").forEach((button) => button.addEventListener("click", () => openOrderForm(button.dataset.editOrder)));
     });
+    afterRender.push(() => document.querySelectorAll("[data-open-recambio]").forEach((b) => b.addEventListener("click", openRecambioModal)));
     return pageShell(
       "Mis Pedidos",
       "Pedidos de sus cuentas vinculadas.",
-      `<button class="btn primary" data-route="nuevo-pedido">Nuevo pedido</button><button class="btn blue" data-route="registrar-transferencia">Registrar transferencia</button>`,
+      `<button class="btn primary" data-route="nuevo-pedido">Nuevo pedido</button><button class="btn blue" data-route="registrar-transferencia">Registrar transferencia</button><button class="btn ghost" data-open-recambio>Pedir recambio</button>`,
       `
       <div class="panel" style="margin-bottom:14px">
         <div class="form-grid balance-date-grid orders-date-grid">
