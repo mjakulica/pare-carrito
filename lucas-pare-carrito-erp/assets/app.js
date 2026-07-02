@@ -10385,6 +10385,7 @@
           <div class="form-grid" style="margin-top:8px">
             <div class="field span-4"><label>Mensaje</label><textarea id="holiday-message" rows="2">${escapeHtml(getHolidayMessageText())}</textarea></div>
             <div class="field span-2"><label>Nombre de plantilla Meta</label><input id="holiday-template" value="${escapeAttr((state.appSettings && state.appSettings.holidayTemplateName) || "")}" placeholder="ej: aviso_feriado" /></div>
+            <div class="field span-2"><label>&nbsp;</label><button type="button" class="btn ghost full" id="settings-holidays-btn">Gestionar feriados (agregar/aprobar fechas)</button></div>
             <div class="field span-4"><label><input type="checkbox" id="orderchange-enabled" ${state.appSettings && state.appSettings.orderChangeNotifyEnabled ? "checked" : ""} style="width:auto;min-height:auto" /> Avisar al cliente por WhatsApp al agregar/quitar productos de su pedido</label></div>
             <div class="field span-4"><label>Mensaje de aviso de cambio de pedido (usa {cliente} y {detalle})</label><textarea id="orderchange-message" rows="2">${escapeHtml(getOrderChangeMessageText())}</textarea></div>
             <div class="field span-2"><label>Nombre de plantilla Meta (cambios de pedido)</label><input id="orderchange-template" value="${escapeAttr((state.appSettings && state.appSettings.orderChangeTemplateName) || "")}" placeholder="ej: pedido_modificado" /></div>
@@ -10675,6 +10676,8 @@
     if (holidayMessageInput) holidayMessageInput.addEventListener("change", () => { state.appSettings.holidayMessage = holidayMessageInput.value.trim(); saveState(); });
     const holidayTemplateInput = document.getElementById("holiday-template");
     if (holidayTemplateInput) holidayTemplateInput.addEventListener("change", () => { state.appSettings.holidayTemplateName = holidayTemplateInput.value.trim(); saveState(); });
+    const settingsHolidaysBtn = document.getElementById("settings-holidays-btn");
+    if (settingsHolidaysBtn) settingsHolidaysBtn.addEventListener("click", openHolidaysModal);
     const ocEnabled = document.getElementById("orderchange-enabled");
     if (ocEnabled) ocEnabled.addEventListener("change", () => { state.appSettings.orderChangeNotifyEnabled = ocEnabled.checked; saveState(); });
     const ocMessage = document.getElementById("orderchange-message");
@@ -11675,6 +11678,7 @@
         <div class="field span-2"><label>Correo</label><input id="client-email" type="email" value="${escapeAttr(client ? client.email || "" : "")}" /></div>
         <div class="field span-2"><label>Correo facturacion</label><input id="client-billing-email" type="email" value="${escapeAttr(client ? client.billingEmail || "" : "")}" /></div>
         <div class="field"><label>Tipo pago</label><select id="client-payment">${["cuenta_corriente", "contado", "semanal", "contra_factura"].map((type) => `<option value="${type}" ${client && client.paymentType === type ? "selected" : ""}>${escapeHtml(paymentTypeLabel(type))}</option>`).join("")}</select></div>
+        <div class="field" id="client-payment-day-wrap" style="${client && (client.paymentType === "semanal" || client.paymentType === "cuenta_corriente") ? "" : "display:none"}"><label>Día/plazo de pago</label><select id="client-payment-day">${["lunes","martes","miercoles","jueves","viernes","sabado","domingo","10 dias","15 dias","20 dias","mensual"].map((d) => `<option value="${d}" ${client && client.paymentDay === d ? "selected" : ""}>${d}</option>`).join("")}</select></div>
         <div class="field"><label>Precio</label><select id="client-tier"><option value="general" ${client && client.priceTier === "general" ? "selected" : ""}>General</option><option value="preferencial" ${client && client.priceTier === "preferencial" ? "selected" : ""}>Preferencial</option><option value="con_factura" ${client && client.priceTier === "con_factura" ? "selected" : ""}>Con Factura</option></select></div>
         <div class="field"><label>Ajuste precio %</label><input id="client-adjustment" inputmode="decimal" value="${formatAmountInput(client ? client.priceAdjustmentPct || 0 : 0)}" /></div>
         <div class="field"><label>Vehículo</label><select id="client-vehicle">${activeVehicles().map((vehicle) => `<option value="${vehicle.id}" ${client && client.vehicleId === vehicle.id ? "selected" : ""}>${escapeHtml(vehicle.name)}</option>`).join("")}</select></div>
@@ -11701,6 +11705,13 @@
           // Si no es "con_factura" no forzamos nada: el usuario decide si necesita factura y de que tipo.
         };
         tierSelect.addEventListener("change", syncInvoiceDefaults);
+        const clientPaymentSelect = document.getElementById("client-payment");
+        const clientPaymentDayWrap = document.getElementById("client-payment-day-wrap");
+        if (clientPaymentSelect && clientPaymentDayWrap) {
+          const syncPaymentDay = () => { clientPaymentDayWrap.style.display = (clientPaymentSelect.value === "semanal" || clientPaymentSelect.value === "cuenta_corriente") ? "" : "none"; };
+          clientPaymentSelect.addEventListener("change", syncPaymentDay);
+          syncPaymentDay();
+        }
         document.getElementById("modal-save").addEventListener("click", () => {
           const idValue = client ? client.id : document.getElementById("client-id").value.trim();
           if (!idValue || !document.getElementById("client-name").value.trim()) return alert("Complete ID y nombre.");
@@ -11722,6 +11733,7 @@
             billingEmail: document.getElementById("client-billing-email").value.trim(),
             contactName: "",
             paymentType: document.getElementById("client-payment").value,
+            paymentDay: document.getElementById("client-payment-day") ? document.getElementById("client-payment-day").value : (client ? client.paymentDay || "" : ""),
             priceTier: priceTierValue,
             priceAdjustmentPct: parseAmount(document.getElementById("client-adjustment").value),
             needsInvoice: needsInvoiceValue,
