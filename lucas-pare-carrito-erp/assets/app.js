@@ -3470,6 +3470,18 @@
     `;
   }
 
+  function renderPendingReplacementsPanel() {
+    if (isClientLikeRole(currentUser.role)) return "";
+    const pend = (state.replacements || []).filter((r) => r.status === "pendiente");
+    if (!pend.length) return "";
+    const rows = pend.map((r) => {
+      const c = getClient(r.clientId);
+      const items = r.items.map((it) => `${escapeHtml(it.productName)} x${formatNumber(it.qty)}${it.photo ? ` <img src="${it.photo}" style="height:22px;vertical-align:middle;border-radius:3px" />` : ""}`).join(", ");
+      return `<div style="padding:3px 0;border-bottom:1px solid #eee"><strong>${escapeHtml(c ? c.name : r.clientId)}</strong> <span class="muted">(${r.when === "manana" ? "mañana" : "próximo pedido"})</span>: ${items}</div>`;
+    }).join("");
+    return `<div class="panel highlight-panel" style="margin-bottom:14px"><h2 class="page-title" style="font-size:16px">Productos de reposición pendientes (${pend.length})</h2>${rows}</div>`;
+  }
+
   function renderPendingTransfersBanner() {
     const count = Array.isArray(state.clientTransfers)
       ? state.clientTransfers.filter((transfer) => transfer.status === "pending").length
@@ -4489,6 +4501,7 @@
         </div>
       </div>
       ${["manager", "admin"].includes(currentUser.role) && !annulledView && !deletedView ? `<div class="panel" style="margin-bottom:14px"><div class="form-grid"><div class="field"><label>Estado masivo</label><select id="bulk-order-status">${["pendiente", "preparando", "listo", "entregado", "cancelado"].map((status) => `<option value="${status}">${statusLabel(status)}</option>`).join("")}</select></div><div class="field"><label>&nbsp;</label><button class="btn ghost" id="apply-bulk-order-status" type="button">Actualizar pedidos visibles</button></div></div></div>` : ""}
+      ${renderPendingReplacementsPanel()}
       <div class="panel">
         <div class="table-wrap orders-table">
           <table>
