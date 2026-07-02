@@ -1828,6 +1828,41 @@ app.post("/clients/holiday-broadcast", authenticate, requireRole("manager", "adm
   }
 });
 
+// Aviso al cliente cuando se agrega/quita un producto de su pedido (plantilla editable en Configuracion).
+app.post("/clients/order-change-notify", authenticate, async (req, res) => {
+  const botUrl = process.env.BOT_BROADCAST_URL || "";
+  const botKey = process.env.BROADCAST_KEY || "";
+  if (!botUrl) return res.status(503).json({ error: "Aviso por WhatsApp no configurado (BOT_BROADCAST_URL)." });
+  const stored = await loadStateData();
+  if (!stored) return res.status(404).json({ error: "Sin datos." });
+  const d = stored.data || {};
+  const settings = d.appSettings || {};
+  if (!settings.orderChangeNotifyEnabled) return res.json({ ok: true, skipped: "deshabilitado" });
+  const templateName = settings.orderChangeTemplateName || "";
+  if (!templateName) return res.status(400).json({ error: "Configura la plantilla de aviso de cambios en Configuracion." });
+  const lang = settings.orderChangeTemplateLang || "es";
+  const clientId = String((req.body || {}).clientId || "");
+  const detail = String((req.body || {}).detail || "");
+  const client = (d.clients || []).find((c) => c.id === clientId);
+  if (!client) return res.status(404).json({ error: "Cliente no encontrado." });
+  const phone = String(client.phone || (Array.isArray(client.phones) ? client.phones[0] : "") || "").replace(/\D/g, "");
+  if (!phone) return res.json({ ok: true, sent: 0, note: "El cliente no tiene celular principal." });
+  let msg = settings.orderChangeMessage || "Hola {cliente}, actualizamos tu pedido de hoy: {detalle}. Cualquier cosa avisanos.";
+  msg = msg.replace(/{cliente}/g, client.name || "").replace(/{detalle}/g, detail);
+  try {
+    const r = await fetch(botUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-broadcast-key": botKey },
+      body: JSON.stringify({ numbers: [phone], templateName, lang, params: [msg] })
+    });
+    const payload = await r.json().catch(() => ({}));
+    if (!r.ok) return res.status(502).json({ error: payload.error || "El bot no pudo enviar." });
+    res.json({ ok: true, sent: payload.sent || 0, failed: payload.failed || 0 });
+  } catch (error) {
+    res.status(502).json({ error: "No se pudo contactar al bot: " + error.message });
+  }
+});
+
 // Regenera (URL fresca) el PDF de una factura ya emitida en TusFacturas. La URL del alta caduca.
 app.post("/billing/regenerate-pdf", authenticate, requireRole("manager", "admin", "contador"), async (req, res) => {
   const cfg = billingConfig();

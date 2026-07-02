@@ -10383,6 +10383,9 @@
           <div class="form-grid" style="margin-top:8px">
             <div class="field span-4"><label>Mensaje</label><textarea id="holiday-message" rows="2">${escapeHtml(getHolidayMessageText())}</textarea></div>
             <div class="field span-2"><label>Nombre de plantilla Meta</label><input id="holiday-template" value="${escapeAttr((state.appSettings && state.appSettings.holidayTemplateName) || "")}" placeholder="ej: aviso_feriado" /></div>
+            <div class="field span-4"><label><input type="checkbox" id="orderchange-enabled" ${state.appSettings && state.appSettings.orderChangeNotifyEnabled ? "checked" : ""} style="width:auto;min-height:auto" /> Avisar al cliente por WhatsApp al agregar/quitar productos de su pedido</label></div>
+            <div class="field span-4"><label>Mensaje de aviso de cambio de pedido (usa {cliente} y {detalle})</label><textarea id="orderchange-message" rows="2">${escapeHtml(getOrderChangeMessageText())}</textarea></div>
+            <div class="field span-2"><label>Nombre de plantilla Meta (cambios de pedido)</label><input id="orderchange-template" value="${escapeAttr((state.appSettings && state.appSettings.orderChangeTemplateName) || "")}" placeholder="ej: pedido_modificado" /></div>
           </div>
         </div>` : ""}
       </div>` : ""}
@@ -10670,6 +10673,12 @@
     if (holidayMessageInput) holidayMessageInput.addEventListener("change", () => { state.appSettings.holidayMessage = holidayMessageInput.value.trim(); saveState(); });
     const holidayTemplateInput = document.getElementById("holiday-template");
     if (holidayTemplateInput) holidayTemplateInput.addEventListener("change", () => { state.appSettings.holidayTemplateName = holidayTemplateInput.value.trim(); saveState(); });
+    const ocEnabled = document.getElementById("orderchange-enabled");
+    if (ocEnabled) ocEnabled.addEventListener("change", () => { state.appSettings.orderChangeNotifyEnabled = ocEnabled.checked; saveState(); });
+    const ocMessage = document.getElementById("orderchange-message");
+    if (ocMessage) ocMessage.addEventListener("change", () => { state.appSettings.orderChangeMessage = ocMessage.value.trim(); saveState(); });
+    const ocTemplate = document.getElementById("orderchange-template");
+    if (ocTemplate) ocTemplate.addEventListener("change", () => { state.appSettings.orderChangeTemplateName = ocTemplate.value.trim(); saveState(); });
     document.querySelectorAll("[data-product-kg]").forEach((input) => input.addEventListener("change", () => {
       const product = getProduct(input.dataset.productKg);
       if (!product) return;
@@ -11557,6 +11566,21 @@
   function getHolidayMessageText() {
     return (state.appSettings && state.appSettings.holidayMessage) || "Hola! Te recordamos que el {fecha} ({feriado}) no hay reparto por feriado. Hace tu pedido con anticipacion. Gracias!";
   }
+
+  function getOrderChangeMessageText() {
+    return (state.appSettings && state.appSettings.orderChangeMessage) || "Hola {cliente}, actualizamos tu pedido de hoy: {detalle}. Cualquier cosa avisanos.";
+  }
+
+  // Aviso por WhatsApp al cliente cuando se agrega/quita un producto de su pedido (via plantilla configurable).
+  function notifyOrderProductChange(order, detail) {
+    try {
+      if (!order || !detail) return;
+      if (!state.appSettings || !state.appSettings.orderChangeNotifyEnabled) return;
+      const cfg = getCloudSyncConfig();
+      if (!cfg.username || !cloudSyncReady(cfg)) return;
+      cloudRequest(cfg, "/clients/order-change-notify", { method: "POST", body: JSON.stringify({ clientId: order.clientId, detail }) }).catch(() => {});
+    } catch (e) { /* no bloquea el guardado */ }
+  }
   function canApproveHolidays() {
     return currentUser.role === "admin" || currentUser.role === "manager";
   }
@@ -12149,6 +12173,8 @@
             order.status = document.getElementById("edit-order-status").value;
           }
           order.notes = document.getElementById("edit-order-notes").value.trim();
+          const removedNames = order.items.filter((entry) => removedItemIds.has(entry.id)).map((entry) => entry.productName);
+          const addedNames = [];
           document.querySelectorAll("[data-edit-order-item]").forEach((row) => {
             const item = order.items.find((entry) => entry.id === row.dataset.editOrderItem);
             if (!item) return;
@@ -12175,12 +12201,17 @@
             const addIvaRate = shouldApplyInvoiceVat(addClient) ? getIvaRate(addProduct.ivaType) : 0;
             const addIvaAmount = addSubtotal * (addIvaRate / 100);
             order.items.push({ id: nextItemId(), productId: addProduct.id, productName: addProduct.name, quantity: addQty, unitType: addProduct.unitType, unitPrice: addUnitPrice, subtotal: addSubtotal, ivaRate: addIvaRate, ivaAmount: addIvaAmount, totalWithIva: addSubtotal + addIvaAmount, note: addRow.querySelector("[data-add-note]").value.trim(), assignedProviderId: "", assignedToType: "", assignedToId: "" });
+            addedNames.push(formatAmountInput(addQty) + " " + addProduct.name);
           });
           if (removedItemIds.size) order.items = order.items.filter((entry) => !removedItemIds.has(entry.id));
           recalcOrderTotals(order);
           order.updatedAt = new Date().toISOString();
           if (!order.exampleOnly) updateOrderAccounting(order);
           saveState();
+          const changeBits = [];
+          if (addedNames.length) changeBits.push("agregamos " + addedNames.join(", "));
+          if (removedNames.length) changeBits.push("sacamos " + removedNames.join(", "));
+          if (changeBits.length) notifyOrderProductChange(order, changeBits.join(" y "));
           closeModal();
         });
       }
