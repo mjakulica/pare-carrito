@@ -13268,7 +13268,7 @@
     const cleanUnit = normalizeText(unitType);
     let nextQuantity = quantity;
     let nextUnitType = unitType;
-    if (productUnit === "docena" && (cleanUnit === "unidad" || (!cleanUnit && isLikelyLooseUnitCountName(nameTokens)))) {
+    if (productUnit === "docena" && (cleanUnit === "unidad" || (!cleanUnit && (isLikelyLooseUnitCountName(nameTokens) || quantity > 2)))) {
       nextQuantity = quantity / 12;
       nextUnitType = "docena";
     } else if (productUnit && isWholesaleParsedUnit(cleanUnit) && isWholesaleParsedUnit(productUnit)) {
@@ -13464,12 +13464,12 @@
     clean = clean.replace(/\bpimientos?\b/g, "morron").replace(/\bmolido\b/g, "polvo").replace(/\bzucc?h?ini\b/g, "zukini");
     if (!clean) return null;
     const unitText = normalizeText(unitType);
-    const clientAlias = state.clientProductAliases.find((alias) => alias.clientId === clientId && normalizeText(alias.alias) === clean);
+    const clientAlias = state.clientProductAliases.find((alias) => alias.clientId === clientId && (normalizeText(alias.alias) === clean || singularizeParsedProductText(normalizeText(alias.alias)) === singularizeParsedProductText(clean)));
     if (clientAlias) {
       const product = getProduct(clientAlias.productId);
       return product ? { product, score: 120, exact: true } : null;
     }
-    const generalAlias = state.productAliases.find((alias) => normalizeText(alias.alias) === clean);
+    const generalAlias = state.productAliases.find((alias) => normalizeText(alias.alias) === clean || singularizeParsedProductText(normalizeText(alias.alias)) === singularizeParsedProductText(clean));
     if (generalAlias) {
       const product = getProduct(generalAlias.productId);
       return product ? { product, score: 115, exact: true } : null;
