@@ -2732,7 +2732,7 @@
     saveState();
   }
   function recordStockPurchaseMovements(purchase) {
-    if (!purchase || ["other_expense", "market_price", "provider_payment", "cash_movement", "prepared"].includes(purchase.expenseType)) return;
+    if (!purchase || ["other_expense", "freight", "market_price", "provider_payment", "cash_movement", "prepared"].includes(purchase.expenseType)) return;
     const items = Array.isArray(purchase.items) && purchase.items.length ? purchase.items : (purchase.productId ? [{ productId: purchase.productId, quantity: purchase.quantity }] : []);
     const tracked = getStockTrackedProductIds();
     const relations = state.productRelations || [];
@@ -4595,7 +4595,7 @@
   function getPurchasedQuantities(date) {
     const purchased = {};
     state.purchases
-      .filter((purchase) => purchase.date === date && !["other_expense", "market_price", "provider_payment", "cash_movement"].includes(purchase.expenseType))
+      .filter((purchase) => purchase.date === date && !["other_expense", "freight", "market_price", "provider_payment", "cash_movement"].includes(purchase.expenseType))
       .forEach((purchase) => {
         const items = Array.isArray(purchase.items) && purchase.items.length
           ? purchase.items
@@ -5937,7 +5937,7 @@
           <td>${formatDate(purchase.date)}<br><span class="muted">${escapeHtml(purchase.createdByName || purchase.recordedBy || "")}${purchase.createdAt ? " \u00b7 " + formatClockHM(purchase.createdAt) : ""}</span></td>
           <td>${escapeHtml(expenseTypeLabel(purchase.expenseType || "purchase"))}</td>
           <td>${escapeHtml(origin)}</td>
-          <td>${itemText}</td>
+          <td>${itemText}${(purchase.expenseType === "other_expense" || purchase.expenseType === "freight") && purchase.proofFile ? ` <button class="btn small ghost" type="button" data-view-proof="${escapeAttr(purchase.id)}">Ver comprobante</button>` : ""}</td>
           <td>${escapeHtml(purchaseStatusLabel(purchase.paymentStatus || "paid"))}</td>
           <td>${escapeHtml(getCashBoxName(getPurchaseCashBoxId(purchase)))}</td>
           <td class="num">${formatMoney(purchase.totalCost)}</td>
@@ -5961,6 +5961,10 @@
       bindPurchaseTabs();
       if (purchaseTab === "proveedores") bindProviderPaymentTab();
       else bindPurchases();
+      document.querySelectorAll("[data-view-proof]").forEach((b) => b.addEventListener("click", () => {
+        const p = state.purchases.find((x) => x.id === b.dataset.viewProof);
+        if (p && p.proofFile) showModal("Comprobante", `<img src="${p.proofFile}" style="max-width:100%;height:auto;display:block;margin:0 auto" />`, null, { className: "wide" });
+      }));
     });
     return pageShell(
       currentUser.role === "employee" ? "Gastos" : "Compras y Gastos",
@@ -6114,6 +6118,7 @@
                 <option value="prepared">Preparado</option>
                 <option value="market_price">Actualizar precio mercado</option>
                 <option value="other_expense">Otro gasto</option>
+                <option value="freight">Flete</option>
                 <option value="cash_movement">Movimiento de Caja</option>
               </select>
             </div>
@@ -6174,6 +6179,10 @@
             <div class="field" id="purchase-other-amount-wrap">
               <label>Monto</label>
               <input id="purchase-other-amount" inputmode="decimal" placeholder="0" />
+            </div>
+            <div class="field" id="purchase-proof-wrap" style="display:none">
+              <label>Adjuntar comprobante (opcional)</label>
+              <input id="purchase-proof" type="file" accept="image/*" />
             </div>
             <div class="field" id="purchase-total-wrap">
               <label>Total</label>
@@ -6359,7 +6368,7 @@
         total.value = formatMoney(0);
         return;
       }
-      if (kind.value === "other_expense") {
+      if (kind.value === "other_expense" || kind.value === "freight") {
         total.value = formatMoney(parseAmount(otherAmount.value));
         return;
       }
@@ -6374,7 +6383,7 @@
       total.value = formatMoney(sum);
     };
     const updateKind = () => {
-      const isOther = kind.value === "other_expense";
+      const isOther = kind.value === "other_expense" || kind.value === "freight";
       const isPurchase = kind.value === "purchase";
       const isProviderPayment = kind.value === "provider_payment";
       const isPrepared = kind.value === "prepared";
@@ -6385,6 +6394,8 @@
       if (addItemBtnToggle) addItemBtnToggle.style.display = (isOther || isProviderPayment || isCashMovement) ? "none" : "inline-flex";
       itemsContainer.classList.toggle("market-price-mode", isMarketPrice);
       descriptionWrap.style.display = isOther ? "grid" : "none";
+      const proofWrap = document.getElementById("purchase-proof-wrap");
+      if (proofWrap) proofWrap.style.display = isOther ? "grid" : "none";
       otherAmountWrap.style.display = isOther || isCashMovement ? "grid" : "none";
       if (cashMovementTargetWrap) cashMovementTargetWrap.style.display = isCashMovement ? "grid" : "none";
       if (cashBoxWrap) cashBoxWrap.style.display = isPrepared || isMarketPrice ? "none" : "grid";
@@ -6528,7 +6539,7 @@
     }
     kind.addEventListener("change", updateKind);
     updateKind();
-    document.getElementById("purchase-form").addEventListener("submit", (event) => {
+    document.getElementById("purchase-form").addEventListener("submit", async (event) => {
       event.preventDefault();
       const expenseType = kind.value;
       const providerParsed = providerInput ? parsePurchaseProviderValue(providerInput.value) : { provider: null };
@@ -6614,16 +6625,22 @@
       }
       if (expenseType === "purchase" && !provider) return alert("Seleccione un proveedor en el dropdown.");
       if (expenseType === "other_expense" && !description) return alert("Ingrese una descripción para el gasto.");
-      const items = expenseType === "other_expense" ? [] : expenseType === "market_price" ? readMarketPriceItems() : readPurchaseItems(expenseType === "prepared");
-      const totalCost = expenseType === "other_expense"
+      const isOtherExp = expenseType === "other_expense" || expenseType === "freight";
+      const items = isOtherExp ? [] : expenseType === "market_price" ? readMarketPriceItems() : readPurchaseItems(expenseType === "prepared");
+      const totalCost = isOtherExp
         ? parseAmount(otherAmount.value)
         : expenseType === "market_price"
           ? 0
         : expenseType === "prepared"
           ? 0
         : items.reduce((sum, item) => sum + item.totalCost, 0);
-      if (expenseType !== "other_expense" && !items.length) return alert("Agregue al menos un producto valido.");
+      if (!isOtherExp && !items.length) return alert("Agregue al menos un producto valido.");
       if (!["prepared", "market_price"].includes(expenseType) && totalCost <= 0) return alert("Complete el monto/costo.");
+      let proofFile = "";
+      const proofInput = document.getElementById("purchase-proof");
+      if (isOtherExp && proofInput && proofInput.files && proofInput.files[0]) {
+        try { proofFile = await compressImageFile(proofInput.files[0], 1200, 0.7); } catch (e) { console.warn("No se pudo comprimir el comprobante:", e.message); }
+      }
       const purchase = {
         id: nextDatedId("CMP", state.purchases),
         date: document.getElementById("purchase-date").value || todayISO(),
@@ -6643,7 +6660,8 @@
         assignedEmployeeId: currentUser.role === "employee" ? currentUser.id : document.getElementById("purchase-assigned-employee").value,
         vendorName: document.getElementById("purchase-vendor").value.trim(),
         recordedBy: currentUser.name,
-        userRole: currentUser.role
+        userRole: currentUser.role,
+        proofFile
       };
       state.purchases.push(purchase);
       recordStockPurchaseMovements(purchase);
@@ -14162,6 +14180,7 @@
       purchase: "Compra",
       product_expense: "Gasto producto",
       other_expense: "Otro gasto",
+      freight: "Flete",
       provider_payment: "Pago a proveedor",
       prepared: "Preparado",
       market_price: "Actualizar precio mercado",
