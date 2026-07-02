@@ -13459,7 +13459,7 @@
       const protectedLine = line
         .replace(/(\d)\s*,\s*(\d)/g, "$1\u0001$2")
         .replace(/(\d)\s*\.\s*(\d)/g, "$1\u0002$2")
-        .replace(/\.\s+/g, ", ");
+        .replace(/\.\s+(?!\()/g, ", ");
       const commaParts = protectedLine
         .replace(/[;]+/g, ",")
         .split(/\s*,+\s*/)
