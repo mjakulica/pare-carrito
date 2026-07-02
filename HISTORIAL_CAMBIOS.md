@@ -1,5 +1,13 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.16 - Proveedor: contador de recambios en Inicio (2026-07-01)
+
+### Frontend / Rol Proveedor
+
+- En el Inicio del proveedor se agrega la tarjeta "Recambios pendientes" con la cantidad de productos suyos marcados para reposicion. Commit pendiente en este push.
+
+---
+
 ## v12.9.15 - Proveedor: selector de compras acotado y recambios visibles (2026-07-01)
 
 ### Frontend / Rol Proveedor
