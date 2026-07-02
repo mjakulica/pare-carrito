@@ -1,5 +1,15 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.9 - Vehiculos (impresion) y fecha por defecto del pedido (2026-06-30)
+
+### Frontend / Vehiculos / Nuevo Pedido
+
+- Impresion de Vehiculos (Sin Dividir, Todos y por vehiculo): la "Sumatoria total de productos" pasa de 2 a 3 columnas, y cada pedido muestra el N de cliente junto al nombre. Aplica en desktop y mobile. Commit `75f845e`.
+- En "Sin Dividir" ya no se muestra el total de precio de cada pedido (se mantiene en "Todos" y por vehiculo). Commit `75f845e`.
+- Nuevo Pedido: la fecha por defecto es el dia siguiente cuando se carga despues de las 10:00, y el mismo dia de 00:00 a 09:59. Commit `75f845e`.
+
+---
+
 ## v12.9.8 - Eliminar productos inactivos (2026-06-30)
 
 ### Frontend / Productos
