@@ -9359,6 +9359,15 @@
         });
       }));
       document.querySelectorAll("[data-edit-provider]").forEach((button) => button.addEventListener("click", () => openProviderForm(button.dataset.editProvider)));
+      const provGrid = document.getElementById("prov-products-grid");
+      if (provGrid && selectedProvider) {
+        const provFilter = document.getElementById("prov-products-filter");
+        if (provFilter) provFilter.addEventListener("input", () => { const c = normalizeText(provFilter.value); provGrid.querySelectorAll("[data-check-name]").forEach((it) => { it.style.display = !c || it.dataset.checkName.includes(c) ? "" : "none"; }); });
+        provGrid.querySelectorAll("[data-prov-product]").forEach((cb) => cb.addEventListener("change", () => {
+          selectedProvider.productsSupplied = Array.from(provGrid.querySelectorAll("[data-prov-product]:checked")).map((x) => x.value);
+          saveState();
+        }));
+      }
       document.querySelectorAll("[data-annul-provider-ledger]").forEach((button) => button.addEventListener("click", () => {
         const entry = state.providerLedger.find((item) => item.id === button.dataset.annulProviderLedger);
         if (!entry) return;
@@ -9397,11 +9406,17 @@
               const isAnnulled = entry.status === "anulado";
               const annulButton = isManager && !isAnnulled ? `<button class="btn small danger" data-annul-provider-ledger="${entry.id}" title="Anular movimiento">X</button>` : "";
               const annulledLabel = isAnnulled ? `<span class="pill gray">Anulado</span>` : "";
-              return `<tr style="${isAnnulled ? "text-decoration:line-through;opacity:0.6" : ""}"><td>${formatDate(entry.date)}</td><td>${escapeHtml(entry.providerName || "")}</td><td>${escapeHtml(entry.type)}</td><td>${escapeHtml(entry.description)}</td><td class="num">${formatMoney(entry.amount)}</td><td class="num">${formatMoney(entry.balance || 0)}</td><td>${escapeHtml(entry.notes || "")}</td><td>${annulButton}${annulledLabel}</td></tr>`;
+              const relP = entry.relatedEntityId ? (state.purchases || []).find((p) => p.id === entry.relatedEntityId) : null;
+              const movDesc = relP && Array.isArray(relP.items) && relP.items.length ? `<details><summary>${escapeHtml(entry.description)}</summary><div class="mini-table">${relP.items.map((it) => `<div><span>${escapeHtml(it.productName)}</span><span>${formatNumber(it.quantity)} ${escapeHtml(it.unitType || "")} x ${formatMoney(it.unitCost)} = ${formatMoney(it.totalCost)}</span></div>`).join("")}</div></details>` : escapeHtml(entry.description);
+              return `<tr style="${isAnnulled ? "text-decoration:line-through;opacity:0.6" : ""}"><td>${formatDate(entry.date)}</td><td>${escapeHtml(entry.providerName || "")}</td><td>${escapeHtml(entry.type)}</td><td>${movDesc}</td><td class="num">${formatMoney(entry.amount)}</td><td class="num">${formatMoney(entry.balance || 0)}</td><td>${escapeHtml(entry.notes || "")}</td><td>${annulButton}${annulledLabel}</td></tr>`;
             }).join("") || emptyRow(8, "Sin movimientos para este rango.")}</tbody>
           </table>
         </div>
       </div>
+      ${!isAllProviders && selectedProvider ? `<div class="panel" style="margin-bottom:14px">
+        <h2 class="page-title" style="font-size:18px">Productos que vende ${escapeHtml(selectedProvider.name)}</h2>
+        ${(currentUser && roleFlag(currentUser.role, "editarProveedores")) ? `<input id="prov-products-filter" placeholder="Filtrar productos..." autocomplete="off" style="margin:6px 0" /><div id="prov-products-grid" class="check-grid">${activeProducts().map((p) => `<label class="check-item" data-check-name="${escapeAttr(normalizeText(p.name))}"><input type="checkbox" data-prov-product value="${p.id}" ${(selectedProvider.productsSupplied || []).includes(p.id) ? "checked" : ""} /><span>${escapeHtml(p.name)} - ${escapeHtml(p.unitType)}</span></label>`).join("")}</div>` : `<ul class="divide-print-list">${(selectedProvider.productsSupplied || []).map((pid) => { const p = getProduct(pid); return p ? `<li>${escapeHtml(p.name)} - ${escapeHtml(p.unitType)}</li>` : ""; }).join("") || "<li class='muted'>Sin productos cargados.</li>"}</ul>`}
+      </div>` : ""}
       <div class="panel" style="margin-bottom:14px">
         <h2 class="page-title" style="font-size:18px">Buscar producto</h2>
         <div class="form-grid" style="margin-top:10px">
@@ -16594,6 +16609,9 @@
   function printHtmlDocument(title, body, options = {}) {
     const previousTitle = document.title;
     document.title = title;
+    // En mobile el iframe oculto imprime la pagina completa o no dispara el dialogo;
+    // usamos una pestania dedicada que auto-imprime solo este contenido.
+    if (!options.useWindow && typeof window !== "undefined" && window.matchMedia && window.matchMedia("(max-width: 760px)").matches) options.useWindow = true;
     if (options.useWindow) {
       const printWindow = options.printWindow || window.open("", "_blank");
       if (printWindow) {
