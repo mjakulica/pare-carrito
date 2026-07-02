@@ -4434,6 +4434,8 @@
         : visibleOrders().filter((order) => order.status !== "anulado");
       baseOrders = baseOrders.filter((order) => isDateInRange(order.date, ui.ordersFrom, ui.ordersTo));
     }
+    const provFilter = currentProviderId();
+    if (provFilter) baseOrders = baseOrders.filter((order) => (order.items || []).some((it) => getProductAssigneeValue(it.productId) === "provider:" + provFilter));
     const orders = baseOrders.slice().sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
     const canEditStatus = ["manager", "admin"].includes(currentUser.role) && !annulledView && !deletedView;
     const showActions = currentUser.role !== "customer";
@@ -7132,8 +7134,10 @@
     let selected = Array.isArray(ui.divideAssignees) ? ui.divideAssignees : (ui.divideAssignee && ui.divideAssignee !== "all" ? [ui.divideAssignee] : allValues.slice());
     ui.divideAssignees = selected;
     delete ui.divideAssignee;
+    if (currentProviderId()) { selected = [currentProviderAssigneeValue()]; ui.divideAssignees = selected; }
     const isAllSelected = selected.length >= allValues.length;
-    const assignables = getDivideAssignables();
+    let assignables = getDivideAssignables();
+    if (currentProviderId()) assignables = filterDivideAssignables(assignables, selected);
     const rows = assignables.map(({ order, item }) => {
         const client = getClient(order.clientId);
         const product = getProduct(item.productId);
@@ -7146,7 +7150,7 @@
             <td class="num">${formatNumber(item.quantity)} ${escapeHtml(item.unitType)}</td>
           <td>${assignee ? `<span class="pill green">Asignado a ${escapeHtml(assignee.name)}</span>` : `<span class="pill amber">Sin asignar</span>`}</td>
           <td>
-            <select data-assign-product="${item.productId}">
+            <select data-assign-product="${item.productId}" ${currentProviderId() ? "disabled" : ""}>
               <option value="">Sin asignar</option>
               ${assignees.map((entry) => `<option value="${entry.value}" ${assignedValue === entry.value ? "selected" : ""}>${escapeHtml(entry.label)}</option>`).join("")}
             </select>
@@ -7205,8 +7209,7 @@
       "Dividir Compras",
       "Agrupacion diaria por producto y por cliente segun la asignacion cargada en Productos.",
       `<div class="divide-page-actions">
-         <button class="btn primary" data-add-provider>Agregar</button>
-         <button class="btn ghost" data-print-divide="all">PDF todos</button>
+         ${currentProviderId() ? "" : `<button class="btn primary" data-add-provider>Agregar</button><button class="btn ghost" data-print-divide="all">PDF todos</button>`}
          <button class="btn ghost" data-print-divide="${escapeAttr(selected.join(","))}">PDF seleccionado</button>
        </div>
        <div class="divide-page-actions">
@@ -7216,11 +7219,11 @@
          </label>
        </div>
        <div class="divide-page-actions divide-whatsapp-actions">
-         <button class="btn ghost" data-copy-divide="all">${WHATSAPP_SVG} Todos</button>
+         ${currentProviderId() ? "" : `<button class="btn ghost" data-copy-divide="all">${WHATSAPP_SVG} Todos</button>`}
          <button class="btn ghost" data-copy-divide="${escapeAttr(selected.join(","))}">${WHATSAPP_SVG} Seleccionado</button>
        </div>`,
       `
-      <div class="panel" style="margin-bottom:14px">
+      ${currentProviderId() ? "" : `<div class="panel" style="margin-bottom:14px">
         <div class="form-grid">
           <div class="field span-2">
             <label>Empleado o proveedor</label>
@@ -7230,7 +7233,7 @@
             </div>
           </div>
         </div>
-      </div>
+      </div>`}
       <div class="grid two">
         <div class="panel">
           <h2 class="page-title" style="font-size:18px">Agrupado por producto</h2>
@@ -9192,7 +9195,8 @@
   }
 
   function renderProviders() {
-    const providers = state.providers.filter((provider) => ui.tab === "inactivos" ? !provider.isActive : provider.isActive);
+    let providers = state.providers.filter((provider) => ui.tab === "inactivos" ? !provider.isActive : provider.isActive);
+    if (currentProviderId()) { providers = providers.filter((p) => p.id === currentProviderId()); ui.providerSelectedId = currentProviderId(); }
     if (!ui.providerSelectedId || (ui.providerSelectedId !== "all" && !providers.some((provider) => provider.id === ui.providerSelectedId))) ui.providerSelectedId = "all";
     const isAllProviders = ui.providerSelectedId === "all";
     const selectedProvider = isAllProviders ? null : getProvider(ui.providerSelectedId);
