@@ -1,5 +1,14 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.12 - Fecha por defecto en Vehiculos/Unidades y lista de faltantes (2026-06-30)
+
+### Frontend / Vehiculos / Unidades
+
+- Vehiculos y Unidades vuelven siempre a la fecha de hoy por defecto (no arrastran una fecha de un dia anterior). Commit pendiente en este push.
+- En Unidades, "Productos sin compra o compra insuficiente" se muestra en formato de lista (una columna) en vez de cuadricula. Commit pendiente en este push.
+
+---
+
 ## v12.9.11 - Flete/comprobante, remitos PDF y aviso de cambios por WhatsApp (2026-06-30)
 
 ### Frontend / Backend / Compras / Remitos / Pedidos
