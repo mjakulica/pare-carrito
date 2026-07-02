@@ -333,6 +333,7 @@
     { id: "mi-facturacion", label: "Facturación", icon: "FA", roles: ["customer", "example"] },
     { id: "lista-precios", label: "Lista de Precios", icon: "LP", roles: ["customer", "example"] },
     { id: "proveedores", label: "Proveedores", icon: "PV", roles: ["manager", "admin", "employee", "contador", "proveedor"] },
+    { id: "mis-costos", label: "Mis Costos", icon: "$", roles: ["proveedor"] },
     { id: "usuarios", label: "Usuarios", icon: "US", roles: ["manager"] },
     { id: "configuracion", label: "Configuración", icon: "CF", roles: ["manager", "admin", "employee", "customer", "contador", "example", "proveedor"] },
     { id: "backup", label: "Backup", icon: "BK", roles: ["manager", "admin"] }
@@ -2449,6 +2450,7 @@
       "mis-pedidos": renderCustomerReports,
       "lista-precios": renderCustomerPriceList,
       proveedores: renderProviders,
+      "mis-costos": renderProviderCosts,
       usuarios: renderUsers,
       configuracion: renderSettings,
       backup: renderBackup
@@ -6057,6 +6059,8 @@
     const purchaseTab = ui.purchaseTab || "registro";
     const visiblePurchases = currentUser.role === "employee"
       ? state.purchases.filter((purchase) => purchase.userRole === "employee" || purchase.recordedBy === currentUser.name)
+      : currentUser.role === "proveedor"
+      ? state.purchases.filter((purchase) => purchase.recordedBy === currentUser.name)
       : state.purchases;
     const isManager = currentUser.role === "manager";
     const purchasesLimit = Number(ui.purchasesLimit) || 30;
@@ -9192,6 +9196,52 @@
       saveState();
       render();
     }));
+  }
+
+  function providerAssignedProducts() {
+    const pid = currentProviderId();
+    if (!pid) return [];
+    return activeProducts().filter((p) => getProductAssigneeValue(p.id) === "provider:" + pid)
+      .sort((a, b) => normalizeText(a.name).localeCompare(normalizeText(b.name)));
+  }
+
+  function renderProviderCosts() {
+    const products = providerAssignedProducts();
+    const rows = products.map((p) => {
+      const rec = state.prices[p.id] || { cost: p.baseCost || 0, marketPrice: 0 };
+      return `<tr data-pcost-row="${escapeAttr(p.id)}"><td>${escapeHtml(p.name)}</td><td><input data-pcost-cost inputmode="decimal" value="${formatAmountInput(rec.cost || 0)}" style="max-width:130px" /></td><td><input data-pcost-market inputmode="decimal" value="${formatAmountInput(rec.marketPrice || 0)}" style="max-width:130px" /></td></tr>`;
+    }).join("");
+    afterRender.push(() => {
+      const btn = document.getElementById("pcost-save");
+      if (btn) btn.addEventListener("click", () => {
+        document.querySelectorAll("[data-pcost-row]").forEach((row) => {
+          const pid = row.dataset.pcostRow;
+          const cost = parseAmount(row.querySelector("[data-pcost-cost]").value);
+          const market = parseAmount(row.querySelector("[data-pcost-market]").value);
+          const prev = state.prices[pid] || {};
+          const prod = getProduct(pid);
+          state.prices[pid] = {
+            productId: pid,
+            date: todayISO(),
+            cost,
+            marketPrice: market,
+            marginPct: prev.marginPct != null ? prev.marginPct : (prod ? calcMargin(prod.baseCost, prod.salePrice) : 0),
+            price: prev.price != null ? prev.price : (prod ? prod.salePrice || 0 : 0)
+          };
+          if (prod) prod.baseCost = cost;
+        });
+        saveState();
+        alert("Costos actualizados.");
+        render();
+      });
+    });
+    return pageShell(
+      "Mis Costos",
+      "Carga el costo y el precio de mercado de tus productos asignados (no modifica el precio de venta).",
+      `<button class="btn primary" id="pcost-save">Guardar costos</button>`,
+      `<div class="panel"><div class="table-wrap"><table><thead><tr><th>Producto</th><th>Costo</th><th>Precio mercado</th></tr></thead><tbody>${rows || emptyRow(3, "No tenes productos asignados.")}</tbody></table></div></div>`,
+      "mis-costos"
+    );
   }
 
   function renderProviders() {
