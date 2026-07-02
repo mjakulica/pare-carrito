@@ -307,16 +307,16 @@
   migrateProductImages();
 
   const menu = [
-    { id: "dashboard", label: "Inicio", icon: "IN", roles: ["manager", "admin", "employee", "customer", "contador", "example"] },
+    { id: "dashboard", label: "Inicio", icon: "IN", roles: ["manager", "admin", "employee", "customer", "contador", "example", "proveedor"] },
     { id: "nuevo-pedido", label: "Nuevo Pedido", icon: "NP", roles: ["manager", "admin", "employee", "customer", "example"] },
-    { id: "pedidos", label: "Pedidos", icon: "PE", roles: ["manager", "admin", "employee", "customer", "example"] },
+    { id: "pedidos", label: "Pedidos", icon: "PE", roles: ["manager", "admin", "employee", "customer", "example", "proveedor"] },
     { id: "clientes", label: "Clientes", icon: "CL", roles: ["manager", "admin"] },
     { id: "productos", label: "Productos", icon: "PR", roles: ["manager", "admin"] },
     { id: "precios", label: "Precios", icon: "$", roles: ["manager", "admin"] },
     { id: "historiales", label: "Historiales", icon: "HI", roles: ["manager", "admin"] },
     { id: "rendimiento", label: "Rendimiento", icon: "RE", roles: ["manager"] },
-    { id: "compras", label: "Compras/Gastos", icon: "CO", roles: ["manager", "admin", "employee"] },
-    { id: "dividir", label: "Dividir Compras", icon: "DV", roles: ["manager", "admin", "employee"] },
+    { id: "compras", label: "Compras/Gastos", icon: "CO", roles: ["manager", "admin", "employee", "proveedor"] },
+    { id: "dividir", label: "Dividir Compras", icon: "DV", roles: ["manager", "admin", "employee", "proveedor"] },
     { id: "stock", label: "Stock", icon: "ST", roles: ["manager", "admin", "employee"] },
     { id: "vehiculos", label: "Vehículos", icon: "VH", roles: ["manager", "admin", "employee"] },
     { id: "remitos", label: "Remitos", icon: "RM", roles: ["manager", "admin", "employee"] },
@@ -332,9 +332,9 @@
     { id: "mis-pedidos", label: "Mis Pedidos", icon: "MP", roles: ["customer", "example"] },
     { id: "mi-facturacion", label: "Facturación", icon: "FA", roles: ["customer", "example"] },
     { id: "lista-precios", label: "Lista de Precios", icon: "LP", roles: ["customer", "example"] },
-    { id: "proveedores", label: "Proveedores", icon: "PV", roles: ["manager", "admin", "employee", "contador"] },
+    { id: "proveedores", label: "Proveedores", icon: "PV", roles: ["manager", "admin", "employee", "contador", "proveedor"] },
     { id: "usuarios", label: "Usuarios", icon: "US", roles: ["manager"] },
-    { id: "configuracion", label: "Configuración", icon: "CF", roles: ["manager", "admin", "employee", "customer", "contador", "example"] },
+    { id: "configuracion", label: "Configuración", icon: "CF", roles: ["manager", "admin", "employee", "customer", "contador", "example", "proveedor"] },
     { id: "backup", label: "Backup", icon: "BK", roles: ["manager", "admin"] }
   ];
 
@@ -12489,8 +12489,8 @@
     const user = id ? getUser(id) : null;
     const clientOptions = activeClients().map((client) => `<option value="${client.id}" ${user && user.clientId === client.id ? "selected" : ""}>${escapeHtml(client.id)} - ${escapeHtml(client.name)}</option>`).join("");
     const roleOptions = (currentUser.role === "admin"
-      ? ["admin", "employee", "customer", "contador", "example"]
-      : ["manager", "admin", "employee", "customer", "contador", "example"]
+      ? ["admin", "employee", "customer", "contador", "example", "proveedor"]
+      : ["manager", "admin", "employee", "customer", "contador", "example", "proveedor"]
     ).map((role) => `<option value="${role}" ${(user ? user.role === role : role === "customer") ? "selected" : ""}>${escapeHtml(roleLabel(role))}</option>`).join("");
     showModal(
       user ? "Editar usuario" : "Agregar usuario",
@@ -12513,6 +12513,10 @@
             <div class="field span-2"><label>Cuentas vinculadas cliente</label><select id="user-linked-clients" multiple size="5">${activeClients().map((client) => `<option value="${client.id}" ${user && Array.isArray(user.linkedClientIds) && user.linkedClientIds.includes(client.id) ? "selected" : ""}>${escapeHtml(client.id)} - ${escapeHtml(client.name)}</option>`).join("")}</select></div>
           </div>
         </div>
+        <div class="field span-4 user-provider-fields" style="${user && user.role === "proveedor" ? "" : "display:none"}">
+          <label>Cuenta de proveedor vinculada</label>
+          <select id="user-provider"><option value="">Sin proveedor</option>${activeProviders().map((p) => `<option value="${p.id}" ${user && user.providerId === p.id ? "selected" : ""}>${escapeHtml(p.name)}</option>`).join("")}</select>
+        </div>
         <label class="field" style="display:flex;align-items:center;gap:8px;grid-template-columns:auto 1fr">
           <input type="checkbox" id="user-active" style="width:auto;min-height:auto" ${!user || user.isActive !== false ? "checked" : ""} />
           <span>Activo</span>
@@ -12521,7 +12525,10 @@
       `,
       () => {
         document.getElementById("user-role").addEventListener("change", () => {
-          document.querySelector(".user-client-fields").style.display = isClientLikeRole(document.getElementById("user-role").value) ? "grid" : "none";
+          const roleVal = document.getElementById("user-role").value;
+          document.querySelector(".user-client-fields").style.display = isClientLikeRole(roleVal) ? "grid" : "none";
+          const provWrap = document.querySelector(".user-provider-fields");
+          if (provWrap) provWrap.style.display = roleVal === "proveedor" ? "grid" : "none";
         });
         document.getElementById("modal-save").addEventListener("click", () => {
           const username = document.getElementById("user-username").value.trim();
@@ -12548,6 +12555,7 @@
             overtimeStart: document.getElementById("user-overtime-start").value || "14:00",
             clientId: isClientLikeRole(role) ? clientId : "",
             linkedClientIds,
+            providerId: role === "proveedor" ? (document.getElementById("user-provider") ? document.getElementById("user-provider").value : "") : "",
             isActive: document.getElementById("user-active").checked
           };
           if (user) Object.assign(user, payload);
@@ -12888,12 +12896,26 @@
       employee: "Empleado",
       customer: "Cliente",
       contador: "Contador",
-      example: "Ejemplo"
+      example: "Ejemplo",
+      proveedor: "Proveedor"
     }[role] || role;
   }
 
   function isClientLikeRole(role) {
     return role === "customer" || role === "example";
+  }
+
+  function isProviderRole(role) {
+    return role === "proveedor";
+  }
+
+  function currentProviderId() {
+    return currentUser && currentUser.role === "proveedor" ? (currentUser.providerId || "") : "";
+  }
+
+  function currentProviderAssigneeValue() {
+    const pid = currentProviderId();
+    return pid ? "provider:" + pid : "";
   }
 
   function visibleOrders() {

@@ -462,9 +462,9 @@ app.post("/auth/reset", async (req, res) => {
 });
 
 // ---------- Estado del ERP (sincronización) ----------
-const STATE_READ_ROLES = ["manager", "admin", "employee", "contador"];
+const STATE_READ_ROLES = ["manager", "admin", "employee", "contador", "proveedor"];
 const SYNC_ROLES = ["manager", "admin", "contador"];
-const PATCH_SYNC_ROLES = ["manager", "admin", "employee", "contador"];
+const PATCH_SYNC_ROLES = ["manager", "admin", "employee", "contador", "proveedor"];
 const EMPLOYEE_STALE_PATCH_ARRAY_KEYS = new Set([
   "orders", "remitos", "saldos", "purchases", "payments", "caja",
   "providerLedger", "providerPayments", "clientTransfers", "vendorLedger",
@@ -2024,7 +2024,7 @@ async function bootstrap() {
   await pool.query(schema);
   try {
     await pool.query("ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check");
-    await pool.query("ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('manager','admin','employee','customer','contador','example'))");
+    await pool.query("ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('manager','admin','employee','customer','contador','example','proveedor'))");
   } catch (error) {
     console.warn("No se pudo actualizar la restriccion de roles:", error.message);
   }
