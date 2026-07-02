@@ -55,4 +55,4 @@ else
 fi
 
 echo "==> 4/4 Deploy finalizado. Version actual:"
-git --n
+git --no-pager log --oneline -1
