@@ -383,7 +383,7 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 ### 12.4 Sincronizacion con Google Sheets (Apps Script)
 - Webhook de Apps Script (`google-sheets-sync/Code.gs`) que recibe diffs del backend: pedidos nuevos/editados/cancelados a la pestania `pedidos` (upsert por numero, recuerda fila en Properties) y precios/costo a la pestania `precios` (mapeo por nombre normalizado + overrides, busca la fila de encabezados sin asumir fila 1).
 - `Compra Hoy` es de ENTRADA: el sheet no la escribe; se observa por escaneo periodico (soporta formulas) con frecuencia escalonada por franjas horarias. Al cambiar, actualiza el costo del producto y recalcula el precio de venta manteniendo el margen (endpoint `/external/compra-hoy`). El sistema solo escribe Venta y Costo.
-- `mirrorStateToTables` reconstruye solo las tablas que cambiaron para acelerar los guardados chicos. El acceso del web app debe ser "Cualquiera" y republicarse como "Nueva version". La celda de cliente en los pedidos se escribe como "NNN) Nombre" (numero + nombre).
+- `mirrorStateToTables` reconstruye solo las tablas que cambiaron para acelerar los guardados chicos. El acceso del web app debe ser "Cualquiera" y republicarse como "Nueva version". La celda de cliente en los pedidos se escribe como "NNN) Nombre" (numero + nombre). Modelo: `client.paymentDay` (dia/plazo de pago); coleccion `state.replacements` (recambios/reposiciones); appSettings de dunning (`dunningEnabled`, `dunningWhatsappMessage`, `dunningMailMessage`, `dunningWhatsappTemplate`).
 
 ### 12.5 Feriados
 - Recuadro de feriados (boton en Nuevo Pedido) con alta y aprobacion: el empleado propone, admin/gerente aprueban. Bloquea la fecha en el calendario y permite avisar por WhatsApp a los clientes activos. El texto del aviso es configurable.
@@ -400,7 +400,7 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 
 ## 13. Ultimo Cambio y Version
 
-**Version operativa:** 12.9.12
+**Version operativa:** 12.9.13
 **Fecha:** 2026-06-30
 **Commit GitHub del cambio funcional:** `7fc43f2`
 **Entorno actualizado:** VPS productivo `/opt/pare-carrito` con frontend estatico y API Docker Compose saludable.

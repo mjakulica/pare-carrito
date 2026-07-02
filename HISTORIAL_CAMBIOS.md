@@ -1,5 +1,18 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.13 - Feriados en Config, plazo de pago, recordatorios de pago y pedir recambio (2026-07-01)
+
+### Frontend / Backend / Config / Clientes / Cobranzas / Recambio
+
+- Configuracion (admin/gerente): boton "Gestionar feriados" que abre el modal de alta/aprobacion de feriados (antes solo accesible desde Nuevo Pedido). Commit `0701bb1`.
+- Clientes: en el edit, si el tipo de pago es semanal o cuenta corriente, aparece un dropdown de dia/plazo de pago (dias de la semana + 10/15/20 dias + mensual), guardado en `client.paymentDay`. Commit `0701bb1`.
+- Recordatorios de pago (dunning): scheduler diario a las 8am en el backend (`runDunning` en server.js). Al vencer el plazo del cliente sin pago registrado, envia WhatsApp diario por plantilla Meta; a partir de 3 dias de mora envia correo al cliente (billingEmail) y al gerente. Plazos: contado/contra_factura = diario, semanal/dia de semana = 7, 10/15/20 dias, mensual = 30. Textos y plantilla configurables en Configuracion (`dunningEnabled`, `dunningWhatsappMessage`, `dunningMailMessage`, `dunningWhatsappTemplate`). Commit `32a38a3`.
+- Pedir recambio: boton en Pedidos (staff) y Mis Pedidos (cliente) que abre un popup con los pedidos de los ultimos 3 dias; se eligen productos con +, se define cantidad (no mayor a la del pedido) y una foto obligatoria (camara o galeria), y "Reponer en: proximo pedido / manana". Se guarda en `state.replacements` y se muestra un panel de reposiciones pendientes en Pedidos y un cartel "Prod reposicion" en Inicio (empleado/admin/gerente). Al corresponder se genera un pedido de reposicion con items a $0 y nota "(reposicion)" (manana = dia siguiente; proximo = se adjunta al proximo pedido del cliente), asi aparece en Dividir Compras y en el remito sin tocar el precio real ni el saldo. Commits `71ab8f9`, `9a6bd39`.
+
+**Deploy/externo**: cambia el backend -> `./deploy.sh` (rebuild). Crear en Meta la plantilla de recordatorio de pago (1 variable {{1}}) y cargar su nombre + activar en Configuracion. Requiere BROADCAST_KEY y SMTP en el `.env` (ya presentes).
+
+---
+
 ## v12.9.12 - Fecha por defecto en Vehiculos/Unidades y lista de faltantes (2026-06-30)
 
 ### Frontend / Vehiculos / Unidades
