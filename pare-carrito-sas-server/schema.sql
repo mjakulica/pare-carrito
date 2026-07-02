@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS users (
   username TEXT NOT NULL UNIQUE,
   name TEXT NOT NULL DEFAULT '',
   email TEXT,
-  role TEXT NOT NULL CHECK (role IN ('manager','admin','employee','customer','example')),
+  role TEXT NOT NULL CHECK (role IN ('manager','admin','employee','customer','contador','example','proveedor')),
   password_hash TEXT NOT NULL,
   password_fingerprint TEXT NOT NULL DEFAULT '',
   client_id TEXT,
@@ -160,5 +160,4 @@ CREATE TABLE IF NOT EXISTS state_writes (
   clients_after INT NOT NULL DEFAULT 0,
   products_before INT NOT NULL DEFAULT 0,
   products_after INT NOT NULL DEFAULT 0,
-  diff_orders INT NOT NULL DEFAULT 0
-);
+  diff_orders INT
