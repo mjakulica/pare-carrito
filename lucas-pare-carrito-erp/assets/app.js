@@ -229,7 +229,7 @@
   const ui = {
     modal: null,
     selectedClientId: "",
-    selectedDate: todayISO(),
+    selectedDate: defaultNewOrderDate(),
     vehicleDate: todayISO(),
     search: "",
     tab: "activos",
@@ -4099,6 +4099,7 @@
         ui.orderProductFilter = "";
         ui.orderDraft = {};
         ui.orderRenderedLimit = getOrderProductBatchLimit();
+        ui.selectedDate = defaultNewOrderDate();
         alert("Pedido guardado: " + order.id);
         render();
         return;
@@ -4135,6 +4136,7 @@
       ui.orderProductFilter = "";
       ui.orderDraft = {};
       ui.orderRenderedLimit = getOrderProductBatchLimit();
+      ui.selectedDate = defaultNewOrderDate();
       alert("Pedido guardado: " + order.id);
       render();
     });
@@ -7492,10 +7494,9 @@
       return `
         <li class="vehicle-print-order">
           <div class="vehicle-print-num">N° ${escapeHtml(order.id)}</div>
-          <strong>${escapeHtml(client ? client.name : order.clientId)}</strong>
+          <strong>${escapeHtml(order.clientId)}) ${escapeHtml(client ? client.name : order.clientId)}</strong>
           <div class="vehicle-print-sub">${escapeHtml(getVehicleName(order.deliveryVehicleId))}</div>
           <ul>${order.items.map((item) => `<li>${escapeHtml(item.productName)}: ${formatNumber(item.quantity)} ${escapeHtml(item.unitType)}${item.note ? " (" + escapeHtml(item.note) + ")" : ""}</li>`).join("")}</ul>
-          <div class="vehicle-print-total"><span>Total</span> <strong>${formatMoney(order.totalAmount)}</strong></div>
         </li>
       `;
     }).join("");
@@ -7527,7 +7528,7 @@
       return `
         <li class="vehicle-print-order">
           <div class="vehicle-print-num">N° ${escapeHtml(order.id)}</div>
-          <strong>${escapeHtml(client ? client.name : order.clientId)}</strong>
+          <strong>${escapeHtml(order.clientId)}) ${escapeHtml(client ? client.name : order.clientId)}</strong>
           ${client && client.address ? `<div class="vehicle-print-sub">${escapeHtml(client.address)}</div>` : ""}
           ${order.notes ? `<div class="vehicle-print-sub">Nota: ${escapeHtml(order.notes)}</div>` : ""}
           <ul>${order.items.map((item) => `<li>${escapeHtml(item.productName)}: ${formatNumber(item.quantity)} ${escapeHtml(item.unitType)}${item.note ? " (" + escapeHtml(item.note) + ")" : ""}</li>`).join("")}</ul>
@@ -15738,6 +15739,12 @@
     return local.toISOString().slice(0, 10);
   }
 
+  // Fecha por defecto para un pedido nuevo: despues de las 10:00 se asume para el dia
+  // siguiente; de 00:00 a 09:59 para el mismo dia.
+  function defaultNewOrderDate() {
+    return currentTimeHHMM() >= "10:00" ? addDaysISO(todayISO(), 1) : todayISO();
+  }
+
   function isSundayISO(dateISO) {
     if (!dateISO) return false;
     const date = new Date(dateISO + "T00:00:00");
@@ -16360,7 +16367,7 @@
       .vehicle-print-sub{font-size:9px;color:#475467;margin:1px 0 2px}
       .divide-two-col{display:grid;grid-template-columns:1fr 1fr;gap:2px 18px;align-items:start}
       .divide-two-col .assigned-group{break-inside:avoid;page-break-inside:avoid}
-      .product-sum-grid{column-count:2;column-gap:22px;font-size:10px}
+      .product-sum-grid{column-count:3;column-gap:10px;font-size:10px}
       .product-sum-line{display:flex;justify-content:flex-start;gap:6px;break-inside:avoid;padding:1px 0}
       .product-sum-line strong{white-space:nowrap}
       .print-title{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111;padding-bottom:6px;margin-bottom:8px}
