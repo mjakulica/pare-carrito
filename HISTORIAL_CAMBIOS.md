@@ -1,5 +1,14 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.15 - Proveedor: selector de compras acotado y recambios visibles (2026-07-01)
+
+### Frontend / Rol Proveedor
+
+- En Compras/Gastos, el selector de productos (select y datalist) queda limitado a los productos asignados al proveedor. Commit pendiente en este push.
+- El proveedor ve el panel de "Productos de reposición pendientes" filtrado a sus productos, y puede abrir la foto adjunta del recambio haciendo click en la miniatura (tambien disponible para el staff). Commit pendiente en este push.
+
+---
+
 ## v12.9.14 - Nuevo rol Proveedor (2026-07-01)
 
 ### Frontend / Backend / Roles
