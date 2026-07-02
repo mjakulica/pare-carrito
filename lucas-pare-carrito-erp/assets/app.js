@@ -8028,7 +8028,13 @@
         updateOrderAccounting(order);
         order.updatedAt = new Date().toISOString();
         saveState();
-        render();
+        // Confirmacion visual en la misma linea (sin popup ni recargar la pantalla).
+        button.innerHTML = "&#10003;";
+        button.style.background = "#16a34a";
+        button.style.borderColor = "#16a34a";
+        button.style.color = "#fff";
+        button.disabled = true;
+        if (line) line.classList.add("unit-line-sent");
       });
     });
     document.querySelectorAll("[data-remove-unit-order-item]").forEach((button) => {
