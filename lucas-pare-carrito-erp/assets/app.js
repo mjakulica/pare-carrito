@@ -333,7 +333,7 @@
     { id: "mi-facturacion", label: "Facturación", icon: "FA", roles: ["customer", "example"] },
     { id: "lista-precios", label: "Lista de Precios", icon: "LP", roles: ["customer", "example"] },
     { id: "proveedores", label: "Proveedores", icon: "PV", roles: ["manager", "admin", "employee", "contador", "proveedor"] },
-    { id: "mis-costos", label: "Mis Costos", icon: "$", roles: ["proveedor"] },
+    { id: "mis-costos", label: "Mis Precios", icon: "$", roles: ["proveedor"] },
     { id: "usuarios", label: "Usuarios", icon: "US", roles: ["manager"] },
     { id: "configuracion", label: "Configuración", icon: "CF", roles: ["manager", "admin", "employee", "customer", "contador", "example", "proveedor"] },
     { id: "backup", label: "Backup", icon: "BK", roles: ["manager", "admin"] }
@@ -2538,7 +2538,7 @@
         <h2 class="page-title" style="font-size:18px">Accesos rapidos</h2>
         <div class="page-actions" style="margin-top:10px;flex-wrap:wrap;gap:8px">
           <button class="btn primary" data-route="dividir">Ver mis pedidos (Dividir Compras)</button>
-          <button class="btn ghost" data-route="mis-costos">Cargar mis costos</button>
+          <button class="btn ghost" data-route="mis-costos">Cargar mis precios</button>
           <button class="btn ghost" data-route="compras">Compras/Gastos</button>
           <button class="btn ghost" data-route="proveedores">Mi cuenta</button>
         </div>
@@ -6148,7 +6148,7 @@
       }));
     });
     return pageShell(
-      currentUser.role === "employee" ? "Gastos" : "Compras y Gastos",
+      currentUser.role === "proveedor" ? "Venta de Hoy" : currentUser.role === "employee" ? "Gastos" : "Compras y Gastos",
       currentUser.role === "employee" ? "Registre gastos por producto asignado u otros gastos operativos." : "Registro de compras y gastos. Cada egreso impacta Caja.",
       canUseProviders ? `<button class="btn ghost" data-route="proveedores">Proveedores</button>` : "",
       `
@@ -6290,7 +6290,7 @@
               <label>Fecha</label>
               <input type="date" id="purchase-date" value="${todayISO()}" />
             </div>
-            <div class="field" id="purchase-kind-wrap">
+            <div class="field" id="purchase-kind-wrap" style="${currentUser.role === "proveedor" ? "display:none" : ""}">
               <label>Tipo</label>
               <select id="purchase-kind">
                 ${canPurchaseProviders ? `<option value="purchase">Compra a proveedor</option>` : ""}
@@ -6303,6 +6303,7 @@
                 <option value="cash_movement">Movimiento de Caja</option>
               </select>
             </div>
+            ${currentUser.role === "proveedor" ? `<div class="field"><label>Estado</label><select id="purchase-payment-status"><option value="account_current" selected>Cuenta Corriente</option><option value="paid">Pagado</option></select></div>` : ""}
             ${canPayProviders ? `
             <div class="field span-2" id="purchase-provider-wrap">
               <label>Proveedor / Asignado a</label>
@@ -6334,7 +6335,7 @@
               <label>Método pago</label>
               <select id="purchase-provider-payment-method">${providerPaymentMethods.map((method) => `<option value="${method}">${escapeHtml(PAYMENT_METHODS[method])}</option>`).join("")}</select>
             </div>` : ""}
-            <div class="field" id="purchase-cash-box-wrap">
+            <div class="field" id="purchase-cash-box-wrap" style="${currentUser.role === "proveedor" ? "display:none" : ""}">
               <label>Caja salida</label>
               <select id="purchase-cash-box">${renderPurchaseCashBoxOptions(defaultPurchaseCashBox)}</select>
             </div>
@@ -6342,13 +6343,13 @@
               <label>Caja destino</label>
               <select id="purchase-cash-transfer-target">${renderCashMovementTargetOptions()}</select>
             </div>
-            <div class="field" id="purchase-assigned-employee-wrap">
+            <div class="field" id="purchase-assigned-employee-wrap" style="${currentUser.role === "proveedor" ? "display:none" : ""}">
               <label>Empleado asignado</label>
               <select id="purchase-assigned-employee" ${currentUser.role === "employee" ? "disabled" : ""}>
                 ${(currentUser.role === "employee" ? [currentUser] : activeEmployees()).map((employee) => `<option value="${employee.id}" ${employee.id === currentUser.id ? "selected" : ""}>${escapeHtml(employee.name)}</option>`).join("")}
               </select>
             </div>
-            <div class="field span-2" id="purchase-vendor-wrap">
+            <div class="field span-2" id="purchase-vendor-wrap" style="${currentUser.role === "proveedor" ? "display:none" : ""}">
               <label>Vendedor</label>
               <div class="input-with-button"><input id="purchase-vendor" list="vendor-options" placeholder="Nombre del vendedor" /><button class="btn small ghost" type="button" data-register-vendor>Registrar</button></div>
               <datalist id="vendor-options">${getKnownVendors().map((name) => `<option value="${escapeAttr(name)}"></option>`).join("")}</datalist>
@@ -6722,9 +6723,9 @@
     updateKind();
     document.getElementById("purchase-form").addEventListener("submit", async (event) => {
       event.preventDefault();
-      const expenseType = kind.value;
+      const expenseType = currentUser.role === "proveedor" ? "purchase" : kind.value;
       const providerParsed = providerInput ? parsePurchaseProviderValue(providerInput.value) : { provider: null };
-      const provider = providerParsed.provider;
+      const provider = currentUser.role === "proveedor" ? getProvider(currentProviderId()) : providerParsed.provider;
       const description = document.getElementById("purchase-description").value.trim();
       const paymentStatus = document.getElementById("purchase-payment-status") ? document.getElementById("purchase-payment-status").value : "paid";
       if (expenseType === "cash_movement") {
@@ -6938,7 +6939,13 @@
   }
 
   function purchaseSelectableProducts() {
-    return currentProviderId() ? providerAssignedProducts() : activeProducts();
+    const pid = currentProviderId();
+    if (!pid) return activeProducts();
+    const prov = getProvider(pid);
+    const supplied = new Set(prov && Array.isArray(prov.productsSupplied) ? prov.productsSupplied : []);
+    const mine = activeProducts().filter((p) => supplied.has(p.id));
+    const shortageIds = new Set(getProductPurchaseShortages(todayISO()).map((g) => g.productId));
+    return mine.sort((a, b) => (Number(shortageIds.has(b.id)) - Number(shortageIds.has(a.id))) || normalizeText(a.name).localeCompare(normalizeText(b.name)));
   }
 
   function purchaseProductOptions(selectedId, filter) {
@@ -9251,41 +9258,73 @@
       .sort((a, b) => normalizeText(a.name).localeCompare(normalizeText(b.name)));
   }
 
+  function providerSuppliedProducts() {
+    const pid = currentProviderId();
+    if (!pid) return [];
+    const prov = getProvider(pid);
+    const supplied = new Set(prov && Array.isArray(prov.productsSupplied) ? prov.productsSupplied : []);
+    return activeProducts().filter((p) => supplied.has(p.id)).sort((a, b) => normalizeText(a.name).localeCompare(normalizeText(b.name)));
+  }
+
+  function openAddProviderProductsModal() {
+    const prov = getProvider(currentProviderId());
+    if (!prov) return;
+    const supplied = new Set(prov.productsSupplied || []);
+    const available = activeProducts().filter((p) => !supplied.has(p.id)).sort((a, b) => normalizeText(a.name).localeCompare(normalizeText(b.name)));
+    const body = `<input id="add-prov-prod-filter" placeholder="Filtrar productos..." autocomplete="off" style="margin-bottom:6px" /><div id="add-prov-prod-grid" class="check-grid">${available.map((p) => `<label class="check-item" data-check-name="${escapeAttr(normalizeText(p.name))}"><input type="checkbox" value="${p.id}" /><span>${escapeHtml(p.name)} - ${escapeHtml(p.unitType)}</span></label>`).join("") || "<span class='muted'>No hay mas productos para agregar.</span>"}</div>`;
+    showModal("Agregar productos que vendo", body, () => {
+      const filter = document.getElementById("add-prov-prod-filter");
+      const grid = document.getElementById("add-prov-prod-grid");
+      if (filter) filter.addEventListener("input", () => { const c = normalizeText(filter.value); grid.querySelectorAll("[data-check-name]").forEach((it) => { it.style.display = !c || it.dataset.checkName.includes(c) ? "" : "none"; }); });
+      document.getElementById("modal-save").addEventListener("click", () => {
+        const sel = Array.from(grid.querySelectorAll("input:checked")).map((x) => x.value);
+        if (!sel.length) { closeModal(); return; }
+        prov.productsSupplied = Array.from(new Set([...(prov.productsSupplied || []), ...sel]));
+        saveState();
+        closeModal();
+        render();
+      });
+    }, { className: "wide" });
+  }
+
   function renderProviderCosts() {
-    const products = providerAssignedProducts();
+    const prov = getProvider(currentProviderId());
+    const products = providerSuppliedProducts();
     const rows = products.map((p) => {
       const rec = state.prices[p.id] || { cost: p.baseCost || 0, marketPrice: 0 };
-      return `<tr data-pcost-row="${escapeAttr(p.id)}"><td>${escapeHtml(p.name)}</td><td><input data-pcost-cost inputmode="decimal" value="${formatAmountInput(rec.cost || 0)}" style="max-width:130px" /></td><td><input data-pcost-market inputmode="decimal" value="${formatAmountInput(rec.marketPrice || 0)}" style="max-width:130px" /></td></tr>`;
+      return `<tr data-pcost-row="${escapeAttr(p.id)}"><td>${escapeHtml(p.name)}</td><td><input data-pcost-cost inputmode="decimal" value="${formatAmountInput(rec.cost || 0)}" style="max-width:130px" /></td><td><input data-pcost-market inputmode="decimal" value="${formatAmountInput(rec.marketPrice || 0)}" style="max-width:130px" /></td><td><button class="btn small danger" type="button" data-pcost-remove="${escapeAttr(p.id)}" title="Sacar de mis productos">Desactivar</button></td></tr>`;
     }).join("");
     afterRender.push(() => {
       const btn = document.getElementById("pcost-save");
       if (btn) btn.addEventListener("click", () => {
         document.querySelectorAll("[data-pcost-row]").forEach((row) => {
-          const pid = row.dataset.pcostRow;
+          const rid = row.dataset.pcostRow;
           const cost = parseAmount(row.querySelector("[data-pcost-cost]").value);
           const market = parseAmount(row.querySelector("[data-pcost-market]").value);
-          const prev = state.prices[pid] || {};
-          const prod = getProduct(pid);
-          state.prices[pid] = {
-            productId: pid,
-            date: todayISO(),
-            cost,
-            marketPrice: market,
-            marginPct: prev.marginPct != null ? prev.marginPct : (prod ? calcMargin(prod.baseCost, prod.salePrice) : 0),
-            price: prev.price != null ? prev.price : (prod ? prod.salePrice || 0 : 0)
-          };
+          const prev = state.prices[rid] || {};
+          const prod = getProduct(rid);
+          state.prices[rid] = { productId: rid, date: todayISO(), cost, marketPrice: market, marginPct: prev.marginPct != null ? prev.marginPct : (prod ? calcMargin(prod.baseCost, prod.salePrice) : 0), price: prev.price != null ? prev.price : (prod ? prod.salePrice || 0 : 0) };
           if (prod) prod.baseCost = cost;
         });
         saveState();
-        alert("Costos actualizados.");
+        alert("Precios actualizados.");
         render();
       });
+      document.querySelectorAll("[data-pcost-remove]").forEach((b) => b.addEventListener("click", () => {
+        if (!prov) return;
+        if (!confirm("Sacar este producto de los que vendes?")) return;
+        prov.productsSupplied = (prov.productsSupplied || []).filter((id) => id !== b.dataset.pcostRemove);
+        saveState();
+        render();
+      }));
+      const addBtn = document.getElementById("pcost-add");
+      if (addBtn) addBtn.addEventListener("click", openAddProviderProductsModal);
     });
     return pageShell(
-      "Mis Costos",
-      "Carga el costo y el precio de mercado de tus productos asignados (no modifica el precio de venta).",
-      `<button class="btn primary" id="pcost-save">Guardar costos</button>`,
-      `<div class="panel"><div class="table-wrap"><table><thead><tr><th>Producto</th><th>Costo</th><th>Precio mercado</th></tr></thead><tbody>${rows || emptyRow(3, "No tenes productos asignados.")}</tbody></table></div></div>`,
+      "Mis Precios",
+      "Carga el costo y el precio de mercado de tus productos.",
+      `<button class="btn primary" id="pcost-save">Guardar precios</button><button class="btn ghost" id="pcost-add">Agregar productos</button>`,
+      `<div class="panel"><div class="table-wrap"><table><thead><tr><th>Producto</th><th>Costo</th><th>Precio mercado</th><th></th></tr></thead><tbody>${rows || emptyRow(4, "No tenes productos cargados. Usa 'Agregar productos'.")}</tbody></table></div></div>`,
       "mis-costos"
     );
   }
@@ -9396,7 +9435,7 @@
           <div class="field"><label>Desde</label><input type="date" id="provider-account-from" value="${ui.providerFrom}" /></div>
           <div class="field"><label>Hasta</label><input type="date" id="provider-account-to" value="${ui.providerTo}" /></div>
           <div class="field"><label>Saldo</label><input disabled value="${formatMoney(providerBalanceValue)}" /></div>
-          <div class="field"><label>&nbsp;</label><button class="btn blue" type="button" data-pay-provider="${selectedProvider ? selectedProvider.id : ""}">Pagar</button></div>
+          <div class="field"><label>&nbsp;</label><button class="btn blue" type="button" data-pay-provider="${selectedProvider ? selectedProvider.id : ""}">Cobrado</button></div>
           <div class="field"><label>&nbsp;</label><button class="btn ghost" data-print-provider-account type="button">PDF / Imprimir proveedor</button></div>
         </div>
         <div class="table-wrap provider-account-box" style="margin-top:10px">
@@ -9417,18 +9456,6 @@
         <h2 class="page-title" style="font-size:18px">Productos que vende ${escapeHtml(selectedProvider.name)}</h2>
         ${(currentUser && roleFlag(currentUser.role, "editarProveedores")) ? `<input id="prov-products-filter" placeholder="Filtrar productos..." autocomplete="off" style="margin:6px 0" /><div id="prov-products-grid" class="check-grid">${activeProducts().map((p) => `<label class="check-item" data-check-name="${escapeAttr(normalizeText(p.name))}"><input type="checkbox" data-prov-product value="${p.id}" ${(selectedProvider.productsSupplied || []).includes(p.id) ? "checked" : ""} /><span>${escapeHtml(p.name)} - ${escapeHtml(p.unitType)}</span></label>`).join("")}</div>` : `<ul class="divide-print-list">${(selectedProvider.productsSupplied || []).map((pid) => { const p = getProduct(pid); return p ? `<li>${escapeHtml(p.name)} - ${escapeHtml(p.unitType)}</li>` : ""; }).join("") || "<li class='muted'>Sin productos cargados.</li>"}</ul>`}
       </div>` : ""}
-      <div class="panel" style="margin-bottom:14px">
-        <h2 class="page-title" style="font-size:18px">Buscar producto</h2>
-        <div class="form-grid" style="margin-top:10px">
-          <div class="field span-2"><label>Producto</label><select id="provider-product-search"><option value="">Seleccione producto</option>${activeProducts().map((product) => `<option value="${product.id}" ${ui.providerProductId === product.id ? "selected" : ""}>${escapeHtml(product.name)} - ${escapeHtml(product.unitType)}</option>`).join("")}</select></div>
-        </div>
-        <div class="table-wrap" style="margin-top:10px">
-          <table>
-            <thead><tr><th>Proveedor</th><th>Ultimo costo unitario</th><th>Cantidad</th><th>Fecha</th><th>Compra</th></tr></thead>
-            <tbody>${providerProductRows || emptyRow(5, ui.providerProductId ? "Sin compras registradas para este producto." : "Seleccione un producto para ver proveedores.")}</tbody>
-          </table>
-        </div>
-      </div>
       <div class="panel no-print">
         <div class="table-wrap">
           <table>
@@ -12276,7 +12303,6 @@
         <div class="field span-2"><label>Email</label><input id="provider-email" value="${escapeAttr(provider ? provider.email || "" : "")}" /></div>
         <div class="field span-2"><label>Direccion</label><input id="provider-address" value="${escapeAttr(provider ? provider.address || "" : "")}" /></div>
         <div class="field"><label>Pago</label><select id="provider-terms">${["contado", "semanal", "quincenal", "mensual"].map((term) => `<option value="${term}" ${provider && provider.paymentTerms === term ? "selected" : ""}>${term}</option>`).join("")}</select></div>
-        <div class="field"><label>Margen defecto %</label><input id="provider-margin" value="${formatAmountInput(provider ? provider.defaultMargin || 0 : 25)}" inputmode="decimal" /></div>
         <div class="field span-4">
           <label>Productos que vende (marque varios)</label>
           <input id="provider-products-filter" placeholder="Filtrar productos..." autocomplete="off" />
@@ -12332,7 +12358,7 @@
             email: document.getElementById("provider-email").value.trim(),
             address: document.getElementById("provider-address").value.trim(),
             paymentTerms: document.getElementById("provider-terms").value,
-            defaultMargin: parseAmount(document.getElementById("provider-margin").value),
+            defaultMargin: document.getElementById("provider-margin") ? parseAmount(document.getElementById("provider-margin").value) : (provider ? provider.defaultMargin || 25 : 25),
             productsSupplied: Array.from(productsWrap.querySelectorAll("input:checked")).map((input) => input.value),
             isActive: provider ? provider.isActive : true,
             notes: document.getElementById("provider-notes").value.trim()
@@ -14936,12 +14962,12 @@
       "Pagar proveedor",
       `
       <form id="provider-quick-payment-form" class="form-grid">
-        <div class="field span-2"><label>Proveedor</label><select id="quick-provider-payment-provider">${activeProviders().map((item) => `<option value="${item.id}" ${item.id === provider.id ? "selected" : ""}>${escapeHtml(item.name)}</option>`).join("")}</select></div>
+        <div class="field span-2"><label>Proveedor</label>${currentUser.role === "proveedor" ? `<input value="${escapeAttr(provider.name)}" disabled /><input type="hidden" id="quick-provider-payment-provider" value="${escapeAttr(provider.id)}" />` : `<select id="quick-provider-payment-provider">${activeProviders().map((item) => `<option value="${item.id}" ${item.id === provider.id ? "selected" : ""}>${escapeHtml(item.name)}</option>`).join("")}</select>`}</div>
         <div class="field"><label>Saldo</label><input id="quick-provider-payment-balance" value="${formatMoney(balance)}" disabled /></div>
         <div class="field"><label>Pago</label><select id="quick-provider-payment-mode"><option value="full">Pago total</option><option value="partial">Pago parcial</option></select></div>
         <div class="field"><label>Monto</label><input id="quick-provider-payment-amount" inputmode="decimal" value="${formatAmountInput(balance)}" /></div>
         <div class="field"><label>Método</label><select id="quick-provider-payment-method">${(employeeMode ? ["efectivo"] : Object.keys(PAYMENT_METHODS)).map((method) => `<option value="${method}">${escapeHtml(PAYMENT_METHODS[method])}</option>`).join("")}</select></div>
-        <div class="field"><label>Caja</label>${employeeMode ? `<input value="${escapeAttr(getCashBoxName(getDefaultOutgoingCashBoxId()))}" disabled /><input type="hidden" id="quick-provider-payment-cash-box" value="${escapeAttr(getDefaultOutgoingCashBoxId())}" />` : `<select id="quick-provider-payment-cash-box">${renderCashBoxOptions(getDefaultOutgoingCashBoxId())}</select>`}</div>
+        <div class="field"><label>Pagado por:</label>${employeeMode ? `<input value="${escapeAttr(getCashBoxName(getDefaultOutgoingCashBoxId()))}" disabled /><input type="hidden" id="quick-provider-payment-cash-box" value="${escapeAttr(getDefaultOutgoingCashBoxId())}" />` : `<select id="quick-provider-payment-cash-box">${renderCashBoxOptions(getDefaultOutgoingCashBoxId())}</select>`}</div>
         <div class="field span-4"><label>Notas</label><input id="quick-provider-payment-notes" placeholder="Pago a proveedor" /></div>
       </form>
       `,
