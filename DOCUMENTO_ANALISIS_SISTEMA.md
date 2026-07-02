@@ -400,9 +400,9 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 
 ## 13. Ultimo Cambio y Version
 
-**Version operativa:** 12.9.9
+**Version operativa:** 12.9.10
 **Fecha:** 2026-06-30
-**Commit GitHub del cambio funcional:** `75f845e`
+**Commit GitHub del cambio funcional:** `59decb8`
 **Entorno actualizado:** VPS productivo `/opt/pare-carrito` con frontend estatico y API Docker Compose saludable.
 
 ### Detalle del ultimo cambio

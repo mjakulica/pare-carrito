@@ -1,5 +1,16 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.10 - Unidades, parser docena, y detalle de Compras/Pagos (2026-06-30)
+
+### Frontend / Unidades / Parser / Compras / Pagos
+
+- Unidades: al enviar la cantidad de una linea, se muestra un tilde verde de confirmacion en la misma linea, sin popup ni recargar la pantalla. Commit `216c505`.
+- Parser: los productos que se venden por docena, cuando se piden sin unidad y con cantidad > 2, se interpretan como unidades sueltas (ej. "Banana 6" -> 0,5 docena). Commit `25a5a4f`.
+- Parser: el match de alias ahora tolera plural/singular (ej. "papas grandes bolsa" matchea el alias "papa grande bolsa"). Commit `25a5a4f`.
+- Compras/Gastos y Pagos: en el detalle de cada movimiento se muestra el usuario que lo cargo (Compras no lo tenia) y el horario de carga (ambos). Commit `59decb8`.
+
+---
+
 ## v12.9.9 - Vehiculos (impresion) y fecha por defecto del pedido (2026-06-30)
 
 ### Frontend / Vehiculos / Nuevo Pedido
