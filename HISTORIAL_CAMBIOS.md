@@ -1,5 +1,15 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.11 - Flete/comprobante, remitos PDF y aviso de cambios por WhatsApp (2026-06-30)
+
+### Frontend / Backend / Compras / Remitos / Pedidos
+
+- Compras/Gastos: nuevo tipo "Flete". En "Otro gasto" y "Flete" se puede adjuntar un comprobante (imagen comprimida) y, en el detalle del movimiento, aparece un boton "Ver comprobante". Commit `7382188`.
+- Remitos: "Exportar PDF remitos de hoy" ahora imprime directo tambien en mobile (mismo formato que desktop, sin ir a otra pagina). Franja gris cada 2da fila de productos y filas en blanco sin gris. Commit `d98ef00`.
+- Pedidos: al agregar o quitar un producto de un pedido (popup de edicion) se envia un aviso por WhatsApp al celular principal del cliente, via plantilla de Meta configurable. El texto/plantilla se edita en Configuracion (admin/gerente), con variables {cliente} y {detalle}. Backend: endpoint `/clients/order-change-notify` que usa el bot. Requiere BOT_BROADCAST_URL/BROADCAST_KEY y la plantilla aprobada en Meta. Commit `7fc43f2`.
+
+---
+
 ## v12.9.10 - Unidades, parser docena, y detalle de Compras/Pagos (2026-06-30)
 
 ### Frontend / Unidades / Parser / Compras / Pagos
