@@ -2522,6 +2522,7 @@
     const balance = pid ? getProviderBalance(pid) : 0;
     const products = providerAssignedProducts();
     const todayItems = getDivideAssignables().filter(({ item }) => getProductAssigneeValue(item.productId) === "provider:" + pid);
+    const pendRecambios = (state.replacements || []).filter((r) => r.status === "pendiente" && (r.items || []).some((it) => getProductAssigneeValue(it.productId) === "provider:" + pid)).length;
     return pageShell(
       "Inicio",
       "Panel del proveedor.",
@@ -2531,6 +2532,7 @@
         ${metricCard("Cuenta con la empresa", formatMoney(balance), balance > 0 ? "La empresa te debe" : "Sin saldo pendiente")}
         ${metricCard("Productos asignados", String(products.length), "Productos que proves")}
         ${metricCard("Items de hoy", String(todayItems.length), "Lineas de pedidos de hoy con tus productos")}
+        ${metricCard("Recambios pendientes", String(pendRecambios), "Productos tuyos marcados para reposicion")}
       </div>
       <div class="panel">
         <h2 class="page-title" style="font-size:18px">Accesos rapidos</h2>
