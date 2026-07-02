@@ -1,5 +1,13 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.18 - Parser: punto antes de parentesis no separa items (2026-07-01)
+
+### Frontend / Parser
+
+- En el parser de pedidos, un punto seguido de un parentesis ya no separa el item: "batata 2kg. ( grandes)" toma "(grandes)" como nota de la batata, en vez de crear un item fantasma (antes "grandes" matcheaba "Naranja Grande Jaula"). Commit pendiente en este push.
+
+---
+
 ## v12.9.17 - Proveedores: productos que vende, detalle de movimientos y fix impresion mobile (2026-07-01)
 
 ### Frontend / Proveedores / Impresion
