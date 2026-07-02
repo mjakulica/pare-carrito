@@ -7341,7 +7341,8 @@
   }
 
   function renderVehicles() {
-    const date = ui.vehicleDate || todayISO();
+    if (!ui.vehicleDate || ui.vehicleDate < todayISO()) ui.vehicleDate = todayISO();
+    const date = ui.vehicleDate;
     const canManageVehicles = ["manager", "admin"].includes(currentUser.role);
     const columns = activeVehicles().map((vehicle) => {
       const totals = getVehicleTotals(vehicle.id, date);
@@ -7926,7 +7927,8 @@
   }
 
   function renderUnits() {
-    const date = ui.unitsDate || todayISO();
+    if (!ui.unitsDate || ui.unitsDate < todayISO()) ui.unitsDate = todayISO();
+    const date = ui.unitsDate;
     const unitItems = getUnitWeightGroups(date).filter((group) => group.unitProduct && group.pendingEntries.length);
     const missingPurchases = getProductPurchaseShortages(date);
     const todaysNotes = getProductNotesByDate(date);
@@ -7960,7 +7962,7 @@
       </div>
       <div class="panel ${missingPurchases.length ? "highlight-panel" : ""}">
         <h2 class="page-title" style="font-size:18px">Productos sin compra o compra insuficiente</h2>
-        <div class="assigned-products-grid" style="margin-top:10px">${shortageRows || `<div class="empty compact">Todos los productos de hoy tienen compra suficiente.</div>`}</div>
+        <div class="assigned-products-grid" style="margin-top:10px;grid-template-columns:1fr">${shortageRows || `<div class="empty compact">Todos los productos de hoy tienen compra suficiente.</div>`}</div>
       </div>
       `,
       "unidades"
