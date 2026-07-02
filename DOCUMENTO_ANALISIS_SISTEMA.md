@@ -67,6 +67,7 @@ Roles existentes:
 - `customer` — Cliente: crea pedidos, consulta saldos, lista de precios, mis pedidos, registra transferencias.
 - `example` — Cliente de demo: igual que customer pero con datos ficticios (`exampleOnly`).
 - `contador` — Contador: accede a saldos, caja, pagos, facturación, transferencias, empleados y proveedores.
+- `proveedor` — Proveedor: vinculado a una cuenta de proveedor (`user.providerId`). Ve solo lo asignado a él: Inicio propio, Pedidos (que incluyen sus productos), Dividir Compras (solo lo suyo), Proveedores (su cuenta), Compras/Gastos (selector y movimientos acotados a él), Mis Costos y Configuración.
 
 Permisos personalizados: `state.appSettings.rolePermissions` permite sobreescribir visibilidad de páginas y flags (`pageVisibleForRole`, `roleFlag`).
 
@@ -361,7 +362,7 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 
 ---
 
-## 12. Modulos y subsistemas agregados (2026-06-26 a 2026-06-29)
+## 12. Modulos y subsistemas agregados (2026-06-26 a 2026-07-01)
 
 ### 12.1 Subsistema de Stock de fraccionados
 - Pagina `Stock` con conteo diario por producto, calculo de merma (kg) y sugerencia de compra en bultos. Soporta override por menor, multi-bulto y activar/desactivar producto del calculo.
@@ -395,6 +396,33 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 ### 12.7 Impresion y Remitos
 - El texto interno de los documentos imprimibles es 11px (titulos sin cambios). Los remitos usan interlineado minimo legible.
 - Scripts de Apps Script en `remitos-impresion/` para imprimir a PDF horizontal (margenes 0.59cm) las paginas con contenido segun la tabla `Datos A7:C44`, con apertura automatica del PDF.
+
+### 12.8 Facturacion: detalle de pedidos y envio automatico (v12.9.4)
+- En Facturacion, la cantidad de pedidos de cada cliente abre un popup con los pedidos que acumulan IVA (detalle desplegable, imprimir remito por pedido, "Imprimir todo").
+- Al emitir la factura de clientes semanal/quincenal/mensual (automatica o manual) se envia al correo de facturacion un PDF con el detalle de los pedidos (generado con `pdfkit` en el servidor) y la factura de TusFacturas adjunta. Funciones backend: `buildBillingDetailPdf`, `fetchPdfAttachment`, `emailBillingResults`; `sendMail` admite adjuntos.
+
+### 12.9 Recordatorios de pago (dunning) (v12.9.13)
+- Scheduler diario a las 8am en el backend (`runDunning` en server.js, patron de `startBillingScheduler`). Segun el plazo del cliente (`paymentType`/`paymentDay`: contado/contra_factura=diario, dia de semana/semanal=7, 10/15/20 dias, mensual=30) envia WhatsApp diario por plantilla al vencer el plazo sin pago, y correo al cliente (billingEmail) + gerente a partir de 3 dias de mora. Textos y plantilla configurables en Configuracion (`dunningEnabled`, `dunningWhatsappMessage`, `dunningMailMessage`, `dunningWhatsappTemplate`).
+
+### 12.10 Pedir recambio / reposicion (v12.9.13, v12.9.15)
+- Boton "Pedir recambio" en Pedidos y Mis Pedidos: popup con pedidos de los ultimos 3 dias, seleccion de productos con `+`, cantidad (<= la del pedido), foto obligatoria (camara o galeria) y "Reponer en: proximo pedido / manana". Se guarda en `state.replacements`.
+- Panel "Productos de reposicion pendientes" (foto ampliable con click) y cartel "Prod reposicion" en Inicio (staff). Genera un pedido de reposicion con items a $0 y nota "(reposicion)" (manana=dia siguiente; proximo=se adjunta al proximo pedido del cliente), visible en Dividir Compras y en el remito sin tocar precio ni saldo.
+
+### 12.11 Rol Proveedor (v12.9.14, v12.9.15)
+- Rol `proveedor` vinculado a una cuenta de proveedor via `user.providerId` (form de Usuarios). Backend: incluido en STATE_READ_ROLES/PATCH_SYNC_ROLES y en el CHECK de la tabla users.
+- Ve solo lo asignado a el (los productos con `assignedTo = provider:PROV-XXX`): Inicio propio (estado de cuenta con la empresa, productos asignados, items de hoy), Pedidos (solo los que incluyen sus productos), Dividir Compras (solo lo suyo, con export; sin selector ni reasignacion), Proveedores (su cuenta), Compras/Gastos (selector de productos y movimientos acotados a el), "Mis Costos" (carga costo + precio de mercado de sus productos, sin tocar precio de venta) y Configuracion. Tambien ve los recambios de sus productos con la foto adjunta.
+
+### 12.12 Feriados en Configuracion y plazo de pago del cliente (v12.9.13)
+- Boton "Gestionar feriados" en Configuracion (abre el modal de alta/aprobacion existente).
+- Campo `client.paymentDay` (dia de semana / 10-15-20 dias / mensual) visible cuando el tipo de pago del cliente es semanal o cuenta corriente.
+
+### 12.13 Otros cambios operativos y de UX (v12.9.5 a v12.9.12)
+- Aviso por WhatsApp al agregar/quitar productos de un pedido (plantilla configurable, endpoint `/clients/order-change-notify`).
+- Compras/Gastos: tipo "Flete", adjuntar comprobante (imagen comprimida) y "Ver comprobante" en el detalle; usuario + horario en el detalle de movimientos (tambien en Pagos).
+- Vehiculos: sumatoria en 3 columnas + N de cliente; "Sin Dividir" sin total. Remitos PDF: franja gris cada 2da fila + boton mobile identico a desktop. Nuevo pedido: fecha por defecto = dia siguiente despues de las 10am. Vehiculos/Unidades: fecha hoy por defecto; faltantes en lista. Orden de productos agrupa variantes. Botón para eliminar productos inactivos. Cliente en la sync de Sheets como "NNN) Nombre".
+
+### 12.14 Modelo de datos agregado
+- `client.paymentDay`; coleccion `state.replacements` (recambios/reposiciones); `user.providerId` (vinculo del rol proveedor); appSettings: dunning (`dunningEnabled`, `dunningWhatsappMessage`, `dunningMailMessage`, `dunningWhatsappTemplate`) y aviso de cambios (`orderChangeNotifyEnabled`, `orderChangeMessage`, `orderChangeTemplateName`); `purchase.proofFile` (comprobante), tipo de gasto `freight`.
 
 ---
 
