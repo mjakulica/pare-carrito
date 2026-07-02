@@ -2517,7 +2517,37 @@
     return "";
   }
 
+  function renderProviderDashboard() {
+    const pid = currentProviderId();
+    const balance = pid ? getProviderBalance(pid) : 0;
+    const products = providerAssignedProducts();
+    const todayItems = getDivideAssignables().filter(({ item }) => getProductAssigneeValue(item.productId) === "provider:" + pid);
+    return pageShell(
+      "Inicio",
+      "Panel del proveedor.",
+      "",
+      `
+      <div class="grid three" style="margin-bottom:14px">
+        ${metricCard("Cuenta con la empresa", formatMoney(balance), balance > 0 ? "La empresa te debe" : "Sin saldo pendiente")}
+        ${metricCard("Productos asignados", String(products.length), "Productos que proves")}
+        ${metricCard("Items de hoy", String(todayItems.length), "Lineas de pedidos de hoy con tus productos")}
+      </div>
+      <div class="panel">
+        <h2 class="page-title" style="font-size:18px">Accesos rapidos</h2>
+        <div class="page-actions" style="margin-top:10px;flex-wrap:wrap;gap:8px">
+          <button class="btn primary" data-route="dividir">Ver mis pedidos (Dividir Compras)</button>
+          <button class="btn ghost" data-route="mis-costos">Cargar mis costos</button>
+          <button class="btn ghost" data-route="compras">Compras/Gastos</button>
+          <button class="btn ghost" data-route="proveedores">Mi cuenta</button>
+        </div>
+      </div>
+      `,
+      "dashboard"
+    );
+  }
+
   function renderDashboard() {
+    if (currentUser.role === "proveedor") return renderProviderDashboard();
     if (currentUser.role === "contador") return renderAccountantDashboard();
     if (isClientLikeRole(currentUser.role)) return renderCustomerDashboard();
     if (currentUser.role === "employee") return renderEmployeeDashboard();
