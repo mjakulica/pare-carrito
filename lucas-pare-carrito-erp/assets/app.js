@@ -5934,7 +5934,7 @@
       const annulledLabel = isAnnulled ? `<span class="pill gray">Anulado</span>` : "";
       return `
         <tr style="${isAnnulled ? "text-decoration:line-through;opacity:0.6" : ""}">
-          <td>${formatDate(purchase.date)}</td>
+          <td>${formatDate(purchase.date)}<br><span class="muted">${escapeHtml(purchase.createdByName || purchase.recordedBy || "")}${purchase.createdAt ? " \u00b7 " + formatClockHM(purchase.createdAt) : ""}</span></td>
           <td>${escapeHtml(expenseTypeLabel(purchase.expenseType || "purchase"))}</td>
           <td>${escapeHtml(origin)}</td>
           <td>${itemText}</td>
@@ -8139,7 +8139,7 @@
       const annulledLabel = isAnnulled ? `<span class="pill gray">Anulado</span>` : "";
       return `
         <tr style="${isAnnulled ? "text-decoration:line-through;opacity:0.6" : ""}">
-          <td>${formatDate(payment.date)}<br><span class="muted">${escapeHtml(payment.recordedBy || "")}</span></td>
+          <td>${formatDate(payment.date)}<br><span class="muted">${escapeHtml(payment.recordedBy || "")}${payment.timestamp ? " \u00b7 " + formatClockHM(payment.timestamp) : ""}</span></td>
           <td>${escapeHtml(client ? client.name : payment.clientId)}</td>
           <td>${escapeHtml(payment.receivedByName || payment.recordedBy || "")}</td>
           <td>${escapeHtml(PAYMENT_METHODS[payment.method] || payment.method)}</td>
@@ -15743,6 +15743,13 @@
     const offset = date.getTimezoneOffset();
     const local = new Date(date.getTime() - offset * 60000);
     return local.toISOString().slice(0, 10);
+  }
+
+  function formatClockHM(iso) {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return "";
+    return d.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", hour12: false });
   }
 
   // Fecha por defecto para un pedido nuevo: despues de las 10:00 se asume para el dia
