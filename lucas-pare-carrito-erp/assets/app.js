@@ -3504,14 +3504,18 @@
 
   function renderPendingReplacementsPanel() {
     if (isClientLikeRole(currentUser.role)) return "";
-    const pend = (state.replacements || []).filter((r) => r.status === "pendiente");
-    if (!pend.length) return "";
-    const rows = pend.map((r) => {
+    const pid = currentProviderId();
+    const rowsData = (state.replacements || []).filter((r) => r.status === "pendiente").map((r) => {
+      const items = pid ? r.items.filter((it) => getProductAssigneeValue(it.productId) === "provider:" + pid) : r.items;
+      return { r, items };
+    }).filter((x) => x.items.length);
+    if (!rowsData.length) return "";
+    const rows = rowsData.map(({ r, items }) => {
       const c = getClient(r.clientId);
-      const items = r.items.map((it) => `${escapeHtml(it.productName)} x${formatNumber(it.qty)}${it.photo ? ` <img src="${it.photo}" style="height:22px;vertical-align:middle;border-radius:3px" />` : ""}`).join(", ");
-      return `<div style="padding:3px 0;border-bottom:1px solid #eee"><strong>${escapeHtml(c ? c.name : r.clientId)}</strong> <span class="muted">(${r.when === "manana" ? "mañana" : "próximo pedido"})</span>: ${items}</div>`;
+      const parts = items.map((it) => `${escapeHtml(it.productName)} x${formatNumber(it.qty)}${it.photo ? ` <img src="${it.photo}" data-recambio-photo-view="${escapeAttr(it.photo)}" style="height:26px;vertical-align:middle;border-radius:3px;cursor:pointer" title="Ver foto del recambio" />` : ` <span class="pill amber">sin foto</span>`}`).join(", ");
+      return `<div style="padding:3px 0;border-bottom:1px solid #eee"><strong>${escapeHtml(c ? c.name : r.clientId)}</strong> <span class="muted">(${r.when === "manana" ? "mañana" : "próximo pedido"})</span>: ${parts}</div>`;
     }).join("");
-    return `<div class="panel highlight-panel" style="margin-bottom:14px"><h2 class="page-title" style="font-size:16px">Productos de reposición pendientes (${pend.length})</h2>${rows}</div>`;
+    return `<div class="panel highlight-panel" style="margin-bottom:14px"><h2 class="page-title" style="font-size:16px">Productos de reposición pendientes (${rowsData.length})</h2>${rows}</div>`;
   }
 
   function renderPendingTransfersBanner() {
@@ -4509,7 +4513,10 @@
     const headers = `<th>Pedido</th><th>Cliente</th><th>Productos</th><th>Total</th>${canEditStatus ? "<th>Estado</th>" : "<th>Cobrado</th><th>Estado</th>"}${showActions ? "<th>Acciones</th>" : ""}`;
 
     afterRender.push(bindOrders);
-    afterRender.push(() => document.querySelectorAll("[data-open-recambio]").forEach((b) => b.addEventListener("click", openRecambioModal)));
+    afterRender.push(() => {
+      document.querySelectorAll("[data-open-recambio]").forEach((b) => b.addEventListener("click", openRecambioModal));
+      document.querySelectorAll("[data-recambio-photo-view]").forEach((img) => img.addEventListener("click", () => showModal("Foto de recambio", `<img src="${img.dataset.recambioPhotoView}" style="max-width:100%;height:auto;display:block;margin:0 auto" />`, null, { className: "wide" })));
+    });
     return pageShell(
       "Pedidos",
       currentUser.role === "employee" ? "Pedidos para reparto y cobranza segun el rango seleccionado." : isClientLikeRole(currentUser.role) ? "Pedidos de su cuenta." : "Lista de pedidos y estados.",
@@ -4881,7 +4888,10 @@
       document.querySelectorAll("[data-view-customer-remito]").forEach((button) => button.addEventListener("click", () => openCustomerRemitoModal(button.dataset.viewCustomerRemito)));
       document.querySelectorAll("[data-edit-order]").forEach((button) => button.addEventListener("click", () => openOrderForm(button.dataset.editOrder)));
     });
-    afterRender.push(() => document.querySelectorAll("[data-open-recambio]").forEach((b) => b.addEventListener("click", openRecambioModal)));
+    afterRender.push(() => {
+      document.querySelectorAll("[data-open-recambio]").forEach((b) => b.addEventListener("click", openRecambioModal));
+      document.querySelectorAll("[data-recambio-photo-view]").forEach((img) => img.addEventListener("click", () => showModal("Foto de recambio", `<img src="${img.dataset.recambioPhotoView}" style="max-width:100%;height:auto;display:block;margin:0 auto" />`, null, { className: "wide" })));
+    });
     return pageShell(
       "Mis Pedidos",
       "Pedidos de sus cuentas vinculadas.",
@@ -6925,9 +6935,13 @@
     `;
   }
 
+  function purchaseSelectableProducts() {
+    return currentProviderId() ? providerAssignedProducts() : activeProducts();
+  }
+
   function purchaseProductOptions(selectedId, filter) {
     const clean = normalizeText(filter);
-    const products = activeProducts()
+    const products = purchaseSelectableProducts()
       .filter((product) => !clean || productMatchScore(product, clean) > 0 || normalizeText(product.category).includes(clean))
       .sort((a, b) => clean ? productMatchScore(b, clean) - productMatchScore(a, clean) || a.name.localeCompare(b.name) : a.name.localeCompare(b.name));
     const selected = selectedId ? getProduct(selectedId) : null;
@@ -6937,7 +6951,7 @@
 
   function purchaseProductDatalistOptions(filter) {
     const clean = normalizeText(filter);
-    return activeProducts()
+    return purchaseSelectableProducts()
       .filter((product) => !clean || productMatchScore(product, clean) > 0 || normalizeText(product.category).includes(clean))
       .sort((a, b) => clean ? productMatchScore(b, clean) - productMatchScore(a, clean) || a.name.localeCompare(b.name) : a.name.localeCompare(b.name))
       .slice(0, 80)
