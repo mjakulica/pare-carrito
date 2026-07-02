@@ -1924,6 +1924,98 @@ function startBillingScheduler() {
   }, 5 * 60 * 1000);
 }
 
+// ---------- Recordatorios de pago (dunning) ----------
+async function runDunning({ pool, now = new Date() }) {
+  const botUrl = process.env.BOT_BROADCAST_URL || "";
+  const botKey = process.env.BROADCAST_KEY || "";
+  const stateRow = await pool.query("SELECT data FROM app_state WHERE id = 'main'");
+  if (!stateRow.rows.length) return { ran: false };
+  const d = stateRow.rows[0].data || {};
+  const settings = d.appSettings || {};
+  if (!settings.dunningEnabled) return { ran: false, reason: "deshabilitado" };
+  const art = nowArt(now);
+  const today = art.dateISO;
+  const clients = d.clients || [];
+  const payments = (d.payments || []).filter((p) => p && p.status !== "anulado");
+  const saldos = d.saldos || [];
+  const balanceOf = (cid) => saldos.filter((s) => s.clientId === cid).reduce((a, s) => a + Number(s.amount || 0), 0);
+  const lastPayOf = (cid) => payments.filter((p) => p.clientId === cid).map((p) => String(p.date || "")).sort().pop() || "";
+  const firstDebtOf = (cid) => (saldos.filter((s) => s.clientId === cid).map((s) => String(s.date || "")).sort()[0]) || today;
+  const managerEmail = ((d.users || []).find((u) => u && u.role === "manager" && u.email) || {}).email || "";
+  const WEEKDAYS = ["lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo"];
+  const intervalOf = (c) => {
+    const t = c.paymentType;
+    const day = String(c.paymentDay || "");
+    if (t === "contado" || t === "contra_factura") return 1;
+    const m = day.match(/^(\d+)/);
+    if (m) return parseInt(m[1], 10);
+    if (day === "mensual") return 30;
+    if (WEEKDAYS.includes(day)) return 7;
+    if (t === "semanal") return 7;
+    return 30;
+  };
+  const daysBetween = (aISO, bISO) => Math.round((new Date(bISO + "T12:00:00") - new Date(aISO + "T12:00:00")) / 86400000);
+  const money = (v) => "$" + Number(v || 0).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const waTpl = settings.dunningWhatsappMessage || "Hola {cliente}, ayer no registramos el pago correspondiente, su saldo es {saldo} por favor regularizar su deuda";
+  const mailTpl = settings.dunningMailMessage || "El cliente {cliente} tiene una demora de pago de {diassinpago} y su saldo es {saldo}.";
+  const templateName = settings.dunningWhatsappTemplate || "";
+  const lang = settings.dunningWhatsappLang || "es";
+  let waSent = 0;
+  let mailsSent = 0;
+  for (const c of clients) {
+    if (!c || c.isActive === false) continue;
+    const bal = balanceOf(c.id);
+    if (bal <= 0) continue;
+    const lastPay = lastPayOf(c.id) || firstDebtOf(c.id);
+    const overdue = daysBetween(lastPay, today) - intervalOf(c);
+    if (overdue < 1) continue;
+    const phone = String(c.phone || (Array.isArray(c.phones) ? c.phones[0] : "") || "").replace(/\D/g, "");
+    if (botUrl && templateName && phone) {
+      const msg = waTpl.replace(/{cliente}/g, c.name || "").replace(/{saldo}/g, money(bal));
+      try {
+        await fetch(botUrl, { method: "POST", headers: { "content-type": "application/json", "x-broadcast-key": botKey }, body: JSON.stringify({ numbers: [phone], templateName, lang, params: [msg] }) });
+        waSent += 1;
+      } catch (e) { console.error("dunning whatsapp:", e.message); }
+    }
+    if (overdue >= 3) {
+      const to = [c.billingEmail, managerEmail].filter(Boolean).join(",");
+      if (to) {
+        const mail = mailTpl.replace(/{cliente}/g, c.name || "").replace(/{diassinpago}/g, String(overdue) + " dias").replace(/{saldo}/g, money(bal));
+        try { await sendMail(to, "Demora de pago - " + (c.name || c.id), "<p>" + mail + "</p>"); mailsSent += 1; } catch (e) { console.error("dunning mail:", e.message); }
+      }
+    }
+  }
+  return { ran: true, waSent, mailsSent };
+}
+
+let dunningLastRunDate = "";
+async function loadDunningLastRunDate() {
+  try { const { rows } = await pool.query("SELECT data->>'dunningLastRunDate' AS d FROM app_state WHERE id = 'main'"); return rows[0]?.d || ""; }
+  catch (e) { console.warn("No se pudo cargar dunningLastRunDate:", e.message); return ""; }
+}
+async function saveDunningLastRunDate(value) {
+  if (!value) return;
+  try { await pool.query("UPDATE app_state SET data = jsonb_set(COALESCE(data, '{}'), '{dunningLastRunDate}', to_jsonb($1::text)) WHERE id = 'main'", [value]); }
+  catch (e) { console.warn("No se pudo guardar dunningLastRunDate:", e.message); }
+}
+async function initDunningScheduler() {
+  dunningLastRunDate = await loadDunningLastRunDate();
+  startDunningScheduler();
+}
+function startDunningScheduler() {
+  setInterval(async () => {
+    try {
+      const art = nowArt();
+      if (art.hour >= 8 && dunningLastRunDate !== art.dateISO) {
+        const r = await runDunning({ pool });
+        dunningLastRunDate = art.dateISO;
+        await saveDunningLastRunDate(dunningLastRunDate);
+        if (r && (r.waSent || r.mailsSent)) console.log("Dunning:", r.waSent, "whatsapp,", r.mailsSent, "correos");
+      }
+    } catch (e) { console.error("Dunning fallo:", e.message); }
+  }, 5 * 60 * 1000);
+}
+
 app.use((req, res) => res.status(404).json({ error: "Ruta no encontrada." }));
 
 // ---------- Arranque: esquema + usuario administrador inicial ----------
@@ -1951,6 +2043,7 @@ if (require.main === module) {
   bootstrap()
     .then(() => {
       initBillingScheduler();
+      initDunningScheduler();
       return app.listen(PORT, () => console.log("Pare Carrito SAS API escuchando en puerto " + PORT));
     })
     .catch((error) => {

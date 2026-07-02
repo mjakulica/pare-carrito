@@ -10389,6 +10389,10 @@
             <div class="field span-4"><label><input type="checkbox" id="orderchange-enabled" ${state.appSettings && state.appSettings.orderChangeNotifyEnabled ? "checked" : ""} style="width:auto;min-height:auto" /> Avisar al cliente por WhatsApp al agregar/quitar productos de su pedido</label></div>
             <div class="field span-4"><label>Mensaje de aviso de cambio de pedido (usa {cliente} y {detalle})</label><textarea id="orderchange-message" rows="2">${escapeHtml(getOrderChangeMessageText())}</textarea></div>
             <div class="field span-2"><label>Nombre de plantilla Meta (cambios de pedido)</label><input id="orderchange-template" value="${escapeAttr((state.appSettings && state.appSettings.orderChangeTemplateName) || "")}" placeholder="ej: pedido_modificado" /></div>
+            <div class="field span-4"><label><input type="checkbox" id="dunning-enabled" ${state.appSettings && state.appSettings.dunningEnabled ? "checked" : ""} style="width:auto;min-height:auto" /> Enviar recordatorios de pago (WhatsApp diario + correo a los 3 dias de mora)</label></div>
+            <div class="field span-4"><label>Mensaje WhatsApp de recordatorio (usa {cliente} y {saldo})</label><textarea id="dunning-wa-message" rows="2">${escapeHtml((state.appSettings && state.appSettings.dunningWhatsappMessage) || "Hola {cliente}, ayer no registramos el pago correspondiente, su saldo es {saldo} por favor regularizar su deuda")}</textarea></div>
+            <div class="field span-4"><label>Mensaje de correo de mora (usa {cliente}, {diassinpago} y {saldo})</label><textarea id="dunning-mail-message" rows="2">${escapeHtml((state.appSettings && state.appSettings.dunningMailMessage) || "El cliente {cliente} tiene una demora de pago de {diassinpago} y su saldo es {saldo}.")}</textarea></div>
+            <div class="field span-2"><label>Nombre de plantilla Meta (recordatorio de pago)</label><input id="dunning-template" value="${escapeAttr((state.appSettings && state.appSettings.dunningWhatsappTemplate) || "")}" placeholder="ej: recordatorio_pago" /></div>
           </div>
         </div>` : ""}
       </div>` : ""}
@@ -10684,6 +10688,14 @@
     if (ocMessage) ocMessage.addEventListener("change", () => { state.appSettings.orderChangeMessage = ocMessage.value.trim(); saveState(); });
     const ocTemplate = document.getElementById("orderchange-template");
     if (ocTemplate) ocTemplate.addEventListener("change", () => { state.appSettings.orderChangeTemplateName = ocTemplate.value.trim(); saveState(); });
+    const dnEnabled = document.getElementById("dunning-enabled");
+    if (dnEnabled) dnEnabled.addEventListener("change", () => { state.appSettings.dunningEnabled = dnEnabled.checked; saveState(); });
+    const dnWa = document.getElementById("dunning-wa-message");
+    if (dnWa) dnWa.addEventListener("change", () => { state.appSettings.dunningWhatsappMessage = dnWa.value.trim(); saveState(); });
+    const dnMail = document.getElementById("dunning-mail-message");
+    if (dnMail) dnMail.addEventListener("change", () => { state.appSettings.dunningMailMessage = dnMail.value.trim(); saveState(); });
+    const dnTpl = document.getElementById("dunning-template");
+    if (dnTpl) dnTpl.addEventListener("change", () => { state.appSettings.dunningWhatsappTemplate = dnTpl.value.trim(); saveState(); });
     document.querySelectorAll("[data-product-kg]").forEach((input) => input.addEventListener("change", () => {
       const product = getProduct(input.dataset.productKg);
       if (!product) return;
