@@ -1,5 +1,15 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.19 - Ajustes del rol Proveedor (Venta de Hoy, Proveedores, Mis Precios) (2026-07-01)
+
+### Frontend / Rol Proveedor
+
+- Compras/Gastos del proveedor se renombra "Venta de Hoy": oculta Tipo, Caja salida, Empleado asignado y Vendedor; muestra Estado con "Cuenta Corriente" por defecto; el selector de productos lista los que el proveedor vende, ordenados con los que faltan (pedidos de hoy) primero. Commit pendiente en este push.
+- Proveedores: se quita el recuadro "Buscar producto" (queda el panel "Productos que vende") y el campo "Margen defecto" del form; el boton "Pagar" pasa a "Cobrado"; en el pop-up de cobro el proveedor queda fijo (no seleccionable) para el rol proveedor y "Caja" se renombra "Pagado por:". Commit pendiente en este push.
+- "Mis Costos" pasa a "Mis Precios": muestra los productos que el proveedor vende (como en su perfil), cada uno con boton "Desactivar" (lo saca de los que vende) y un boton "Agregar productos" para sumar productos a los que vende. Commit pendiente en este push.
+
+---
+
 ## v12.9.18 - Parser: punto antes de parentesis no separa items (2026-07-01)
 
 ### Frontend / Parser
