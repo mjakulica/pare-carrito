@@ -7697,10 +7697,6 @@
       });
       document.querySelectorAll("[data-export-today-remitos]").forEach((button) => {
         button.addEventListener("click", () => {
-          if (window.innerWidth <= 760) {
-            navigate("remitos/imprimir-hoy");
-            return;
-          }
           if (todaysNotes.length && !confirm("Todavia hay notas en productos de pedidos de hoy. Exportar igual?")) return;
           if (missingPurchases.length && !confirm("Hay productos de hoy sin compra registrada. Exportar igual?")) return;
           printTodayRemitosDirect();
@@ -8083,10 +8079,6 @@
     });
     document.querySelectorAll("[data-export-today-remitos]").forEach((button) => {
       button.addEventListener("click", () => {
-        if (window.innerWidth <= 760) {
-          navigate("remitos/imprimir-hoy");
-          return;
-        }
         const date = ui.unitsDate || todayISO();
         const unitItems = getUnitWeightGroups(date).filter((group) => group.unitProduct && group.pendingEntries.length);
         const missingPurchases = getProductPurchaseShortages(date);
@@ -16419,6 +16411,7 @@
       .remito-table{font-size:10.5px;line-height:1;border-collapse:collapse}
       .remito-table thead th{border-top:1px solid #b8b8b8;border-bottom:1px solid #b8b8b8;color:#17228a;font-weight:800;padding:1px 3px;line-height:1.05}
       .remito-table tbody tr:nth-child(odd){background:#ededed}
+      .remito-table tbody tr.blank-row{background:transparent}
       .remito-table td{height:auto;line-height:1.05;padding:0.4px 3px;border:0}
       .remito-table .blank-row td{color:transparent}
       .remito-footer{display:grid;grid-template-columns:1fr 230px;gap:10px;align-items:end;border-top:1px solid #c7c7c7;margin-top:6px;padding-top:6px;font-size:10px}
