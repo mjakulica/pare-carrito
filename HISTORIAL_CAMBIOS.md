@@ -1,5 +1,17 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.14 - Nuevo rol Proveedor (2026-07-01)
+
+### Frontend / Backend / Roles
+
+- Nuevo rol `proveedor`, vinculado a una cuenta de proveedor (`user.providerId`) desde el formulario de Usuarios. Backend: incluido en STATE_READ_ROLES/PATCH_SYNC_ROLES y en el CHECK de la tabla users. Commits `f371157`.
+- El proveedor solo ve: Inicio (panel propio con su estado de cuenta con la empresa, productos asignados, items de hoy y accesos rapidos), Pedidos (solo los que incluyen productos asignados a el), Dividir Compras (solo lo asignado a el, con export PDF/WhatsApp de lo suyo y sin poder reasignar ni cambiar de proveedor), Proveedores (solo su cuenta), Compras/Gastos (movimientos acotados a los que carga el), Mis Costos y Configuracion. Commits `5459957`, `e09a9a5`.
+- "Mis Costos": vista rapida donde el proveedor carga el costo y el precio de mercado de sus productos asignados; actualiza el costo del sistema (`state.prices` + `product.baseCost`) sin tocar el precio de venta. Ademas puede cargar el costo generando una compra en Compras/Gastos, igual que el empleado. Commit `417010f`.
+
+**Uso**: crear el usuario proveedor (rol Proveedor) y vincularlo a su cuenta de proveedor (Miriam, Chicho, Mario Ibero, Antonia, etc.); asignarle sus productos desde Productos / Dividir Compras (asignacion por producto). Deploy: cambia el backend -> `./deploy.sh` (rebuild; el nuevo rol requiere el ALTER del CHECK que corre en el bootstrap).
+
+---
+
 ## v12.9.13 - Feriados en Config, plazo de pago, recordatorios de pago y pedir recambio (2026-07-01)
 
 ### Frontend / Backend / Config / Clientes / Cobranzas / Recambio
