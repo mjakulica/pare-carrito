@@ -4907,9 +4907,14 @@
     const groups = {};
     ordersByDate(date).forEach((order) => {
       order.items.forEach((item) => {
-        const key = item.productId + "|" + item.unitType;
+        // Agrupar por PRODUCTO (no por unidad): el mismo producto con la unidad escrita
+        // distinto en cada pedido (ej. "unidad" vs "atado") se suma en una sola tarjeta.
+        const key = item.productId || ("name:" + item.productName);
         const client = getClient(order.clientId);
-        if (!groups[key]) groups[key] = { key, productId: item.productId, productName: item.productName, unitType: item.unitType, quantity: 0, entries: [] };
+        if (!groups[key]) {
+          const prod = getProduct(item.productId);
+          groups[key] = { key, productId: item.productId, productName: (prod && prod.name) || item.productName, unitType: (prod && prod.unitType) || item.unitType, quantity: 0, entries: [] };
+        }
         groups[key].quantity += Number(item.quantity || 0);
         groups[key].entries.push({ order, item, client });
       });
