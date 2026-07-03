@@ -4571,8 +4571,8 @@
     });
     const dayRows = Object.values(byDay).sort((a, b) => String(b.date).localeCompare(String(a.date))).map((d) => {
       const prods = Object.values(d.items).sort((a, b) => a.name.localeCompare(b.name))
-        .map((p) => `<div class="assigned-group"><strong>${escapeHtml(p.name)}</strong><span>${formatDivideQty(p.qty)} ${escapeHtml(p.unit)} = ${formatMoney(p.sub)}</span></div>`).join("");
-      return `<details class="prov-day-row" style="border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:6px"><summary style="cursor:pointer;display:flex;justify-content:space-between;gap:8px"><span>${formatDateShort(d.date)}</span><strong>${formatMoney(d.total)}</strong></summary><div style="margin-top:8px">${prods}</div></details>`;
+        .map((p) => `<div><span>${escapeHtml(p.name)}</span><span>${formatDivideQty(p.qty)} ${escapeHtml(p.unit)} x ${formatMoney(p.qty > 0 ? p.sub / p.qty : 0)} = ${formatMoney(p.sub)}</span></div>`).join("");
+      return `<details class="prov-day-row" style="border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:6px"><summary style="cursor:pointer;display:flex;justify-content:space-between;gap:8px"><span>${formatDateShort(d.date)}</span><strong>${formatMoney(d.total)}</strong></summary><div class="mini-table" style="margin-top:8px">${prods}</div></details>`;
     }).join("");
     return `
       <div class="panel" style="margin-bottom:14px">
