@@ -6380,14 +6380,14 @@
             <div id="purchase-items" class="grid">
               ${renderPurchaseItemRow()}
             </div>
+            <div class="page-actions purchase-submit-row" style="margin-top:12px;gap:8px">
+              <button class="btn small yellow" type="button" data-add-purchase-item id="purchase-add-item-btn">Agregar producto</button>
+              <button class="btn small primary" type="submit">Guardar egreso</button>
+            </div>
             <div class="page-actions" style="margin-top:12px">
               <strong>Productos</strong>
             </div>
             <div id="required-purchase-grid">${renderRequiredPurchaseGrid()}</div>
-          </div>
-          <div class="page-actions purchase-submit-row" style="margin-top:12px;justify-content:space-between">
-            <button class="btn small yellow" type="button" data-add-purchase-item id="purchase-add-item-btn">Agregar producto</button>
-            <button class="btn small primary" type="submit">Guardar egreso</button>
           </div>
           <div id="vendor-favorites-wrap" class="panel" style="box-shadow:none;margin-top:12px">
             <div class="page-actions" style="justify-content:space-between">
