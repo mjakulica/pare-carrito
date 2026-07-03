@@ -2804,6 +2804,17 @@
     if (!Array.isArray(state.appSettings.stockGroups)) state.appSettings.stockGroups = [];
     return state.appSettings.stockGroups;
   }
+  // Productos que pertenecen a un grupo como "miembro de equivalencia" o como "se compra
+  // entero": no se muestran individualmente en Stock ni en la grilla de falta (se cuentan
+  // una sola vez a nivel de grupo). El "bulto" (jaula/caja) NO se oculta: es lo que se sugiere comprar.
+  function getGroupHiddenProductIds() {
+    const set = new Set();
+    getStockGroups().forEach((g) => {
+      (g.members || []).forEach((m) => { if (m.productId) set.add(m.productId); });
+      if (g.wholeProductId) set.add(g.wholeProductId);
+    });
+    return set;
+  }
 
   // Calcula, para un grupo, la demanda del dia en kg y la sugerencia de compra:
   // el producto "entero" (ej. cajon) se compra por su parte entera; el resto (fracciones
@@ -2895,7 +2906,9 @@
 
   function renderStock() {
     const stockView = ui.stockView || "activos";
+    const stockHiddenIds = getGroupHiddenProductIds();
     const rows = getStockTrackedProductIds().map((id) => getProduct(id)).filter(Boolean)
+      .filter((product) => !stockHiddenIds.has(product.id))
       .filter((product) => stockView === "inactivos" ? isStockDisabled(product.id) : !isStockDisabled(product.id))
       .sort((a, b) => a.name.localeCompare(b.name)).map((product) => {
         const sug = getStockSuggestion(product.id);
@@ -6358,7 +6371,8 @@
     const groups = Object.values(getOrderProductGroups(date));
     const remaining = { ...getPurchasedQuantities(date) };
     const trackedStockIds = new Set(getStockTrackedProductIds().filter((id) => !isStockDisabled(id)));
-    const allItems = groups.map((group) => {
+    const hiddenGroupIds = getGroupHiddenProductIds();
+    const allItems = groups.filter((group) => !hiddenGroupIds.has(group.productId)).map((group) => {
       const available = Number(remaining[group.productId] || 0);
       const purchasedQuantity = Math.min(available, Number(group.quantity || 0));
       remaining[group.productId] = available - purchasedQuantity;
@@ -6397,6 +6411,7 @@
     const seenIds = new Set([...requiredIds, ...restItems.map((item) => item.productId)]);
     relatedIds.forEach((productId) => {
       if (seenIds.has(productId)) return;
+      if (hiddenGroupIds.has(productId)) return;
       const product = getProduct(productId);
       if (!product || product.isActive === false) return;
       restItems.push({ productId: product.id, productName: product.name, unitType: product.unitType, shortageQuantity: 0, favorite: false });
@@ -6408,6 +6423,30 @@
       return "Agregar";
     };
 
+    // Conciliacion por grupo: en vez de mostrar cada miembro (berenjena unidad/kg, tomate
+    // cajon/perita) por separado, mostramos lo que falta comprar a nivel de grupo: los enteros
+    // (cajon) netos de lo ya comprado, y el bulto (jaula/caja) neto de lo ya comprado.
+    const purchasedAll = getPurchasedQuantities(date);
+    const allowedForAssignee = (pid) => isAll || providerProducts.has(pid) || getProductAssigneeValue(pid) === assignedValue;
+    const groupCards = [];
+    getStockGroups().forEach((g) => {
+      const c = stockGroupComputation(g, date);
+      const wholeProd = g.wholeProductId ? getProduct(g.wholeProductId) : null;
+      const bulkProd = g.bulkProductId ? getProduct(g.bulkProductId) : null;
+      if (wholeProd && c.wholeToBuy > 0 && allowedForAssignee(g.wholeProductId)) {
+        const falta = Math.max(0, c.wholeToBuy - Number(purchasedAll[g.wholeProductId] || 0));
+        if (falta > 0) groupCards.push({ productId: g.wholeProductId, name: wholeProd.name, qty: falta, label: "Falta " + formatNumber(falta) + " " + escapeHtml(wholeProd.unitType || "") });
+      }
+      if (bulkProd && c.bulkToBuy > 0 && allowedForAssignee(g.bulkProductId)) {
+        const falta = Math.max(0, c.bulkToBuy - Number(purchasedAll[g.bulkProductId] || 0));
+        if (falta > 0) groupCards.push({ productId: g.bulkProductId, name: bulkProd.name, qty: falta, label: "Falta " + formatNumber(falta) + " " + escapeHtml(bulkProd.unitType || "") });
+      }
+    });
+    const groupCardsHtml = groupCards.map((gc) => `
+      <button class="assigned-product-card favorite" type="button" data-employee-assigned-product="${gc.productId}" data-default-qty="${formatAmountInput(gc.qty)}">
+        <span>${escapeHtml(gc.name)}</span>
+        <strong>${gc.label}</strong>
+      </button>`).join("");
     const cards = [...requiredItems, ...restItems].map((item) => {
       let cardProductId = item.productId;
       let cardName = item.productName;
@@ -6430,7 +6469,7 @@
         <strong>${cardLabel}</strong>
       </button>`;
     }).join("");
-    return `<div class="assigned-products-grid">${cards || `<div class="empty compact">No hay productos pendientes de compra para hoy.</div>`}</div>`;
+    return `<div class="assigned-products-grid">${(groupCardsHtml + cards) || `<div class="empty compact">No hay productos pendientes de compra para hoy.</div>`}</div>`;
   }
 
   function isPreparedProductToday(productId, userId) {
