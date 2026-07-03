@@ -1,5 +1,21 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.30 - Facturacion TusFacturas: provincia, condicion de pago e IVA (2026-07-03)
+
+### Backend (billing.js) - requiere ./deploy.sh (rebuild)
+- Codigos de provincia corregidos a la tabla oficial de TusFacturas (estaban corridos: Salta se enviaba como "10" que es Jujuy; el default "17" que ahora es Salta explicaba a los que salian en Salta). Se agrega normalizacion de acentos y alias de CABA/Capital Federal. Ahora Salta=17, Jujuy=10, Buenos Aires=2, CABA=1.
+- condicion_pago por defecto pasa a "205" (Cuenta corriente); antes "211" (Tarjeta de credito). Verificar que la variable de entorno TUSFACTURAS_CONDICION_PAGO no este forzando 211.
+- Codigos de condicion_iva corregidos: Exento = "E" (antes "EX", invalido) y Monotributo = "M" (antes "MT"). Consumidor Final y Responsable Inscripto sin cambios.
+- La condicion de IVA ahora prioriza: (1) la cargada a mano en el cliente, (2) la que devuelve AFIP por CUIT, (3) el default por tipo de factura.
+
+### Frontend
+- Nuevo campo "Condicion IVA" en el formulario de cliente (Automatica/AFIP, Consumidor Final, Responsable Inscripto, Monotributo, Exento) para marcar exentos a los clientes que corresponda (46, 47, 48).
+
+### Nota importante
+- TusFacturas NO actualiza la condicion frente al IVA de un cliente que ya existe (solo la toma al crearlo). Los clientes 46/47/48 que ya se crearon como Consumidor Final probablemente haya que corregirlos una vez desde el panel de TusFacturas; de ahi en mas el sistema los enviara bien.
+
+---
+
 ## v12.9.29 - Parser, proveedor y unidades (2026-07-03)
 
 ### Parser
