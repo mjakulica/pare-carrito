@@ -1,5 +1,15 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.26 - Stock: grupos y equivalencias (2026-07-02)
+
+### Frontend / Stock
+
+- Nueva seccion en Stock "Grupos / equivalencias" (admin/gerente): permite agrupar productos que son lo mismo contabilizado distinto, con un factor en kg por unidad de cada variante (berenjena unidad 0,4kg; calabaza unidad 2kg; manzana/pera unidad 0,25kg y bandeja 4kg; etc.). Asi la demanda del grupo se calcula una sola vez en kg.
+- Regla especial (tomate): un producto se marca "se compra entero" (cajon, kg por unidad) y otro "bulto para armar el resto" (jaula, kg por bulto). La parte entera de cada pedido de cajon se compra entera; las fracciones (medios cajones) + los kg de los demas miembros (perita) se arman desde jaulas, redondeando para arriba. Ej: 1 cajon entero + 4 medios + perita -> 1 cajon + 2 jaulas.
+- Panel de sugerencia por grupo en Stock (demanda en kg + cajones enteros a comprar + jaulas). La conciliacion automatica en Compras/Gastos (que hoy sigue mostrando el faltante por producto) queda como paso siguiente. Commit pendiente en este push.
+
+---
+
 ## v12.9.25 - Precios: actualizan los pedidos del dia (2026-07-02)
 
 ### Frontend / Precios
