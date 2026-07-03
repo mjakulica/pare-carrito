@@ -4476,7 +4476,8 @@
     if (provFilter) baseOrders = baseOrders.filter((order) => (order.items || []).some((it) => getProductAssigneeValue(it.productId) === "provider:" + provFilter));
     const orders = baseOrders.slice().sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
     const canEditStatus = ["manager", "admin"].includes(currentUser.role) && !annulledView && !deletedView;
-    const showActions = currentUser.role !== "customer";
+    const isProv = currentUser.role === "proveedor";
+    const showActions = !["customer", "proveedor"].includes(currentUser.role);
     const rows = orders.map((order) => {
       const client = getClient(order.clientId);
       const vehicle = getVehicle(order.deliveryVehicleId);
@@ -4488,11 +4489,11 @@
       return `
         <tr>
           <td><strong>${escapeHtml(order.id)}</strong> <span class="muted">${formatDateShort(order.date)}</span>${metaLine}</td>
-          <td><strong>${escapeHtml(order.clientId)} - ${escapeHtml(client ? client.name : order.clientId)}</strong> <span class="muted">${escapeHtml(vehicle ? vehicle.name : order.deliveryVehicleId)}</span></td>
-          <td>${renderOrderInlineDetails(order, { summary: order.items.length + " productos" })}</td>
-          <td class="num">${formatMoney(order.totalAmount)}</td>
-          ${canEditStatus || deletedView ? "" : `<td class="num">${formatMoney(paid)}</td>
-          <td><span class="status ${statusClass(order.status)}">${statusLabel(order.status)}</span></td>`}
+          ${isProv ? `<td><strong>${escapeHtml(order.clientId)}</strong></td>` : `<td><strong>${escapeHtml(order.clientId)} - ${escapeHtml(client ? client.name : order.clientId)}</strong> <span class="muted">${escapeHtml(vehicle ? vehicle.name : order.deliveryVehicleId)}</span></td>`}
+          <td>${renderOrderInlineDetails(order, { summary: order.items.length + " productos", hideMoney: isProv })}</td>
+          ${isProv ? "" : `<td class="num">${formatMoney(order.totalAmount)}</td>`}
+          ${canEditStatus || deletedView ? "" : (isProv ? `<td><span class="status ${statusClass(order.status)}">${statusLabel(order.status)}</span></td>` : `<td class="num">${formatMoney(paid)}</td>
+          <td><span class="status ${statusClass(order.status)}">${statusLabel(order.status)}</span></td>`)}
           ${canEditStatus ? `<td>
             <select data-order-status="${order.id}">
               ${["pendiente", "preparando", "listo", "entregado", "cancelado"].map((status) => `<option value="${status}" ${order.status === status ? "selected" : ""}>${statusLabel(status)}</option>`).join("")}
@@ -4512,7 +4513,9 @@
         </tr>
       `;
     }).join("");
-    const headers = `<th>Pedido</th><th>Cliente</th><th>Productos</th><th>Total</th>${canEditStatus ? "<th>Estado</th>" : "<th>Cobrado</th><th>Estado</th>"}${showActions ? "<th>Acciones</th>" : ""}`;
+    const headers = isProv
+      ? `<th>Pedido</th><th>Cliente</th><th>Productos</th><th>Estado</th>`
+      : `<th>Pedido</th><th>Cliente</th><th>Productos</th><th>Total</th>${canEditStatus ? "<th>Estado</th>" : "<th>Cobrado</th><th>Estado</th>"}${showActions ? "<th>Acciones</th>" : ""}`;
 
     afterRender.push(bindOrders);
     afterRender.push(() => {
@@ -6193,7 +6196,7 @@
   }
 
   function renderRequiredPurchaseGrid(selectedAssigneeValue) {
-    const assignedValue = currentUser.role === "employee" ? "employee:" + currentUser.id : (selectedAssigneeValue || "");
+    const assignedValue = currentUser.role === "employee" ? "employee:" + currentUser.id : currentUser.role === "proveedor" ? currentProviderAssigneeValue() : (selectedAssigneeValue || "");
     const date = todayISO();
     const groups = Object.values(getOrderProductGroups(date));
     const remaining = { ...getPurchasedQuantities(date) };
