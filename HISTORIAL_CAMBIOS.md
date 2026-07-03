@@ -1,5 +1,13 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.31 - Proveedor: compra por dia y privacidad en Dividir (2026-07-03)
+
+### Rol proveedor
+- En Pedidos, se reemplaza "Tu pedido total del dia por producto" por "Compra por dia": una fila por dia con el precio total de la compra (cantidades x costo del proveedor cargado en Mis Precios), y al hacer click se despliega el detalle de cada producto asignado ese dia con su subtotal. Respeta el rango de fechas seleccionado.
+- En Dividir Compras, el recuadro "Agrupado por cliente" ya no muestra el nombre del cliente; solo el numero.
+
+---
+
 ## v12.9.30 - Facturacion TusFacturas: provincia, condicion de pago e IVA (2026-07-03)
 
 ### Backend (billing.js) - requiere ./deploy.sh (rebuild)
