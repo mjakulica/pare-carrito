@@ -1,5 +1,13 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.28 - Compras: sumar por producto en la grilla de falta (2026-07-03)
+
+### Frontend / Compras
+
+- La grilla de falta agrupaba por producto + unidad, por lo que un mismo producto con la unidad escrita distinta en cada pedido (ej. Apio como "unidad" en un pedido y "atado" en otro) aparecia como dos tarjetas separadas. Ahora se agrupa solo por producto y se suma en una sola tarjeta, mostrando la unidad canonica del producto. Esto tambien colapsa los casos tipo "Remolacha por kg" vs "Remolacha por atado" cuando es el mismo producto con la unidad mal cargada en un pedido.
+
+---
+
 ## v12.9.27 - Stock: conteo unico por grupo + conciliacion en Compras (2026-07-03)
 
 ### Frontend / Stock y Compras
