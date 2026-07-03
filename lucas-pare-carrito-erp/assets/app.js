@@ -6553,11 +6553,11 @@
                 ${(currentUser.role === "employee" ? [currentUser] : activeEmployees()).map((employee) => `<option value="${employee.id}" ${employee.id === currentUser.id ? "selected" : ""}>${escapeHtml(employee.name)}</option>`).join("")}
               </select>
             </div>
-            <div class="field span-2" id="purchase-vendor-wrap" style="${currentUser.role === "proveedor" ? "display:none" : ""}">
+            ${currentUser.role === "proveedor" ? "" : `<div class="field span-2" id="purchase-vendor-wrap">
               <label>Vendedor</label>
               <div class="input-with-button"><input id="purchase-vendor" list="vendor-options" placeholder="Nombre del vendedor" /><button class="btn small ghost" type="button" data-register-vendor>Registrar</button></div>
               <datalist id="vendor-options">${getKnownVendors().map((name) => `<option value="${escapeAttr(name)}"></option>`).join("")}</datalist>
-            </div>
+            </div>`}
             <div class="field span-3" id="purchase-description-wrap">
               <label>Descripcion de otro gasto</label>
               <input id="purchase-description" placeholder="Combustible, peaje, bolsa, estacionamiento, etc." />
@@ -8376,7 +8376,9 @@
   }
 
   function renderUnitProductCard(group, allowBulkUpdate) {
-    const entries = allowBulkUpdate ? group.pendingEntries : group.entries;
+    const omittedLines = ui.omittedUnitLines || {};
+    const entries = (allowBulkUpdate ? group.pendingEntries : group.entries).filter(({ order, item }) => !omittedLines[order.id + "|" + item.id]);
+    if (!entries.length) return "";
     return `
       <div class="assigned-product-card" data-unit-group="${escapeAttr(group.key)}">
         <span class="product-name"><img class="product-thumb" src="${productThumb(getProduct(group.productId))}" alt="" />${escapeHtml(group.productName)}</span>
@@ -8450,13 +8452,17 @@
         updateOrderAccounting(order);
         order.updatedAt = new Date().toISOString();
         saveState();
-        // Confirmacion visual en la misma linea (sin popup ni recargar la pantalla).
-        button.innerHTML = "&#10003;";
-        button.style.background = "#16a34a";
-        button.style.borderColor = "#16a34a";
-        button.style.color = "#fff";
-        button.disabled = true;
-        if (line) line.classList.add("unit-line-sent");
+        // Al enviar, quitar el recuadro de ese pedido/producto (como Omitir), sin recargar
+        // la pantalla: se marca la linea como omitida y se saca del DOM; si la tarjeta queda
+        // sin lineas, se saca la tarjeta entera.
+        ui.omittedUnitLines = ui.omittedUnitLines || {};
+        ui.omittedUnitLines[button.dataset.uo + "|" + button.dataset.uitem] = true;
+        if (line) {
+          const list = line.parentElement;
+          const card = line.closest("[data-unit-group]");
+          line.remove();
+          if (list && !list.querySelector(".unit-order-line") && card) card.remove();
+        }
       });
     });
     document.querySelectorAll("[data-remove-unit-order-item]").forEach((button) => {
@@ -14040,12 +14046,26 @@
     clean = clean.replace(/\bpimientos?\b/g, "morron").replace(/\bmolido\b/g, "polvo").replace(/\bzucc?h?ini\b/g, "zukini");
     if (!clean) return null;
     const unitText = normalizeText(unitType);
-    const clientAlias = state.clientProductAliases.find((alias) => alias.clientId === clientId && (normalizeText(alias.alias) === clean || singularizeParsedProductText(normalizeText(alias.alias)) === singularizeParsedProductText(clean)));
+    // Al comparar alias, ignorar conectores ("de", "del", "la", "el"): el parser los quita
+    // del texto pegado ("cebolla de verdeo" -> "cebolla verdeo"), pero el alias guardado
+    // puede conservarlos. Sin esto, un alias como "cebolla de verdeo" nunca matcheaba.
+    const stripAliasConnectors = (t) => String(t || "").split(/\s+/).filter((w) => !isOrderConnectorToken(w)).join(" ").trim();
+    const aliasMatchesClean = (aliasRaw) => {
+      const a = normalizeText(aliasRaw);
+      if (a === clean) return true;
+      const aNo = stripAliasConnectors(a);
+      const cNo = stripAliasConnectors(clean);
+      if (aNo && aNo === cNo) return true;
+      if (singularizeParsedProductText(a) === singularizeParsedProductText(clean)) return true;
+      if (aNo && singularizeParsedProductText(aNo) === singularizeParsedProductText(cNo)) return true;
+      return false;
+    };
+    const clientAlias = state.clientProductAliases.find((alias) => alias.clientId === clientId && aliasMatchesClean(alias.alias));
     if (clientAlias) {
       const product = getProduct(clientAlias.productId);
       return product ? { product, score: 120, exact: true } : null;
     }
-    const generalAlias = state.productAliases.find((alias) => normalizeText(alias.alias) === clean || singularizeParsedProductText(normalizeText(alias.alias)) === singularizeParsedProductText(clean));
+    const generalAlias = state.productAliases.find((alias) => aliasMatchesClean(alias.alias));
     if (generalAlias) {
       const product = getProduct(generalAlias.productId);
       return product ? { product, score: 115, exact: true } : null;
