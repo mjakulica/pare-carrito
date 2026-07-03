@@ -1,5 +1,13 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.25 - Precios: actualizan los pedidos del dia (2026-07-02)
+
+### Frontend / Precios
+
+- Al guardar precios en la pagina Precios y al usar "Importar precios (pegar)", los pedidos del mismo dia se actualizan con los nuevos precios (usa updateOrdersWithNewPrices). Antes los pedidos quedaban con el precio que tenian al cargarse. Commit pendiente en este push.
+
+---
+
 ## v12.9.24 - Importar precios: match tolerante (2026-07-02)
 
 ### Frontend / Precios
