@@ -5268,6 +5268,7 @@
           (byTol[k] = byTol[k] || []).push(p);
         });
         let updated = 0;
+        const changedIds = [];
         const notFound = [];
         const ambiguous = [];
         lines.forEach((line) => {
@@ -5287,9 +5288,11 @@
           state.prices[prod.id] = { productId: prod.id, date: todayISO(), cost, marketPrice: prev.marketPrice || 0, marginPct: calcMargin(cost, venta), price: venta };
           prod.baseCost = cost;
           prod.salePrice = venta;
+          changedIds.push({ productId: prod.id });
           updated += 1;
         });
-        if (!updated && !notFound.length) { alert("No se detectaron filas validas. Revisa el formato."); return; }
+        if (!updated && !notFound.length && !ambiguous.length) { alert("No se detectaron filas validas. Revisa el formato."); return; }
+        updateOrdersWithNewPrices(todayISO(), changedIds);
         saveState();
         const resultNode = document.getElementById("import-prices-result");
         const msg = "Actualizados: " + updated + (ambiguous.length ? "\nAmbiguos (" + ambiguous.length + ", no aplicados): " + ambiguous.join(", ") : "") + (notFound.length ? "\nNo encontrados (" + notFound.length + "): " + notFound.join(", ") : "");
@@ -5384,6 +5387,7 @@
     const importPricesBtn = document.getElementById("import-prices-paste");
     if (importPricesBtn) importPricesBtn.addEventListener("click", openImportPricesModal);
     document.getElementById("save-prices").addEventListener("click", () => {
+      const changedProducts = [];
       document.querySelectorAll("[data-price-row]").forEach((row) => {
         const productId = row.dataset.priceRow;
         const cost = parseAmount(row.querySelector("[data-cost]").value);
@@ -5405,10 +5409,12 @@
           product.baseCost = cost;
           product.salePrice = price;
         }
+        changedProducts.push({ productId });
         // Solo propagar a productos relacionados si cambio el costo de ESTA fila
         // (evita que al guardar se pisen precios editados a mano de productos derivados).
         if (costChanged) applyCostRelations({ productId, unitCost: cost, relationUnits: 0 }, marginPct || calcMargin(cost, price));
       });
+      updateOrdersWithNewPrices(todayISO(), changedProducts);
       saveState();
       alert("Precios guardados.");
       render();
