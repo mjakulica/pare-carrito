@@ -1,5 +1,13 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.21 - Compras: reubicar botones Agregar producto / Guardar egreso (2026-07-02)
+
+### Frontend / Compras
+
+- En Compras/Gastos, los botones "Agregar producto" y "Guardar egreso" quedan uno al lado del otro, justo debajo del buscador de productos y arriba de la grilla de favoritos del vendedor (todos los roles, desktop y mobile). Commit pendiente en este push.
+
+---
+
 ## v12.9.20 - Rol Proveedor: Proveedores y Caja Salida por estado (2026-07-02)
 
 ### Frontend / Rol Proveedor
