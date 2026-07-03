@@ -160,4 +160,5 @@ CREATE TABLE IF NOT EXISTS state_writes (
   clients_after INT NOT NULL DEFAULT 0,
   products_before INT NOT NULL DEFAULT 0,
   products_after INT NOT NULL DEFAULT 0,
-  diff_orders INT
+  diff_orders INT NOT NULL DEFAULT 0
+);
