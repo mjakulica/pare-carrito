@@ -4546,25 +4546,42 @@
   function renderProviderOrdersProductPanels() {
     const provVal = currentProviderAssigneeValue();
     if (!provVal) return "";
-    const dayAssignables = getDivideAssignables();
-    const mine = filterDivideAssignables(dayAssignables, [provVal]);
-    const grouped = renderDivideProductGroups(dayAssignables, [provVal]);
-    const totals = {};
-    mine.forEach(({ item }) => {
-      const key = normalizeText(item.productName);
-      if (!totals[key]) totals[key] = { name: item.productName, unit: divideItemUnit(item), qty: 0 };
-      totals[key].qty += Number(item.quantity || 0);
+    const grouped = renderDivideProductGroups(getDivideAssignables(), [provVal]);
+    // Costo del proveedor por producto (lo que carga en "Mis Precios"); respaldo: baseCost.
+    const unitCost = (pid) => {
+      const rec = state.prices ? state.prices[pid] : null;
+      if (rec && Number(rec.cost) > 0) return Number(rec.cost);
+      const p = getProduct(pid);
+      return p ? Number(p.baseCost || 0) : 0;
+    };
+    const byDay = {};
+    (state.orders || []).forEach((o) => {
+      if (!o || ["cancelado", "anulado"].includes(o.status)) return;
+      if (!isDateInRange(o.date, ui.ordersFrom, ui.ordersTo)) return;
+      (o.items || []).forEach((it) => {
+        if (getEffectiveItemAssigneeValue(it) !== provVal) return;
+        if (!byDay[o.date]) byDay[o.date] = { date: o.date, total: 0, items: {} };
+        const sub = Number(it.quantity || 0) * unitCost(it.productId);
+        byDay[o.date].total += sub;
+        const k = normalizeText(it.productName);
+        if (!byDay[o.date].items[k]) byDay[o.date].items[k] = { name: it.productName, unit: divideItemUnit(it), qty: 0, sub: 0 };
+        byDay[o.date].items[k].qty += Number(it.quantity || 0);
+        byDay[o.date].items[k].sub += sub;
+      });
     });
-    const totalsRows = Object.values(totals).sort((a, b) => a.name.localeCompare(b.name))
-      .map((t) => `<div class="assigned-group"><strong>${escapeHtml(t.name)}</strong><span>${formatDivideQty(t.qty)} ${escapeHtml(t.unit)}</span></div>`).join("");
+    const dayRows = Object.values(byDay).sort((a, b) => String(b.date).localeCompare(String(a.date))).map((d) => {
+      const prods = Object.values(d.items).sort((a, b) => a.name.localeCompare(b.name))
+        .map((p) => `<div class="assigned-group"><strong>${escapeHtml(p.name)}</strong><span>${formatDivideQty(p.qty)} ${escapeHtml(p.unit)} = ${formatMoney(p.sub)}</span></div>`).join("");
+      return `<details class="prov-day-row" style="border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:6px"><summary style="cursor:pointer;display:flex;justify-content:space-between;gap:8px"><span>${formatDateShort(d.date)}</span><strong>${formatMoney(d.total)}</strong></summary><div style="margin-top:8px">${prods}</div></details>`;
+    }).join("");
     return `
       <div class="panel" style="margin-bottom:14px">
         <h2 class="page-title" style="font-size:18px">Pedidos por producto (hoy)</h2>
         <div style="margin-top:8px">${grouped}</div>
       </div>
       <div class="panel" style="margin-bottom:14px">
-        <h2 class="page-title" style="font-size:18px">Tu pedido total del dia por producto</h2>
-        <div style="margin-top:8px">${totalsRows || `<div class="empty compact">Sin pedidos para hoy.</div>`}</div>
+        <h2 class="page-title" style="font-size:18px">Compra por día</h2>
+        <div style="margin-top:8px">${dayRows || `<div class="empty compact">Sin pedidos en el rango seleccionado.</div>`}</div>
       </div>`;
   }
 
@@ -7619,7 +7636,7 @@
       return `
         <div class="assigned-group">
           <strong>Pedido del cliente ${escapeHtml(formatClientIdShort(clientId))})</strong>
-          <span>${escapeHtml(group.clientName)}</span>
+          ${currentProviderId() ? "" : `<span>${escapeHtml(group.clientName)}</span>`}
           <div>${group.items.map((item) => `${formatDivideQty(item.quantity)} ${escapeHtml(divideItemUnit(item))} ${escapeHtml(item.productName)}${isAll ? " - " + escapeHtml(item.assigneeName) : ""}${item.note ? " (" + escapeHtml(item.note) + ")" : ""}`).join("<br>")}</div>
           <div class="divide-client-spacer" aria-hidden="true">&nbsp;</div>
         </div>
