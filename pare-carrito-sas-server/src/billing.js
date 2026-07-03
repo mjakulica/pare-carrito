@@ -288,10 +288,12 @@ function buildInvoicePayload(invoice, cfg, options = {}) {
   const razonSocial = contributor.razonSocial || client.legalName || client.name || "";
   const domicilio = contributor.domicilio || client.address || "-";
   const provinciaCodigo = PROVINCIA_MAP[normalizeProvinceKey(contributor.provinciaTexto)] || cfg.provincia;
-  // Prioridad de condicion de IVA: (1) lo cargado a mano en el cliente, (2) lo que devuelve
-  // AFIP por CUIT, (3) default segun tipo de factura. Asi se puede marcar Exento a un cliente.
+  // Prioridad de condicion de IVA: (1) lo que devuelve AFIP por CUIT, (2) lo cargado a mano en
+  // el cliente (solo respaldo), (3) default segun tipo de factura. AFIP manda; de lo cargado a
+  // mano en teoria solo se usa el CUIT (razon social, domicilio, provincia y condicion de IVA
+  // salen del padron AFIP y solo caen al dato manual si AFIP no devolvio nada).
   const clientCondIva = VALID_CONDICION_IVA.includes(String(client.condicionIva || "").toUpperCase()) ? String(client.condicionIva).toUpperCase() : "";
-  const condicionIva = clientCondIva || contributor.condicionIva || (client.invoiceType === "Factura A" ? "RI" : "CF");
+  const condicionIva = contributor.condicionIva || clientCondIva || (client.invoiceType === "Factura A" ? "RI" : "CF");
 
   const batchNumber = options.batchNumber || 1;
   const batchTotal = options.batchTotal || 1;
