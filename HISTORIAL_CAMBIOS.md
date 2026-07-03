@@ -1,5 +1,15 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.20 - Rol Proveedor: Proveedores y Caja Salida por estado (2026-07-02)
+
+### Frontend / Rol Proveedor
+
+- Proveedores (rol proveedor): se ocultan el boton "Agregar" y las pestanias "Activos"/"Inactivos".
+- Venta de Hoy (rol proveedor): se elimina el recuadro "Vendedor" y su boton "Registrar".
+- Venta de Hoy - Caja Salida segun Estado: con "Cuenta corriente" se oculta; con "Pagado" se muestra con los usuarios empleado (cada uno vinculado a su caja de efectivo) y la opcion "Transferencia" (vinculada a Banco).
+
+---
+
 ## v12.9.19 - Ajustes del rol Proveedor (Venta de Hoy, Proveedores, Mis Precios) (2026-07-01)
 
 ### Frontend / Rol Proveedor
