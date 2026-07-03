@@ -216,7 +216,7 @@ Tablas adicionales:
 2. A las 23:00 hora Argentina verifica clientes con `invoiceFrequency` (`diaria`, `semanal`, `mensual`).
 3. Agrupa pedidos facturables (`needsInvoice`) del período y recalcula neto, IVA y total a partir de los ítems agrupados (precio + alícuota + cantidad) usando `decimal.js`.
 4. Valida CUIT/CUIL del cliente (longitud, prefijo y dígito verificador) antes de emitir.
-5. Consulta los datos oficiales del contribuyente en ARCA a través del endpoint `clientes/afip-info` de TusFacturasAPP (razón social, domicilio, provincia y condición impositiva) y los utiliza en el payload del cliente. Si la consulta no está habilitada o falla, se conservan los datos del ERP como fallback.
+5. Consulta los datos oficiales del contribuyente en ARCA a través del endpoint `clientes/afip-info` de TusFacturasAPP (razón social, domicilio, provincia y condición impositiva) y los utiliza en el payload del cliente, con **prioridad de AFIP** sobre lo cargado a mano (de lo manual en la práctica solo se usa el CUIT). Si la consulta no está habilitada o falla, se conservan los datos del ERP como fallback. Los códigos de provincia, `condicion_pago` y `condicion_iva` siguen las tablas oficiales de TusFacturas (ver 12.20).
 6. Si el período supera los 130 ítems permitidos por TusFacturas, divide el comprobante en múltiples facturas con `external_reference` idempotente (`PC-{clientId}-{from}-{to}` y sufijo `(X/Y)`).
 7. Envía a TusFacturasAPP con timeout de 30s y hasta 3 reintentos con backoff exponencial (o simula si faltan credenciales).
 8. Si un comprobante de un período falla, se detiene el procesamiento de ese período para evitar estados inconsistentes; los períodos anteriores exitosos quedan registrados.
@@ -362,7 +362,7 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 
 ---
 
-## 12. Modulos y subsistemas agregados (2026-06-26 a 2026-07-01)
+## 12. Modulos y subsistemas agregados (2026-06-26 a 2026-07-03)
 
 ### 12.1 Subsistema de Stock de fraccionados
 - Pagina `Stock` con conteo diario por producto, calculo de merma (kg) y sugerencia de compra en bultos. Soporta override por menor, multi-bulto y activar/desactivar producto del calculo.
@@ -421,8 +421,36 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 - Compras/Gastos: tipo "Flete", adjuntar comprobante (imagen comprimida) y "Ver comprobante" en el detalle; usuario + horario en el detalle de movimientos (tambien en Pagos).
 - Vehiculos: sumatoria en 3 columnas + N de cliente; "Sin Dividir" sin total. Remitos PDF: franja gris cada 2da fila + boton mobile identico a desktop. Nuevo pedido: fecha por defecto = dia siguiente despues de las 10am. Vehiculos/Unidades: fecha hoy por defecto; faltantes en lista. Orden de productos agrupa variantes. Botón para eliminar productos inactivos. Cliente en la sync de Sheets como "NNN) Nombre".
 
+### 12.15 Precios: importar pegando y actualizar pedidos del dia (v12.9.22 a v12.9.25)
+- En `Precios`, importar precios pegando una tabla (Venta y Costo): match tolerante por nombre normalizado que ignora "por"/"x" y unidades (ej. "zanahoria por kg" -> Zanahoria Kg), evitando los productos que no vienen en la lista.
+- Al actualizar precios, los pedidos del MISMO dia se recalculan con el nuevo precio (funcion `updateOrdersWithNewPrices`): antes quedaban con el precio que tenian al cargarse.
+
+### 12.16 Stock: grupos / equivalencias y conciliacion en Compras (v12.9.26 a v12.9.28)
+- Seccion "Grupos / equivalencias" en `Stock` (gerente/admin): agrupa productos que son lo mismo contado distinto, con un factor en kg por unidad de cada variante (berenjena unidad 0,4kg; calabaza unidad 2kg; manzana/pera unidad 0,25kg y bandeja 4kg; etc.). Regla especial del tomate: un producto "se compra entero" (cajon, kg por unidad) y otro es "bulto para armar el resto" (jaula, kg por bulto). La parte entera de cada pedido del cajon se compra entera; las fracciones (medios cajones) + los kg de los demas miembros se arman desde jaulas, redondeando para arriba. Funciones: `getStockGroups`, `stockGroupComputation`, `renderStockGroupsPanel`, `openStockGroupsModal`. Config en `appSettings.stockGroups`.
+- Conteo unico: los miembros de un grupo (y el producto "se compra entero") ya no figuran como filas individuales en Stock ni en la grilla de falta; se cuentan una sola vez a nivel de grupo (`getGroupHiddenProductIds`). El bulto no se oculta porque es lo que se sugiere comprar.
+- Conciliacion en Compras/Gastos: la grilla de "falta" muestra la sugerencia por grupo (cajones enteros + jaulas/cajas), neta de lo ya comprado, en vez de sobre-sugerir por producto.
+- La grilla de falta se agrupa por PRODUCTO (no por producto+unidad): un mismo producto con la unidad escrita distinta en dos pedidos (ej. "unidad" vs "atado") se suma en una sola tarjeta con la unidad canonica.
+
+### 12.17 Parser: alias ignora conectores (v12.9.29)
+- El match por alias ignora los conectores "de/del/la/el". El parser quita el "de" del texto pegado ("cebolla de verdeo" -> "cebolla verdeo"), asi que un alias con "de" nunca matcheaba; ahora si (ej. "1 atado de cebolla de verdeo" carga Verdeo, no Cebolla Bolsa).
+
+### 12.18 Rol Proveedor: refinamientos (v12.9.20 a v12.9.31)
+- Compras/Gastos renombrado a "Venta de hoy" para el proveedor; sin Vendedor/Registrar; Caja Salida segun estado; no ve el campo Vendedor (se dejo de renderizar porque `updateKind` lo re-mostraba).
+- Pedidos: no ve nombre de cliente/precios/total (solo cantidades). En el detalle por producto de cada pedido solo se muestran los productos asignados al proveedor. Se agrego "Pedidos por producto (hoy)" (desglose por cliente estilo Dividir) y "Compra por dia" (una fila por dia con el total al costo del proveedor -de Mis Precios-, expandible al detalle producto x costo = total, con el mismo formato que la pagina Proveedores). Respeta el rango de fechas.
+- Dividir Compras: el recuadro "Agrupado por cliente" no muestra el nombre del cliente, solo el numero.
+
+### 12.19 Unidades: enviar quita el recuadro (v12.9.29)
+- Al presionar Enviar en unidades pendientes se quita el recuadro de ese pedido/producto (igual que Omitir), sin recargar la pantalla; si la tarjeta queda sin lineas se saca entera. Se registra en `ui.omittedUnitLines`.
+
+### 12.20 Facturacion TusFacturas: correccion de codigos y condicion de IVA (v12.9.30)
+- Codigos de provincia corregidos a la tabla oficial de TusFacturas (estaban corridos: Salta salia como Jujuy y el default salia como Salta). Ahora Salta=17, Jujuy=10, Buenos Aires=2, CABA=1, con normalizacion de acentos y alias de CABA/Capital Federal (`normalizeProvinceKey`).
+- `condicion_pago` por defecto = "205" (Cuenta corriente); antes "211" (Tarjeta de credito). Verificar que la env `TUSFACTURAS_CONDICION_PAGO` no fuerce 211.
+- Codigos de `condicion_iva` validos: Exento="E" (antes "EX", invalido), Monotributo="M" (antes "MT"). Prioridad: AFIP por CUIT, luego el campo manual del cliente (respaldo), luego default por tipo de factura.
+- Nuevo campo "Condicion IVA" en el formulario de cliente (`client.condicionIva`: ""=automatica/AFIP, CF, RI, M, E) como respaldo. NOTA: TusFacturas no actualiza la condicion de IVA de un cliente ya existente; hay que corregirlo una vez en su panel.
+
 ### 12.14 Modelo de datos agregado
 - `client.paymentDay`; coleccion `state.replacements` (recambios/reposiciones); `user.providerId` (vinculo del rol proveedor); appSettings: dunning (`dunningEnabled`, `dunningWhatsappMessage`, `dunningMailMessage`, `dunningWhatsappTemplate`) y aviso de cambios (`orderChangeNotifyEnabled`, `orderChangeMessage`, `orderChangeTemplateName`); `purchase.proofFile` (comprobante), tipo de gasto `freight`.
+- `appSettings.stockGroups` (grupos/equivalencias de stock: `{id,name,members:[{productId,factorKg}],wholeProductId,wholeKg,bulkProductId,bulkKg}`); `client.condicionIva` (respaldo de condicion frente al IVA para facturacion); `ui.omittedUnitLines` (lineas de Unidades enviadas/ocultas).
 
 ---
 
