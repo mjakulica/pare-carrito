@@ -12223,6 +12223,7 @@
         <div class="field"><label>CUIT</label><input id="client-cuit" value="${escapeAttr(client ? client.cuit || "" : "")}" /></div>
         <div class="field span-2"><label>Nombre legal</label><input id="client-legal-name" value="${escapeAttr(client ? client.legalName || "" : "")}" /></div>
         <div class="field"><label>Tipo factura</label><select id="client-invoice-type">${["Sin Factura", "Factura A", "Factura B", "Factura C"].map((type) => `<option value="${type}" ${(!client && type === "Sin Factura") || (client && (client.invoiceType || "Sin Factura") === type) ? "selected" : ""}>${type}</option>`).join("")}</select></div>
+        <div class="field"><label>Condición IVA</label><select id="client-condicion-iva">${[["", "Automática (AFIP)"], ["CF", "Consumidor Final"], ["RI", "Responsable Inscripto"], ["M", "Monotributo"], ["E", "Exento"]].map(([code, label]) => `<option value="${code}" ${(client && String(client.condicionIva || "") === code) ? "selected" : ""}>${label}</option>`).join("")}</select></div>
         <div class="field"><label>Frecuencia</label><select id="client-invoice-frequency">${["diaria", "semanal", "quincenal", "mensual"].map((freq) => `<option value="${freq}" ${client && client.invoiceFrequency === freq ? "selected" : ""}>${freq}</option>`).join("")}</select></div>
         <div class="field span-4"><label>Notas</label><textarea id="client-notes">${escapeHtml(client ? client.notes || "" : "")}</textarea></div>
       </form>
@@ -12274,6 +12275,7 @@
             cuit: document.getElementById("client-cuit").value.trim(),
             legalName: document.getElementById("client-legal-name").value.trim(),
             invoiceType: invoiceTypeValue,
+            condicionIva: (document.getElementById("client-condicion-iva") ? document.getElementById("client-condicion-iva").value : (client ? client.condicionIva || "" : "")),
             invoiceFrequency: document.getElementById("client-invoice-frequency").value,
             vehicleId: document.getElementById("client-vehicle").value,
             isActive: client ? client.isActive : true,

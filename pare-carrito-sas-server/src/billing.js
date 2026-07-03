@@ -12,42 +12,52 @@ const TF_ITEMS_PER_INVOICE = 130;
 const TF_TIMEOUT_MS = 30000;
 const TF_RETRIES = 3;
 
+// Codigos oficiales de provincia de TusFacturas (tabla condiciones/provincias de la API).
+// OJO: NO coinciden con el orden alfabetico; ej. Salta=17, Jujuy=10, Buenos Aires=2, CABA=1.
 const PROVINCIA_MAP = {
+  "CIUDAD AUTONOMA DE BUENOS AIRES": "1",
+  "CIUDAD DE BUENOS AIRES": "1",
   "CAPITAL FEDERAL": "1",
   "CABA": "1",
   "BUENOS AIRES": "2",
   "CATAMARCA": "3",
-  "CORDOBA": "4",
-  "CORRIENTES": "5",
-  "ENTRE RIOS": "6",
-  "JUJUY": "7",
-  "MENDOZA": "8",
-  "LA RIOJA": "9",
-  "SALTA": "10",
-  "SAN JUAN": "11",
-  "SAN LUIS": "12",
-  "SANTA FE": "13",
-  "SANTIAGO DEL ESTERO": "14",
-  "TUCUMAN": "15",
-  "CHACO": "16",
-  "CHUBUT": "17",
-  "FORMOSA": "18",
-  "MISIONES": "19",
-  "NEUQUEN": "20",
-  "LA PAMPA": "21",
-  "RIO NEGRO": "22",
-  "SANTA CRUZ": "23",
-  "TIERRA DEL FUEGO": "24"
+  "CHACO": "4",
+  "CHUBUT": "5",
+  "CORDOBA": "6",
+  "CORRIENTES": "7",
+  "ENTRE RIOS": "8",
+  "FORMOSA": "9",
+  "JUJUY": "10",
+  "LA PAMPA": "11",
+  "LA RIOJA": "12",
+  "MENDOZA": "13",
+  "MISIONES": "14",
+  "NEUQUEN": "15",
+  "RIO NEGRO": "16",
+  "SALTA": "17",
+  "SAN JUAN": "18",
+  "SAN LUIS": "19",
+  "SANTA CRUZ": "20",
+  "SANTA FE": "21",
+  "SANTIAGO DEL ESTERO": "22",
+  "TIERRA DEL FUEGO": "23",
+  "TUCUMAN": "24"
 };
+
+function normalizeProvinceKey(text) {
+  return String(text || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim();
+}
+
+const VALID_CONDICION_IVA = ["CF", "RI", "M", "E", "CDEX", "IVNA", "PDEX"];
 
 function mapCondicionIva(condicion) {
   const c = String(condicion || "").toUpperCase().trim();
+  // Codigos validos de TusFacturas: CF, RI, M, E, CDEX, IVNA, PDEX.
   if (c.includes("RESPONSABLE INSCRIPTO")) return "RI";
-  if (c.includes("MONOTRIBUTO")) return "MT";
-  if (c.includes("EXENTO")) return "EX";
+  if (c.includes("MONOTRIBUT")) return "M";
+  if (c.includes("EXENTO")) return "E";
   if (c.includes("CONSUMIDOR FINAL")) return "CF";
-  if (c.includes("NO RESPONSABLE")) return "NR";
-  if (c.includes("SUJETO EXENTO")) return "SE";
+  if (c.includes("NO ALCANZADO")) return "IVNA";
   return "";
 }
 
@@ -59,7 +69,7 @@ function billingConfig(env = process.env) {
     puntoVenta: env.TUSFACTURAS_PUNTO_VENTA || "1",
     provincia: env.TUSFACTURAS_PROVINCIA || "17",
     rubro: env.TUSFACTURAS_RUBRO || "Frutas y verduras",
-    condicionPago: env.TUSFACTURAS_CONDICION_PAGO || "211"
+    condicionPago: env.TUSFACTURAS_CONDICION_PAGO || "205" // 205 = Cuenta corriente (211 era Tarjeta de credito)
   };
   cfg.enabled = !!(cfg.apikey && cfg.apitoken && cfg.usertoken);
   return cfg;
@@ -277,8 +287,11 @@ function buildInvoicePayload(invoice, cfg, options = {}) {
   const contributor = options.contributorData || {};
   const razonSocial = contributor.razonSocial || client.legalName || client.name || "";
   const domicilio = contributor.domicilio || client.address || "-";
-  const provinciaCodigo = PROVINCIA_MAP[String(contributor.provinciaTexto || "").toUpperCase().trim()] || cfg.provincia;
-  const condicionIva = contributor.condicionIva || (client.invoiceType === "Factura A" ? "RI" : "CF");
+  const provinciaCodigo = PROVINCIA_MAP[normalizeProvinceKey(contributor.provinciaTexto)] || cfg.provincia;
+  // Prioridad de condicion de IVA: (1) lo cargado a mano en el cliente, (2) lo que devuelve
+  // AFIP por CUIT, (3) default segun tipo de factura. Asi se puede marcar Exento a un cliente.
+  const clientCondIva = VALID_CONDICION_IVA.includes(String(client.condicionIva || "").toUpperCase()) ? String(client.condicionIva).toUpperCase() : "";
+  const condicionIva = clientCondIva || contributor.condicionIva || (client.invoiceType === "Factura A" ? "RI" : "CF");
 
   const batchNumber = options.batchNumber || 1;
   const batchTotal = options.batchTotal || 1;
