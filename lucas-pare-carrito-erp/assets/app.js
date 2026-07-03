@@ -2815,30 +2815,31 @@
     let kgPool = 0;
     let wholeToBuy = 0;
     let demandKg = 0;
-    (group.members || []).forEach((m) => {
-      if (group.wholeProductId && m.productId === group.wholeProductId) {
-        // Parte entera de CADA item de pedido -> se compra entero; la fraccion (0,5) -> se arma desde bulto.
-        let whole = 0;
-        let frac = 0;
-        (state.orders || []).forEach((o) => {
-          if (!o || ["cancelado", "anulado"].includes(o.status)) return;
-          if (!o.date || o.date < d || o.date >= next) return;
-          (o.items || []).forEach((it) => {
-            if (it.productId !== m.productId) return;
-            const q = Number(it.quantity || 0);
-            const w = Math.floor(q + 1e-9);
-            whole += w;
-            frac += Math.max(0, q - w);
-          });
+    // Producto "se compra entero" (ej. cajon): la parte entera de cada pedido se compra
+    // entera; la fraccion (0,5) se arma desde el bulto. No hace falta que este en miembros.
+    if (group.wholeProductId) {
+      let whole = 0;
+      let frac = 0;
+      (state.orders || []).forEach((o) => {
+        if (!o || ["cancelado", "anulado"].includes(o.status)) return;
+        if (!o.date || o.date < d || o.date >= next) return;
+        (o.items || []).forEach((it) => {
+          if (it.productId !== group.wholeProductId) return;
+          const q = Number(it.quantity || 0);
+          const w = Math.floor(q + 1e-9);
+          whole += w;
+          frac += Math.max(0, q - w);
         });
-        wholeToBuy += whole;
-        kgPool += frac * Number(group.wholeKg || 0);
-        demandKg += (whole + frac) * Number(group.wholeKg || 0);
-      } else {
-        const q = stockOrdersBetween(m.productId, d, next);
-        kgPool += q * Number(m.factorKg || 0);
-        demandKg += q * Number(m.factorKg || 0);
-      }
+      });
+      wholeToBuy += whole;
+      kgPool += frac * Number(group.wholeKg || 0);
+      demandKg += (whole + frac) * Number(group.wholeKg || 0);
+    }
+    (group.members || []).forEach((m) => {
+      if (group.wholeProductId && m.productId === group.wholeProductId) return;
+      const q = stockOrdersBetween(m.productId, d, next);
+      kgPool += q * Number(m.factorKg || 0);
+      demandKg += q * Number(m.factorKg || 0);
     });
     const bulkKg = Number(group.bulkKg || 0);
     const bulkToBuy = bulkKg > 0 ? Math.ceil((kgPool / bulkKg) - 1e-9) : 0;
