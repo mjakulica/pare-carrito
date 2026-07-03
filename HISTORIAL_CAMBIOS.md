@@ -1,5 +1,14 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.22 - Rol Proveedor: Pedidos sin datos sensibles y "falta" en Venta de Hoy (2026-07-02)
+
+### Frontend / Rol Proveedor
+
+- Pedidos (rol proveedor): muestra solo el numero de cliente (no el nombre), sin precios ni total; el detalle muestra solo las cantidades. Se quita la columna de acciones.
+- Venta de Hoy (rol proveedor): la grilla "falta" muestra los productos asignados al proveedor ese dia, igual que la ve el empleado al seleccionar su usuario en "Proveedor / Asignado a".
+
+---
+
 ## v12.9.21 - Compras: reubicar botones Agregar producto / Guardar egreso (2026-07-02)
 
 ### Frontend / Compras
