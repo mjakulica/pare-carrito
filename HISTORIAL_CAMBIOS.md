@@ -6,7 +6,7 @@
 - Codigos de provincia corregidos a la tabla oficial de TusFacturas (estaban corridos: Salta se enviaba como "10" que es Jujuy; el default "17" que ahora es Salta explicaba a los que salian en Salta). Se agrega normalizacion de acentos y alias de CABA/Capital Federal. Ahora Salta=17, Jujuy=10, Buenos Aires=2, CABA=1.
 - condicion_pago por defecto pasa a "205" (Cuenta corriente); antes "211" (Tarjeta de credito). Verificar que la variable de entorno TUSFACTURAS_CONDICION_PAGO no este forzando 211.
 - Codigos de condicion_iva corregidos: Exento = "E" (antes "EX", invalido) y Monotributo = "M" (antes "MT"). Consumidor Final y Responsable Inscripto sin cambios.
-- La condicion de IVA ahora prioriza: (1) la cargada a mano en el cliente, (2) la que devuelve AFIP por CUIT, (3) el default por tipo de factura.
+- La condicion de IVA (igual que domicilio, provincia y razon social) prioriza lo que devuelve AFIP por CUIT; el dato cargado a mano en el cliente queda solo como respaldo si AFIP no devuelve nada. En la practica, de lo cargado a mano solo se usa el CUIT.
 
 ### Frontend
 - Nuevo campo "Condicion IVA" en el formulario de cliente (Automatica/AFIP, Consumidor Final, Responsable Inscripto, Monotributo, Exento) para marcar exentos a los clientes que corresponda (46, 47, 48).
