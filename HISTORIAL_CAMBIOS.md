@@ -1,5 +1,20 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.29 - Parser, proveedor y unidades (2026-07-03)
+
+### Parser
+- El match por alias ahora ignora los conectores "de/del/la/el". Antes un alias como "cebolla de verdeo" no matcheaba porque el parser quita el "de" del texto pegado; ahora "1 atado de cebolla de verdeo" carga Verdeo y no Cebolla Bolsa.
+
+### Rol proveedor
+- En Compras/Gastos ya no se renderiza el campo Vendedor ni el boton Registrar (updateKind los volvia a mostrar pese al display:none).
+- En Pedidos, el detalle por producto de cada pedido muestra solo los productos asignados al proveedor.
+- En Pedidos se agregan dos recuadros: "Pedidos por producto (hoy)" con desglose por cliente (estilo Dividir / Agrupado por producto) y "Tu pedido total del dia por producto".
+
+### Unidades
+- Al presionar Enviar en unidades pendientes, se quita el recuadro de ese pedido/producto (igual que Omitir), sin recargar la pantalla; si la tarjeta queda sin lineas, se saca entera.
+
+---
+
 ## v12.9.28 - Compras: sumar por producto en la grilla de falta (2026-07-03)
 
 ### Frontend / Compras
