@@ -1,5 +1,13 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.24 - Importar precios: match tolerante (2026-07-02)
+
+### Frontend / Precios
+
+- El importador de precios ahora hace match tolerante: intenta primero el nombre exacto y, si no encuentra, ignora palabras de relleno ("por", "x", "de", "del", "la", "el") - ej. "Zanahoria por Kg" matchea "Zanahoria Kg". Si la version tolerante corresponde a mas de un producto, no lo aplica y lo reporta como ambiguo. Commit pendiente en este push.
+
+---
+
 ## v12.9.23 - Importar precios pegando (Precios) (2026-07-02)
 
 ### Frontend / Precios
