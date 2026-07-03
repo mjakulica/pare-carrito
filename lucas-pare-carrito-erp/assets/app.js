@@ -2799,6 +2799,99 @@
       return { productId: row.productId, units: row.units, productName: product ? product.name : row.productId, unitType: product ? product.unitType : "", kg: row.units * getKgFactor(product) };
     }).sort((a, b) => b.kg - a.kg);
   }
+  function getStockGroups() {
+    if (!state.appSettings) state.appSettings = {};
+    if (!Array.isArray(state.appSettings.stockGroups)) state.appSettings.stockGroups = [];
+    return state.appSettings.stockGroups;
+  }
+
+  // Calcula, para un grupo, la demanda del dia en kg y la sugerencia de compra:
+  // el producto "entero" (ej. cajon) se compra por su parte entera; el resto (fracciones
+  // de ese producto + los demas miembros por su factor) se convierte a kg y se compra
+  // como "bulto" (ej. jaula), redondeando para arriba.
+  function stockGroupComputation(group, date) {
+    const d = date || todayISO();
+    const next = addDaysISO(d, 1);
+    let kgPool = 0;
+    let wholeToBuy = 0;
+    let demandKg = 0;
+    (group.members || []).forEach((m) => {
+      if (group.wholeProductId && m.productId === group.wholeProductId) {
+        // Parte entera de CADA item de pedido -> se compra entero; la fraccion (0,5) -> se arma desde bulto.
+        let whole = 0;
+        let frac = 0;
+        (state.orders || []).forEach((o) => {
+          if (!o || ["cancelado", "anulado"].includes(o.status)) return;
+          if (!o.date || o.date < d || o.date >= next) return;
+          (o.items || []).forEach((it) => {
+            if (it.productId !== m.productId) return;
+            const q = Number(it.quantity || 0);
+            const w = Math.floor(q + 1e-9);
+            whole += w;
+            frac += Math.max(0, q - w);
+          });
+        });
+        wholeToBuy += whole;
+        kgPool += frac * Number(group.wholeKg || 0);
+        demandKg += (whole + frac) * Number(group.wholeKg || 0);
+      } else {
+        const q = stockOrdersBetween(m.productId, d, next);
+        kgPool += q * Number(m.factorKg || 0);
+        demandKg += q * Number(m.factorKg || 0);
+      }
+    });
+    const bulkKg = Number(group.bulkKg || 0);
+    const bulkToBuy = bulkKg > 0 ? Math.ceil((kgPool / bulkKg) - 1e-9) : 0;
+    const sobrante = bulkKg > 0 ? Math.max(0, bulkToBuy * bulkKg - kgPool) : 0;
+    return { demandKg, kgPool, wholeToBuy, bulkToBuy, sobrante };
+  }
+
+  function renderStockGroupsPanel() {
+    const groups = getStockGroups();
+    const canConfig = ["manager", "admin"].includes(currentUser.role);
+    const rows = groups.map((g) => {
+      const c = stockGroupComputation(g);
+      const wholeProd = g.wholeProductId ? getProduct(g.wholeProductId) : null;
+      const bulkProd = g.bulkProductId ? getProduct(g.bulkProductId) : null;
+      const compra = [];
+      if (c.wholeToBuy > 0 && wholeProd) compra.push("<strong>" + formatNumber(c.wholeToBuy) + "</strong> " + escapeHtml(wholeProd.name));
+      if (c.bulkToBuy > 0 && bulkProd) compra.push("<strong>" + formatNumber(c.bulkToBuy) + "</strong> " + escapeHtml(bulkProd.name) + " <span class=\"muted\">(sobran " + formatNumber(c.sobrante) + " kg)</span>");
+      return "<tr><td><strong>" + escapeHtml(g.name) + "</strong></td><td class=\"num\">" + formatNumber(c.demandKg) + " kg</td><td>" + (compra.join(" + ") || "<span class=\"muted\">Sin faltante</span>") + "</td></tr>";
+    }).join("");
+    return "<div class=\"panel\" style=\"margin-top:14px\"><div class=\"page-actions\" style=\"justify-content:space-between\"><h2 class=\"page-title\" style=\"font-size:18px\">Grupos / equivalencias</h2>" + (canConfig ? "<button class=\"btn ghost\" type=\"button\" id=\"stock-groups-config\">Configurar grupos</button>" : "") + "</div><div class=\"table-wrap\" style=\"margin-top:8px\"><table><thead><tr><th>Grupo</th><th>Demanda hoy (kg)</th><th>Sugerencia de compra</th></tr></thead><tbody>" + (rows || emptyRow(3, "Sin grupos configurados.")) + "</tbody></table></div></div>";
+  }
+
+  function openStockGroupsModal() {
+    const groups = getStockGroups();
+    const prodOptions = (sel) => "<option value=\"\">-</option>" + activeProducts().slice().sort((a, b) => a.name.localeCompare(b.name)).map((p) => "<option value=\"" + p.id + "\" " + (sel === p.id ? "selected" : "") + ">" + escapeHtml(p.name) + "</option>").join("");
+    const groupBlocks = groups.map((g, gi) => {
+      const members = (g.members || []).map((m, mi) => {
+        const p = getProduct(m.productId);
+        return "<div style=\"display:flex;gap:6px;align-items:center;margin:2px 0\"><span style=\"flex:1\">" + escapeHtml(p ? p.name : m.productId) + " — " + formatNumber(m.factorKg) + " kg c/u</span><button class=\"btn small danger\" type=\"button\" data-sg-delmember=\"" + gi + ":" + mi + "\">X</button></div>";
+      }).join("");
+      return "<div class=\"panel\" style=\"box-shadow:none;border:1px solid var(--line);margin-bottom:10px\">"
+        + "<div class=\"page-actions\" style=\"justify-content:space-between\"><strong>" + escapeHtml(g.name) + "</strong><button class=\"btn small danger\" type=\"button\" data-sg-delgroup=\"" + gi + "\">Eliminar grupo</button></div>"
+        + "<div style=\"margin-top:6px\">" + (members || "<span class='muted'>Sin productos.</span>") + "</div>"
+        + "<div class=\"form-grid\" style=\"margin-top:6px\"><div class=\"field span-2\"><label>Agregar producto</label><select data-sg-addmember-prod=\"" + gi + "\">" + prodOptions("") + "</select></div><div class=\"field\"><label>kg c/u</label><input data-sg-addmember-factor=\"" + gi + "\" inputmode=\"decimal\" placeholder=\"1\" /></div><div class=\"field\"><label>&nbsp;</label><button class=\"btn small ghost\" type=\"button\" data-sg-addmember=\"" + gi + "\">Agregar</button></div></div>"
+        + "<div class=\"form-grid\" style=\"margin-top:6px\"><div class=\"field\"><label>Se compra entero</label><select data-sg-whole=\"" + gi + "\">" + prodOptions(g.wholeProductId || "") + "</select></div><div class=\"field\"><label>kg por unidad entera</label><input data-sg-wholekg=\"" + gi + "\" inputmode=\"decimal\" value=\"" + (g.wholeKg || "") + "\" /></div><div class=\"field\"><label>Bulto para armar el resto</label><select data-sg-bulk=\"" + gi + "\">" + prodOptions(g.bulkProductId || "") + "</select></div><div class=\"field\"><label>kg por bulto</label><input data-sg-bulkkg=\"" + gi + "\" inputmode=\"decimal\" value=\"" + (g.bulkKg || "") + "\" /></div></div>"
+        + "</div>";
+    }).join("");
+    const body = groupBlocks + "<div class=\"form-grid\" style=\"margin-top:8px\"><div class=\"field span-3\"><label>Nuevo grupo (nombre)</label><input id=\"sg-new-name\" placeholder=\"Ej: Tomate\" /></div><div class=\"field\"><label>&nbsp;</label><button class=\"btn small primary\" type=\"button\" id=\"sg-add-group\">Crear grupo</button></div></div>";
+    showModal("Grupos de stock / equivalencias", body, () => {
+      const reopen = () => { saveState(); closeModal(); openStockGroupsModal(); };
+      const g = getStockGroups();
+      const addG = document.getElementById("sg-add-group");
+      if (addG) addG.addEventListener("click", () => { const n = (document.getElementById("sg-new-name").value || "").trim(); if (!n) return; g.push({ id: "SG-" + Date.now(), name: n, members: [], wholeProductId: "", wholeKg: 0, bulkProductId: "", bulkKg: 0 }); reopen(); });
+      document.querySelectorAll("[data-sg-delgroup]").forEach((b) => b.addEventListener("click", () => { g.splice(Number(b.dataset.sgDelgroup), 1); reopen(); }));
+      document.querySelectorAll("[data-sg-delmember]").forEach((b) => b.addEventListener("click", () => { const [gi, mi] = b.dataset.sgDelmember.split(":").map(Number); g[gi].members.splice(mi, 1); reopen(); }));
+      document.querySelectorAll("[data-sg-addmember]").forEach((b) => b.addEventListener("click", () => { const gi = Number(b.dataset.sgAddmember); const pid = document.querySelector("[data-sg-addmember-prod=\"" + gi + "\"]").value; const factor = parseAmount(document.querySelector("[data-sg-addmember-factor=\"" + gi + "\"]").value); if (!pid) return; g[gi].members = g[gi].members || []; g[gi].members.push({ productId: pid, factorKg: factor || 1 }); reopen(); }));
+      document.querySelectorAll("[data-sg-whole]").forEach((s) => s.addEventListener("change", () => { g[Number(s.dataset.sgWhole)].wholeProductId = s.value; saveState(); }));
+      document.querySelectorAll("[data-sg-wholekg]").forEach((i) => i.addEventListener("change", () => { g[Number(i.dataset.sgWholekg)].wholeKg = parseAmount(i.value); saveState(); }));
+      document.querySelectorAll("[data-sg-bulk]").forEach((s) => s.addEventListener("change", () => { g[Number(s.dataset.sgBulk)].bulkProductId = s.value; saveState(); }));
+      document.querySelectorAll("[data-sg-bulkkg]").forEach((i) => i.addEventListener("change", () => { g[Number(i.dataset.sgBulkkg)].bulkKg = parseAmount(i.value); saveState(); }));
+    }, { className: "wide" });
+  }
+
   function renderStock() {
     const stockView = ui.stockView || "activos";
     const rows = getStockTrackedProductIds().map((id) => getProduct(id)).filter(Boolean)
@@ -2842,6 +2935,7 @@
           </table>
         </div>
       </div>
+      ${renderStockGroupsPanel()}
       <div class="panel" style="margin-top:14px">
         <h2 class="page-title" style="font-size:18px">Merma / descarte</h2>
         <div class="form-grid" style="margin-top:8px">
@@ -2860,6 +2954,8 @@
     );
   }
   function bindStock() {
+    const sgConfigBtn = document.getElementById("stock-groups-config");
+    if (sgConfigBtn) sgConfigBtn.addEventListener("click", openStockGroupsModal);
     document.querySelectorAll("[data-stock-view]").forEach((btn) => btn.addEventListener("click", () => { ui.stockView = btn.dataset.stockView; render(); }));
     document.querySelectorAll("[data-stock-toggle-active]").forEach((btn) => btn.addEventListener("click", () => { setStockDisabled(btn.dataset.stockToggleActive, !isStockDisabled(btn.dataset.stockToggleActive)); render(); }));
     document.querySelectorAll("[data-stock-save]").forEach((btn) => btn.addEventListener("click", () => {
