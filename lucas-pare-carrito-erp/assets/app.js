@@ -4543,9 +4543,36 @@
     `).join("");
   }
 
+  function renderProviderOrdersProductPanels() {
+    const provVal = currentProviderAssigneeValue();
+    if (!provVal) return "";
+    const dayAssignables = getDivideAssignables();
+    const mine = filterDivideAssignables(dayAssignables, [provVal]);
+    const grouped = renderDivideProductGroups(dayAssignables, [provVal]);
+    const totals = {};
+    mine.forEach(({ item }) => {
+      const key = normalizeText(item.productName);
+      if (!totals[key]) totals[key] = { name: item.productName, unit: divideItemUnit(item), qty: 0 };
+      totals[key].qty += Number(item.quantity || 0);
+    });
+    const totalsRows = Object.values(totals).sort((a, b) => a.name.localeCompare(b.name))
+      .map((t) => `<div class="assigned-group"><strong>${escapeHtml(t.name)}</strong><span>${formatDivideQty(t.qty)} ${escapeHtml(t.unit)}</span></div>`).join("");
+    return `
+      <div class="panel" style="margin-bottom:14px">
+        <h2 class="page-title" style="font-size:18px">Pedidos por producto (hoy)</h2>
+        <div style="margin-top:8px">${grouped}</div>
+      </div>
+      <div class="panel" style="margin-bottom:14px">
+        <h2 class="page-title" style="font-size:18px">Tu pedido total del dia por producto</h2>
+        <div style="margin-top:8px">${totalsRows || `<div class="empty compact">Sin pedidos para hoy.</div>`}</div>
+      </div>`;
+  }
+
   function renderOrderInlineDetails(order, options) {
     const hideMoney = !!(options && options.hideMoney);
-    const summary = options && options.summary ? options.summary : "Detalle";
+    const assigneeFilter = options && options.assigneeFilter;
+    const items = (order.items || []).filter((item) => !assigneeFilter || getEffectiveItemAssigneeValue(item) === assigneeFilter);
+    const summary = options && options.summary ? options.summary : (items.length + " productos");
     const client = getClient(order.clientId);
     const iva = getOrderIva(order);
     const total = getOrderTotal(order);
@@ -4554,7 +4581,7 @@
       <details>
         <summary>${escapeHtml(summary)}</summary>
         <div class="mini-table">
-          ${(order.items || []).map((item) => `<div>
+          ${items.map((item) => `<div>
             <span>${escapeHtml(item.productName)}${item.note ? `<br><small>${escapeHtml(item.note)}</small>` : ""}</span>
             <span>${formatNumber(item.quantity)}${hasKgLegend(item.productId) ? " kg" : ""}${hideMoney ? "" : ` x ${formatMoney(item.unitPrice)} = ${formatMoney(item.totalWithIva || item.subtotal)}`}</span>
           </div>`).join("")}
@@ -4600,7 +4627,7 @@
         <tr>
           <td><strong>${escapeHtml(order.id)}</strong> <span class="muted">${formatDateShort(order.date)}</span>${metaLine}</td>
           ${isProv ? `<td><strong>${escapeHtml(order.clientId)}</strong></td>` : `<td><strong>${escapeHtml(order.clientId)} - ${escapeHtml(client ? client.name : order.clientId)}</strong> <span class="muted">${escapeHtml(vehicle ? vehicle.name : order.deliveryVehicleId)}</span></td>`}
-          <td>${renderOrderInlineDetails(order, { summary: order.items.length + " productos", hideMoney: isProv })}</td>
+          <td>${renderOrderInlineDetails(order, isProv ? { hideMoney: true, assigneeFilter: "provider:" + provFilter } : { summary: order.items.length + " productos" })}</td>
           ${isProv ? "" : `<td class="num">${formatMoney(order.totalAmount)}</td>`}
           ${canEditStatus || deletedView ? "" : (isProv ? `<td><span class="status ${statusClass(order.status)}">${statusLabel(order.status)}</span></td>` : `<td class="num">${formatMoney(paid)}</td>
           <td><span class="status ${statusClass(order.status)}">${statusLabel(order.status)}</span></td>`)}
@@ -4658,6 +4685,7 @@
       </div>
       ${["manager", "admin"].includes(currentUser.role) && !annulledView && !deletedView ? `<div class="panel" style="margin-bottom:14px"><div class="form-grid"><div class="field"><label>Estado masivo</label><select id="bulk-order-status">${["pendiente", "preparando", "listo", "entregado", "cancelado"].map((status) => `<option value="${status}">${statusLabel(status)}</option>`).join("")}</select></div><div class="field"><label>&nbsp;</label><button class="btn ghost" id="apply-bulk-order-status" type="button">Actualizar pedidos visibles</button></div></div></div>` : ""}
       ${renderPendingReplacementsPanel()}
+      ${isProv ? renderProviderOrdersProductPanels() : ""}
       <div class="panel">
         <div class="table-wrap orders-table">
           <table>
