@@ -5248,6 +5248,45 @@
     }));
   }
 
+  function openImportPricesModal() {
+    const body = `
+      <p class="muted" style="margin:0 0 8px">Pega filas con formato: <strong>Nombre&nbsp;&nbsp;Venta&nbsp;&nbsp;Costo</strong> (separadas por tab o espacios). Solo se actualizan los productos que existen en el sistema; los demas se listan como no encontrados.</p>
+      <textarea id="import-prices-text" rows="10" style="width:100%;font-family:monospace" placeholder="Bananas Docena\t2800\t2000"></textarea>
+      <div id="import-prices-result" class="muted" style="margin-top:8px;white-space:pre-wrap"></div>
+    `;
+    showModal("Importar precios (pegar)", body, () => {
+      document.getElementById("modal-save").addEventListener("click", () => {
+        const text = document.getElementById("import-prices-text").value || "";
+        const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+        const byName = {};
+        state.products.forEach((p) => { byName[normalizeText(p.name)] = p; });
+        let updated = 0;
+        const notFound = [];
+        lines.forEach((line) => {
+          const m = line.match(/^(.+?)\s+([\d.,]+)\s+([\d.,]+)\s*$/);
+          if (!m) return;
+          const name = m[1];
+          const venta = parseAmount(m[2]);
+          const cost = parseAmount(m[3]);
+          const prod = byName[normalizeText(name)];
+          if (!prod) { notFound.push(name); return; }
+          const prev = state.prices[prod.id] || {};
+          state.prices[prod.id] = { productId: prod.id, date: todayISO(), cost, marketPrice: prev.marketPrice || 0, marginPct: calcMargin(cost, venta), price: venta };
+          prod.baseCost = cost;
+          prod.salePrice = venta;
+          updated += 1;
+        });
+        if (!updated && !notFound.length) { alert("No se detectaron filas validas. Revisa el formato."); return; }
+        saveState();
+        const resultNode = document.getElementById("import-prices-result");
+        const msg = "Actualizados: " + updated + (notFound.length ? "\nNo encontrados (" + notFound.length + "): " + notFound.join(", ") : "");
+        if (resultNode) resultNode.textContent = msg;
+        alert("Precios actualizados: " + updated + (notFound.length ? ". No encontrados: " + notFound.length + " (ver detalle en el popup)." : "."));
+        render();
+      });
+    }, { className: "wide", keepOpen: true });
+  }
+
   function renderPrices() {
     const rows = activeProducts().sort((a, b) => a.sortOrder - b.sortOrder).map((product) => {
       const rec = state.prices[product.id] || { cost: product.baseCost || 0, price: product.salePrice || 0, marketPrice: 0, marginPct: calcMargin(product.baseCost, product.salePrice) };
@@ -5275,7 +5314,7 @@
     return pageShell(
       "Precios",
       "Entrada diaria de costo y precio de lista. Solo admin.",
-      `<button class="btn primary" id="save-prices">Guardar precios</button>`,
+      `<button class="btn primary" id="save-prices">Guardar precios</button><button class="btn ghost" id="import-prices-paste">Importar precios (pegar)</button>`,
       `
       <div class="panel">
         <div class="table-wrap">
@@ -5329,6 +5368,8 @@
       input.addEventListener("input", () => recalcRow(input.closest("[data-price-row]"), input));
       input.addEventListener("change", () => recalcRow(input.closest("[data-price-row]"), input));
     });
+    const importPricesBtn = document.getElementById("import-prices-paste");
+    if (importPricesBtn) importPricesBtn.addEventListener("click", openImportPricesModal);
     document.getElementById("save-prices").addEventListener("click", () => {
       document.querySelectorAll("[data-price-row]").forEach((row) => {
         const productId = row.dataset.priceRow;
