@@ -5258,17 +5258,30 @@
       document.getElementById("modal-save").addEventListener("click", () => {
         const text = document.getElementById("import-prices-text").value || "";
         const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-        const byName = {};
-        state.products.forEach((p) => { byName[normalizeText(p.name)] = p; });
+        const NOISE_WORDS = new Set(["por", "x", "de", "del", "la", "el"]);
+        const tolerantKey = (nm) => normalizeText(nm).split(" ").filter((w) => w && !NOISE_WORDS.has(w)).join(" ");
+        const byExact = {};
+        const byTol = {};
+        state.products.forEach((p) => {
+          byExact[normalizeText(p.name)] = p;
+          const k = tolerantKey(p.name);
+          (byTol[k] = byTol[k] || []).push(p);
+        });
         let updated = 0;
         const notFound = [];
+        const ambiguous = [];
         lines.forEach((line) => {
           const m = line.match(/^(.+?)\s+([\d.,]+)\s+([\d.,]+)\s*$/);
           if (!m) return;
           const name = m[1];
           const venta = parseAmount(m[2]);
           const cost = parseAmount(m[3]);
-          const prod = byName[normalizeText(name)];
+          let prod = byExact[normalizeText(name)];
+          if (!prod) {
+            const cands = byTol[tolerantKey(name)] || [];
+            if (cands.length === 1) prod = cands[0];
+            else if (cands.length > 1) { ambiguous.push(name + " (" + cands.map((c) => c.name).join(" / ") + ")"); return; }
+          }
           if (!prod) { notFound.push(name); return; }
           const prev = state.prices[prod.id] || {};
           state.prices[prod.id] = { productId: prod.id, date: todayISO(), cost, marketPrice: prev.marketPrice || 0, marginPct: calcMargin(cost, venta), price: venta };
@@ -5279,9 +5292,9 @@
         if (!updated && !notFound.length) { alert("No se detectaron filas validas. Revisa el formato."); return; }
         saveState();
         const resultNode = document.getElementById("import-prices-result");
-        const msg = "Actualizados: " + updated + (notFound.length ? "\nNo encontrados (" + notFound.length + "): " + notFound.join(", ") : "");
+        const msg = "Actualizados: " + updated + (ambiguous.length ? "\nAmbiguos (" + ambiguous.length + ", no aplicados): " + ambiguous.join(", ") : "") + (notFound.length ? "\nNo encontrados (" + notFound.length + "): " + notFound.join(", ") : "");
         if (resultNode) resultNode.textContent = msg;
-        alert("Precios actualizados: " + updated + (notFound.length ? ". No encontrados: " + notFound.length + " (ver detalle en el popup)." : "."));
+        alert("Precios actualizados: " + updated + ((notFound.length || ambiguous.length) ? ". Sin aplicar: " + (notFound.length + ambiguous.length) + " (ver detalle en el popup)." : "."));
         render();
       });
     }, { className: "wide", keepOpen: true });
