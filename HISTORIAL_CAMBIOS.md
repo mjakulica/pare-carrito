@@ -1,5 +1,14 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.27 - Stock: conteo unico por grupo + conciliacion en Compras (2026-07-03)
+
+### Frontend / Stock y Compras
+
+- En Stock, los productos que son miembros de un grupo de equivalencia (ej. Berenjena Kg y Berenjena Unidad) o el producto "se compra entero" (cajon) ya NO aparecen como filas individuales: se cuentan una sola vez a nivel de grupo (panel Grupos / equivalencias). El bulto (jaula/caja) no se oculta porque es lo que se sugiere comprar.
+- En Compras/Gastos la grilla de "falta" ahora concilia por grupo: en lugar de sobre-sugerir por cada miembro, muestra los enteros a comprar (cajones), netos de lo ya comprado, y el bulto a armar (jaulas/cajas), neto de lo ya comprado. Asi deja de aparecer "falta 2 cajones" cuando esos se arman desde jaulas.
+
+---
+
 ## v12.9.26 - Stock: grupos y equivalencias (2026-07-02)
 
 ### Frontend / Stock
