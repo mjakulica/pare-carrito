@@ -1,5 +1,13 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.23 - Importar precios pegando (Precios) (2026-07-02)
+
+### Frontend / Precios
+
+- En la pagina Precios (admin/gerente), boton "Importar precios (pegar)": abre un textarea donde se pega "Nombre  Venta  Costo" (tab o espacios). Matchea por nombre contra el catalogo actual, actualiza costo y venta (y margen) de los productos existentes, saltea los que no existen y reporta la lista de no encontrados. Commit pendiente en este push.
+
+---
+
 ## v12.9.22 - Rol Proveedor: Pedidos sin datos sensibles y "falta" en Venta de Hoy (2026-07-02)
 
 ### Frontend / Rol Proveedor
