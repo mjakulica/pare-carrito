@@ -6337,7 +6337,7 @@
             </div>` : ""}
             <div class="field" id="purchase-cash-box-wrap" style="${currentUser.role === "proveedor" ? "display:none" : ""}">
               <label>Caja salida</label>
-              <select id="purchase-cash-box">${renderPurchaseCashBoxOptions(defaultPurchaseCashBox)}</select>
+              <select id="purchase-cash-box">${currentUser.role === "proveedor" ? providerCashBoxOptions() : renderPurchaseCashBoxOptions(defaultPurchaseCashBox)}</select>
             </div>
             <div class="field span-2" id="cash-movement-target-wrap">
               <label>Caja destino</label>
@@ -6580,7 +6580,7 @@
       if (proofWrap) proofWrap.style.display = isOther ? "grid" : "none";
       otherAmountWrap.style.display = isOther || isCashMovement ? "grid" : "none";
       if (cashMovementTargetWrap) cashMovementTargetWrap.style.display = isCashMovement ? "grid" : "none";
-      if (cashBoxWrap) cashBoxWrap.style.display = isPrepared || isMarketPrice ? "none" : "grid";
+      if (cashBoxWrap && currentUser.role !== "proveedor") cashBoxWrap.style.display = isPrepared || isMarketPrice ? "none" : "grid";
       if (cashBoxSelect) {
         if (currentUser.role === "employee" || isCashMovement) cashBoxSelect.value = getDefaultOutgoingCashBoxId();
         cashBoxSelect.disabled = currentUser.role === "employee" || isCashMovement;
@@ -6721,6 +6721,15 @@
     }
     kind.addEventListener("change", updateKind);
     updateKind();
+    if (currentUser.role === "proveedor") {
+      const provStatus = document.getElementById("purchase-payment-status");
+      const provCashWrap = document.getElementById("purchase-cash-box-wrap");
+      if (provStatus && provCashWrap) {
+        const syncProvCash = () => { provCashWrap.style.display = provStatus.value === "paid" ? "grid" : "none"; };
+        provStatus.addEventListener("change", syncProvCash);
+        syncProvCash();
+      }
+    }
     document.getElementById("purchase-form").addEventListener("submit", async (event) => {
       event.preventDefault();
       const expenseType = currentUser.role === "proveedor" ? "purchase" : kind.value;
@@ -9426,9 +9435,9 @@
     return pageShell(
       "Proveedores",
       "Alta y mantenimiento de proveedores para compras y division.",
-      `<button class="btn primary" data-add-provider>Agregar</button>`,
+      currentProviderId() ? "" : `<button class="btn primary" data-add-provider>Agregar</button>`,
       `
-      ${renderTabs()}
+      ${currentProviderId() ? "" : renderTabs()}
       <div class="panel" style="margin-bottom:14px">
         <div class="form-grid">
           <div class="field span-2"><label>Proveedor</label><select id="provider-account-select"><option value="all" ${isAllProviders ? "selected" : ""}>TODOS</option>${providers.map((provider) => `<option value="${provider.id}" ${provider.id === ui.providerSelectedId ? "selected" : ""}>${escapeHtml(provider.name)}</option>`).join("")}</select></div>
@@ -15266,6 +15275,10 @@
   function renderCashBoxOptions(selectedId) {
     const boxes = activeCashBoxesForRole(currentUser ? currentUser.role : "admin");
     return boxes.map((box) => `<option value="${box.id}" ${selectedId === box.id ? "selected" : ""}>${escapeHtml(box.name)}</option>`).join("");
+  }
+
+  function providerCashBoxOptions() {
+    return activeEmployees().map((e) => `<option value="${getUserCashBoxId(e.id)}">${escapeHtml(e.name)} (efectivo)</option>`).join("") + `<option value="cash-banco">Transferencia</option>`;
   }
 
   function renderPurchaseCashBoxOptions(selectedId) {
