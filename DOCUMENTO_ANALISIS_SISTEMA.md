@@ -449,15 +449,19 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 - Codigos de `condicion_iva` validos: Exento="E" (antes "EX", invalido), Monotributo="M" (antes "MT"). Prioridad: AFIP por CUIT, luego el campo manual del cliente (respaldo), luego default por tipo de factura.
 - Nuevo campo "Condicion IVA" en el formulario de cliente (`client.condicionIva`: ""=automatica/AFIP, CF, RI, M, E) como respaldo. NOTA: TusFacturas no actualiza la condicion de IVA de un cliente ya existente; hay que corregirlo una vez en su panel.
 
+### 12.21 Compras: costo unitario y aviso de suba (v12.9.33)
+- Compras/Gastos: "Unid. calculo" solo para mayoristas con relacion minorista; costo unitario con separador de miles (xxx.xxx); boton de ultimo costo por producto (pega el costo guardado); advertencia si el costo es >30% mayor al guardado.
+- Aviso de suba automatico: al guardar una compra con costo >30% mayor, el bot envia WhatsApp (plantilla aprobada) a los clientes con ese producto en pedidos de hoy, con el precio de venta de cada cliente (viejo vs nuevo). Endpoint `/clients/price-increase-notify`. Config: `priceIncreaseMessage`, `priceIncreaseTemplateName`, `priceIncreaseTemplateLang`.
+
 ### 12.14 Modelo de datos agregado
 - `client.paymentDay`; coleccion `state.replacements` (recambios/reposiciones); `user.providerId` (vinculo del rol proveedor); appSettings: dunning (`dunningEnabled`, `dunningWhatsappMessage`, `dunningMailMessage`, `dunningWhatsappTemplate`) y aviso de cambios (`orderChangeNotifyEnabled`, `orderChangeMessage`, `orderChangeTemplateName`); `purchase.proofFile` (comprobante), tipo de gasto `freight`.
-- `appSettings.stockGroups` (grupos/equivalencias de stock: `{id,name,members:[{productId,factorKg}],wholeProductId,wholeKg,bulkProductId,bulkKg}`); `client.condicionIva` (respaldo de condicion frente al IVA para facturacion); `ui.omittedUnitLines` (lineas de Unidades enviadas/ocultas).
+- `appSettings.stockGroups` (grupos/equivalencias de stock: `{id,name,members:[{productId,factorKg}],wholeProductId,wholeKg,bulkProductId,bulkKg}`); `client.condicionIva` (respaldo de condicion frente al IVA para facturacion); `ui.omittedUnitLines` (lineas de Unidades enviadas/ocultas); appSettings de aviso de suba (`priceIncreaseMessage`, `priceIncreaseTemplateName`, `priceIncreaseTemplateLang`).
 
 ---
 
 ## 13. Ultimo Cambio y Version
 
-**Version operativa:** 12.9.32
+**Version operativa:** 12.9.33
 **Fecha:** 2026-06-30
 **Commit GitHub del cambio funcional:** `7fc43f2`
 **Entorno actualizado:** VPS productivo `/opt/pare-carrito` con frontend estatico y API Docker Compose saludable.

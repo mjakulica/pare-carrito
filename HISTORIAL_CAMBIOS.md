@@ -1,5 +1,19 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.33 - Compras: costo unitario, ultimo costo y aviso de suba por WhatsApp (2026-07-03)
+
+### Frontend / Compras
+- El campo "Unid. calculo" solo se muestra para productos mayoristas con relacion minorista marcada en Productos (desktop y mobile, todos los roles).
+- El input de costo unitario formatea los miles con punto (xxx.xxx) mientras se escribe.
+- Cada producto seleccionado muestra un boton "Ultimo costo: $X" que al hacer click pega ese costo en el input.
+- Advertencia visible si se carga un costo mas de 30% mayor al ultimo costo guardado.
+
+### Aviso de suba por WhatsApp (backend + bot)
+- Al guardar una compra con un costo >30% mayor al guardado, se envia automaticamente un WhatsApp (plantilla aprobada) a los clientes que tienen ese producto en pedidos de hoy, con el precio de venta de cada cliente (viejo vs nuevo, recalculado por costo+margen y ajuste del cliente). Endpoint `/clients/price-increase-notify`.
+- Mensaje y nombre de plantilla configurables en Configuracion (admin/gerente): `priceIncreaseMessage` (usa {producto}, {porcentaje}, {precioAnterior}, {precioNuevo}) y `priceIncreaseTemplateName`. Default: "El producto {producto} tuvo una suba de un {porcentaje}%, paso de valer {precioAnterior} a valer {precioNuevo}, si se desea cancelar la compra avisar, de caso contrario no hace falta contestar, gracias".
+
+---
+
 ## v12.9.32 - Stock: conteo por grupo en kg (2026-07-03)
 
 ### Stock
