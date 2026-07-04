@@ -393,18 +393,36 @@
     const btn = document.getElementById("update-now-btn");
     if (btn) btn.addEventListener("click", forceReloadFresh);
   }
-  async function checkForUpdate() {
+  // Horarios de chequeo (hora local): 4,5,6,7,8,10,12 y luego cada 4 h (16, 20, 0).
+  const UPDATE_CHECK_HOURS = [0, 4, 5, 6, 7, 8, 10, 12, 16, 20];
+  let lastUpdateCheckKey = "";
+  async function maybeApplyUpdate() {
     const stamp = await fetchAppStamp();
     if (!stamp) return;
     if (bootAssetStamp === null) { bootAssetStamp = stamp; return; }
-    if (stamp !== bootAssetStamp) { updatePending = true; showUpdateBanner(); }
+    if (stamp === bootAssetStamp) return;
+    updatePending = true;
+    // Si la pestania esta oculta o el usuario lleva mas de 2 min inactivo, recarga sola.
+    // Si esta usando activamente, muestra el banner para no interrumpir lo que esta cargando.
+    const idleMs = Date.now() - lastActivityTs;
+    if (document.visibilityState !== "visible" || idleMs > 2 * 60 * 1000) forceReloadFresh();
+    else showUpdateBanner();
   }
   function startVersionWatch() {
     fetchAppStamp().then((st) => { if (st) bootAssetStamp = st; });
-    setInterval(checkForUpdate, 3 * 60 * 1000);
+    // Timer liviano cada minuto SIN red: solo dispara el chequeo (una peticion HEAD) al entrar
+    // en una de las horas objetivo, una sola vez por hora.
+    setInterval(() => {
+      const now = new Date();
+      if (UPDATE_CHECK_HOURS.indexOf(now.getHours()) === -1) return;
+      const key = now.getFullYear() + "-" + now.getMonth() + "-" + now.getDate() + "-" + now.getHours();
+      if (key === lastUpdateCheckKey) return;
+      lastUpdateCheckKey = key;
+      maybeApplyUpdate();
+    }, 60 * 1000);
+    // Ademas, al volver a la pestania se chequea una vez (evento, no polling).
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState !== "visible") return;
-      checkForUpdate().then(() => { if (updatePending) forceReloadFresh(); });
+      if (document.visibilityState === "visible") maybeApplyUpdate();
     });
   }
 
