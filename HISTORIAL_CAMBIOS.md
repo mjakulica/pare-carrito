@@ -1,5 +1,11 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.38 - Reajuste de fechas al cambiar de dia (2026-07-04)
+
+- Si el sistema queda abierto de un dia para el otro, al cambiar de dia (deteccion en cada render con `ui.lastActiveDay`) los filtros de fecha operativos se reajustan solos a hoy: Pedidos, Proveedores, Remitos, Unidades, Vehiculos, Rendimiento/Analisis y el "Hasta" de Saldos. No se toca el "Desde" de Saldos ni Facturacion (siguen mostrando el rango completo, como se pidio). Durante el mismo dia se puede navegar libremente a rangos pasados sin que se reajusten.
+
+---
+
 ## v12.9.37 - Fixes proveedor/unidades y mejoras caja/compras (2026-07-04)
 
 ### Fixes
