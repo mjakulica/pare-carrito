@@ -7305,7 +7305,7 @@
     const storedCost = product ? getStoredProductCost(product.id) : 0;
     const lastBtn = row.querySelector("[data-fill-last-cost]");
     if (lastBtn) {
-      if (product && storedCost > 0) { lastBtn.style.display = ""; lastBtn.textContent = "ult " + formatMoney(storedCost); lastBtn.dataset.cost = storedCost; }
+      if (product && storedCost > 0) { lastBtn.style.display = ""; lastBtn.textContent = "$" + Math.round(storedCost).toLocaleString("es-AR"); lastBtn.dataset.cost = storedCost; }
       else lastBtn.style.display = "none";
     }
   }
@@ -7366,7 +7366,7 @@
           <input data-item-cost inputmode="decimal" placeholder="0" />
         </div>
         <div class="field pl-ult">
-          <label>&nbsp;</label>
+          <label>último</label>
           <button type="button" class="btn small ghost pl-ult-btn" data-fill-last-cost style="display:none"></button>
         </div>
         <div class="field" data-relation-field style="display:none">
