@@ -370,6 +370,60 @@
   ]);
 
   window.addEventListener("hashchange", render);
+  // --- Auto-actualizacion: detecta un deploy nuevo (cambia app.js) y recarga sin borrar cache ---
+  let bootAssetStamp = null;
+  let updatePending = false;
+  async function fetchAppStamp() {
+    try {
+      const r = await fetch("./assets/app.js?vc=" + Date.now(), { method: "HEAD", cache: "no-store" });
+      return r.headers.get("last-modified") || r.headers.get("etag") || "";
+    } catch (e) { return null; }
+  }
+  function forceReloadFresh() {
+    try { location.replace(location.pathname + "?v=" + Date.now() + location.hash); }
+    catch (e) { location.reload(); }
+  }
+  function showUpdateBanner() {
+    if (document.getElementById("update-banner")) return;
+    const b = document.createElement("div");
+    b.id = "update-banner";
+    b.className = "update-banner";
+    b.innerHTML = 'Hay una nueva version disponible. <button type="button" id="update-now-btn">Actualizar ahora</button>';
+    document.body.appendChild(b);
+    const btn = document.getElementById("update-now-btn");
+    if (btn) btn.addEventListener("click", forceReloadFresh);
+  }
+  async function checkForUpdate() {
+    const stamp = await fetchAppStamp();
+    if (!stamp) return;
+    if (bootAssetStamp === null) { bootAssetStamp = stamp; return; }
+    if (stamp !== bootAssetStamp) { updatePending = true; showUpdateBanner(); }
+  }
+  function startVersionWatch() {
+    fetchAppStamp().then((st) => { if (st) bootAssetStamp = st; });
+    setInterval(checkForUpdate, 3 * 60 * 1000);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState !== "visible") return;
+      checkForUpdate().then(() => { if (updatePending) forceReloadFresh(); });
+    });
+  }
+
+  // --- Cierre de sesion por inactividad (4 horas) ---
+  let lastActivityTs = Date.now();
+  function markActivity() { lastActivityTs = Date.now(); }
+  function startIdleLogout() {
+    ["pointerdown", "keydown", "touchstart", "mousemove", "wheel"].forEach((ev) => window.addEventListener(ev, markActivity, { passive: true }));
+    setInterval(() => {
+      if (!currentUser) { lastActivityTs = Date.now(); return; }
+      if (Date.now() - lastActivityTs > 4 * 3600 * 1000) {
+        lastActivityTs = Date.now();
+        setCurrentUser(null);
+        render();
+        try { alert("Tu sesion se cerro por inactividad."); } catch (e) { /* noop */ }
+      }
+    }, 60 * 1000);
+  }
+
   window.addEventListener("DOMContentLoaded", async () => {
     const cloudConfig = getCloudSyncConfig();
     if (canReadCloudState() && cloudSyncReady(cloudConfig) && cloudConfig.auto !== false) {
@@ -378,6 +432,8 @@
     render();
     startCloudAutoSync();
     flushClientWriteQueue(false);
+    startVersionWatch();
+    startIdleLogout();
   });
   window.addEventListener("online", () => {
     const banner = document.getElementById("offline-banner");
@@ -2079,7 +2135,7 @@
           </div>
           <div class="field">
             <label>Contrasena</label>
-            <div class="input-with-button"><input id="login-password" type="password" autocomplete="current-password" placeholder="Ingrese su contraseña" /><button class="btn small ghost" type="button" id="toggle-login-password" aria-label="Ver contraseña">&#128065;</button></div>
+            <div class="password-field"><input id="login-password" type="password" autocomplete="current-password" placeholder="Ingrese su contraseña" /><button class="password-toggle" type="button" id="toggle-login-password" aria-label="Ver contraseña" title="Ver contraseña">&#128065;</button></div>
           </div>
           <button class="btn primary full" type="submit">Ingresar</button>
         </form>
