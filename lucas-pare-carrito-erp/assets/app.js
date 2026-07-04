@@ -231,6 +231,7 @@
     selectedClientId: "",
     selectedDate: defaultNewOrderDate(),
     vehicleDate: todayISO(),
+    lastActiveDay: todayISO(),
     search: "",
     tab: "activos",
     purchaseTab: "registro",
@@ -1918,8 +1919,24 @@
     else localStorage.removeItem(USER_KEY);
   }
 
+  // Si el sistema quedo abierto de un dia para el otro, al cambiar de dia se reajustan a hoy
+  // los filtros de fecha operativos (los que siguen "hoy"). No toca Saldos (Desde) ni Facturacion.
+  function realignDatesToTodayOnDayChange() {
+    const t = todayISO();
+    if (ui.lastActiveDay === t) return;
+    ui.ordersFrom = t; ui.ordersTo = t;
+    ui.providerFrom = t; ui.providerTo = t;
+    ui.remitosFrom = t; ui.remitosTo = t;
+    ui.unitsDate = t;
+    ui.vehicleDate = t;
+    ui.balanceTo = t;            // Saldos: solo el "Hasta"; el "Desde" queda como estaba.
+    ui.performanceFrom = t; ui.performanceTo = t; ui.performanceDate = t;
+    ui.lastActiveDay = t;
+  }
+
   function render() {
     afterRender = [];
+    realignDatesToTodayOnDayChange();
     const app = document.getElementById("app");
     if (!currentUser) {
       app.innerHTML = renderLogin();
