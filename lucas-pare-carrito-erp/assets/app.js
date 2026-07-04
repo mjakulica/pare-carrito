@@ -1931,6 +1931,8 @@
     ui.vehicleDate = t;
     ui.balanceTo = t;            // Saldos: solo el "Hasta"; el "Desde" queda como estaba.
     ui.performanceFrom = t; ui.performanceTo = t; ui.performanceDate = t;
+    ui.historyFrom = t; ui.historyTo = t;          // Historiales / analisis de compra
+    ui.billingTo = t;            // Facturacion: solo el "Hasta"; el "Desde" queda como estaba.
     ui.lastActiveDay = t;
   }
 
