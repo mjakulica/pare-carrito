@@ -2,6 +2,8 @@
 
 ## v12.9.38 - Reajuste de fechas al cambiar de dia (2026-07-04)
 
+(v12.9.38b) Se amplio el reajuste por cambio de dia a Historiales/Analisis y al "Hasta" de Facturacion. Compras/Gastos, Empleados, Horarios y Registrar transferencia ya usan la fecha de hoy fija en cada render, por lo que siempre muestran hoy.
+
 - Si el sistema queda abierto de un dia para el otro, al cambiar de dia (deteccion en cada render con `ui.lastActiveDay`) los filtros de fecha operativos se reajustan solos a hoy: Pedidos, Proveedores, Remitos, Unidades, Vehiculos, Rendimiento/Analisis y el "Hasta" de Saldos. No se toca el "Desde" de Saldos ni Facturacion (siguen mostrando el rango completo, como se pidio). Durante el mismo dia se puede navegar libremente a rangos pasados sin que se reajusten.
 
 ---
