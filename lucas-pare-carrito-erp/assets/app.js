@@ -6930,10 +6930,21 @@
       recalc();
     });
     itemsContainer.addEventListener("change", (event) => {
+      const row = event.target.closest("[data-purchase-item-row]");
       if (event.target.matches("[data-product-select]")) {
         const product = getProduct(event.target.value);
-        const row = event.target.closest("[data-purchase-item-row]");
         if (product && row) row.querySelector("[data-product-filter]").value = product.name;
+      }
+      if (event.target.matches("[data-item-cost]") && row) {
+        const sel = row.querySelector("[data-product-select]");
+        const prod = sel && sel.value ? getProduct(sel.value) : null;
+        const storedCost = prod ? getStoredProductCost(prod.id) : 0;
+        const v = parseAmount(event.target.value);
+        if (prod && storedCost > 0 && v > storedCost * 1.3) {
+          const pct = Math.round((v / storedCost - 1) * 100);
+          const ok = confirm("El costo de " + prod.name + " (" + formatMoney(v) + ") es " + pct + "% mayor al ultimo (" + formatMoney(storedCost) + ").\n\nAceptar: se mantiene y al guardar se avisara por WhatsApp a los clientes con este producto hoy.\nCancelar: se borra el costo.");
+          if (!ok) event.target.value = "";
+        }
       }
       recalc();
     });
@@ -7273,23 +7284,15 @@
     const select = row.querySelector("[data-product-select]");
     const pid = select ? select.value : "";
     const product = pid ? getProduct(pid) : null;
+    const isRel = !!(product && isWholesaleWithRetail(product.id));
+    row.classList.toggle("pl-norel", !isRel);
     const relField = row.querySelector("[data-relation-field]");
-    if (relField) relField.style.display = (product && isWholesaleWithRetail(product.id)) ? "" : "none";
+    if (relField) relField.style.display = isRel ? "" : "none";
     const storedCost = product ? getStoredProductCost(product.id) : 0;
     const lastBtn = row.querySelector("[data-fill-last-cost]");
     if (lastBtn) {
-      if (product && storedCost > 0) { lastBtn.style.display = ""; lastBtn.textContent = "Ultimo costo: " + formatMoney(storedCost); lastBtn.dataset.cost = storedCost; }
+      if (product && storedCost > 0) { lastBtn.style.display = ""; lastBtn.textContent = "ult " + formatMoney(storedCost); lastBtn.dataset.cost = storedCost; }
       else lastBtn.style.display = "none";
-    }
-    const warn = row.querySelector("[data-cost-warning]");
-    const costInput = row.querySelector("[data-item-cost]");
-    if (warn && costInput) {
-      const v = parseAmount(costInput.value);
-      if (product && storedCost > 0 && v > storedCost * 1.3) {
-        const pct = Math.round((v / storedCost - 1) * 100);
-        warn.style.display = "";
-        warn.textContent = "\u26A0 Este costo es " + pct + "% mayor al ultimo (" + formatMoney(storedCost) + "). Al guardar se avisara por WhatsApp a los clientes con este producto hoy.";
-      } else warn.style.display = "none";
     }
   }
   function collectPriceIncreaseCandidates(items, date) {
@@ -7341,21 +7344,23 @@
           </select>
         </div>
         <div class="field">
-          <label>Cantidad</label>
+          <label>cant</label>
           <input data-item-qty inputmode="decimal" placeholder="0" />
         </div>
         <div class="field">
-          <label>Costo unitario</label>
+          <label>costo u.</label>
           <input data-item-cost inputmode="decimal" placeholder="0" />
-          <button type="button" class="btn small ghost" data-fill-last-cost style="display:none;margin-top:4px;font-size:11px;padding:2px 8px"></button>
-          <div class="alert" data-cost-warning style="display:none;margin-top:4px;font-size:11px"></div>
+        </div>
+        <div class="field pl-ult">
+          <label>&nbsp;</label>
+          <button type="button" class="btn small ghost pl-ult-btn" data-fill-last-cost style="display:none"></button>
         </div>
         <div class="field" data-relation-field style="display:none">
-          <label>Unid. calculo</label>
+          <label>Unid. calc</label>
           <input data-item-relation-units inputmode="decimal" placeholder="auto" />
         </div>
         <div class="field">
-          <label>Precio mercado</label>
+          <label>$ mercado</label>
           <input data-item-market-price inputmode="decimal" placeholder="0" />
         </div>
         <div class="field">
@@ -17248,7 +17253,12 @@
       .remito-total-style-box .remito-total-line{border:2px solid #e6007e;border-radius:3px;padding:2px 8px;min-width:104px}
       .remito-total-style-none .remito-total-line{border:0;padding:0}
       .print-now-btn{position:fixed;left:50%;transform:translateX(-50%);bottom:16px;z-index:99999;background:#17228a;color:#fff;border:0;border-radius:8px;padding:12px 22px;font-size:15px;font-weight:700;box-shadow:0 2px 10px rgba(0,0,0,.35);cursor:pointer}
-      @media print{.print-now-btn{display:none !important}}
+      @media print{
+        .print-now-btn{display:none !important}
+        *{-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;color-adjust:exact !important}
+        .remito-table tbody tr:nth-child(odd){background:#ededed !important}
+        .remito-table tbody tr.blank-row{background:transparent !important}
+      }
     `;
   }
 })();
