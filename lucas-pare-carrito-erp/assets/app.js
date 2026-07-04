@@ -2853,9 +2853,72 @@
       demandKg += q * Number(m.factorKg || 0);
     });
     const bulkKg = Number(group.bulkKg || 0);
-    const bulkToBuy = bulkKg > 0 ? Math.ceil((kgPool / bulkKg) - 1e-9) : 0;
-    const sobrante = bulkKg > 0 ? Math.max(0, bulkToBuy * bulkKg - kgPool) : 0;
-    return { demandKg, kgPool, wholeToBuy, bulkToBuy, sobrante };
+    // Descontar el stock fisico del grupo (en kg): lo que ya tengo reduce lo que hay que
+    // armar desde el bulto (no reduce los cajones enteros, que se compran por caja).
+    const stockKg = getGroupStockKgToday(group, d);
+    const netPool = Math.max(0, kgPool - stockKg);
+    const bulkToBuy = bulkKg > 0 ? Math.ceil((netPool / bulkKg) - 1e-9) : 0;
+    const sobrante = bulkKg > 0 ? Math.max(0, bulkToBuy * bulkKg - netPool) : 0;
+    return { demandKg, kgPool, netPool, stockKg, wholeToBuy, bulkToBuy, sobrante };
+  }
+
+  // --- Conteo de stock a nivel de grupo, en kg (una sola fila por grupo) ---
+  // Los movimientos se guardan con productId sintetico "GRPKG:<idGrupo>" para no chocar con
+  // los productos reales (PROD-XXX) ni ensuciar los conteos por producto.
+  function groupCountKey(group) { return "GRPKG:" + (group ? group.id : ""); }
+  function groupOrdersKg(group, fromInc, toExc) {
+    let kg = 0;
+    (state.orders || []).forEach((o) => {
+      if (!o || ["cancelado", "anulado"].includes(o.status)) return;
+      if (!o.date || o.date < fromInc || o.date >= toExc) return;
+      (o.items || []).forEach((it) => {
+        if (group.wholeProductId && it.productId === group.wholeProductId) { kg += Number(it.quantity || 0) * Number(group.wholeKg || 0); return; }
+        const m = (group.members || []).find((mm) => mm.productId === it.productId);
+        if (m) kg += Number(it.quantity || 0) * Number(m.factorKg || 0);
+      });
+    });
+    return kg;
+  }
+  function groupComprasKg(group, fromInc, toExc) {
+    let kg = 0;
+    (state.purchases || []).forEach((p) => {
+      if (!p || ["other_expense", "freight", "market_price", "provider_payment", "cash_movement"].includes(p.expenseType)) return;
+      if (!p.date || p.date < fromInc || p.date >= toExc) return;
+      const items = Array.isArray(p.items) && p.items.length ? p.items : (p.productId ? [{ productId: p.productId, quantity: p.quantity }] : []);
+      items.forEach((it) => {
+        if (!it.productId) return;
+        if (group.wholeProductId && it.productId === group.wholeProductId) { kg += Number(it.quantity || 0) * Number(group.wholeKg || 0); return; }
+        if (group.bulkProductId && it.productId === group.bulkProductId) { kg += Number(it.quantity || 0) * Number(group.bulkKg || 0); return; }
+        const m = (group.members || []).find((mm) => mm.productId === it.productId);
+        if (m) kg += Number(it.quantity || 0) * Number(m.factorKg || 0);
+      });
+    });
+    return kg;
+  }
+  function getGroupCountToday(group) { return getStockCountToday(groupCountKey(group)); }
+  function getGroupEstimatedKg(group, asOfDate) {
+    const today = asOfDate || todayISO();
+    const last = lastStockCountBefore(groupCountKey(group), today);
+    if (!last) return 0;
+    return Number(last.qty || 0) + groupComprasKg(group, last.date, today) - groupOrdersKg(group, last.date, today);
+  }
+  // Stock del grupo al inicio de hoy (conteo de hoy si existe, si no el estimado) + compras de hoy.
+  function getGroupStockKgToday(group, asOfDate) {
+    const today = asOfDate || todayISO();
+    const countToday = getGroupCountToday(group);
+    const morning = countToday ? Number(countToday.qty || 0) : getGroupEstimatedKg(group, today);
+    const comprasHoy = groupComprasKg(group, today, addDaysISO(today, 1));
+    return Math.round((morning + comprasHoy) * 100) / 100;
+  }
+  function recordGroupStockCount(group, realKg) {
+    const today = todayISO();
+    const key = groupCountKey(group);
+    const real = Math.round(Number(realKg || 0) * 100) / 100;
+    state.stockMovements = (state.stockMovements || []).filter((m) => !(m.productId === key && m.date === today && m.type === "conteo"));
+    const stamp = new Date().toISOString();
+    const baseId = nextDatedId("STK", state.stockMovements);
+    state.stockMovements.push({ id: baseId + "-gc", date: today, productId: key, type: "conteo", qty: real, note: "grupo " + (group.name || ""), userId: currentUser.id, createdAt: stamp });
+    saveState();
   }
 
   function renderStockGroupsPanel() {
@@ -2865,12 +2928,14 @@
       const c = stockGroupComputation(g);
       const wholeProd = g.wholeProductId ? getProduct(g.wholeProductId) : null;
       const bulkProd = g.bulkProductId ? getProduct(g.bulkProductId) : null;
+      const countToday = getGroupCountToday(g);
       const compra = [];
       if (c.wholeToBuy > 0 && wholeProd) compra.push("<strong>" + formatNumber(c.wholeToBuy) + "</strong> " + escapeHtml(wholeProd.name));
       if (c.bulkToBuy > 0 && bulkProd) compra.push("<strong>" + formatNumber(c.bulkToBuy) + "</strong> " + escapeHtml(bulkProd.name) + " <span class=\"muted\">(sobran " + formatNumber(c.sobrante) + " kg)</span>");
-      return "<tr><td><strong>" + escapeHtml(g.name) + "</strong></td><td class=\"num\">" + formatNumber(c.demandKg) + " kg</td><td>" + (compra.join(" + ") || "<span class=\"muted\">Sin faltante</span>") + "</td></tr>";
+      const countCell = "<div class=\"input-with-button\"><input data-group-count=\"" + g.id + "\" inputmode=\"decimal\" placeholder=\"kg real\" value=\"" + (countToday ? formatAmountInput(countToday.qty) : "") + "\" /><button class=\"btn small primary\" type=\"button\" data-group-count-save=\"" + g.id + "\">Guardar</button></div>" + (countToday ? "<span class=\"muted\">Contado hoy</span>" : "");
+      return "<tr><td><strong>" + escapeHtml(g.name) + "</strong></td><td class=\"num\">" + formatNumber(c.stockKg) + " kg</td><td>" + countCell + "</td><td class=\"num\">" + formatNumber(c.demandKg) + " kg</td><td>" + (compra.join(" + ") || "<span class=\"muted\">Sin faltante</span>") + "</td></tr>";
     }).join("");
-    return "<div class=\"panel\" style=\"margin-top:14px\"><div class=\"page-actions\" style=\"justify-content:space-between\"><h2 class=\"page-title\" style=\"font-size:18px\">Grupos / equivalencias</h2>" + (canConfig ? "<button class=\"btn ghost\" type=\"button\" id=\"stock-groups-config\">Configurar grupos</button>" : "") + "</div><div class=\"table-wrap\" style=\"margin-top:8px\"><table><thead><tr><th>Grupo</th><th>Demanda hoy (kg)</th><th>Sugerencia de compra</th></tr></thead><tbody>" + (rows || emptyRow(3, "Sin grupos configurados.")) + "</tbody></table></div></div>";
+    return "<div class=\"panel\" style=\"margin-top:14px\"><div class=\"page-actions\" style=\"justify-content:space-between\"><h2 class=\"page-title\" style=\"font-size:18px\">Grupos / equivalencias (conteo en kg)</h2>" + (canConfig ? "<button class=\"btn ghost\" type=\"button\" id=\"stock-groups-config\">Configurar grupos</button>" : "") + "</div><div class=\"table-wrap\" style=\"margin-top:8px\"><table><thead><tr><th>Grupo</th><th>Stock estimado (kg)</th><th>Stock real (kg)</th><th>Demanda hoy (kg)</th><th>Sugerencia de compra</th></tr></thead><tbody>" + (rows || emptyRow(5, "Sin grupos configurados.")) + "</tbody></table></div></div>";
   }
 
   function openStockGroupsModal() {
@@ -2970,6 +3035,14 @@
   function bindStock() {
     const sgConfigBtn = document.getElementById("stock-groups-config");
     if (sgConfigBtn) sgConfigBtn.addEventListener("click", openStockGroupsModal);
+    document.querySelectorAll("[data-group-count-save]").forEach((btn) => btn.addEventListener("click", () => {
+      const gid = btn.dataset.groupCountSave;
+      const grp = getStockGroups().find((g) => g.id === gid);
+      const input = document.querySelector('[data-group-count="' + gid + '"]');
+      if (!grp || !input) return;
+      recordGroupStockCount(grp, parseAmount(input.value));
+      render();
+    }));
     document.querySelectorAll("[data-stock-view]").forEach((btn) => btn.addEventListener("click", () => { ui.stockView = btn.dataset.stockView; render(); }));
     document.querySelectorAll("[data-stock-toggle-active]").forEach((btn) => btn.addEventListener("click", () => { setStockDisabled(btn.dataset.stockToggleActive, !isStockDisabled(btn.dataset.stockToggleActive)); render(); }));
     document.querySelectorAll("[data-stock-save]").forEach((btn) => btn.addEventListener("click", () => {
