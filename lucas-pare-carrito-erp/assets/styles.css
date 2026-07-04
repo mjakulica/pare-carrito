@@ -3901,3 +3901,7 @@ tr:last-child td {
     page-break-after: auto;
   }
 }
+
+/* Vista lista (toggle en Compras y Unidades) */
+.assigned-products-grid.list-view { grid-template-columns: 1fr !important; }
+.note-grid.list-view { grid-template-columns: 1fr !important; }

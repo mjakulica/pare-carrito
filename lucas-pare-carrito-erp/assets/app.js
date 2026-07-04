@@ -235,6 +235,7 @@
     tab: "activos",
     purchaseTab: "registro",
     purchaseProductView: "grid",
+    unitsProductView: "grid",
     purchaseAssigneeFilter: "all",
     orderView: "grid",
     orderProductFilter: "",
@@ -6592,7 +6593,7 @@
         <strong>${cardLabel}</strong>
       </button>`;
     }).join("");
-    return `<div class="assigned-products-grid">${(groupCardsHtml + cards) || `<div class="empty compact">No hay productos pendientes de compra para hoy.</div>`}</div>`;
+    return `<div class="assigned-products-grid${ui.purchaseProductView === "list" ? " list-view" : ""}">${(groupCardsHtml + cards) || `<div class="empty compact">No hay productos pendientes de compra para hoy.</div>`}</div>`;
   }
 
   function isPreparedProductToday(productId, userId) {
@@ -6688,33 +6689,36 @@
               <label>Adjuntar comprobante (opcional)</label>
               <input id="purchase-proof" type="file" accept="image/*" />
             </div>
-            <div class="field" id="purchase-total-wrap">
-              <label>Total</label>
-              <input id="purchase-total" disabled value="$0" />
-            </div>
             <div class="field span-2" id="purchase-notes-wrap">
               <label>Notas</label>
               <input id="purchase-notes" placeholder="Detalle de compra, gasto, cancelación, etc." />
             </div>
           </div>
-          ${canPurchaseProviders ? `<div id="provider-favorites-wrap" class="panel" style="box-shadow:none;margin-top:12px"><strong>Favoritos del proveedor</strong><div id="provider-favorites" class="favorite-row"></div></div>` : ""}
           <div id="purchase-items-wrap" class="grid" style="margin-top:12px">
             <div id="purchase-items" class="grid">
               ${renderPurchaseItemRow()}
             </div>
-            <div class="page-actions purchase-submit-row" style="margin-top:12px;gap:8px">
+            <div class="field" id="purchase-total-wrap" style="margin-top:8px;max-width:220px;margin-left:auto">
+              <label>Total</label>
+              <input id="purchase-total" disabled value="$0" />
+            </div>
+            <div class="page-actions purchase-submit-row" style="margin-top:8px;gap:8px">
               <button class="btn small yellow" type="button" data-add-purchase-item id="purchase-add-item-btn">Agregar producto</button>
               <button class="btn small primary" type="submit">Guardar egreso</button>
             </div>
-            <div class="page-actions" style="margin-top:12px">
+            <div class="page-actions" style="margin-top:12px;justify-content:space-between">
               <strong>Productos</strong>
+              <div class="segmented-icon-control" role="group" aria-label="Vista de productos">
+                <button class="btn icon ${ui.purchaseProductView === "grid" ? "primary" : "ghost"}" type="button" data-purchase-products-view="grid" title="Cuadrícula" aria-label="Cuadrícula">&#9638;</button>
+                <button class="btn icon ${ui.purchaseProductView === "list" ? "primary" : "ghost"}" type="button" data-purchase-products-view="list" title="Lista" aria-label="Lista">&#9776;</button>
+              </div>
             </div>
             <div id="required-purchase-grid">${renderRequiredPurchaseGrid()}</div>
           </div>
+          ${canPurchaseProviders ? `<div id="provider-favorites-wrap" class="panel" style="box-shadow:none;margin-top:12px"><strong>Favoritos del proveedor</strong><div id="provider-favorites" class="favorite-row"></div></div>` : ""}
           <div id="vendor-favorites-wrap" class="panel" style="box-shadow:none;margin-top:12px">
             <div class="page-actions" style="justify-content:space-between">
               <strong>Favoritos del vendedor</strong>
-              <select id="purchase-product-view" style="max-width:160px"><option value="list" ${ui.purchaseProductView === "list" ? "selected" : ""}>Lista</option><option value="grid" ${ui.purchaseProductView === "grid" ? "selected" : ""}>Cuadrícula</option></select>
             </div>
             <div id="vendor-favorites" class="favorite-row ${ui.purchaseProductView === "grid" ? "favorite-grid" : ""}"></div>
           </div>
@@ -7018,6 +7022,16 @@
       if (!name) return;
       vendorInput.value = name.trim();
       renderVendorFavorites(vendorInput.value);
+    }));
+    document.querySelectorAll("[data-purchase-products-view]").forEach((btn) => btn.addEventListener("click", () => {
+      ui.purchaseProductView = btn.dataset.purchaseProductsView || "grid";
+      document.querySelectorAll("[data-purchase-products-view]").forEach((b) => { const on = b.dataset.purchaseProductsView === ui.purchaseProductView; b.classList.toggle("primary", on); b.classList.toggle("ghost", !on); });
+      const rg = document.querySelector("#required-purchase-grid .assigned-products-grid");
+      if (rg) rg.classList.toggle("list-view", ui.purchaseProductView === "list");
+      const vf = document.getElementById("vendor-favorites");
+      if (vf) vf.classList.toggle("favorite-grid", ui.purchaseProductView === "grid");
+      const vn = document.getElementById("purchase-vendor");
+      renderVendorFavorites(vn ? vn.value : "");
     }));
     if (purchaseProductView) {
       purchaseProductView.addEventListener("change", () => {
@@ -8553,6 +8567,10 @@
     `;
   }
 
+  function unitsViewToggle() {
+    return `<div class="segmented-icon-control" role="group" aria-label="Vista de productos"><button class="btn icon ${ui.unitsProductView === "grid" ? "primary" : "ghost"}" type="button" data-units-view="grid" title="Cuadrícula" aria-label="Cuadrícula">&#9638;</button><button class="btn icon ${ui.unitsProductView === "list" ? "primary" : "ghost"}" type="button" data-units-view="list" title="Lista" aria-label="Lista">&#9776;</button></div>`;
+  }
+
   function renderUnits() {
     if (!ui.unitsDate || ui.unitsDate < todayISO()) ui.unitsDate = todayISO();
     const date = ui.unitsDate;
@@ -8579,17 +8597,17 @@
             <h2 class="page-title" style="font-size:18px">Notas de productos de hoy</h2>
             <p class="muted">${todaysNotes.length ? "Hay productos con notas para revisar antes de generar remitos." : "No hay notas de productos para esta fecha."}</p>
           </div>
-          ${todaysNotes.length ? `<button class="btn danger" data-clear-units-notes>Borrar notas de hoy</button>` : ""}
+          <div class="page-actions" style="gap:8px">${todaysNotes.length ? `<button class="btn danger" data-clear-units-notes>Borrar notas de hoy</button>` : ""}${unitsViewToggle()}</div>
         </div>
-        ${todaysNotes.length ? `<div class="note-grid">${todaysNotes.map((entry) => `<div class="note-card"><strong>${escapeHtml(entry.clientId)} - ${escapeHtml(entry.clientName)}</strong><span>${escapeHtml(entry.productName)}</span><small>${escapeHtml(entry.note)}</small></div>`).join("")}</div>` : ""}
+        ${todaysNotes.length ? `<div class="note-grid${ui.unitsProductView === "list" ? " list-view" : ""}">${todaysNotes.map((entry) => `<div class="note-card"><strong>${escapeHtml(entry.clientId)} - ${escapeHtml(entry.clientName)}</strong><span>${escapeHtml(entry.productName)}</span><small>${escapeHtml(entry.note)}</small></div>`).join("")}</div>` : ""}
       </div>
       <div class="panel" style="margin-bottom:14px">
-        <h2 class="page-title" style="font-size:18px">Productos por unidades pendientes</h2>
-        <div class="assigned-products-grid" style="margin-top:10px">${unitRows || `<div class="empty compact">No hay productos con casilla Unidades pendientes para esta fecha.</div>`}</div>
+        <div class="page-actions" style="justify-content:space-between"><h2 class="page-title" style="font-size:18px">Productos por unidades pendientes</h2>${unitsViewToggle()}</div>
+        <div class="assigned-products-grid${ui.unitsProductView === "list" ? " list-view" : ""}" style="margin-top:10px">${unitRows || `<div class="empty compact">No hay productos con casilla Unidades pendientes para esta fecha.</div>`}</div>
       </div>
       <div class="panel ${missingPurchases.length ? "highlight-panel" : ""}">
-        <h2 class="page-title" style="font-size:18px">Productos sin compra o compra insuficiente</h2>
-        <div class="assigned-products-grid" style="margin-top:10px;grid-template-columns:1fr">${shortageRows || `<div class="empty compact">Todos los productos de hoy tienen compra suficiente.</div>`}</div>
+        <div class="page-actions" style="justify-content:space-between"><h2 class="page-title" style="font-size:18px">Productos sin compra o compra insuficiente</h2>${unitsViewToggle()}</div>
+        <div class="assigned-products-grid${ui.unitsProductView === "list" ? " list-view" : ""}" style="margin-top:10px${ui.unitsProductView === "list" ? "" : ";grid-template-columns:1fr"}">${shortageRows || `<div class="empty compact">Todos los productos de hoy tienen compra suficiente.</div>`}</div>
       </div>
       `,
       "unidades"
@@ -8620,6 +8638,7 @@
   }
 
   function bindUnits() {
+    document.querySelectorAll("[data-units-view]").forEach((btn) => btn.addEventListener("click", () => { ui.unitsProductView = btn.dataset.unitsView || "grid"; render(); }));
     document.querySelectorAll("[data-omit-unit-card]").forEach((button) => {
       button.addEventListener("click", () => {
         ui.omittedUnitCards = ui.omittedUnitCards || {};
