@@ -2,7 +2,7 @@
 
 ## v12.9.39 - Auto-actualizacion, logout por inactividad y toggle de contraseña (2026-07-04)
 
-- Auto-actualizacion: el sistema detecta cuando se desplego una version nueva (compara el Last-Modified/ETag de app.js con un HEAD sin cache cada 3 min y al volver a la pestania). Muestra un banner "Hay una nueva version disponible - Actualizar ahora" y, al volver el foco a la pestania, recarga solo con cache-bust (?v=timestamp). Asi los usuarios no tienen que borrar cache ni cerrar la pagina. NOTA: recien toma efecto para los deploys POSTERIORES a que cada usuario cargue esta version una vez.
+- Auto-actualizacion: el sistema detecta cuando se desplego una version nueva (compara el Last-Modified/ETag de app.js con un HEAD sin cache). El chequeo ahora corre a horas fijas (4,5,6,7,8,10,12 y luego cada 4h) y al volver a la pestania, para reducir trafico. Si hay version nueva y la pestania esta oculta o el usuario lleva >2 min inactivo, recarga sola; si esta usando activamente muestra el banner para no interrumpir. Muestra un banner "Hay una nueva version disponible - Actualizar ahora" y, al volver el foco a la pestania, recarga solo con cache-bust (?v=timestamp). Asi los usuarios no tienen que borrar cache ni cerrar la pagina. NOTA: recien toma efecto para los deploys POSTERIORES a que cada usuario cargue esta version una vez.
 - Cierre de sesion por inactividad: si no se usa el sistema por 4 horas, la sesion se cierra sola.
 - Login: el boton de "ver contraseña" pasa a ser un icono sin marco dentro del input de contraseña.
 
