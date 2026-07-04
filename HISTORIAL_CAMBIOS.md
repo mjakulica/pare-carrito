@@ -1,5 +1,17 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.36 - Compras/Unidades: total, favoritos y toggle cuadricula/lista (2026-07-04)
+
+### Compras/Gastos
+- El Total ahora se muestra arriba del boton "Agregar producto", justo debajo del ultimo producto agregado (antes estaba arriba, en la grilla de campos).
+- "Favoritos del proveedor" se movio abajo del recuadro "Productos", justo arriba de "Favoritos del vendedor".
+- El recuadro "Productos" tiene los botones de vista cuadricula/lista (mismos iconos que Nuevo Pedido). Toggle in-place (no recarga el formulario) que tambien alterna la vista de los favoritos del vendedor.
+
+### Unidades
+- Se agregaron los botones de vista cuadricula/lista en "Notas de productos de hoy", "Productos por unidades pendientes" y "Productos sin compra o compra insuficiente" (estado `ui.unitsProductView`).
+
+---
+
 ## v12.9.35 - Compras: fila en una linea, advertencia en popup y fix zebra mobile (2026-07-03)
 
 ### Compras/Gastos
