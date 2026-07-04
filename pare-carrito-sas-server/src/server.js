@@ -1863,6 +1863,43 @@ app.post("/clients/order-change-notify", authenticate, async (req, res) => {
   }
 });
 
+// Aviso de suba de precio: manda WhatsApp (plantilla aprobada) a los clientes indicados con
+// su propio precio anterior/nuevo. El frontend arma "notices" con clientId + precios ya calculados.
+app.post("/clients/price-increase-notify", authenticate, async (req, res) => {
+  const botUrl = process.env.BOT_BROADCAST_URL || "";
+  const botKey = process.env.BROADCAST_KEY || "";
+  if (!botUrl) return res.status(503).json({ error: "Aviso por WhatsApp no configurado (BOT_BROADCAST_URL)." });
+  const stored = await loadStateData();
+  if (!stored) return res.status(404).json({ error: "Sin datos." });
+  const d = stored.data || {};
+  const settings = d.appSettings || {};
+  const templateName = settings.priceIncreaseTemplateName || "";
+  if (!templateName) return res.status(400).json({ error: "Configura la plantilla de aviso de suba en Configuracion." });
+  const lang = settings.priceIncreaseTemplateLang || "es";
+  const tpl = settings.priceIncreaseMessage || "El producto {producto} tuvo una suba de un {porcentaje}%, paso de valer {precioAnterior} a valer {precioNuevo}, si se desea cancelar la compra avisar, de caso contrario no hace falta contestar, gracias";
+  const money = (v) => "$" + Number(v || 0).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const clients = d.clients || [];
+  const notices = Array.isArray((req.body || {}).notices) ? req.body.notices : [];
+  let sent = 0;
+  let failed = 0;
+  for (const n of notices) {
+    const client = clients.find((c) => c.id === String(n.clientId));
+    if (!client) continue;
+    const phone = String(client.phone || (Array.isArray(client.phones) ? client.phones[0] : "") || "").replace(/\D/g, "");
+    if (!phone) continue;
+    const msg = tpl
+      .replace(/{producto}/g, String(n.productName || ""))
+      .replace(/{porcentaje}/g, String(n.pct != null ? n.pct : ""))
+      .replace(/{precioAnterior}/g, money(n.oldPrice))
+      .replace(/{precioNuevo}/g, money(n.newPrice));
+    try {
+      const r = await fetch(botUrl, { method: "POST", headers: { "content-type": "application/json", "x-broadcast-key": botKey }, body: JSON.stringify({ numbers: [phone], templateName, lang, params: [msg] }) });
+      if (r.ok) sent += 1; else failed += 1;
+    } catch (e) { failed += 1; }
+  }
+  res.json({ ok: true, sent, failed });
+});
+
 // Regenera (URL fresca) el PDF de una factura ya emitida en TusFacturas. La URL del alta caduca.
 app.post("/billing/regenerate-pdf", authenticate, requireRole("manager", "admin", "contador"), async (req, res) => {
   const cfg = billingConfig();

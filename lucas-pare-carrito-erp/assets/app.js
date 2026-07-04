@@ -6885,6 +6885,7 @@
         row.querySelector("[data-item-total]").value = formatMoney(subtotal);
       });
       total.value = formatMoney(sum);
+      itemsContainer.querySelectorAll("[data-purchase-item-row]").forEach((r) => syncPurchaseRow(r));
     };
     const updateKind = () => {
       const isOther = kind.value === "other_expense" || kind.value === "freight";
@@ -6923,6 +6924,9 @@
       if (event.target.matches("[data-product-filter]")) {
         updatePurchaseProductSelect(event.target.closest("[data-purchase-item-row]"));
       }
+      if (event.target.matches("[data-item-cost]")) {
+        formatThousandsInputEl(event.target);
+      }
       recalc();
     });
     itemsContainer.addEventListener("change", (event) => {
@@ -6931,11 +6935,20 @@
         const row = event.target.closest("[data-purchase-item-row]");
         if (product && row) row.querySelector("[data-product-filter]").value = product.name;
       }
+      recalc();
     });
     otherAmount.addEventListener("input", recalc);
     if (providerPaymentAmount) providerPaymentAmount.addEventListener("input", recalc);
     if (providerPaymentMode) providerPaymentMode.addEventListener("change", recalc);
     itemsContainer.addEventListener("click", (event) => {
+      const fillBtn = event.target.closest("[data-fill-last-cost]");
+      if (fillBtn) {
+        const frow = fillBtn.closest("[data-purchase-item-row]");
+        const costInput = frow.querySelector("[data-item-cost]");
+        if (costInput) { costInput.value = formatAmountInput(Number(fillBtn.dataset.cost || 0)); }
+        recalc();
+        return;
+      }
       const button = event.target.closest("[data-remove-purchase-item]");
       if (!button) return;
       const rows = itemsContainer.querySelectorAll("[data-purchase-item-row]");
@@ -7182,8 +7195,10 @@
       if (purchase.vendorName && items.length) rememberVendorProducts(purchase.vendorName, items, purchase.date);
       if (items.length && expenseType === "market_price") updateMarketPrices(items);
       else if (items.length && expenseType !== "prepared") {
+        const priceIncreaseNotices = collectPriceIncreaseCandidates(items, purchase.date);
         updateProductCostsFromPurchase(items, provider);
         updateOrdersWithNewPrices(purchase.date, items);
+        sendPriceIncreaseNotices(priceIncreaseNotices);
       }
       if (purchase.paymentStatus === "account_current" && provider) {
         addProviderLedgerEntry({
@@ -7231,6 +7246,87 @@
     });
   }
 
+  function isWholesaleWithRetail(productId) {
+    return (state.productRelations || []).some((r) => r.wholesaleProductId === productId && Number(r.retailPerWholesale) > 0);
+  }
+  function getStoredProductCost(productId) {
+    const rec = state.prices ? state.prices[productId] : null;
+    const p = getProduct(productId);
+    if (rec && Number(rec.cost) > 0) return Number(rec.cost);
+    return p ? Number(p.baseCost || 0) : 0;
+  }
+  // Formatea el input mostrando "." como separador de miles (xxx.xxx) mientras se escribe.
+  function formatThousandsInputEl(el) {
+    if (!el) return;
+    const raw = String(el.value || "");
+    const parts = raw.replace(/[^\d,]/g, "").split(",");
+    let intPart = (parts[0] || "").replace(/\D/g, "");
+    if (intPart) intPart = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+    let out = intPart;
+    if (parts.length > 1) out += "," + parts.slice(1).join("").replace(/\D/g, "");
+    el.value = out;
+  }
+  // Muestra/oculta "Unid. calculo" (solo mayoristas con relacion minorista), el boton de
+  // ultimo costo y la advertencia de suba >30% de cada fila de compra.
+  function syncPurchaseRow(row) {
+    if (!row) return;
+    const select = row.querySelector("[data-product-select]");
+    const pid = select ? select.value : "";
+    const product = pid ? getProduct(pid) : null;
+    const relField = row.querySelector("[data-relation-field]");
+    if (relField) relField.style.display = (product && isWholesaleWithRetail(product.id)) ? "" : "none";
+    const storedCost = product ? getStoredProductCost(product.id) : 0;
+    const lastBtn = row.querySelector("[data-fill-last-cost]");
+    if (lastBtn) {
+      if (product && storedCost > 0) { lastBtn.style.display = ""; lastBtn.textContent = "Ultimo costo: " + formatMoney(storedCost); lastBtn.dataset.cost = storedCost; }
+      else lastBtn.style.display = "none";
+    }
+    const warn = row.querySelector("[data-cost-warning]");
+    const costInput = row.querySelector("[data-item-cost]");
+    if (warn && costInput) {
+      const v = parseAmount(costInput.value);
+      if (product && storedCost > 0 && v > storedCost * 1.3) {
+        const pct = Math.round((v / storedCost - 1) * 100);
+        warn.style.display = "";
+        warn.textContent = "\u26A0 Este costo es " + pct + "% mayor al ultimo (" + formatMoney(storedCost) + "). Al guardar se avisara por WhatsApp a los clientes con este producto hoy.";
+      } else warn.style.display = "none";
+    }
+  }
+  function collectPriceIncreaseCandidates(items, date) {
+    const notices = [];
+    (items || []).forEach((item) => {
+      const product = getProduct(item.productId);
+      if (!product) return;
+      const oldCost = getStoredProductCost(item.productId);
+      const newCost = Number(item.unitCost || 0);
+      if (!(oldCost > 0) || !(newCost > oldCost * 1.3)) return;
+      const pct = Math.round((newCost / oldCost - 1) * 100);
+      const seen = {};
+      (state.orders || []).forEach((o) => {
+        if (!o || ["cancelado", "anulado"].includes(o.status)) return;
+        if (o.date !== date) return;
+        if (!(o.items || []).some((it) => it.productId === item.productId)) return;
+        if (seen[o.clientId]) return;
+        const client = getClient(o.clientId);
+        if (!client) return;
+        seen[o.clientId] = true;
+        notices.push({ productId: item.productId, productName: product.name, pct, clientId: o.clientId, oldPrice: getAdjustedProductPrice(product, client) });
+      });
+    });
+    return notices;
+  }
+  function sendPriceIncreaseNotices(notices) {
+    if (!notices || !notices.length) return;
+    notices.forEach((n) => { const p = getProduct(n.productId); const c = getClient(n.clientId); if (p && c) n.newPrice = getAdjustedProductPrice(p, c); });
+    const payload = notices.filter((n) => n.newPrice != null).map((n) => ({ productName: n.productName, pct: n.pct, clientId: n.clientId, oldPrice: n.oldPrice, newPrice: n.newPrice }));
+    if (!payload.length) return;
+    try {
+      const cfg = getCloudSyncConfig();
+      if (!cfg.username || !cloudSyncReady(cfg)) return;
+      cloudRequest(cfg, "/clients/price-increase-notify", { method: "POST", body: JSON.stringify({ notices: payload }) }).catch(() => {});
+    } catch (e) { /* no bloquea el guardado */ }
+  }
+
   function renderPurchaseItemRow(productName) {
     const selected = productName ? findProductByInput(productName) : null;
     const listId = "purchase-product-list-" + nextItemId();
@@ -7251,8 +7347,10 @@
         <div class="field">
           <label>Costo unitario</label>
           <input data-item-cost inputmode="decimal" placeholder="0" />
+          <button type="button" class="btn small ghost" data-fill-last-cost style="display:none;margin-top:4px;font-size:11px;padding:2px 8px"></button>
+          <div class="alert" data-cost-warning style="display:none;margin-top:4px;font-size:11px"></div>
         </div>
-        <div class="field">
+        <div class="field" data-relation-field style="display:none">
           <label>Unid. calculo</label>
           <input data-item-relation-units inputmode="decimal" placeholder="auto" />
         </div>
@@ -11005,6 +11103,8 @@
             <div class="field span-4"><label>Mensaje WhatsApp de recordatorio (usa {cliente} y {saldo})</label><textarea id="dunning-wa-message" rows="2">${escapeHtml((state.appSettings && state.appSettings.dunningWhatsappMessage) || "Hola {cliente}, ayer no registramos el pago correspondiente, su saldo es {saldo} por favor regularizar su deuda")}</textarea></div>
             <div class="field span-4"><label>Mensaje de correo de mora (usa {cliente}, {diassinpago} y {saldo})</label><textarea id="dunning-mail-message" rows="2">${escapeHtml((state.appSettings && state.appSettings.dunningMailMessage) || "El cliente {cliente} tiene una demora de pago de {diassinpago} y su saldo es {saldo}.")}</textarea></div>
             <div class="field span-2"><label>Nombre de plantilla Meta (recordatorio de pago)</label><input id="dunning-template" value="${escapeAttr((state.appSettings && state.appSettings.dunningWhatsappTemplate) || "")}" placeholder="ej: recordatorio_pago" /></div>
+            <div class="field span-4"><label>Mensaje de aviso de suba de precio (usa {producto}, {porcentaje}, {precioAnterior}, {precioNuevo})</label><textarea id="priceinc-message" rows="2">${escapeHtml(getPriceIncreaseMessageText())}</textarea></div>
+            <div class="field span-2"><label>Nombre de plantilla Meta (suba de precio)</label><input id="priceinc-template" value="${escapeAttr((state.appSettings && state.appSettings.priceIncreaseTemplateName) || "")}" placeholder="ej: suba_precio" /></div>
           </div>
         </div>` : ""}
       </div>` : ""}
@@ -11308,6 +11408,10 @@
     if (dnMail) dnMail.addEventListener("change", () => { state.appSettings.dunningMailMessage = dnMail.value.trim(); saveState(); });
     const dnTpl = document.getElementById("dunning-template");
     if (dnTpl) dnTpl.addEventListener("change", () => { state.appSettings.dunningWhatsappTemplate = dnTpl.value.trim(); saveState(); });
+    const piMsg = document.getElementById("priceinc-message");
+    if (piMsg) piMsg.addEventListener("change", () => { state.appSettings.priceIncreaseMessage = piMsg.value.trim(); saveState(); });
+    const piTpl = document.getElementById("priceinc-template");
+    if (piTpl) piTpl.addEventListener("change", () => { state.appSettings.priceIncreaseTemplateName = piTpl.value.trim(); saveState(); });
     document.querySelectorAll("[data-product-kg]").forEach((input) => input.addEventListener("change", () => {
       const product = getProduct(input.dataset.productKg);
       if (!product) return;
@@ -12198,6 +12302,10 @@
 
   function getOrderChangeMessageText() {
     return (state.appSettings && state.appSettings.orderChangeMessage) || "Hola {cliente}, actualizamos tu pedido de hoy: {detalle}. Cualquier cosa avisanos.";
+  }
+
+  function getPriceIncreaseMessageText() {
+    return (state.appSettings && state.appSettings.priceIncreaseMessage) || "El producto {producto} tuvo una suba de un {porcentaje}%, paso de valer {precioAnterior} a valer {precioNuevo}, si se desea cancelar la compra avisar, de caso contrario no hace falta contestar, gracias";
   }
 
   // Aviso por WhatsApp al cliente cuando se agrega/quita un producto de su pedido (via plantilla configurable).
