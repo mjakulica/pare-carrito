@@ -453,9 +453,26 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 - Compras/Gastos: "Unid. calculo" solo para mayoristas con relacion minorista; costo unitario con separador de miles (xxx.xxx); boton de ultimo costo por producto (pega el costo guardado); advertencia si el costo es >30% mayor al guardado.
 - Aviso de suba automatico: al guardar una compra con costo >30% mayor, el bot envia WhatsApp (plantilla aprobada) a los clientes con ese producto en pedidos de hoy, con el precio de venta de cada cliente (viejo vs nuevo). Endpoint `/clients/price-increase-notify`. Config: `priceIncreaseMessage`, `priceIncreaseTemplateName`, `priceIncreaseTemplateLang`.
 
+### 12.22 Impresion: zebra y compatibilidad, y ajustes de fila de Compras (v12.9.34, v12.9.35)
+- Se fuerza `print-color-adjust: exact` (con bloque `@media print` para mobile) para que el fondo gris (zebra) de los remitos salga al imprimir/exportar, no solo en el popup "Ver".
+- Fix impresion en Android: la ventana de impresion movil ya no se auto-cierra (dejaba la hoja en blanco / cancelaba el dialogo); muestra el contenido, intenta imprimir y ofrece un boton "Imprimir / Guardar PDF" de respaldo.
+- Compras/Gastos: la fila de cada producto quedo en una sola linea; labels "cant", "costo u.", "$ mercado"; boton de ultimo costo como columna propia; la advertencia de suba >30% paso a ser un popup (confirm) en desktop y mobile (Aceptar mantiene el costo, Cancelar lo borra).
+
+### 12.23 Compras/Unidades: layout, vistas y movimientos (v12.9.36, v12.9.37)
+- Compras/Gastos: el Total se muestra arriba de "Agregar producto" (debajo del ultimo producto); "Favoritos del proveedor" se movio abajo del recuadro Productos (arriba de "Favoritos del vendedor"); el recuadro Productos tiene toggle cuadricula/lista (iconos como Nuevo Pedido, estado `ui.purchaseProductView`), con vista lista compacta en fila.
+- Unidades: toggle cuadricula/lista (`ui.unitsProductView`) en "Notas de productos de hoy", "Productos por unidades pendientes" y "Productos sin compra o compra insuficiente".
+- Fixes: rol proveedor podia no guardar el egreso (lectura de campo Vendedor inexistente) y el boton grilla del panel de faltantes no alternaba; ambos corregidos. Caja: dropdown 30/60/120/Todos (`ui.cajaLimit`). Compras: hora junto al usuario en la tabla de movimientos.
+- Boton de ultimo costo: label "ultimo" arriba y solo el monto sin decimales ni espacio ($1.234) en el boton.
+
+### 12.24 Sesion, fechas y auto-actualizacion (v12.9.38, v12.9.39)
+- Reajuste de fechas al cambiar de dia (si el sistema queda abierto): al cambiar el dia se llevan a hoy los filtros operativos (Pedidos, Proveedores, Remitos, Unidades, Vehiculos, Rendimiento/Analisis, Historiales y el "Hasta" de Saldos y Facturacion). No se toca el "Desde" de Saldos ni Facturacion. Control por `ui.lastActiveDay` evaluado en cada render.
+- Auto-actualizacion sin borrar cache: compara el Last-Modified/ETag de `app.js` (HEAD sin cache) a horas fijas (4,5,6,7,8,10,12 y luego cada 4h) y al volver a la pestania. Si hay version nueva, recarga sola con cache-bust si la pestania esta oculta o el usuario inactivo >2 min; si esta usando activamente, muestra un banner "Actualizar ahora". Solo aplica a deploys posteriores a que el usuario cargue la version con el detector.
+- Cierre de sesion por inactividad de 4 horas.
+- Login: toggle "ver contraseña" como icono sin marco dentro del input.
+
 ### 12.14 Modelo de datos agregado
 - `client.paymentDay`; coleccion `state.replacements` (recambios/reposiciones); `user.providerId` (vinculo del rol proveedor); appSettings: dunning (`dunningEnabled`, `dunningWhatsappMessage`, `dunningMailMessage`, `dunningWhatsappTemplate`) y aviso de cambios (`orderChangeNotifyEnabled`, `orderChangeMessage`, `orderChangeTemplateName`); `purchase.proofFile` (comprobante), tipo de gasto `freight`.
-- `appSettings.stockGroups` (grupos/equivalencias de stock: `{id,name,members:[{productId,factorKg}],wholeProductId,wholeKg,bulkProductId,bulkKg}`); `client.condicionIva` (respaldo de condicion frente al IVA para facturacion); `ui.omittedUnitLines` (lineas de Unidades enviadas/ocultas); appSettings de aviso de suba (`priceIncreaseMessage`, `priceIncreaseTemplateName`, `priceIncreaseTemplateLang`).
+- `appSettings.stockGroups` (grupos/equivalencias de stock: `{id,name,members:[{productId,factorKg}],wholeProductId,wholeKg,bulkProductId,bulkKg}`); `client.condicionIva` (respaldo de condicion frente al IVA para facturacion); `ui.omittedUnitLines` (lineas de Unidades enviadas/ocultas); appSettings de aviso de suba (`priceIncreaseMessage`, `priceIncreaseTemplateName`, `priceIncreaseTemplateLang`). Estados de UI (no persistidos): `ui.purchaseProductView` / `ui.unitsProductView` (vista cuadricula/lista), `ui.cajaLimit` (30/60/120/todos), `ui.lastActiveDay` (reajuste de fechas por cambio de dia). Cliente: `client.condicionIva`.
 
 ---
 
