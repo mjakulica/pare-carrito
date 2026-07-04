@@ -17108,7 +17108,10 @@
       if (printWindow) {
         const baseHref = location.origin + location.pathname.replace(/[^/]*$/, "");
         printWindow.document.open();
-        printWindow.document.write(`<!doctype html><html><head><base href="${escapeAttr(baseHref)}"><title>${escapeHtml(title)}</title><style>${printDocumentStyles(options)}</style></head><body>${body}<script>window.addEventListener("load",function(){setTimeout(function(){window.focus();window.print();setTimeout(function(){window.close();},300);},120);});<\/script></body></html>`);
+        // No auto-cerramos la ventana (en Android Chrome eso deja la hoja en blanco o cancela
+        // la impresion). Mostramos el contenido + un boton "Imprimir" visible como fallback,
+        // e intentamos disparar el dialogo de impresion una vez cargado.
+        printWindow.document.write(`<!doctype html><html><head><base href="${escapeAttr(baseHref)}"><title>${escapeHtml(title)}</title><style>${printDocumentStyles(options)}</style></head><body>${body}<button type="button" class="print-now-btn" id="print-now-btn">Imprimir / Guardar PDF</button><script>function pcPrint(){try{window.focus();window.print();}catch(e){}}document.getElementById("print-now-btn").addEventListener("click",pcPrint);window.addEventListener("load",function(){setTimeout(pcPrint,450);});<\/script></body></html>`);
         printWindow.document.close();
         setTimeout(() => {
           document.title = previousTitle;
@@ -17153,7 +17156,7 @@
     const pageMargin = options.margin || "8mm";
     return `
       @page{size:${pageSize};margin:${pageMargin}}
-      *{box-sizing:border-box}
+      *{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}
       .no-print{display:none !important}
       body{font-family:Arial,sans-serif;margin:0;color:#111;background:#fff;font-size:11px}
       table{width:100%;border-collapse:collapse}
@@ -17244,6 +17247,8 @@
       .remito-total-style-line .remito-total-line{border-bottom:2px solid #e6007e;min-width:92px;padding-bottom:1px}
       .remito-total-style-box .remito-total-line{border:2px solid #e6007e;border-radius:3px;padding:2px 8px;min-width:104px}
       .remito-total-style-none .remito-total-line{border:0;padding:0}
+      .print-now-btn{position:fixed;left:50%;transform:translateX(-50%);bottom:16px;z-index:99999;background:#17228a;color:#fff;border:0;border-radius:8px;padding:12px 22px;font-size:15px;font-weight:700;box-shadow:0 2px 10px rgba(0,0,0,.35);cursor:pointer}
+      @media print{.print-now-btn{display:none !important}}
     `;
   }
 })();
