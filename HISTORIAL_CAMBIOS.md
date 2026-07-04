@@ -1,5 +1,13 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.34 - Impresion: zebra en remitos impresos y fix Android (2026-07-03)
+
+### Impresion / Remitos
+- Se fuerza `print-color-adjust: exact` en los documentos imprimibles: el fondo gris (zebra) cada 2da fila de los remitos ahora sale tambien al imprimir / exportar PDF, no solo en el popup "Ver". Mantiene el formato compacto actual (interlineado minimo, letra chica) de Exportar PDF.
+- Fix impresion en Android: la ventana de impresion movil ya no se auto-cierra (eso dejaba la hoja en blanco o cancelaba el dialogo en Android Chrome). Ahora muestra el contenido, intenta imprimir automaticamente y ademas ofrece un boton "Imprimir / Guardar PDF" visible como respaldo. En iOS ya funcionaba y sigue igual.
+
+---
+
 ## v12.9.33 - Compras: costo unitario, ultimo costo y aviso de suba por WhatsApp (2026-07-03)
 
 ### Frontend / Compras
