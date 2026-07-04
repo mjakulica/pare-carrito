@@ -3902,6 +3902,26 @@ tr:last-child td {
   }
 }
 
-/* Vista lista (toggle en Compras y Unidades) */
-.assigned-products-grid.list-view { grid-template-columns: 1fr !important; }
-.note-grid.list-view { grid-template-columns: 1fr !important; }
+/* Vista lista (toggle en Compras y Unidades): una columna, tarjetas compactas en fila */
+.assigned-products-grid.list-view { grid-template-columns: 1fr !important; gap: 4px; }
+.note-grid.list-view { grid-template-columns: 1fr !important; gap: 4px; }
+.assigned-products-grid.list-view .assigned-product-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 10px;
+  padding: 5px 10px;
+}
+.assigned-products-grid.list-view .assigned-product-card > span:first-child,
+.assigned-products-grid.list-view .assigned-product-card .product-name { flex: 1 1 130px; min-width: 120px; }
+.assigned-products-grid.list-view .assigned-product-card .product-thumb { width: 22px; height: 22px; }
+.assigned-products-grid.list-view .assigned-product-card .unit-order-list { flex: 1 1 100%; margin-top: 2px; }
+.assigned-products-grid.list-view .assigned-product-card [data-omit-unit-card] { flex: 0 0 auto; }
+.note-grid.list-view .note-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  padding: 5px 10px;
+}
+.note-grid.list-view .note-card strong { flex: 0 0 auto; }
