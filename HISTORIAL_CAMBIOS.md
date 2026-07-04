@@ -1,5 +1,14 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.32 - Stock: conteo por grupo en kg (2026-07-03)
+
+### Stock
+- El panel "Grupos / equivalencias" ahora permite el conteo del stock fisico por grupo en kg (una sola fila por grupo, en vez de contar kg/bandeja/unidad por separado). Columnas: Stock estimado (kg), Stock real (kg) con input + Guardar, Demanda hoy (kg) y Sugerencia de compra.
+- El stock contado (o estimado: ultimo conteo + compras del grupo en kg - pedidos del grupo en kg) descuenta la sugerencia de compra: reduce el pool que se arma desde el bulto (jaulas/cajas), no los enteros que se compran por caja. Ej: 30 kg pedidos con 10 kg en stock -> 1 jaula en vez de 2.
+- Los conteos de grupo se guardan como movimientos con productId sintetico "GRPKG:<idGrupo>" para no chocar con los productos reales ni con los conteos por producto. Funciones: groupCountKey, groupOrdersKg, groupComprasKg, getGroupEstimatedKg, getGroupStockKgToday, recordGroupStockCount.
+
+---
+
 ## v12.9.31 - Proveedor: compra por dia y privacidad en Dividir (2026-07-03)
 
 ### Rol proveedor

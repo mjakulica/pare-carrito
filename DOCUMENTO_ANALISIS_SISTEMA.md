@@ -429,6 +429,7 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 - Seccion "Grupos / equivalencias" en `Stock` (gerente/admin): agrupa productos que son lo mismo contado distinto, con un factor en kg por unidad de cada variante (berenjena unidad 0,4kg; calabaza unidad 2kg; manzana/pera unidad 0,25kg y bandeja 4kg; etc.). Regla especial del tomate: un producto "se compra entero" (cajon, kg por unidad) y otro es "bulto para armar el resto" (jaula, kg por bulto). La parte entera de cada pedido del cajon se compra entera; las fracciones (medios cajones) + los kg de los demas miembros se arman desde jaulas, redondeando para arriba. Funciones: `getStockGroups`, `stockGroupComputation`, `renderStockGroupsPanel`, `openStockGroupsModal`. Config en `appSettings.stockGroups`.
 - Conteo unico: los miembros de un grupo (y el producto "se compra entero") ya no figuran como filas individuales en Stock ni en la grilla de falta; se cuentan una sola vez a nivel de grupo (`getGroupHiddenProductIds`). El bulto no se oculta porque es lo que se sugiere comprar.
 - Conciliacion en Compras/Gastos: la grilla de "falta" muestra la sugerencia por grupo (cajones enteros + jaulas/cajas), neta de lo ya comprado, en vez de sobre-sugerir por producto.
+- Conteo por grupo en kg (v12.9.32): el panel de grupos permite contar el stock fisico del grupo en kg (una fila por grupo) y ese stock descuenta la sugerencia de compra (reduce el pool de bulto, no los enteros). Los conteos se guardan con productId sintetico "GRPKG:<id>".
 - La grilla de falta se agrupa por PRODUCTO (no por producto+unidad): un mismo producto con la unidad escrita distinta en dos pedidos (ej. "unidad" vs "atado") se suma en una sola tarjeta con la unidad canonica.
 
 ### 12.17 Parser: alias ignora conectores (v12.9.29)
@@ -456,7 +457,7 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 
 ## 13. Ultimo Cambio y Version
 
-**Version operativa:** 12.9.31
+**Version operativa:** 12.9.32
 **Fecha:** 2026-06-30
 **Commit GitHub del cambio funcional:** `7fc43f2`
 **Entorno actualizado:** VPS productivo `/opt/pare-carrito` con frontend estatico y API Docker Compose saludable.
