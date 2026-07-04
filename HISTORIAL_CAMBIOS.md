@@ -1,5 +1,17 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.37 - Fixes proveedor/unidades y mejoras caja/compras (2026-07-04)
+
+### Fixes
+- Rol proveedor: "Guardar egreso" no hacia nada porque el submit leia el campo Vendedor (que se saco para ese rol) y tiraba error. Se blindaron las lecturas de campos que pueden no existir.
+- Unidades: el boton de vista cuadricula en "Productos sin compra o compra insuficiente" no hacia efecto porque el panel forzaba 1 columna siempre; ahora la vista cuadricula usa varias columnas y la lista una sola.
+
+### Mejoras
+- Caja: dropdown "Mostrar 30 / 60 / 120 / Todos" para los movimientos (igual que Compras/Gastos), estado `ui.cajaLimit`.
+- Compras/Gastos: en la tabla de movimientos, al lado del usuario que registro el egreso se muestra la hora (formato como en Pedidos).
+
+---
+
 ## v12.9.36 - Compras/Unidades: total, favoritos y toggle cuadricula/lista (2026-07-04)
 
 ### Compras/Gastos
