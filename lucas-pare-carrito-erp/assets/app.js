@@ -6419,7 +6419,7 @@
           <td>${escapeHtml(purchaseStatusLabel(purchase.paymentStatus || "paid"))}</td>
           <td>${escapeHtml(getCashBoxName(getPurchaseCashBoxId(purchase)))}</td>
           <td class="num">${formatMoney(purchase.totalCost)}</td>
-          <td>${escapeHtml(purchase.recordedBy || "")}</td>
+          <td>${escapeHtml(purchase.recordedBy || "")}${purchase.createdAt ? ` <span class="muted">\u00b7 ${formatClockHM(purchase.createdAt)}</span>` : ""}</td>
           <td>${escapeHtml(purchase.notes || "")}</td>
           <td>${annulButton}${annulledLabel}</td>
         </tr>
@@ -7166,7 +7166,7 @@
           method: document.getElementById("purchase-provider-payment-method").value,
           notes: document.getElementById("purchase-notes").value.trim(),
           date: document.getElementById("purchase-date").value || todayISO(),
-          assignedEmployeeId: currentUser.role === "employee" ? currentUser.id : document.getElementById("purchase-assigned-employee").value,
+          assignedEmployeeId: currentUser.role === "employee" ? currentUser.id : (document.getElementById("purchase-assigned-employee") || { value: "" }).value,
           cashBoxId: cashBoxSelect.value
         });
         if (!providerPayment) return;
@@ -7208,8 +7208,8 @@
         totalCost,
         cashBoxId: cashBoxSelect.value,
         notes: document.getElementById("purchase-notes").value.trim(),
-        assignedEmployeeId: currentUser.role === "employee" ? currentUser.id : document.getElementById("purchase-assigned-employee").value,
-        vendorName: document.getElementById("purchase-vendor").value.trim(),
+        assignedEmployeeId: currentUser.role === "employee" ? currentUser.id : (document.getElementById("purchase-assigned-employee") || { value: "" }).value,
+        vendorName: (document.getElementById("purchase-vendor") || { value: "" }).value.trim(),
         recordedBy: currentUser.name,
         userRole: currentUser.role,
         proofFile
@@ -8607,7 +8607,7 @@
       </div>
       <div class="panel ${missingPurchases.length ? "highlight-panel" : ""}">
         <div class="page-actions" style="justify-content:space-between"><h2 class="page-title" style="font-size:18px">Productos sin compra o compra insuficiente</h2>${unitsViewToggle()}</div>
-        <div class="assigned-products-grid${ui.unitsProductView === "list" ? " list-view" : ""}" style="margin-top:10px${ui.unitsProductView === "list" ? "" : ";grid-template-columns:1fr"}">${shortageRows || `<div class="empty compact">Todos los productos de hoy tienen compra suficiente.</div>`}</div>
+        <div class="assigned-products-grid${ui.unitsProductView === "list" ? " list-view" : ""}" style="margin-top:10px">${shortageRows || `<div class="empty compact">Todos los productos de hoy tienen compra suficiente.</div>`}</div>
       </div>
       `,
       "unidades"
@@ -9604,7 +9604,8 @@
       </tr>
     `).join("") : "";
     const isManager = currentUser.role === "manager";
-    const rows = selectedEntries.slice().sort((a, b) => String(b.timestamp || b.date).localeCompare(String(a.timestamp || a.date))).map((entry) => {
+    const cajaLimit = Number(ui.cajaLimit) || 30;
+    const rows = selectedEntries.slice().sort((a, b) => String(b.timestamp || b.date).localeCompare(String(a.timestamp || a.date))).slice(0, cajaLimit).map((entry) => {
       const isAnnulled = entry.status === "anulado";
       const annulButton = isManager && !isAnnulled ? `<button class="btn small danger" data-annul-caja="${entry.id}" title="Anular movimiento">X</button>` : "";
       const annulledLabel = isAnnulled ? `<span class="pill gray">Anulado</span>` : "";
@@ -9666,6 +9667,7 @@
         </div>
       </div>` : ""}
       <div class="panel" style="margin-top:14px">
+        <div class="page-actions" style="justify-content:flex-end;margin-bottom:8px"><label style="display:inline-flex;gap:6px;align-items:center;font-size:13px">Mostrar <select id="caja-limit">${[30, 60, 120, 100000].map((n) => `<option value="${n}" ${cajaLimit === n ? "selected" : ""}>${n >= 100000 ? "Todos" : n}</option>`).join("")}</select></label></div>
         <div class="table-wrap">
           <table>
             <thead><tr><th>Fecha</th><th>Caja</th><th>Tipo</th><th>Concepto</th><th>Esperado</th><th>Ingreso</th><th>Egreso</th><th>Balance</th><th>Usuario</th><th>Acciones</th></tr></thead>
@@ -9684,6 +9686,8 @@
       ui.cajaSelectedId = filter.value;
       render();
     });
+    const cajaLimitSel = document.getElementById("caja-limit");
+    if (cajaLimitSel) cajaLimitSel.addEventListener("change", () => { ui.cajaLimit = Number(cajaLimitSel.value) || 30; render(); });
     document.querySelectorAll("[data-add-cash-box]").forEach((button) => button.addEventListener("click", () => openCashBoxForm()));
     document.querySelectorAll("[data-edit-cash-box]").forEach((button) => button.addEventListener("click", () => openCashBoxForm(button.dataset.editCashBox)));
     document.querySelectorAll("[data-cash-box-visible-admin]").forEach((checkbox) => checkbox.addEventListener("change", () => {
