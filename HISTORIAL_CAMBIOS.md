@@ -1,5 +1,17 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.35 - Compras: fila en una linea, advertencia en popup y fix zebra mobile (2026-07-03)
+
+### Compras/Gastos
+- La fila de cada producto vuelve a quedar en una sola linea (el boton de ultimo costo y la advertencia habian roto el layout metiendose dentro de la celda de costo). El boton "ult $X" ahora es una columna propia (visible tambien en mobile). Labels renombrados: "cant", "costo u.", "$ mercado".
+- La advertencia de suba >30% dejo de ser un cartel inline y ahora es un popup (confirm) en desktop y mobile: Aceptar mantiene el costo (y al guardar se avisa por WhatsApp), Cancelar borra el costo cargado.
+- "Unid. calculo" sigue solo para mayoristas con relacion minorista (se colapsa su columna cuando no aplica, sin dejar hueco).
+
+### Impresion
+- El zebra gris de los remitos ahora tambien sale al imprimir en mobile: se agrego un bloque @media print que fuerza print-color-adjust y el fondo gris con !important (antes se veia en la pagina previa pero no en la impresion final del celular).
+
+---
+
 ## v12.9.34 - Impresion: zebra en remitos impresos y fix Android (2026-07-03)
 
 ### Impresion / Remitos
