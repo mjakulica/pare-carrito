@@ -1,5 +1,21 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.40 - Cierre de caja de empleados (2026-07-04)
+
+### Empleado (Horarios)
+- Nuevo recuadro "Cierre de caja": lista los pedidos de hoy con su total y permite marcar cuales cobro en efectivo. Vienen tildados por defecto los que ya tienen un pago registrado en Pagos; si marca uno sin pago, aparece un popup para registrarlo (efectivo).
+- "Hoy cobre en efectivo: $X" (editable, default = suma de los marcados) con la diferencia contra lo que deberia haber cobrado.
+- "Mi caja al cierre del dia es: $X" (editable, default = cierre del dia anterior - gastos/reintegros de hoy + cobros en efectivo de hoy) con la diferencia contra lo esperado. Al guardar, ajusta la caja del empleado al monto real ingresado (crea un ajuste de caja por la diferencia).
+- Historial "Ultimos cierres de caja" con vista 30/60/120/todos (fecha, cobro esperado/real/dif, caja esperada/real/dif).
+
+### Gerente / Admin
+- En Empleados y en Caja se agrego el recuadro "Cierres de caja (empleados)" con los ultimos cierres de cada empleado activo, diferencias de cobro y de caja, con vista 30/60/120/todos.
+
+### Datos
+- Nueva coleccion `state.cashClosings` (sincronizada). Funciones: getCashClosings, expectedEmployeeCash, recordCashClosing, renderCashClosingHistory.
+
+---
+
 ## v12.9.39 - Auto-actualizacion, logout por inactividad y toggle de contraseña (2026-07-04)
 
 - Auto-actualizacion: el sistema detecta cuando se desplego una version nueva (compara el Last-Modified/ETag de app.js con un HEAD sin cache). El chequeo ahora corre a horas fijas (4,5,6,7,8,10,12 y luego cada 4h) y al volver a la pestania, para reducir trafico. Si hay version nueva y la pestania esta oculta o el usuario lleva >2 min inactivo, recarga sola; si esta usando activamente muestra el banner para no interrumpir. Muestra un banner "Hay una nueva version disponible - Actualizar ahora" y, al volver el foco a la pestania, recarga solo con cache-bust (?v=timestamp). Asi los usuarios no tienen que borrar cache ni cerrar la pagina. NOTA: recien toma efecto para los deploys POSTERIORES a que cada usuario cargue esta version una vez.

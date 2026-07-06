@@ -470,6 +470,11 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 - Cierre de sesion por inactividad de 4 horas.
 - Login: toggle "ver contraseña" como icono sin marco dentro del input.
 
+### 12.25 Cierre de caja de empleados (v12.9.40)
+- Empleado (Horarios): recuadro "Cierre de caja" con los pedidos de hoy (marca los cobrados en efectivo; default = los con pago registrado; popup para registrar el que falte), "Hoy cobre en efectivo" y "Mi caja al cierre" con sus diferencias. Al guardar ajusta la caja del empleado al monto real (ajuste de caja por la diferencia). Caja esperada = cierre del dia anterior - gastos/reintegros de hoy + cobros de hoy. Historial con 30/60/120/todos.
+- Gerente/Admin: en Empleados y Caja, recuadro "Cierres de caja (empleados)" con los ultimos cierres, diferencias de cobro y de caja por empleado activo (30/60/120/todos).
+- Datos: coleccion `state.cashClosings` {id,userId,userName,date,expectedCollected,actualCollected,collectDiff,expectedCash,actualCash,cashDiff,orderIds,createdAt}. Estados UI: `ui.cashClosingLimit`, `ui.cashClosingAdminLimit`, `ui.ccChecked`/`ui.ccCheckedDate`.
+
 ### 12.14 Modelo de datos agregado
 - `client.paymentDay`; coleccion `state.replacements` (recambios/reposiciones); `user.providerId` (vinculo del rol proveedor); appSettings: dunning (`dunningEnabled`, `dunningWhatsappMessage`, `dunningMailMessage`, `dunningWhatsappTemplate`) y aviso de cambios (`orderChangeNotifyEnabled`, `orderChangeMessage`, `orderChangeTemplateName`); `purchase.proofFile` (comprobante), tipo de gasto `freight`.
 - `appSettings.stockGroups` (grupos/equivalencias de stock: `{id,name,members:[{productId,factorKg}],wholeProductId,wholeKg,bulkProductId,bulkKg}`); `client.condicionIva` (respaldo de condicion frente al IVA para facturacion); `ui.omittedUnitLines` (lineas de Unidades enviadas/ocultas); appSettings de aviso de suba (`priceIncreaseMessage`, `priceIncreaseTemplateName`, `priceIncreaseTemplateLang`). Estados de UI (no persistidos): `ui.purchaseProductView` / `ui.unitsProductView` (vista cuadricula/lista), `ui.cajaLimit` (30/60/120/todos), `ui.lastActiveDay` (reajuste de fechas por cambio de dia). Cliente: `client.condicionIva`.
@@ -478,7 +483,7 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 
 ## 13. Ultimo Cambio y Version
 
-**Version operativa:** 12.9.39
+**Version operativa:** 12.9.40
 **Fecha:** 2026-06-30
 **Commit GitHub del cambio funcional:** `7fc43f2`
 **Entorno actualizado:** VPS productivo `/opt/pare-carrito` con frontend estatico y API Docker Compose saludable.
