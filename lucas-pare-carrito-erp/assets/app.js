@@ -6793,14 +6793,16 @@
             <div id="purchase-items" class="grid">
               ${renderPurchaseItemRow()}
             </div>
-            <div class="field" id="purchase-total-wrap" style="margin-top:8px;max-width:220px;margin-left:auto">
-              <label>Total</label>
-              <input id="purchase-total" disabled value="$0" />
-            </div>
-            <div class="page-actions purchase-submit-row" style="margin-top:8px;gap:8px">
-              <button class="btn small yellow" type="button" data-add-purchase-item id="purchase-add-item-btn">Agregar producto</button>
-              <button class="btn small primary" type="submit">Guardar egreso</button>
-            </div>
+          </div>
+          <div class="field" id="purchase-total-wrap" style="margin-top:8px;max-width:220px;margin-left:auto">
+            <label>Total</label>
+            <input id="purchase-total" disabled value="$0" />
+          </div>
+          <div class="page-actions purchase-submit-row" style="margin-top:8px;gap:8px">
+            <button class="btn small yellow" type="button" data-add-purchase-item id="purchase-add-item-btn">Agregar producto</button>
+            <button class="btn small primary" type="submit">Guardar egreso</button>
+          </div>
+          <div id="purchase-products-panel">
             <div class="page-actions" style="margin-top:12px;justify-content:space-between">
               <strong>Productos</strong>
               <div class="segmented-icon-control" role="group" aria-label="Vista de productos">
@@ -6811,12 +6813,12 @@
             <div id="required-purchase-grid">${renderRequiredPurchaseGrid()}</div>
           </div>
           ${canPurchaseProviders ? `<div id="provider-favorites-wrap" class="panel" style="box-shadow:none;margin-top:12px"><strong>Favoritos del proveedor</strong><div id="provider-favorites" class="favorite-row"></div></div>` : ""}
-          <div id="vendor-favorites-wrap" class="panel" style="box-shadow:none;margin-top:12px">
+          ${currentUser.role === "employee" ? "" : `<div id="vendor-favorites-wrap" class="panel" style="box-shadow:none;margin-top:12px">
             <div class="page-actions" style="justify-content:space-between">
               <strong>Favoritos del vendedor</strong>
             </div>
             <div id="vendor-favorites" class="favorite-row ${ui.purchaseProductView === "grid" ? "favorite-grid" : ""}"></div>
-          </div>
+          </div>`}
         </form>
     `;
   }
@@ -6994,6 +6996,8 @@
       const isMarketPrice = kind.value === "market_price";
       const isCashMovement = kind.value === "cash_movement";
       itemsWrap.style.display = isOther || isProviderPayment || isCashMovement ? "none" : "grid";
+      const productsPanel = document.getElementById("purchase-products-panel");
+      if (productsPanel) productsPanel.style.display = (isOther || isProviderPayment || isCashMovement) ? "none" : "block";
       const addItemBtnToggle = document.getElementById("purchase-add-item-btn");
       if (addItemBtnToggle) addItemBtnToggle.style.display = (isOther || isProviderPayment || isCashMovement) ? "none" : "inline-flex";
       itemsContainer.classList.toggle("market-price-mode", isMarketPrice);
@@ -7011,7 +7015,7 @@
       if (statusWrap) statusWrap.style.display = isPurchase ? "grid" : "none";
       if (favoritesWrap) favoritesWrap.style.display = isPurchase ? "block" : "none";
       if (vendorWrap) vendorWrap.style.display = isCashMovement ? "none" : "grid";
-      if (vendorFavoritesWrap) vendorFavoritesWrap.style.display = isCashMovement ? "none" : "block";
+      if (vendorFavoritesWrap) vendorFavoritesWrap.style.display = (currentUser.role === "employee" || isCashMovement) ? "none" : "block";
       if (providerPaymentModeWrap) providerPaymentModeWrap.style.display = isProviderPayment ? "grid" : "none";
       if (providerPaymentAmountWrap) providerPaymentAmountWrap.style.display = isProviderPayment ? "grid" : "none";
       if (providerPaymentMethodWrap) providerPaymentMethodWrap.style.display = isProviderPayment ? "grid" : "none";
