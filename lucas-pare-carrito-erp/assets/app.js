@@ -710,6 +710,7 @@
       payments: [],
       preferences: [],
       stockMovements: [],
+      cashClosings: [],
       createdAt: new Date().toISOString()
     };
   }
@@ -747,6 +748,7 @@
         quantityAliases: mergeQuantityAliases(parsed.quantityAliases || []),
         clientQuantityAliases: parsed.clientQuantityAliases || [],
         attendance: parsed.attendance || [],
+        cashClosings: parsed.cashClosings || [],
         employeePayments: parsed.employeePayments || [],
         employeeReimbursements: parsed.employeeReimbursements || [],
         performanceAdjustments: parsed.performanceAdjustments || [],
@@ -1170,7 +1172,7 @@
     "attendance", "employeePayments", "employeeReimbursements", "performanceAdjustments",
     "clients", "products", "providers", "vehicles", "users", "cashBoxes",
     "preferences", "productAliases", "clientProductAliases", "quantityAliases", "clientQuantityAliases",
-    "costRelations", "productRelations", "billingLog", "stockMovements"
+    "costRelations", "productRelations", "billingLog", "stockMovements", "cashClosings"
   ];
   const PATCH_OBJECT_KEYS = ["prices", "appSettings"];
   const HISTORY_STATE_KEYS = ["productListPriceHistory", "productSalesQuantityHistory", "productPurchaseHistory"];
@@ -9768,6 +9770,10 @@
           </table>
         </div>
       </div>
+      ${["manager", "admin"].includes(currentUser.role) ? `<div class="panel" style="margin-top:14px">
+        <div class="page-actions" style="justify-content:space-between"><h2 class="page-title" style="font-size:18px">Cierres de caja (empleados)</h2><label style="display:inline-flex;gap:6px;align-items:center;font-size:13px">Mostrar <select id="cc-admin-limit">${[30, 60, 120, 100000].map((n) => `<option value="${n}" ${(Number(ui.cashClosingAdminLimit) || 30) === n ? "selected" : ""}>${n >= 100000 ? "Todos" : n}</option>`).join("")}</select></label></div>
+        <div style="margin-top:8px">${renderCashClosingHistory(activeEmployees().map((e) => e.id), Number(ui.cashClosingAdminLimit) || 30, true)}</div>
+      </div>` : ""}
       `,
       "caja"
     );
@@ -9781,6 +9787,8 @@
     });
     const cajaLimitSel = document.getElementById("caja-limit");
     if (cajaLimitSel) cajaLimitSel.addEventListener("change", () => { ui.cajaLimit = Number(cajaLimitSel.value) || 30; render(); });
+    const ccAdminLimitElCaja = document.getElementById("cc-admin-limit");
+    if (ccAdminLimitElCaja) ccAdminLimitElCaja.addEventListener("change", () => { ui.cashClosingAdminLimit = Number(ccAdminLimitElCaja.value) || 30; render(); });
     document.querySelectorAll("[data-add-cash-box]").forEach((button) => button.addEventListener("click", () => openCashBoxForm()));
     document.querySelectorAll("[data-edit-cash-box]").forEach((button) => button.addEventListener("click", () => openCashBoxForm(button.dataset.editCashBox)));
     document.querySelectorAll("[data-cash-box-visible-admin]").forEach((checkbox) => checkbox.addEventListener("change", () => {
@@ -10054,6 +10062,7 @@
 
   function renderEmployees() {
     const employees = activeEmployees();
+    const ccAdminLimit = Number(ui.cashClosingAdminLimit) || 30;
     const defaultEmployeeCashBox = getDefaultOutgoingCashBoxId();
     const employeeRows = employees.map((employee) => {
       const summary = getWeeklyAttendanceSummary(employee.id);
@@ -10167,12 +10176,18 @@
           </div>
         </div>
       </div>
+      <div class="panel" style="margin-top:14px">
+        <div class="page-actions" style="justify-content:space-between"><h2 class="page-title" style="font-size:18px">Cierres de caja (empleados)</h2><label style="display:inline-flex;gap:6px;align-items:center;font-size:13px">Mostrar <select id="cc-admin-limit">${[30, 60, 120, 100000].map((n) => `<option value="${n}" ${ccAdminLimit === n ? "selected" : ""}>${n >= 100000 ? "Todos" : n}</option>`).join("")}</select></label></div>
+        <div style="margin-top:8px">${renderCashClosingHistory(employees.map((e) => e.id), ccAdminLimit, true)}</div>
+      </div>
       `,
       "empleados"
     );
   }
 
   function bindEmployees() {
+    const ccAdminLimitEl = document.getElementById("cc-admin-limit");
+    if (ccAdminLimitEl) ccAdminLimitEl.addEventListener("change", () => { ui.cashClosingAdminLimit = Number(ccAdminLimitEl.value) || 30; render(); });
     document.querySelectorAll("[data-add-employee]").forEach((button) => button.addEventListener("click", () => openEmployeeForm()));
     document.querySelectorAll("[data-edit-employee]").forEach((button) => button.addEventListener("click", () => openEmployeeForm(button.dataset.editEmployee)));
     document.querySelectorAll("[data-disable-user]").forEach((button) => button.addEventListener("click", () => {
@@ -10231,6 +10246,21 @@
   function renderAttendance() {
     const summary = getWeeklyAttendanceSummary(currentUser.id);
     const todayEntry = getAttendanceEntry(currentUser.id, todayISO());
+    const ccToday = todayISO();
+    const ccCloseToday = getCashClosingForDate(currentUser.id, ccToday);
+    const ccPaidSet = employeePaidOrderIdsToday(currentUser.id, ccToday);
+    if (ui.ccCheckedDate !== ccToday) { ui.ccCheckedDate = ccToday; ui.ccChecked = ccCloseToday ? (ccCloseToday.orderIds || []).slice() : Array.from(ccPaidSet); }
+    const ccCheckedSet = new Set(ui.ccChecked || []);
+    const ccOrders = ordersByDate(ccToday).filter((o) => !["cancelado", "anulado"].includes(o.status)).sort((a, b) => String(a.clientId).localeCompare(String(b.clientId)));
+    const ccSumChecked = ccOrders.filter((o) => ccCheckedSet.has(o.id)).reduce((s, o) => s + Number(o.totalAmount || 0), 0);
+    const ccDefCollected = ccCloseToday ? Number(ccCloseToday.actualCollected || 0) : ccSumChecked;
+    const ccDefCash = ccCloseToday ? Number(ccCloseToday.actualCash || 0) : expectedEmployeeCash(currentUser.id, ccDefCollected, ccToday);
+    const ccLimit = Number(ui.cashClosingLimit) || 30;
+    const ccOrderRows = ccOrders.map((o) => {
+      const client = getClient(o.clientId);
+      const registered = ccPaidSet.has(o.id);
+      return `<label class="cc-order-row" style="display:flex;gap:8px;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);padding:5px 2px"><span style="display:flex;gap:6px;align-items:center"><input type="checkbox" data-cc-order="${escapeAttr(o.id)}" data-cc-total="${Number(o.totalAmount || 0)}" data-cc-registered="${registered ? 1 : 0}" ${ccCheckedSet.has(o.id) ? "checked" : ""} style="width:auto;min-height:auto" /><span>${escapeHtml(o.clientId)} - ${escapeHtml(client ? client.name : o.clientId)}${registered ? "" : ` <span class="pill amber" style="font-size:10px">sin pago</span>`}</span></span><strong>${formatMoney(o.totalAmount || 0)}</strong></label>`;
+    }).join("");
     const rows = state.attendance.filter((entry) => entry.userId === currentUser.id).slice().sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, 12).map((entry) => `
       <tr>
         <td>${formatDate(entry.date)}</td>
@@ -10287,6 +10317,23 @@
         </div>
         <div class="page-actions" style="margin-top:12px"><button class="btn primary" type="submit">Registrar cobro</button></div>
       </form>
+      <div class="panel" style="margin-top:14px">
+        <h2 class="page-title" style="font-size:18px">Cierre de caja</h2>
+        <p class="muted">Marca los pedidos que cobraste hoy en efectivo. Los que ya tienen pago registrado vienen tildados.</p>
+        <div id="cc-orders" style="margin-top:8px">${ccOrderRows || `<div class="empty compact">No hay pedidos para hoy.</div>`}</div>
+        <div class="form-grid" style="margin-top:12px">
+          <div class="field span-2"><label>Hoy cobré en efectivo</label><input id="cc-collected" inputmode="decimal" value="${formatAmountInput(ccDefCollected)}" /></div>
+          <div class="field span-2"><label>Diferencia de cobro</label><input id="cc-collect-diff" disabled /></div>
+          <div class="field span-2"><label>Mi caja al cierre del día es</label><input id="cc-cash" inputmode="decimal" value="${formatAmountInput(ccDefCash)}" /></div>
+          <div class="field span-2"><label>Diferencia de caja</label><input id="cc-cash-diff" disabled /></div>
+        </div>
+        <p class="muted" id="cc-expected-lines" style="font-size:12px;margin-top:6px"></p>
+        <div class="page-actions" style="margin-top:12px"><button class="btn primary" type="button" id="cc-save">Guardar cierre de caja</button></div>
+      </div>
+      <div class="panel" style="margin-top:14px">
+        <div class="page-actions" style="justify-content:space-between"><h2 class="page-title" style="font-size:18px">Últimos cierres de caja</h2><label style="display:inline-flex;gap:6px;align-items:center;font-size:13px">Mostrar <select id="cc-limit">${[30, 60, 120, 100000].map((n) => `<option value="${n}" ${ccLimit === n ? "selected" : ""}>${n >= 100000 ? "Todos" : n}</option>`).join("")}</select></label></div>
+        <div style="margin-top:8px">${renderCashClosingHistory([currentUser.id], ccLimit, false)}</div>
+      </div>
       <div class="panel" style="margin-top:14px">
         <div class="table-wrap">
           <table>
@@ -10346,6 +10393,76 @@
       saveState();
       render();
     });
+    bindCashClosing();
+  }
+
+  function bindCashClosing() {
+    const ordersWrap = document.getElementById("cc-orders");
+    const collectedInp = document.getElementById("cc-collected");
+    const cashInp = document.getElementById("cc-cash");
+    const collectDiffInp = document.getElementById("cc-collect-diff");
+    const cashDiffInp = document.getElementById("cc-cash-diff");
+    const expLines = document.getElementById("cc-expected-lines");
+    if (!ordersWrap || !collectedInp || !cashInp) return;
+    let collectedTouched = false;
+    let cashTouched = false;
+    const getChecked = () => Array.from(ordersWrap.querySelectorAll("[data-cc-order]")).filter((c) => c.checked);
+    const syncChecked = () => { ui.ccChecked = getChecked().map((c) => c.dataset.ccOrder); ui.ccCheckedDate = todayISO(); };
+    const recompute = (updateDefaults) => {
+      const expectedCollected = getChecked().reduce((sm, c) => sm + Number(c.dataset.ccTotal || 0), 0);
+      if (updateDefaults && !collectedTouched) collectedInp.value = formatAmountInput(expectedCollected);
+      const collected = parseAmount(collectedInp.value);
+      collectDiffInp.value = formatMoney(collected - expectedCollected);
+      const expectedCash = expectedEmployeeCash(currentUser.id, collected, todayISO());
+      if (updateDefaults && !cashTouched) cashInp.value = formatAmountInput(expectedCash);
+      const cash = parseAmount(cashInp.value);
+      cashDiffInp.value = formatMoney(cash - expectedCash);
+      if (expLines) expLines.innerHTML = "Deberías haber cobrado: <strong>" + formatMoney(expectedCollected) + "</strong> &middot; Caja esperada: <strong>" + formatMoney(expectedCash) + "</strong>";
+    };
+    ordersWrap.addEventListener("change", (e) => {
+      const cb = e.target.closest("[data-cc-order]");
+      if (!cb) return;
+      if (cb.checked && cb.dataset.ccRegistered !== "1") {
+        cb.checked = false; // se marcara al registrar el cobro
+        openCashClosingPaymentModal(cb.dataset.ccOrder);
+        return;
+      }
+      syncChecked();
+      recompute(true);
+    });
+    collectedInp.addEventListener("input", () => { collectedTouched = true; recompute(false); });
+    cashInp.addEventListener("input", () => { cashTouched = true; recompute(false); });
+    recompute(false);
+    const saveBtn = document.getElementById("cc-save");
+    if (saveBtn) saveBtn.addEventListener("click", () => {
+      const orderIds = getChecked().map((c) => c.dataset.ccOrder);
+      recordCashClosing({ userId: currentUser.id, orderIds, actualCollected: parseAmount(collectedInp.value), actualCash: parseAmount(cashInp.value) });
+      ui.ccChecked = null; ui.ccCheckedDate = null;
+      alert("Cierre de caja guardado. Tu caja quedó ajustada al monto ingresado.");
+      render();
+    });
+    const ccLimit = document.getElementById("cc-limit");
+    if (ccLimit) ccLimit.addEventListener("change", () => { ui.cashClosingLimit = Number(ccLimit.value) || 30; render(); });
+  }
+
+  function openCashClosingPaymentModal(orderId) {
+    const order = getOrder(orderId);
+    if (!order) return;
+    const client = getClient(order.clientId);
+    const pending = Math.max(0, Number(order.totalAmount || 0) - Number(order.paymentReceived || 0));
+    showModal("Registrar cobro en efectivo",
+      `<p>El pedido <strong>${escapeHtml(order.id)}</strong> (${escapeHtml(client ? client.name : order.clientId)}) no tiene un pago registrado hoy. Cargalo como cobrado en efectivo:</p><div class="form-grid"><div class="field span-2"><label>Monto cobrado</label><input id="cc-pay-amount" inputmode="decimal" value="${formatAmountInput(pending > 0 ? pending : (order.totalAmount || 0))}" /></div></div>`,
+      () => {
+        const save = document.getElementById("modal-save");
+        if (save) save.addEventListener("click", () => {
+          const amount = parseAmount(document.getElementById("cc-pay-amount").value);
+          if (amount <= 0) { alert("Ingrese un monto mayor a cero."); return; }
+          recordPayment({ clientId: order.clientId, orderIds: [order.id], amount, method: "efectivo", receivedByUserId: currentUser.id, notes: "Cierre de caja" });
+          ui.ccChecked = Array.from(new Set([...(ui.ccChecked || []), order.id])); ui.ccCheckedDate = todayISO();
+          saveState();
+          closeModal();
+        });
+      }, { saveLabel: "Registrar cobro" });
   }
 
   function renderCustomerReports() {
@@ -13974,6 +14091,84 @@
 
   function getEmployeeCajaTotal(userId) {
     return getCajaBalance(getUserCashBoxId(userId));
+  }
+
+  // ===================== CIERRE DE CAJA (empleados) =====================
+  function getCashClosings() {
+    if (!Array.isArray(state.cashClosings)) state.cashClosings = [];
+    return state.cashClosings;
+  }
+  function cashBoxBalanceBefore(cashBoxId, date) {
+    return (state.caja || []).filter((e) => resolveCajaEntryCashBoxId(e) === cashBoxId && String(e.date) < date && e.status !== "anulado")
+      .reduce((s, e) => s + Number(e.amountIngreso || 0) - Number(e.amountEgreso || 0), 0);
+  }
+  function lastCashClosingBefore(userId, date) {
+    const list = getCashClosings().filter((c) => c.userId === userId && c.date < date).sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    return list.length ? list[list.length - 1] : null;
+  }
+  function getCashClosingForDate(userId, date) {
+    return getCashClosings().find((c) => c.userId === userId && c.date === (date || todayISO())) || null;
+  }
+  function employeeMatchesPayment(userId, p) {
+    const u = getUser(userId);
+    return p.receivedByUserId === userId || (!p.receivedByUserId && u && p.recordedBy === u.name);
+  }
+  function employeeCashExpensesToday(userId, date) {
+    const d = date || todayISO();
+    const box = getUserCashBoxId(userId);
+    return (state.caja || []).filter((e) => resolveCajaEntryCashBoxId(e) === box && String(e.date) === d && e.status !== "anulado")
+      .reduce((s, e) => s + Number(e.amountEgreso || 0), 0);
+  }
+  function expectedEmployeeCash(userId, actualCollected, date) {
+    const d = date || todayISO();
+    const box = getUserCashBoxId(userId);
+    const prev = lastCashClosingBefore(userId, d);
+    const base = prev ? Number(prev.actualCash || 0) : cashBoxBalanceBefore(box, d);
+    return base + Number(actualCollected || 0) - employeeCashExpensesToday(userId, d);
+  }
+  function employeePaidOrderIdsToday(userId, date) {
+    const d = date || todayISO();
+    const set = new Set();
+    (state.payments || []).filter((p) => p.method === "efectivo" && p.date === d && p.status !== "anulado" && employeeMatchesPayment(userId, p))
+      .forEach((p) => (Array.isArray(p.orderIds) ? p.orderIds : [p.orderId]).filter(Boolean).forEach((id) => set.add(id)));
+    return set;
+  }
+  function recordCashClosing(opts) {
+    const userId = opts.userId;
+    const d = todayISO();
+    const user = getUser(userId);
+    const orderIds = Array.isArray(opts.orderIds) ? opts.orderIds : [];
+    const expectedCollected = orderIds.reduce((s, id) => { const o = getOrder(id); return s + (o ? Number(o.totalAmount || 0) : 0); }, 0);
+    const actualCollected = Number(opts.actualCollected || 0);
+    const collectDiff = Math.round((actualCollected - expectedCollected) * 100) / 100;
+    const expectedCash = Math.round(expectedEmployeeCash(userId, actualCollected, d) * 100) / 100;
+    const actualCash = Number(opts.actualCash || 0);
+    const cashDiff = Math.round((actualCash - expectedCash) * 100) / 100;
+    const box = getUserCashBoxId(userId);
+    const adj = Math.round((actualCash - getCajaBalance(box)) * 100) / 100;
+    if (Math.abs(adj) > 0.009) {
+      addCajaEntry({ date: d, type: "cash_adjustment", concept: "Ajuste por cierre de caja", cashBoxId: box, amountIngreso: adj > 0 ? adj : 0, amountEgreso: adj < 0 ? -adj : 0, notes: "Cierre de caja - " + (user ? user.name : "") });
+    }
+    const existing = getCashClosingForDate(userId, d);
+    const rec = { id: existing ? existing.id : nextDatedId("CIE", getCashClosings()), userId, userName: user ? user.name : "", date: d, expectedCollected, actualCollected, collectDiff, expectedCash, actualCash, cashDiff, orderIds, createdAt: new Date().toISOString() };
+    if (existing) Object.assign(existing, rec); else getCashClosings().push(rec);
+    saveState();
+    return rec;
+  }
+  function renderCashClosingHistory(userIds, limit, showUser) {
+    const ids = new Set(userIds);
+    const list = getCashClosings().filter((c) => ids.has(c.userId)).sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.createdAt || "").localeCompare(String(a.createdAt || ""))).slice(0, limit);
+    const rows = list.map((c) => `<tr>
+        <td>${formatDate(c.date)}</td>
+        ${showUser ? `<td>${escapeHtml(c.userName || "")}</td>` : ""}
+        <td class="num">${formatMoney(c.expectedCollected)}</td>
+        <td class="num">${formatMoney(c.actualCollected)}</td>
+        <td class="num" style="${Math.abs(c.collectDiff) > 0.009 ? "color:#c0392b;font-weight:700" : ""}">${formatMoney(c.collectDiff)}</td>
+        <td class="num">${formatMoney(c.expectedCash)}</td>
+        <td class="num">${formatMoney(c.actualCash)}</td>
+        <td class="num" style="${Math.abs(c.cashDiff) > 0.009 ? "color:#c0392b;font-weight:700" : ""}">${formatMoney(c.cashDiff)}</td>
+      </tr>`).join("");
+    return `<div class="table-wrap"><table><thead><tr><th>Fecha</th>${showUser ? "<th>Empleado</th>" : ""}<th>Cobro esperado</th><th>Cobro real</th><th>Dif. cobro</th><th>Caja esperada</th><th>Caja real</th><th>Dif. caja</th></tr></thead><tbody>${rows || emptyRow(showUser ? 8 : 7, "Sin cierres registrados.")}</tbody></table></div>`;
   }
 
   function getEmployeeCashTotals() {
