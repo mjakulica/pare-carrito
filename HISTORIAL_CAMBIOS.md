@@ -1,5 +1,12 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.41 - Compras: fix boton Guardar en Otro gasto y favoritos del vendedor (2026-07-04)
+
+- Compras/Gastos: al elegir Tipo "Otro gasto" (y otros tipos sin grilla) el boton "Guardar egreso" volvia a desaparecer porque quedaba dentro del bloque de items que se oculta. Se movio el Total y la fila de botones fuera de ese bloque, asi el boton Guardar egreso queda siempre visible; el recuadro Productos se oculta en esos tipos.
+- Rol empleado: se oculta el recuadro "Favoritos del vendedor".
+
+---
+
 ## v12.9.40 - Cierre de caja de empleados (2026-07-04)
 
 ### Empleado (Horarios)
