@@ -14436,6 +14436,12 @@
       .replace(/\bkilos?\s+de\b/gi, "kg de")
       .replace(/\bkgs?\s+de\b/gi, "kg de")
       .replace(/\bbolsas?\s+de\b/gi, "bolsa de")
+      // "cebolla blanca" -> "cebolla" (blanca es la variedad por defecto; no debe quedar como nota)
+      .replace(/\bcebollas?\s+blanc[ao]s?\b/gi, "cebolla")
+      // "cebolla verde / cebolla de verdeo / cebolla verdeo" -> Verdeo
+      .replace(/\bcebollas?\s+(?:de\s+)?verde?o?\b/gi, "verdeo")
+      // "1 docena y media", "2 atados y medio", etc. -> "1,5 docena" / "2,5 atados"
+      .replace(/(\d+(?:[.,]\d+)?)\s+(docenas?|atados?|bolsas?|cajones?|cajon|jaulas?|plantas?|unidad(?:es)?|maples?|kg|kgs|kilos?)\s+y\s+medi[oa]\b/gi, (mm, n, u) => (parseFloat(String(n).replace(",", ".")) + 0.5).toString().replace(".", ",") + " " + u)
       .replace(/(\d+(?:[.,]\d+)?)\s*(kg|kgs|k|kilos?|kilo|grs?|gramos)\s+y\s+medi[oa]\b/gi, (mm, n, u) => (parseFloat(String(n).replace(",", ".")) + 0.5).toString().replace(".", ",") + " " + u)
       .replace(/(\d+(?:[.,]\d+)?)\s+y\s+medi[oa]\b/gi, (mm, n) => (parseFloat(String(n).replace(",", ".")) + 0.5).toString().replace(".", ","))
       .replace(/\bun poquito\b|\bpoquito\b|\bun poco\b/gi, " 0,2 ")
@@ -17478,49 +17484,49 @@
       @page{size:${pageSize};margin:${pageMargin}}
       *{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}
       .no-print{display:none !important}
-      body{font-family:Arial,sans-serif;margin:0;color:#111;background:#fff;font-size:11px}
+      body{font-family:Arial,sans-serif;margin:0;color:#111;background:#fff;font-size:14px}
       table{width:100%;border-collapse:collapse}
       th,td{padding:4px 6px;text-align:left}
       .num{text-align:right}
       .history-print-page{margin:0;padding:0}
       .history-print-page .print-sheet{break-inside:auto;page-break-inside:auto;margin:0 0 4mm}
       .history-print-sheet{width:100%}
-      .history-print-title{display:flex;justify-content:space-between;gap:8px;margin:0 0 3px;font-size:9px}
-      .history-print-page h1{margin:0 0 4px;font-size:13px}
-      .history-print-page p{margin:0 0 6px;font-size:9px}
-      .history-print-page .muted{color:#555;font-size:9px}
+      .history-print-title{display:flex;justify-content:space-between;gap:8px;margin:0 0 3px;font-size:12px}
+      .history-print-page h1{margin:0 0 4px;font-size:16px}
+      .history-print-page p{margin:0 0 6px;font-size:12px}
+      .history-print-page .muted{color:#555;font-size:12px}
       .history-print-page .table-wrap{overflow:visible}
-      .history-print-page table{font-size:7px;min-width:0;table-layout:auto}
+      .history-print-page table{font-size:10px;min-width:0;table-layout:auto}
       .history-print-page th,.history-print-page td{border:1px solid #ddd;padding:1px 2px;white-space:nowrap;line-height:1.1}
       .history-print-page th{background:#f3f4f6}
       .history-print-page .history-category-row td{background:#e5e7eb;font-weight:700}
       .history-chart-print-page{margin:0;padding:0}
-      .history-chart-print-page h1{font-size:16px;margin:0 0 4px}
+      .history-chart-print-page h1{font-size:19px;margin:0 0 4px}
       .history-chart-print-page p{display:none}
       .history-chart-print-page .history-product-modal{display:grid;grid-template-columns:1fr 1fr;gap:8px}
       .history-chart-print-page .history-line-card{border:1px solid #ddd;border-radius:6px;padding:8px;break-inside:avoid;page-break-inside:avoid}
-      .history-chart-print-page .history-line-head{display:flex;justify-content:space-between;gap:8px;margin:0 0 4px;font-size:12px}
+      .history-chart-print-page .history-line-head{display:flex;justify-content:space-between;gap:8px;margin:0 0 4px;font-size:15px}
       .history-chart-print-page .history-line-head .btn{display:none}
       .history-chart-print-page .line-chart-svg{width:100%;height:auto}
       .history-chart-print-page .chart-grid-line{stroke:#e5e7eb;stroke-width:1}
-      .history-chart-print-page .chart-grid-label,.history-chart-print-page .chart-point text{fill:#475467;font-size:10px}
+      .history-chart-print-page .chart-grid-label,.history-chart-print-page .chart-point text{fill:#475467;font-size:13px}
       .history-chart-print-page .line-chart-label-x{display:none}
-      .history-chart-print-page .line-chart-meta{display:flex;justify-content:space-between;font-size:10px;color:#475467}
+      .history-chart-print-page .line-chart-meta{display:flex;justify-content:space-between;font-size:13px;color:#475467}
       .provider-print-page{margin:0;padding:0}
       .provider-print-sheet .print-title{margin-bottom:6px}
-      .provider-print-sheet .print-table{font-size:11px}
+      .provider-print-sheet .print-table{font-size:14px}
       .provider-print-sheet .print-table th,.provider-print-sheet .print-table td{border:1px solid #ddd;padding:3px 4px}
       .assigned-group{break-inside:avoid;page-break-inside:avoid;border:0;padding:2px 0;margin:0 0 4px}
       .assigned-group span{color:#475467}
       .divide-client-spacer{height:8px}
       .print-sheet{break-inside:avoid;page-break-inside:avoid;margin:0 0 12mm}
       .print-sheet:last-child{margin-bottom:0}
-      .print-compact{font-size:11px}
-      .print-compact .print-table{font-size:11px}
-      .print-compact .print-title h1{font-size:16px}
-      .borderless-table th,.borderless-table td{border:0 !important;border-bottom:1px solid #ececec !important;padding:2px 5px;font-size:11px}
-      .borderless-table th{background:transparent;border-bottom:1px solid #999 !important;text-transform:uppercase;font-size:9px;color:#333}
-      .divide-print-list,.vehicle-print-list{list-style:none;padding:0;margin:0;font-size:10px}
+      .print-compact{font-size:14px}
+      .print-compact .print-table{font-size:14px}
+      .print-compact .print-title h1{font-size:19px}
+      .borderless-table th,.borderless-table td{border:0 !important;border-bottom:1px solid #ececec !important;padding:2px 5px;font-size:14px}
+      .borderless-table th{background:transparent;border-bottom:1px solid #999 !important;text-transform:uppercase;font-size:12px;color:#333}
+      .divide-print-list,.vehicle-print-list{list-style:none;padding:0;margin:0;font-size:13px}
       .divide-print-cols{column-count:3;column-gap:6px}
       .divide-print-cols>li{-webkit-column-break-inside:avoid;page-break-inside:avoid;break-inside:avoid}
       .divide-print-list li,.vehicle-print-list li{padding:2px 0;border-bottom:1px solid #ececec}
@@ -17532,42 +17538,42 @@
       .vehicle-print-num{font-weight:700}
       .vehicle-print-total{display:flex;justify-content:space-between;border-top:1px solid #ddd;margin-top:2px;padding-top:1px}
       .vehicle-print-line span{color:#475467}
-      .vehicle-print-sub{font-size:9px;color:#475467;margin:1px 0 2px}
+      .vehicle-print-sub{font-size:12px;color:#475467;margin:1px 0 2px}
       .divide-two-col{display:grid;grid-template-columns:1fr 1fr;gap:2px 18px;align-items:start}
       .divide-two-col .assigned-group{break-inside:avoid;page-break-inside:avoid}
-      .product-sum-grid{column-count:3;column-gap:10px;font-size:10px}
+      .product-sum-grid{column-count:3;column-gap:10px;font-size:13px}
       .product-sum-line{display:flex;justify-content:flex-start;gap:6px;break-inside:avoid;padding:1px 0}
       .product-sum-line strong{white-space:nowrap}
       .print-title{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111;padding-bottom:6px;margin-bottom:8px}
-      .print-title h1{margin:0;font-size:18px}
+      .print-title h1{margin:0;font-size:21px}
       .remito-print-page{display:block}
       .print-sheet{break-inside:avoid;page-break-inside:avoid}
       .remito-sheet{border-top:5px solid #1e2a8a;padding:8px 10px 10px;margin:0 0 7mm}
       .remito-header{display:grid;grid-template-columns:1fr 1fr 1fr;align-items:start;gap:10px}
-      .remito-number{font-size:12px;font-weight:700;margin:6px 0 10px}
-      .remito-left{font-size:10px;line-height:1.45}
+      .remito-number{font-size:15px;font-weight:700;margin:6px 0 10px}
+      .remito-left{font-size:13px;line-height:1.45}
       .remito-title{text-align:center;color:#17228a}
-      .remito-title h1{margin:14px 0 2px;font-size:26px;line-height:1}
+      .remito-title h1{margin:14px 0 2px;font-size:29px;line-height:1}
       .remito-title small{color:#f02b8a;font-weight:700}
-      .remito-brand{text-align:right;font-size:10px;line-height:1.45}
+      .remito-brand{text-align:right;font-size:13px;line-height:1.45}
       .remito-logo{width:78px;height:78px;display:block;margin:0 6px 6px auto}
-      .remito-client{font-size:17px;font-weight:800;margin:12px 0 8px}
-      .remito-table{font-size:10.5px;line-height:1;border-collapse:collapse}
+      .remito-client{font-size:20px;font-weight:800;margin:12px 0 8px}
+      .remito-table{font-size:13.5px;line-height:1;border-collapse:collapse}
       .remito-table thead th{border-top:1px solid #b8b8b8;border-bottom:1px solid #b8b8b8;color:#17228a;font-weight:800;padding:1px 3px;line-height:1.05}
       .remito-table tbody tr:nth-child(odd){background:#ededed}
       .remito-table tbody tr.blank-row{background:transparent}
       .remito-table td{height:auto;line-height:1.05;padding:0.4px 3px;border:0}
       .remito-table .blank-row td{color:transparent}
-      .remito-footer{display:grid;grid-template-columns:1fr 230px;gap:10px;align-items:end;border-top:1px solid #c7c7c7;margin-top:6px;padding-top:6px;font-size:10px}
+      .remito-footer{display:grid;grid-template-columns:1fr 230px;gap:10px;align-items:end;border-top:1px solid #c7c7c7;margin-top:6px;padding-top:6px;font-size:13px}
       .remito-footer .received{color:#3043cf;margin-top:18px}
       .remito-summary{display:grid;gap:3px}
       .remito-summary>div{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:baseline}
       .remito-summary strong{text-align:right}
-      .remito-total{font-size:18px;color:#e6007e;font-weight:900}
+      .remito-total{font-size:21px;color:#e6007e;font-weight:900}
       .remito-total-style-line .remito-total-line{border-bottom:2px solid #e6007e;min-width:92px;padding-bottom:1px}
       .remito-total-style-box .remito-total-line{border:2px solid #e6007e;border-radius:3px;padding:2px 8px;min-width:104px}
       .remito-total-style-none .remito-total-line{border:0;padding:0}
-      .print-now-btn{position:fixed;left:50%;transform:translateX(-50%);bottom:16px;z-index:99999;background:#17228a;color:#fff;border:0;border-radius:8px;padding:12px 22px;font-size:15px;font-weight:700;box-shadow:0 2px 10px rgba(0,0,0,.35);cursor:pointer}
+      .print-now-btn{position:fixed;left:50%;transform:translateX(-50%);bottom:16px;z-index:99999;background:#17228a;color:#fff;border:0;border-radius:8px;padding:12px 22px;font-size:18px;font-weight:700;box-shadow:0 2px 10px rgba(0,0,0,.35);cursor:pointer}
       @media print{
         .print-now-btn{display:none !important}
         *{-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;color-adjust:exact !important}
