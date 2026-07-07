@@ -1,5 +1,11 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.46 - Compras: hora de cada movimiento (2026-07-04)
+
+- Las compras/gastos ahora guardan la hora de creacion (`createdAt`). En la tabla de movimientos de Compras/Gastos se muestra la hora (hh:mm) junto al nombre del usuario que registro el egreso, igual que en Pedidos. Aplica a los egresos nuevos (los cargados antes no tienen la marca de hora).
+
+---
+
 ## v12.9.45 - Impresion: forzar tema claro (2026-07-04)
 
 - Los documentos imprimibles ahora fuerzan `color-scheme: light only` (meta + CSS con fondo blanco). Evita que el "modo oscuro forzado" del navegador (Chrome/Android) oscurezca el remito y muestre barras negras tapando los nombres de los productos. Antes salia bien en un dispositivo sin ese modo y mal en uno con force-dark activado.
