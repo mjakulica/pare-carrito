@@ -58,6 +58,10 @@ function getMailTransport() {
 }
 
 async function sendMail(to, subject, html, attachments) {
+  if (process.env.MAILING_DISABLED) {
+    console.log("[mail deshabilitado por MAILING_DISABLED] Para:", to, "| Asunto:", subject);
+    return false;
+  }
   const transport = getMailTransport();
   if (!transport) {
     console.log("[mail desactivado] Para:", to, "| Asunto:", subject, attachments && attachments.length ? "| Adjuntos: " + attachments.length : "");
@@ -136,6 +140,7 @@ async function fetchPdfAttachment(url, filename) {
 }
 
 async function emailBillingResults(results) {
+  try { const r = await pool.query("SELECT data->'appSettings'->>'mailingEnabled' AS m FROM app_state WHERE id = 'main'"); if (r.rows[0] && r.rows[0].m === "false") { console.log("[mail] facturacion desactivada por configuracion"); return; } } catch (e) { /* ignore */ }
   const entries = (results || []).filter((e) => e && e.status === "ok" && String(e.freq || "") !== "diaria" && e.email);
   if (!entries.length) return;
   const stateRow = await pool.query("SELECT data FROM app_state WHERE id = 'main'");
@@ -2048,7 +2053,7 @@ async function runDunning({ pool, now = new Date() }) {
         } catch (e) { console.error("dunning whatsapp:", e.message); }
       }
       // Correo: UNA sola vez al llegar a 3 dias de mora.
-      if (st.daysWithoutPayment >= 3 && !st.emailSent) {
+      if (st.daysWithoutPayment >= 3 && !st.emailSent && settings.mailingEnabled !== false) {
         const to = [c.billingEmail || c.email, managerEmail].filter(Boolean).join(",");
         if (to) {
           const subj = mailSubject.replace(/{cliente}/g, c.name || "");
