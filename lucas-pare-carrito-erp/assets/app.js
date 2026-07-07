@@ -315,6 +315,7 @@
     { id: "clientes", label: "Clientes", icon: "CL", roles: ["manager", "admin"] },
     { id: "productos", label: "Productos", icon: "PR", roles: ["manager", "admin"] },
     { id: "precios", label: "Precios", icon: "$", roles: ["manager", "admin"] },
+    { id: "ajustes-precios", label: "Ajustes de precios", icon: "$", roles: ["manager", "admin"] },
     { id: "historiales", label: "Historiales", icon: "HI", roles: ["manager", "admin"] },
     { id: "rendimiento", label: "Rendimiento", icon: "RE", roles: ["manager"] },
     { id: "compras", label: "Compras/Gastos", icon: "CO", roles: ["manager", "admin", "employee", "proveedor"] },
@@ -346,6 +347,7 @@
     "nuevo-pedido",
     "productos",
     "precios",
+    "ajustes-precios",
     "historiales",
     "rendimiento",
     "compras",
@@ -452,6 +454,7 @@
     flushClientWriteQueue(false);
     startVersionWatch();
     startIdleLogout();
+    try { runScheduledRepricing(); } catch (e) { console.warn("runScheduledRepricing:", e.message); }
   });
   window.addEventListener("online", () => {
     const banner = document.getElementById("offline-banner");
@@ -711,6 +714,9 @@
       preferences: [],
       stockMovements: [],
       cashClosings: [],
+      marginSections: defaultMarginSections(),
+      priceAutoLog: [],
+      priceAutoSchedule: [],
       createdAt: new Date().toISOString()
     };
   }
@@ -749,6 +755,9 @@
         clientQuantityAliases: parsed.clientQuantityAliases || [],
         attendance: parsed.attendance || [],
         cashClosings: parsed.cashClosings || [],
+        marginSections: (Array.isArray(parsed.marginSections) && parsed.marginSections.length) ? parsed.marginSections : seeded.marginSections,
+        priceAutoLog: parsed.priceAutoLog || [],
+        priceAutoSchedule: parsed.priceAutoSchedule || [],
         employeePayments: parsed.employeePayments || [],
         employeeReimbursements: parsed.employeeReimbursements || [],
         performanceAdjustments: parsed.performanceAdjustments || [],
@@ -939,7 +948,8 @@
       sidebarOrder: [],
       productCategories: CATEGORIES.slice(),
       unitTypes: DEFAULT_UNIT_TYPES.slice(),
-      operationalResetVersion: OPERATIONAL_RESET_VERSION
+      operationalResetVersion: OPERATIONAL_RESET_VERSION,
+      priceAuto: defaultPriceAuto()
     };
   }
 
@@ -1172,7 +1182,7 @@
     "attendance", "employeePayments", "employeeReimbursements", "performanceAdjustments",
     "clients", "products", "providers", "vehicles", "users", "cashBoxes",
     "preferences", "productAliases", "clientProductAliases", "quantityAliases", "clientQuantityAliases",
-    "costRelations", "productRelations", "billingLog", "stockMovements", "cashClosings"
+    "costRelations", "productRelations", "billingLog", "stockMovements", "cashClosings", "marginSections", "priceAutoLog", "priceAutoSchedule"
   ];
   const PATCH_OBJECT_KEYS = ["prices", "appSettings"];
   const HISTORY_STATE_KEYS = ["productListPriceHistory", "productSalesQuantityHistory", "productPurchaseHistory"];
@@ -1789,6 +1799,9 @@
     merged.costRelations = unionByKey(remote.costRelations, local.costRelations, (item) => JSON.stringify([item.sourceProductId, item.targetProductId, item.productId]));
     merged.productRelations = unionByKey(remote.productRelations, local.productRelations, (item) => item.retailProductId + "|" + item.wholesaleProductId);
     merged.billingLog = unionByKey(remote.billingLog, local.billingLog, (item) => String(item.id));
+    merged.marginSections = (Array.isArray(local.marginSections) && local.marginSections.length) ? local.marginSections : (remote.marginSections || []);
+    merged.priceAutoLog = unionByKey(remote.priceAutoLog, local.priceAutoLog, byId);
+    merged.priceAutoSchedule = unionByKey(remote.priceAutoSchedule, local.priceAutoSchedule, (item) => String(item.productId));
     return merged;
   }
 
@@ -2437,6 +2450,7 @@
       "pedidos": '<path d="M8 6h13M8 12h13M8 18h13"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/>',
       "clientes": '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.5 3-6 6.5-6s6.5 2.5 6.5 6"/><circle cx="17.5" cy="9" r="2.5"/><path d="M16.5 14.5c2.8.3 5 2.4 5 5.5"/>',
       "productos": '<path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/>',
+      "ajustes-precios": '<circle cx="12" cy="12" r="9"/><path d="M8 12h8M12 8v8"/>',
       "precios": '<circle cx="12" cy="12" r="9"/><path d="M12 6.5v11M14.8 8.8c0-1-1.2-1.8-2.8-1.8s-2.8.7-2.8 1.8 1 1.8 2.8 1.8 2.8.7 2.8 1.8-1.2 1.8-2.8 1.8-2.8-.8-2.8-1.8"/>',
       "historiales": '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2.5"/>',
       "rendimiento": '<path d="M4 20V10M10 20V4M16 20v-7M21 20H3"/>',
@@ -2526,6 +2540,7 @@
       clientes: renderClients,
       productos: renderProducts,
       precios: renderPrices,
+      "ajustes-precios": renderPriceAutoPage,
       historiales: renderHistories,
       rendimiento: renderPerformance,
       compras: renderPurchases,
@@ -5632,9 +5647,19 @@
     }, { className: "wide", keepOpen: true });
   }
 
+  function lastPriceAutoLogFor(productId) {
+    const list = (state.priceAutoLog || []).filter((e) => e.productId === productId);
+    return list.length ? list[list.length - 1] : null;
+  }
+
   function renderPrices() {
     const rows = activeProducts().sort((a, b) => a.sortOrder - b.sortOrder).map((product) => {
       const rec = state.prices[product.id] || { cost: product.baseCost || 0, price: product.salePrice || 0, marketPrice: 0, marginPct: calcMargin(product.baseCost, product.salePrice) };
+      const secId = product.marginSectionId || "SEC-5";
+      const lastLog = lastPriceAutoLogFor(product.id);
+      let autoPill = "";
+      if (product.priceAutoExempt) autoPill = `<span class="pill gray" title="No se ajusta automaticamente">exento</span>`;
+      else if (lastLog) { const up = Number(lastLog.marginNew) > Number(lastLog.marginPrev); const dn = Number(lastLog.marginNew) < Number(lastLog.marginPrev); autoPill = `<span class="pill ${up ? "green" : dn ? "amber" : "gray"}" title="${escapeAttr(lastLog.event + " " + formatDate(lastLog.date) + ": margen " + roundOne(lastLog.marginPrev) + "→" + roundOne(lastLog.marginNew) + (lastLog.applied ? "" : " (simulado)"))}">${roundOne(lastLog.marginPrev)}→${roundOne(lastLog.marginNew)}%</span>`; }
       return `
         <tr data-price-row="${product.id}">
           <td>${escapeHtml(product.name)}<br><span class="muted">${escapeHtml(product.category)} - ${escapeHtml(product.unitType)}</span></td>
@@ -5642,6 +5667,8 @@
           <td><input data-market-price value="${formatAmountInput(rec.marketPrice || 0)}" inputmode="decimal" /></td>
           <td><input data-margin-pct value="${formatAmountInput(roundOne(rec.marginPct || calcMargin(rec.cost, rec.price)))}" inputmode="decimal" /></td>
           <td><input data-sale-price value="${formatAmountInput(rec.price)}" inputmode="decimal" /></td>
+          <td><select data-margin-section="${product.id}">${getMarginSections().map((sec) => `<option value="${sec.id}" ${sec.id === secId ? "selected" : ""}>${escapeHtml(sec.name)}</option>`).join("")}</select></td>
+          <td><label style="display:inline-flex;gap:4px;align-items:center;white-space:nowrap"><input type="checkbox" data-price-exempt="${product.id}" ${product.priceAutoExempt ? "checked" : ""} style="width:auto;min-height:auto" />No ajustar</label> ${autoPill}</td>
         </tr>
       `;
     }).join("");
@@ -5664,7 +5691,7 @@
       <div class="panel">
         <div class="table-wrap">
           <table class="prices-table">
-            <thead><tr><th>Producto</th><th>Costo</th><th>Precio mercado</th><th>Margen %</th><th>Precio lista</th></tr></thead>
+            <thead><tr><th>Producto</th><th>Costo</th><th>Precio mercado</th><th>Margen %</th><th>Precio lista</th><th>Sección</th><th>Auto</th></tr></thead>
             <tbody>${rows}</tbody>
           </table>
         </div>
@@ -5715,6 +5742,8 @@
     });
     const importPricesBtn = document.getElementById("import-prices-paste");
     if (importPricesBtn) importPricesBtn.addEventListener("click", openImportPricesModal);
+    document.querySelectorAll("[data-margin-section]").forEach((sel) => sel.addEventListener("change", () => { const p = getProduct(sel.dataset.marginSection); if (p) { p.marginSectionId = sel.value; saveState(); } }));
+    document.querySelectorAll("[data-price-exempt]").forEach((chk) => chk.addEventListener("change", () => { const p = getProduct(chk.dataset.priceExempt); if (p) { p.priceAutoExempt = chk.checked; saveState(); render(); } }));
     document.getElementById("save-prices").addEventListener("click", () => {
       const changedProducts = [];
       document.querySelectorAll("[data-price-row]").forEach((row) => {
@@ -5739,6 +5768,10 @@
           product.salePrice = price;
         }
         changedProducts.push({ productId });
+        // La edicion manual SIEMPRE gana: se guarda tal cual y se registra en el log del motor
+        // como nueva linea de base (evento "manual").
+        const changedManually = Number(previousPrice.cost || 0) !== cost || Number(previousPrice.price || 0) !== price || roundOne(Number(previousPrice.marginPct || 0)) !== roundOne(marginPct);
+        if (changedManually) pushPriceAutoLog({ productId, event: "manual", costPrev: Number(previousPrice.cost || 0), costNew: cost, deltaPct: 0, basketIdx: 0, excessPct: 0, marginPrev: roundOne(Number(previousPrice.marginPct || 0)), marginNew: roundOne(marginPct), pricePrev: Number(previousPrice.price || 0), priceNew: price, sectionId: (product && product.marginSectionId) || "SEC-5", applied: true, userId: currentUser ? currentUser.id : "" });
         // Solo propagar a productos relacionados si cambio el costo de ESTA fila
         // (evita que al guardar se pisen precios editados a mano de productos derivados).
         if (costChanged) applyCostRelations({ productId, unitCost: cost, relationUnits: 0 }, marginPct || calcMargin(cost, price));
@@ -11182,6 +11215,71 @@
     }));
   }
 
+  function renderPriceAutoPage() {
+    const P = getPriceAutoSettings();
+    const basket = computeBasketIndexPct();
+    const limit = Number(ui.priceAutoLimit) || 60;
+    const from = addDaysISO(todayISO(), -60);
+    const filterPid = ui.priceAutoFilterProduct || "";
+    const logs = (state.priceAutoLog || []).filter((e) => String(e.date) >= from && (!filterPid || e.productId === filterPid)).slice().reverse().slice(0, limit);
+    const adjustments7 = (state.priceAutoLog || []).filter((e) => String(e.date) >= addDaysISO(todayISO(), -7) && e.applied).length;
+    const logRows = logs.map((e) => { const p = getProduct(e.productId); return `<tr>
+        <td>${formatDate(e.date)}</td><td>${escapeHtml(p ? p.name : e.productId)}</td><td>${escapeHtml(e.event)}</td>
+        <td class="num">${formatMoney(e.costPrev)}&rarr;${formatMoney(e.costNew)}</td>
+        <td class="num">${formatNumber(roundOne(e.excessPct || 0))}%</td>
+        <td class="num">${roundOne(e.marginPrev)}&rarr;${roundOne(e.marginNew)}%</td>
+        <td class="num">${formatMoney(e.pricePrev)}&rarr;${formatMoney(e.priceNew)}</td>
+        <td>${e.applied ? "Aplicado" : "Simulado"}</td>
+        <td>${currentUser.role === "manager" && e.applied ? `<button class="btn small ghost" data-price-revert="${escapeAttr(e.id)}">Revertir</button>` : ""}</td>
+      </tr>`; }).join("");
+    const schedRows = (state.priceAutoSchedule || []).map((sc) => { const p = getProduct(sc.productId); return `<tr><td>${escapeHtml(p ? p.name : sc.productId)}</td><td>${formatDate(sc.nextRecalcDate)}</td><td class="page-actions"><button class="btn small ghost" data-price-recalc="${escapeAttr(sc.productId)}">Recalcular ahora</button><button class="btn small danger" data-price-cancel-sched="${escapeAttr(sc.productId)}">Cancelar</button></td></tr>`; }).join("");
+    afterRender.push(bindPriceAutoPage);
+    return pageShell("Ajustes de precios", "Registro y agenda del motor de precios automaticos.", "",
+      `<div class="grid three" style="margin-bottom:14px">
+        ${metricCard("Canasta interna", (basket.idx >= 0 ? "+" : "") + formatNumber(basket.idx) + "%", basket.count + " productos" + (basket.reliable ? "" : " (poca senal)"))}
+        ${metricCard("Ajustes 7 dias", String(adjustments7), "Aplicados")}
+        ${metricCard("En agenda", String((state.priceAutoSchedule || []).length), "Bajadas grandes")}
+      </div>
+      <div class="panel" style="margin-bottom:14px">
+        <div class="page-actions" style="justify-content:space-between"><h2 class="page-title" style="font-size:18px">Registro de ajustes</h2>
+          <div style="display:flex;gap:8px;align-items:center">
+            <select id="price-auto-filter"><option value="">Todos los productos</option>${activeProducts().slice().sort((a, b) => a.name.localeCompare(b.name)).map((p) => `<option value="${p.id}" ${filterPid === p.id ? "selected" : ""}>${escapeHtml(p.name)}</option>`).join("")}</select>
+            <label style="font-size:13px">Mostrar <select id="price-auto-limit">${[30, 60, 120, 100000].map((n) => `<option value="${n}" ${limit === n ? "selected" : ""}>${n >= 100000 ? "Todos" : n}</option>`).join("")}</select></label>
+          </div>
+        </div>
+        <div class="table-wrap" style="margin-top:8px"><table><thead><tr><th>Fecha</th><th>Producto</th><th>Evento</th><th>Costo</th><th>Exceso</th><th>Margen</th><th>Precio</th><th>Estado</th><th></th></tr></thead><tbody>${logRows || emptyRow(9, "Sin ajustes registrados.")}</tbody></table></div>
+      </div>
+      <div class="panel"><h2 class="page-title" style="font-size:18px">Agenda de convergencia (bajadas grandes)</h2>
+        <div class="table-wrap" style="margin-top:8px"><table><thead><tr><th>Producto</th><th>Proxima fecha</th><th>Accion</th></tr></thead><tbody>${schedRows || emptyRow(3, "Sin productos en agenda.")}</tbody></table></div>
+      </div>`,
+      "ajustes-precios");
+  }
+  function bindPriceAutoPage() {
+    const fil = document.getElementById("price-auto-filter");
+    if (fil) fil.addEventListener("change", () => { ui.priceAutoFilterProduct = fil.value; render(); });
+    const lim = document.getElementById("price-auto-limit");
+    if (lim) lim.addEventListener("change", () => { ui.priceAutoLimit = Number(lim.value) || 60; render(); });
+    document.querySelectorAll("[data-price-revert]").forEach((b) => b.addEventListener("click", () => {
+      const e = (state.priceAutoLog || []).find((x) => x.id === b.dataset.priceRevert);
+      if (!e) return; const p = getProduct(e.productId); if (!p) return;
+      if (!confirm("Revertir al precio anterior y eximir este producto del ajuste automatico?")) return;
+      const rec = state.prices[e.productId] || { productId: e.productId };
+      rec.price = Number(e.pricePrev); rec.marginPct = roundOne(Number(e.marginPrev)); rec.date = todayISO();
+      state.prices[e.productId] = rec; p.salePrice = rec.price; p.priceAutoExempt = true;
+      pushPriceAutoLog({ productId: e.productId, event: "revert", costPrev: Number(e.costNew), costNew: Number(e.costNew), deltaPct: 0, basketIdx: 0, excessPct: 0, marginPrev: roundOne(Number(e.marginNew)), marginNew: roundOne(Number(e.marginPrev)), pricePrev: Number(e.priceNew), priceNew: Number(e.pricePrev), sectionId: e.sectionId, applied: true, userId: currentUser.id });
+      updateOrdersWithNewPrices(todayISO(), [{ productId: e.productId }]);
+      saveState(); render();
+    }));
+    document.querySelectorAll("[data-price-recalc]").forEach((b) => b.addEventListener("click", () => {
+      const sc = (state.priceAutoSchedule || []).find((x) => x.productId === b.dataset.priceRecalc);
+      if (sc) { sc.nextRecalcDate = todayISO(); state.appSettings.priceAutoLastRun = ""; runScheduledRepricing(); render(); }
+    }));
+    document.querySelectorAll("[data-price-cancel-sched]").forEach((b) => b.addEventListener("click", () => {
+      state.priceAutoSchedule = (state.priceAutoSchedule || []).filter((x) => x.productId !== b.dataset.priceCancelSched);
+      saveState(); render();
+    }));
+  }
+
   function renderSettings() {
     if (currentUser.role === "example") {
       return pageShell(
@@ -11368,6 +11466,19 @@
           </div>
         </div>` : ""}
       </div>` : ""}
+      ${currentUser.role === "manager" ? (() => { const P = getPriceAutoSettings(); const basket = computeBasketIndexPct(); return `
+      <div class="panel" style="margin-top:14px">
+        <h2 class="page-title" style="font-size:18px">Precios automáticos</h2>
+        <div class="form-grid" style="margin-top:8px">
+          <div class="field span-2"><label>Modo</label><select id="priceauto-mode"><option value="off" ${P.mode === "off" ? "selected" : ""}>Apagado</option><option value="simulation" ${P.mode === "simulation" ? "selected" : ""}>Simulación</option><option value="on" ${P.mode === "on" ? "selected" : ""}>Activado</option></select></div>
+          <div class="field span-2"><label>Canasta interna (${P.windowDays} días)</label><input disabled value="${(basket.idx >= 0 ? "+" : "") + formatNumber(basket.idx)}% (${basket.count} productos)" /></div>
+        </div>
+        <p class="muted" id="priceauto-mode-note" style="font-size:12px;margin-top:4px"></p>
+        <h3 style="font-size:14px;margin:12px 0 4px">Secciones de margen</h3>
+        <div class="table-wrap"><table><thead><tr><th>Sección</th><th>Mín %</th><th>Normal %</th><th>Máx %</th><th></th></tr></thead><tbody id="priceauto-sections">${getMarginSections().map((sec) => `<tr data-sec-row="${sec.id}"><td><input data-sec-name value="${escapeAttr(sec.name)}" /></td><td><input data-sec-min value="${sec.minPct}" inputmode="decimal" style="max-width:70px" /></td><td><input data-sec-normal value="${sec.normalPct}" inputmode="decimal" style="max-width:70px" /></td><td><input data-sec-max value="${sec.maxPct}" inputmode="decimal" style="max-width:70px" /></td><td><button class="btn small danger" type="button" data-sec-del="${sec.id}">X</button></td></tr>`).join("")}</tbody></table></div>
+        <div class="page-actions" style="margin-top:8px"><button class="btn small ghost" type="button" id="priceauto-add-section">Agregar sección</button><button class="btn small primary" type="button" id="priceauto-save-sections">Guardar secciones</button></div>
+        <details style="margin-top:10px"><summary>Parámetros avanzados</summary><div class="form-grid" style="margin-top:8px">${[["windowDays", "Ventana canasta (días)"], ["upThresholdPct", "Umbral suba %"], ["downThresholdPct", "Umbral baja %"], ["bigDropPct", "Baja grande %"], ["kUp", "kUp"], ["kDown", "kDown"], ["stepPct", "Paso baja %"], ["recoveryStepPct", "Recuperación %"], ["recalcEveryDays", "Recalcular cada (días)"], ["minBasketProducts", "Mín productos canasta"]].map(([k, l]) => `<div class="field"><label>${l}</label><input data-priceauto-param="${k}" value="${P[k]}" inputmode="decimal" /></div>`).join("")}</div></details>
+      </div>`; })() : ""}
       ${currentUser.role === "manager" ? `
       <div class="panel" style="margin-top:14px">
         <div class="page-actions" style="justify-content:space-between">
@@ -11672,6 +11783,44 @@
     if (piMsg) piMsg.addEventListener("change", () => { state.appSettings.priceIncreaseMessage = piMsg.value.trim(); saveState(); });
     const piTpl = document.getElementById("priceinc-template");
     if (piTpl) piTpl.addEventListener("change", () => { state.appSettings.priceIncreaseTemplateName = piTpl.value.trim(); saveState(); });
+    const paMode = document.getElementById("priceauto-mode");
+    const paNote = document.getElementById("priceauto-mode-note");
+    const noteText = (m) => m === "off" ? "Los precios se manejan como hasta ahora." : m === "simulation" ? "Calcula y registra qué haría en Ajustes de precios, sin tocar precios. Revisalo 1-2 semanas antes de activar." : "Los márgenes y precios se ajustan automáticamente.";
+    if (paNote && paMode) paNote.textContent = noteText(paMode.value);
+    if (paMode) paMode.addEventListener("change", () => {
+      const prev = getPriceAutoSettings().mode;
+      if (prev === "off" && paMode.value === "on" && !confirm("Vas a activar el ajuste automático de precios directamente. Se recomienda pasar antes por Simulación 1-2 semanas. ¿Activar igual?")) { paMode.value = prev; return; }
+      if (!state.appSettings.priceAuto) state.appSettings.priceAuto = defaultPriceAuto();
+      state.appSettings.priceAuto.mode = paMode.value;
+      if (paNote) paNote.textContent = noteText(paMode.value);
+      saveState();
+    });
+    document.querySelectorAll("[data-priceauto-param]").forEach((inp) => inp.addEventListener("change", () => {
+      if (!state.appSettings.priceAuto) state.appSettings.priceAuto = defaultPriceAuto();
+      const v = parseAmount(inp.value);
+      state.appSettings.priceAuto[inp.dataset.priceautoParam] = v;
+      saveState();
+    }));
+    const paAddSec = document.getElementById("priceauto-add-section");
+    if (paAddSec) paAddSec.addEventListener("click", () => { getMarginSections().push({ id: "SEC-" + Date.now(), name: "Nueva sección", minPct: 10, normalPct: 25, maxPct: 40 }); saveState(); render(); });
+    const paSaveSec = document.getElementById("priceauto-save-sections");
+    if (paSaveSec) paSaveSec.addEventListener("click", () => {
+      let ok = true;
+      document.querySelectorAll("[data-sec-row]").forEach((row) => {
+        const sec = getMarginSections().find((x) => x.id === row.dataset.secRow);
+        if (!sec) return;
+        const mn = parseAmount(row.querySelector("[data-sec-min]").value), nm = parseAmount(row.querySelector("[data-sec-normal]").value), mx = parseAmount(row.querySelector("[data-sec-max]").value);
+        if (!(mn < nm && nm < mx)) { ok = false; return; }
+        sec.name = row.querySelector("[data-sec-name]").value.trim() || sec.name; sec.minPct = mn; sec.normalPct = nm; sec.maxPct = mx;
+      });
+      if (!ok) return alert("En cada sección debe cumplirse mín < normal < máx.");
+      saveState(); alert("Secciones guardadas.");
+    });
+    document.querySelectorAll("[data-sec-del]").forEach((b) => b.addEventListener("click", () => {
+      const id = b.dataset.secDel;
+      if ((state.products || []).some((p) => (p.marginSectionId || "SEC-5") === id)) return alert("No se puede borrar: hay productos asignados a esta sección.");
+      state.marginSections = getMarginSections().filter((x) => x.id !== id); saveState(); render();
+    }));
     document.querySelectorAll("[data-product-kg]").forEach((input) => input.addEventListener("change", () => {
       const product = getProduct(input.dataset.productKg);
       if (!product) return;
@@ -15890,23 +16039,203 @@
     });
   }
 
+  // ===================== MOTOR DE PRECIOS DINAMICOS =====================
+  // Ajusta el margen segun cuanto subio/bajo el costo de un producto POR ENCIMA de la
+  // inflacion general (canasta interna = mediana del cambio % de costos). Subas: aplican de
+  // una y comprimen margen hasta el minimo de la seccion. Bajas: expanden margen y bajan el
+  // precio progresivamente (30% de la brecha por paso); las bajas grandes se reprograman.
+  // Ejemplo (seccion Fruta comun 10/25/40, canasta +6%):
+  //  - Banana 1000->1500 (+50%), exceso 44 => margen 25-0.5*(44-10)=8 -> clamp 10; precio ceil(1500*1.10)=1650.
+  //  - Luego 1500->1100 (-27% vs canasta +4% => exceso -31): margen 25+0.5*(31-10)=35.5; objetivo ceil(1100*1.355)=1491;
+  //    precio actual 1650 -> paso 30%: 1650-(159*0.30)~=1603; exceso<=-25 => agenda +14 dias.
+  function defaultMarginSections() {
+    return [
+      { id: "SEC-1", name: "Hoja / muy perecedero", minPct: 15, normalPct: 35, maxPct: 55 },
+      { id: "SEC-2", name: "Fruta comun", minPct: 10, normalPct: 25, maxPct: 40 },
+      { id: "SEC-3", name: "Cajones / por mayor", minPct: 8, normalPct: 18, maxPct: 30 },
+      { id: "SEC-4", name: "Almacen / secos", minPct: 12, normalPct: 22, maxPct: 35 },
+      { id: "SEC-5", name: "Otros", minPct: 10, normalPct: 25, maxPct: 40 }
+    ];
+  }
+  function defaultPriceAuto() {
+    return { mode: "off", windowDays: 14, upThresholdPct: 10, downThresholdPct: 10, bigDropPct: 25, kUp: 0.5, kDown: 0.5, stepPct: 30, recoveryStepPct: 30, recalcEveryDays: 14, minBasketProducts: 5 };
+  }
+  function getMarginSections() {
+    if (!Array.isArray(state.marginSections) || !state.marginSections.length) state.marginSections = defaultMarginSections();
+    return state.marginSections;
+  }
+  function getMarginSection(product) {
+    const secs = getMarginSections();
+    const id = product && product.marginSectionId;
+    return secs.find((sec) => sec.id === id) || secs.find((sec) => sec.id === "SEC-5") || secs[secs.length - 1];
+  }
+  function getPriceAutoSettings() {
+    if (!state.appSettings) state.appSettings = {};
+    if (!state.appSettings.priceAuto) state.appSettings.priceAuto = defaultPriceAuto();
+    return { ...defaultPriceAuto(), ...state.appSettings.priceAuto };
+  }
+  function pushPriceAutoLog(entry) {
+    if (!Array.isArray(state.priceAutoLog)) state.priceAutoLog = [];
+    const cutoff = addDaysISO(todayISO(), -180);
+    state.priceAutoLog = state.priceAutoLog.filter((e) => String(e.date || "") >= cutoff);
+    state.priceAutoLog.push({ id: nextDatedId("PAL", state.priceAutoLog), date: todayISO(), ...entry });
+  }
+  function upsertPriceAutoSchedule(productId, targetMargin) {
+    if (!Array.isArray(state.priceAutoSchedule)) state.priceAutoSchedule = [];
+    const P = getPriceAutoSettings();
+    const nextRecalcDate = addDaysISO(todayISO(), P.recalcEveryDays);
+    const ex = state.priceAutoSchedule.find((s) => s.productId === productId);
+    if (ex) { ex.nextRecalcDate = nextRecalcDate; ex.targetMargin = targetMargin; }
+    else state.priceAutoSchedule.push({ productId, nextRecalcDate, targetMargin, createdAt: new Date().toISOString(), reason: "big_drop" });
+  }
+  function computeBasketIndexPct() {
+    const P = getPriceAutoSettings();
+    const today = todayISO();
+    if (ui.basketCache && ui.basketCache.date === today) return ui.basketCache;
+    const from = addDaysISO(today, -P.windowDays);
+    const changes = [];
+    (state.products || []).forEach((product) => {
+      if (!product || product.isActive === false || product.isBasketReference === false) return;
+      const points = [];
+      (state.purchases || []).forEach((pu) => {
+        if (!pu || String(pu.date) < from || String(pu.date) > today) return;
+        (pu.items || []).forEach((it) => { if (it.productId === product.id && Number(it.unitCost) > 0) points.push({ date: pu.date, cost: Number(it.unitCost) }); });
+      });
+      (state.vendorLedger || []).forEach((v) => { if (v.productId === product.id && String(v.date) >= from && String(v.date) <= today && Number(v.unitCost) > 0) points.push({ date: v.date, cost: Number(v.unitCost) }); });
+      (state.priceAutoLog || []).forEach((l) => { if (l.productId === product.id && String(l.date) >= from && String(l.date) <= today) { if (Number(l.costPrev) > 0) points.push({ date: l.date, cost: Number(l.costPrev) }); if (Number(l.costNew) > 0) points.push({ date: l.date, cost: Number(l.costNew) }); } });
+      if (points.length < 2) return;
+      points.sort((a, b) => String(a.date).localeCompare(String(b.date)));
+      const first = points[0].cost;
+      const last = points[points.length - 1].cost;
+      if (first > 0) changes.push((last - first) / first * 100);
+    });
+    let idx = 0;
+    let reliable = false;
+    if (changes.length >= P.minBasketProducts) {
+      changes.sort((a, b) => a - b);
+      const m = Math.floor(changes.length / 2);
+      idx = changes.length % 2 ? changes[m] : (changes[m - 1] + changes[m]) / 2;
+      reliable = true;
+    }
+    const res = { date: today, idx: roundOne(idx), reliable, count: changes.length };
+    ui.basketCache = res;
+    return res;
+  }
+  function computeTargetMargin(product, excessPct, currentMargin, thr) {
+    const S = getMarginSection(product);
+    const P = getPriceAutoSettings();
+    const upThr = thr && thr.upThr != null ? thr.upThr : P.upThresholdPct;
+    const downThr = thr && thr.downThr != null ? thr.downThr : P.downThresholdPct;
+    let target;
+    if (excessPct > upThr) target = S.normalPct - P.kUp * (excessPct - upThr);
+    else if (excessPct < -downThr) target = S.normalPct + P.kDown * (Math.abs(excessPct) - downThr);
+    else target = currentMargin + (S.normalPct - currentMargin) * (P.recoveryStepPct / 100);
+    target = Math.max(S.minPct, Math.min(S.maxPct, target));
+    return roundOne(target);
+  }
+  function computeStepPrice(currentPrice, targetPrice) {
+    const P = getPriceAutoSettings();
+    if (!(currentPrice > 0)) return targetPrice;
+    if (targetPrice >= currentPrice) return targetPrice;
+    let np = ceilMoney(currentPrice - (currentPrice - targetPrice) * (P.stepPct / 100));
+    if (targetPrice > 0 && (np - targetPrice) / targetPrice < 0.02) np = targetPrice;
+    return np;
+  }
+  function ceilMoney(x) { return Math.ceil(Number(x || 0) - 1e-6); }
+  function applyCostChange(product, costNew, eventType, opts) {
+    opts = opts || {};
+    const P = getPriceAutoSettings();
+    const S = getMarginSection(product);
+    const rec = state.prices[product.id] || { productId: product.id, cost: product.baseCost || 0, price: product.salePrice || 0, marginPct: opts.fallbackMargin != null ? opts.fallbackMargin : (S ? S.normalPct : 25) };
+    const costPrev = Number(rec.cost || 0);
+    const currentMargin = Number.isFinite(Number(rec.marginPct)) ? Number(rec.marginPct) : (opts.fallbackMargin != null ? Number(opts.fallbackMargin) : calcMargin(rec.cost, rec.price));
+    const currentPrice = Number(rec.price || product.salePrice || 0);
+    const persist = (margin, price) => {
+      rec.cost = costNew;
+      rec.marketPrice = opts.marketPrice != null ? opts.marketPrice : (rec.marketPrice || 0);
+      rec.marginPct = roundOne(margin);
+      rec.price = price;
+      rec.date = todayISO();
+      state.prices[product.id] = rec;
+      product.baseCost = rec.cost;
+      product.salePrice = rec.price;
+      return { marginPct: rec.marginPct, price: rec.price };
+    };
+    // Sin costo previo: margen = normal de la seccion.
+    if (!(costPrev > 0)) return persist(S.normalPct, ceilMoney(costNew * (1 + S.normalPct / 100)));
+    // Motor apagado o producto exento: comportamiento actual (margen fijo).
+    if (P.mode === "off" || product.priceAutoExempt) return persist(currentMargin, ceilMoney(costNew * (1 + currentMargin / 100)));
+    // Motor activo (on/simulation): calcular
+    const deltaPct = (costNew - costPrev) / costPrev * 100;
+    const basket = computeBasketIndexPct();
+    const upThr = basket.reliable ? P.upThresholdPct : P.upThresholdPct * 2;
+    const downThr = basket.reliable ? P.downThresholdPct : P.downThresholdPct * 2;
+    const excessPct = deltaPct - basket.idx;
+    const targetMargin = computeTargetMargin(product, excessPct, currentMargin, { upThr, downThr });
+    const targetPrice = ceilMoney(costNew * (1 + targetMargin / 100));
+    const stepPrice = computeStepPrice(currentPrice, targetPrice);
+    const finalMargin = costNew > 0 ? roundOne((stepPrice / costNew - 1) * 100) : targetMargin;
+    const applied = P.mode === "on";
+    let out;
+    if (applied) out = persist(finalMargin, stepPrice);
+    else out = persist(currentMargin, ceilMoney(costNew * (1 + currentMargin / 100))); // simulacion: aplica lo actual
+    pushPriceAutoLog({ productId: product.id, event: eventType, costPrev, costNew, deltaPct: roundOne(deltaPct), basketIdx: basket.idx, excessPct: roundOne(excessPct), marginPrev: roundOne(currentMargin), marginNew: finalMargin, pricePrev: currentPrice, priceNew: stepPrice, sectionId: S.id, applied, userId: opts.userId || "" });
+    if (applied && excessPct <= -P.bigDropPct) upsertPriceAutoSchedule(product.id, targetMargin);
+    return applied ? out : { marginPct: roundOne(currentMargin), price: rec.price };
+  }
+  function runScheduledRepricing() {
+    if (!currentUser || !["manager", "admin"].includes(currentUser.role)) return;
+    if (!state.appSettings) state.appSettings = {};
+    if (state.appSettings.priceAutoLastRun === todayISO()) return;
+    const P = getPriceAutoSettings();
+    let changed = false;
+    const affected = [];
+    // Pendientes del sheet (Compra Hoy actualizo el costo y marco pendingReprice)
+    Object.keys(state.prices || {}).forEach((pid) => {
+      const rec = state.prices[pid];
+      if (rec && rec.pendingReprice) {
+        const product = getProduct(pid);
+        if (product) applyCostChange(product, Number(rec.cost || 0), "sheet");
+        if (state.prices[pid]) delete state.prices[pid].pendingReprice;
+        changed = true; affected.push({ productId: pid });
+      }
+    });
+    // Agenda de bajadas grandes
+    if (P.mode === "on") {
+      (state.priceAutoSchedule || []).slice().forEach((sc) => {
+        if (String(sc.nextRecalcDate) > todayISO()) return;
+        const product = getProduct(sc.productId);
+        const rec = state.prices[sc.productId];
+        if (!product || !rec) { state.priceAutoSchedule = state.priceAutoSchedule.filter((x) => x.productId !== sc.productId); return; }
+        const cost = Number(rec.cost || 0);
+        const targetMargin = Number(sc.targetMargin != null ? sc.targetMargin : getMarginSection(product).normalPct);
+        const targetPrice = ceilMoney(cost * (1 + targetMargin / 100));
+        const currentPrice = Number(rec.price || 0);
+        const np = computeStepPrice(currentPrice, targetPrice);
+        if (np !== currentPrice) {
+          rec.price = np; rec.marginPct = cost > 0 ? roundOne((np / cost - 1) * 100) : targetMargin; rec.date = todayISO();
+          product.salePrice = np;
+          pushPriceAutoLog({ productId: product.id, event: "recalc14", costPrev: cost, costNew: cost, deltaPct: 0, basketIdx: 0, excessPct: 0, marginPrev: Number(rec.marginPct), marginNew: rec.marginPct, pricePrev: currentPrice, priceNew: np, sectionId: getMarginSection(product).id, applied: true, userId: "" });
+          changed = true; affected.push({ productId: product.id });
+        }
+        if (np === targetPrice) state.priceAutoSchedule = state.priceAutoSchedule.filter((x) => x.productId !== sc.productId);
+        else sc.nextRecalcDate = addDaysISO(todayISO(), P.recalcEveryDays);
+      });
+    }
+    state.appSettings.priceAutoLastRun = todayISO();
+    if (changed) {
+      saveState();
+      updateOrdersWithNewPrices(todayISO(), affected);
+    }
+  }
+
   function updateProductCostsFromPurchase(items, provider) {
     items.forEach((item) => {
       const product = getProduct(item.productId);
       if (!product || item.unitCost <= 0) return;
       updateRelationDivisorFromItem(item);
-      const rec = state.prices[item.productId] || { productId: item.productId, cost: product.baseCost || 0, price: product.salePrice || 0, marginPct: provider ? provider.defaultMargin : 25 };
-      const margin = Number.isFinite(Number(rec.marginPct)) ? Number(rec.marginPct) : (provider ? Number(provider.defaultMargin || 25) : calcMargin(rec.cost, rec.price));
-      rec.cost = item.unitCost;
-      rec.marketPrice = item.marketPrice || rec.marketPrice || 0;
-      rec.marginPct = margin;
-      rec.marginPct = roundOne(rec.marginPct);
-      rec.price = Math.ceil(item.unitCost * (1 + margin / 100));
-      rec.date = todayISO();
-      state.prices[item.productId] = rec;
-      product.baseCost = rec.cost;
-      product.salePrice = rec.price;
-      applyCostRelations(item, margin);
+      const out = applyCostChange(product, Number(item.unitCost), "compra", { marketPrice: item.marketPrice != null ? Number(item.marketPrice) : undefined, fallbackMargin: provider ? Number(provider.defaultMargin || 25) : undefined });
+      applyCostRelations(item, out.marginPct);
     });
   }
 
@@ -15970,18 +16299,22 @@
         const divisor = Number(sourceItem.relationUnits || relation.divisor || 1) || 1;
         const multiplier = Number(relation.multiplier || 1) || 1;
         const cost = (Number(sourceItem.unitCost || 0) / divisor) * multiplier;
-        const rec = state.prices[target.id] || { productId: target.id, cost: target.baseCost || 0, price: target.salePrice || 0 };
-        const margin = relation.marginPct === null || relation.marginPct === "" || relation.marginPct === undefined
-          ? (Number.isFinite(Number(rec.marginPct)) ? Number(rec.marginPct) : fallbackMargin)
-          : Number(relation.marginPct);
-        rec.cost = cost;
-        rec.marginPct = margin;
-        rec.marginPct = roundOne(margin);
-        rec.price = Math.ceil(cost * (1 + margin / 100));
-        rec.date = todayISO();
-        state.prices[target.id] = rec;
-        target.baseCost = cost;
-        target.salePrice = rec.price;
+        const hasExplicitMargin = !(relation.marginPct === null || relation.marginPct === "" || relation.marginPct === undefined);
+        if (hasExplicitMargin) {
+          // Regla manual explicita: gana (comportamiento actual).
+          const margin = roundOne(Number(relation.marginPct));
+          const rec = state.prices[target.id] || { productId: target.id, cost: target.baseCost || 0, price: target.salePrice || 0 };
+          rec.cost = cost;
+          rec.marginPct = margin;
+          rec.price = Math.ceil(cost * (1 + margin / 100));
+          rec.date = todayISO();
+          state.prices[target.id] = rec;
+          target.baseCost = cost;
+          target.salePrice = rec.price;
+        } else {
+          // "Mantener": pasa por el motor (que respeta modo off/exento).
+          applyCostChange(target, cost, "compra", { fallbackMargin: fallbackMargin });
+        }
       });
   }
 

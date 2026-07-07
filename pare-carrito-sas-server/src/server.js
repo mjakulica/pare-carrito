@@ -1778,6 +1778,10 @@ app.post("/external/compra-hoy", externalAuth, async (req, res) => {
     rec.marginPct = round1(margin);
     rec.price = Math.ceil(value * (1 + margin / 100));
     rec.date = new Date().toISOString().slice(0, 10);
+    // El precio final lo define el motor de precios en el frontend (modo simulacion/activado).
+    // Se deja un precio provisional con el margen vigente y se marca pendingReprice para que
+    // el frontend lo recalcule al cargar (bajo modo "off" el resultado es el mismo).
+    rec.pendingReprice = true;
     data.prices[product.id] = rec;
     product.baseCost = rec.cost;
     product.salePrice = rec.price;
