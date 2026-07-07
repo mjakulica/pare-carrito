@@ -14404,6 +14404,11 @@
     } else if (productUnit && isWholesaleParsedUnit(cleanUnit) && isWholesaleParsedUnit(productUnit)) {
       nextUnitType = product.unitType || productUnit;
     }
+    // Atados: no se dividen a menos de 0,5 (perejil es la excepcion: minimo 0,25).
+    if (productUnit === "atado" && nextQuantity > 0) {
+      const minAtado = normalizeText(product && product.name).includes("perejil") ? 0.25 : 0.5;
+      if (nextQuantity < minAtado) nextQuantity = minAtado;
+    }
     return { quantity: nextQuantity, unitType: nextUnitType };
   }
 
