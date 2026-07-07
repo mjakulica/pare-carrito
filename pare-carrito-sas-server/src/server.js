@@ -1976,57 +1976,99 @@ async function runDunning({ pool, now = new Date() }) {
   if (!settings.dunningEnabled) return { ran: false, reason: "deshabilitado" };
   const art = nowArt(now);
   const today = art.dateISO;
+  const addN = (iso, n) => { const x = new Date(iso + "T12:00:00"); x.setDate(x.getDate() + n); return x.toISOString().slice(0, 10); };
+  const addMonthClamp = (iso) => { const x = new Date(iso + "T12:00:00"); const dd = x.getDate(); x.setMonth(x.getMonth() + 1); if (x.getDate() < dd) x.setDate(0); return x.toISOString().slice(0, 10); };
+  const yesterday = addN(today, -1);
   const clients = d.clients || [];
   const payments = (d.payments || []).filter((p) => p && p.status !== "anulado");
   const saldos = d.saldos || [];
+  const orders = d.orders || [];
   const balanceOf = (cid) => saldos.filter((s) => s.clientId === cid).reduce((a, s) => a + Number(s.amount || 0), 0);
-  const lastPayOf = (cid) => payments.filter((p) => p.clientId === cid).map((p) => String(p.date || "")).sort().pop() || "";
-  const firstDebtOf = (cid) => (saldos.filter((s) => s.clientId === cid).map((s) => String(s.date || "")).sort()[0]) || today;
-  const managerEmail = ((d.users || []).find((u) => u && u.role === "manager" && u.email) || {}).email || "";
-  const WEEKDAYS = ["lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo"];
-  const intervalOf = (c) => {
-    const t = c.paymentType;
-    const day = String(c.paymentDay || "");
-    if (t === "contado" || t === "contra_factura") return 1;
-    const m = day.match(/^(\d+)/);
-    if (m) return parseInt(m[1], 10);
-    if (day === "mensual") return 30;
-    if (WEEKDAYS.includes(day)) return 7;
-    if (t === "semanal") return 7;
-    return 30;
+  const paymentDatesOf = (cid) => {
+    const set = new Set();
+    payments.filter((p) => p.clientId === cid).forEach((p) => set.add(String(p.date || "")));
+    saldos.filter((s) => s.clientId === cid && s.type === "pago").forEach((s) => set.add(String(s.date || "")));
+    return set;
   };
-  const daysBetween = (aISO, bISO) => Math.round((new Date(bISO + "T12:00:00") - new Date(aISO + "T12:00:00")) / 86400000);
+  const lastPayOf = (cid) => { const arr = [...paymentDatesOf(cid)].filter(Boolean).sort(); return arr.length ? arr[arr.length - 1] : ""; };
+  const firstDebtOf = (cid) => (saldos.filter((s) => s.clientId === cid).map((s) => String(s.date || "")).sort()[0]) || today;
+  const hasPaymentOnOrAfter = (cid, dateISO) => [...paymentDatesOf(cid)].some((dt) => dt && dt >= dateISO);
+  const pagoEn = (cid, dateISO) => paymentDatesOf(cid).has(dateISO);
+  const managerEmail = ((d.users || []).find((u) => u && u.role === "manager" && u.email) || {}).email || process.env.MANAGER_EMAIL || "";
+  const isoWeekday = (iso) => { const g = new Date(iso + "T12:00:00").getDay(); return g === 0 ? 7 : g; };
+  const daysBetween = (a, b) => Math.round((new Date(b + "T12:00:00") - new Date(a + "T12:00:00")) / 86400000);
+  const expectedDueFor = (c) => {
+    const anchor = lastPayOf(c.id) || firstDebtOf(c.id);
+    const t = c.paymentType;
+    if (t === "dias_10") return addN(anchor, 10);
+    if (t === "dias_15") return addN(anchor, 15);
+    if (t === "dias_20") return addN(anchor, 20);
+    if (t === "mensual") return addMonthClamp(anchor);
+    return "";
+  };
+  const isExpectedDay = (c, dateISO) => {
+    const t = c.paymentType;
+    if (t === "contado" || t === "contra_factura") return orders.some((o) => o && o.clientId === c.id && o.date === dateISO && !["anulado", "cancelado"].includes(o.status));
+    if (t === "semanal" || t === "cuenta_corriente") { const pd = Number(c.paymentDay || 0); if (!pd) return false; return isoWeekday(dateISO) === pd; }
+    if (["dias_10", "dias_15", "dias_20", "mensual"].includes(t)) return expectedDueFor(c) === dateISO;
+    return false;
+  };
   const money = (v) => "$" + Number(v || 0).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const waTpl = settings.dunningWhatsappMessage || "Hola {cliente}, ayer no registramos el pago correspondiente, su saldo es {saldo} por favor regularizar su deuda";
   const mailTpl = settings.dunningMailMessage || "El cliente {cliente} tiene una demora de pago de {diassinpago} y su saldo es {saldo}.";
+  const mailSubject = settings.dunningMailSubject || "Demora de pago: {cliente}";
   const templateName = settings.dunningWhatsappTemplate || "";
   const lang = settings.dunningWhatsappLang || "es";
+  const dunningState = await loadDunningState();
   let waSent = 0;
   let mailsSent = 0;
   for (const c of clients) {
-    if (!c || c.isActive === false) continue;
-    const bal = balanceOf(c.id);
-    if (bal <= 0) continue;
-    const lastPay = lastPayOf(c.id) || firstDebtOf(c.id);
-    const overdue = daysBetween(lastPay, today) - intervalOf(c);
-    if (overdue < 1) continue;
-    const phone = String(c.phone || (Array.isArray(c.phones) ? c.phones[0] : "") || "").replace(/\D/g, "");
-    if (botUrl && templateName && phone) {
-      const msg = waTpl.replace(/{cliente}/g, c.name || "").replace(/{saldo}/g, money(bal));
-      try {
-        await fetch(botUrl, { method: "POST", headers: { "content-type": "application/json", "x-broadcast-key": botKey }, body: JSON.stringify({ numbers: [phone], templateName, lang, params: [msg] }) });
-        waSent += 1;
-      } catch (e) { console.error("dunning whatsapp:", e.message); }
-    }
-    if (overdue >= 3) {
-      const to = [c.billingEmail, managerEmail].filter(Boolean).join(",");
-      if (to) {
-        const mail = mailTpl.replace(/{cliente}/g, c.name || "").replace(/{diassinpago}/g, String(overdue) + " dias").replace(/{saldo}/g, money(bal));
-        try { await sendMail(to, "Demora de pago - " + (c.name || c.id), "<p>" + mail + "</p>"); mailsSent += 1; } catch (e) { console.error("dunning mail:", e.message); }
+    try {
+      if (!c || c.isActive === false) continue;
+      const bal = balanceOf(c.id);
+      if (bal <= 0) { delete dunningState[c.id]; continue; }
+      let st = dunningState[c.id];
+      // Si pago en o despues del dia esperado registrado, se sale de mora.
+      if (st && st.dueDate && hasPaymentOnOrAfter(c.id, st.dueDate)) { delete dunningState[c.id]; st = null; }
+      if (!st) {
+        // Inicio de mora: ayer era dia esperado y no pago.
+        if (isExpectedDay(c, yesterday) && !pagoEn(c.id, yesterday)) {
+          st = dunningState[c.id] = { dueDate: yesterday, daysWithoutPayment: 1, lastWhatsappDate: "", emailSent: false };
+        } else continue;
+      } else {
+        st.daysWithoutPayment = Math.max(1, daysBetween(st.dueDate, today));
       }
-    }
+      const phone = String(c.phone || (Array.isArray(c.phones) ? c.phones[0] : "") || "").replace(/\D/g, "");
+      // WhatsApp: una vez por dia.
+      if (botUrl && templateName && phone && st.lastWhatsappDate !== today) {
+        const msg = waTpl.replace(/{cliente}/g, c.name || "").replace(/{saldo}/g, money(bal));
+        try {
+          await fetch(botUrl, { method: "POST", headers: { "content-type": "application/json", "x-broadcast-key": botKey }, body: JSON.stringify({ numbers: [phone], templateName, lang, params: [msg] }) });
+          st.lastWhatsappDate = today; waSent += 1;
+        } catch (e) { console.error("dunning whatsapp:", e.message); }
+      }
+      // Correo: UNA sola vez al llegar a 3 dias de mora.
+      if (st.daysWithoutPayment >= 3 && !st.emailSent) {
+        const to = [c.billingEmail || c.email, managerEmail].filter(Boolean).join(",");
+        if (to) {
+          const subj = mailSubject.replace(/{cliente}/g, c.name || "");
+          const mail = mailTpl.replace(/{cliente}/g, c.name || "").replace(/{diassinpago}/g, String(st.daysWithoutPayment) + " dias").replace(/{saldo}/g, money(bal));
+          try { await sendMail(to, subj, "<p>" + mail + "</p>"); st.emailSent = true; mailsSent += 1; } catch (e) { console.error("dunning mail:", e.message); }
+        }
+      }
+    } catch (e) { console.error("dunning cliente:", e.message); }
   }
+  await saveDunningState(dunningState);
   return { ran: true, waSent, mailsSent };
+}
+
+async function loadDunningState() {
+  try { const { rows } = await pool.query("SELECT data->'dunningState' AS s FROM app_state WHERE id = 'main'"); return (rows[0] && rows[0].s) || {}; }
+  catch (e) { console.warn("No se pudo cargar dunningState:", e.message); return {}; }
+}
+async function saveDunningState(obj) {
+  try { await pool.query("UPDATE app_state SET data = jsonb_set(COALESCE(data, '{}'), '{dunningState}', $1::jsonb) WHERE id = 'main'", [JSON.stringify(obj || {})]); }
+  catch (e) { console.warn("No se pudo guardar dunningState:", e.message); }
 }
 
 let dunningLastRunDate = "";

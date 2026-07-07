@@ -316,6 +316,7 @@
     { id: "productos", label: "Productos", icon: "PR", roles: ["manager", "admin"] },
     { id: "precios", label: "Precios", icon: "$", roles: ["manager", "admin"] },
     { id: "ajustes-precios", label: "Ajustes de precios", icon: "$", roles: ["manager", "admin"] },
+    { id: "reposiciones", label: "Reposiciones", icon: "RP", roles: ["manager", "admin", "employee"] },
     { id: "historiales", label: "Historiales", icon: "HI", roles: ["manager", "admin"] },
     { id: "rendimiento", label: "Rendimiento", icon: "RE", roles: ["manager"] },
     { id: "compras", label: "Compras/Gastos", icon: "CO", roles: ["manager", "admin", "employee", "proveedor"] },
@@ -348,6 +349,7 @@
     "productos",
     "precios",
     "ajustes-precios",
+    "reposiciones",
     "historiales",
     "rendimiento",
     "compras",
@@ -455,6 +457,7 @@
     startVersionWatch();
     startIdleLogout();
     try { runScheduledRepricing(); } catch (e) { console.warn("runScheduledRepricing:", e.message); }
+    try { if (currentUser && ["manager", "admin", "employee"].includes(currentUser.role)) generatePendingReplacements(); } catch (e) { console.warn("generatePendingReplacements:", e.message); }
   });
   window.addEventListener("online", () => {
     const banner = document.getElementById("offline-banner");
@@ -2451,6 +2454,7 @@
       "clientes": '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.5 3-6 6.5-6s6.5 2.5 6.5 6"/><circle cx="17.5" cy="9" r="2.5"/><path d="M16.5 14.5c2.8.3 5 2.4 5 5.5"/>',
       "productos": '<path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/>',
       "ajustes-precios": '<circle cx="12" cy="12" r="9"/><path d="M8 12h8M12 8v8"/>',
+      "reposiciones": '<path d="M3 7h13v10H3z"/><path d="M16 10h3l2 3v4h-5z"/><circle cx="7" cy="18" r="1.6"/><circle cx="17.5" cy="18" r="1.6"/>',
       "precios": '<circle cx="12" cy="12" r="9"/><path d="M12 6.5v11M14.8 8.8c0-1-1.2-1.8-2.8-1.8s-2.8.7-2.8 1.8 1 1.8 2.8 1.8 2.8.7 2.8 1.8-1.2 1.8-2.8 1.8-2.8-.8-2.8-1.8"/>',
       "historiales": '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2.5"/>',
       "rendimiento": '<path d="M4 20V10M10 20V4M16 20v-7M21 20H3"/>',
@@ -2541,6 +2545,7 @@
       productos: renderProducts,
       precios: renderPrices,
       "ajustes-precios": renderPriceAutoPage,
+      reposiciones: renderReplacementsPage,
       historiales: renderHistories,
       rendimiento: renderPerformance,
       compras: renderPurchases,
@@ -3746,8 +3751,8 @@
       if (!order) return alert("Elegi un pedido.");
       const keys = Object.keys(selected);
       if (!keys.length) return alert("Seleccioná al menos un producto para recambio.");
-      for (const k of keys) { if (!selected[k].photo) return alert("Falta la foto de: " + selected[k].productName); if (selected[k].qty <= 0) return alert("Cantidad invalida en: " + selected[k].productName); }
-      const when = document.getElementById("recambio-when").value === "manana" ? "manana" : "proximo";
+      for (const k of keys) { if (!selected[k].photo) return alert("Falta la foto de: " + selected[k].productName); if (selected[k].qty <= 0) return alert("Cantidad invalida en: " + selected[k].productName); if (selected[k].qty > Number(selected[k].originalQty || 0)) return alert("La cantidad a recambiar no puede superar la pedida en: " + selected[k].productName); }
+      const when = document.getElementById("recambio-when").value === "manana" ? "manana" : "proximo_pedido";
       state.replacements = state.replacements || [];
       state.replacements.push({ id: nextDatedId("REC", state.replacements), clientId: order.clientId, sourceOrderId: order.id, when, status: "pendiente", createdAt: new Date().toISOString(), createdDate: todayISO(), items: keys.map((k) => ({ productId: selected[k].productId, productName: selected[k].productName, unitType: selected[k].unitType, originalQty: selected[k].originalQty, qty: selected[k].qty, photo: selected[k].photo })) });
       saveState();
@@ -3762,28 +3767,37 @@
     return rep.items.map((it) => ({ id: nextItemId(), productId: it.productId, productName: it.productName, quantity: it.qty, unitType: it.unitType, unitPrice: 0, subtotal: 0, ivaRate: 0, ivaAmount: 0, totalWithIva: 0, note: "(reposición)", assignedProviderId: "", assignedToType: "", assignedToId: "" }));
   }
 
+  function replacementAlreadyMaterialized(rep) {
+    const tag = "[" + rep.id + "]";
+    return (state.orders || []).concat(state.deletedOrders || []).some((o) => String(o.notes || "").includes(tag));
+  }
   function generateReplacementOrder(rep, date) {
+    if (replacementAlreadyMaterialized(rep)) { rep.status = "aplicado"; return null; }
     const client = getClient(rep.clientId);
-    const order = { id: nextDatedId("ORD", (state.orders || []).concat(state.deletedOrders || [])), userId: currentUser.id, date, clientId: rep.clientId, deliveryVehicleId: client ? client.vehicleId : "", status: "pendiente", items: replacementOrderItems(rep), subtotalAmount: 0, ivaAmount: 0, totalAmount: 0, priceTier: client ? client.priceTier : "general", priceAdjustmentPct: client ? Number(client.priceAdjustmentPct || 0) : 0, paymentReceived: 0, paymentStatus: "paid", remitoPrinted: false, notes: "Reposición", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    const order = { id: nextDatedId("ORD", (state.orders || []).concat(state.deletedOrders || [])), userId: currentUser.id, date, clientId: rep.clientId, deliveryVehicleId: client ? client.vehicleId : "", status: "pendiente", items: replacementOrderItems(rep), subtotalAmount: 0, ivaAmount: 0, totalAmount: 0, priceTier: client ? client.priceTier : "general", priceAdjustmentPct: client ? Number(client.priceAdjustmentPct || 0) : 0, paymentReceived: 0, paymentStatus: "paid", remitoPrinted: false, notes: "Reposición de " + (rep.sourceOrderId || "") + " [" + rep.id + "]", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
     state.orders.push(order);
-    rep.status = "generado"; rep.generatedOrderId = order.id;
+    rep.status = "aplicado"; rep.appliedOrderId = order.id;
     return order;
   }
 
   function generatePendingReplacements() {
+    const today = todayISO();
+    let any = false;
     (state.replacements || []).filter((r) => r.status === "pendiente" && r.when === "manana").forEach((r) => {
-      generateReplacementOrder(r, addDaysISO(r.createdDate || todayISO(), 1));
+      const sched = r.scheduledDate || addDaysISO(r.createdDate || today, 1);
+      if (sched > today) return; // todavia no llego el dia
+      generateReplacementOrder(r, sched);
+      any = true;
     });
-    saveState();
+    if (any) saveState();
   }
 
   function attachProximoReplacements(order) {
-    const pend = (state.replacements || []).filter((r) => r.status === "pendiente" && r.when === "proximo" && r.clientId === order.clientId);
+    if (!order || String(order.notes || "").includes("[REC-")) return; // no encadenar sobre un pedido de reposicion
+    const pend = (state.replacements || []).filter((r) => r.status === "pendiente" && r.when !== "manana" && r.clientId === order.clientId);
     if (!pend.length) return;
-    pend.forEach((r) => {
-      replacementOrderItems(r).forEach((it) => order.items.push(it));
-      r.status = "generado"; r.generatedOrderId = order.id;
-    });
+    // Se materializa como pedido SEPARADO (misma fecha), no se mezcla con el pedido del cliente.
+    pend.forEach((r) => generateReplacementOrder(r, order.date));
   }
 
   function renderPendingReplacementsBanner() {
@@ -3791,7 +3805,7 @@
     const count = (state.replacements || []).filter((r) => r.status === "pendiente").length;
     if (!count) return "";
     return `
-      <a class="pending-transfers-banner" data-route="pedidos" title="Productos de reposicion pendientes">
+      <a class="pending-transfers-banner" data-route="reposiciones" title="Productos de reposicion pendientes">
         <span class="pending-transfers-count">${count}</span>
         <span class="pending-transfers-label">Prod reposición</span>
       </a>
@@ -3812,6 +3826,37 @@
       return `<div style="padding:3px 0;border-bottom:1px solid #eee"><strong>${escapeHtml(c ? c.name : r.clientId)}</strong> <span class="muted">(${r.when === "manana" ? "mañana" : "próximo pedido"})</span>: ${parts}</div>`;
     }).join("");
     return `<div class="panel highlight-panel" style="margin-bottom:14px"><h2 class="page-title" style="font-size:16px">Productos de reposición pendientes (${rowsData.length})</h2>${rows}</div>`;
+  }
+
+  function renderReplacementsPage() {
+    const canDelete = ["manager", "admin"].includes(currentUser.role);
+    const list = (state.replacements || []).slice().sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+    const rows = list.map((r) => {
+      const c = getClient(r.clientId);
+      const prods = (r.items || []).map((it) => `${escapeHtml(it.productName)} <strong>${formatNumber(it.qty)}</strong>${it.originalQty != null ? `<span class="muted">/${formatNumber(it.originalQty)} ${escapeHtml(it.unitType || "")}</span>` : ""}${it.photo ? ` <img src="${it.photo}" data-recambio-photo-view="${escapeAttr(it.photo)}" style="height:26px;vertical-align:middle;border-radius:3px;cursor:pointer" title="Ver foto" />` : ` <span class="pill amber">sin foto</span>`}`).join("<br>");
+      const cuando = r.when === "manana" ? ("Mañana" + (r.scheduledDate || r.createdDate ? " (" + formatDate(addDaysISO(r.createdDate || todayISO(), 1)) + ")" : "")) : "Próximo pedido";
+      const estado = r.status === "pendiente" ? `<span class="pill amber">Pendiente</span>` : `<span class="pill green">Aplicado</span>`;
+      return `<tr>
+        <td>${formatDate(r.createdDate || (r.createdAt || "").slice(0, 10))}</td>
+        <td>${escapeHtml(c ? c.name : r.clientId)}</td>
+        <td>${prods}</td>
+        <td>${cuando}</td>
+        <td>${estado}</td>
+        <td>${canDelete && r.status === "pendiente" ? `<button class="btn small danger" data-del-replacement="${escapeAttr(r.id)}">Eliminar</button>` : ""}</td>
+      </tr>`;
+    }).join("");
+    afterRender.push(() => {
+      document.querySelectorAll("[data-recambio-photo-view]").forEach((img) => img.addEventListener("click", () => showModal("Foto de recambio", `<img src="${img.dataset.recambioPhotoView}" style="max-width:100%;height:auto;display:block;margin:0 auto" />`, null, { className: "wide" })));
+      document.querySelectorAll("[data-del-replacement]").forEach((b) => b.addEventListener("click", () => {
+        if (!confirm("Eliminar esta reposición pendiente?")) return;
+        state.replacements = (state.replacements || []).filter((x) => x.id !== b.dataset.delReplacement);
+        saveState(); render();
+      }));
+      document.querySelectorAll("[data-open-recambio]").forEach((b) => b.addEventListener("click", openRecambioModal));
+    });
+    return pageShell("Reposiciones", "Productos marcados para recambio/reposición.", `<button class="btn ghost" data-open-recambio>Pedir recambio</button>`,
+      `<div class="panel"><div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Cliente</th><th>Productos (recambio/pedido)</th><th>Reponer en</th><th>Estado</th><th></th></tr></thead><tbody>${rows || emptyRow(6, "Sin reposiciones registradas.")}</tbody></table></div></div>`,
+      "reposiciones");
   }
 
   function renderPendingTransfersBanner() {
@@ -11453,12 +11498,13 @@
           <div class="form-grid" style="margin-top:8px">
             <div class="field span-4"><label>Mensaje</label><textarea id="holiday-message" rows="2">${escapeHtml(getHolidayMessageText())}</textarea></div>
             <div class="field span-2"><label>Nombre de plantilla Meta</label><input id="holiday-template" value="${escapeAttr((state.appSettings && state.appSettings.holidayTemplateName) || "")}" placeholder="ej: aviso_feriado" /></div>
-            <div class="field span-2"><label>&nbsp;</label><button type="button" class="btn ghost full" id="settings-holidays-btn">Gestionar feriados (agregar/aprobar fechas)</button></div>
+            <div class="field span-2"><label>&nbsp;</label><button type="button" class="btn ghost full" id="config-holidays-btn">Gestionar feriados</button></div>
             <div class="field span-4"><label><input type="checkbox" id="orderchange-enabled" ${state.appSettings && state.appSettings.orderChangeNotifyEnabled ? "checked" : ""} style="width:auto;min-height:auto" /> Avisar al cliente por WhatsApp al agregar/quitar productos de su pedido</label></div>
             <div class="field span-4"><label>Mensaje de aviso de cambio de pedido (usa {cliente} y {detalle})</label><textarea id="orderchange-message" rows="2">${escapeHtml(getOrderChangeMessageText())}</textarea></div>
             <div class="field span-2"><label>Nombre de plantilla Meta (cambios de pedido)</label><input id="orderchange-template" value="${escapeAttr((state.appSettings && state.appSettings.orderChangeTemplateName) || "")}" placeholder="ej: pedido_modificado" /></div>
             <div class="field span-4"><label><input type="checkbox" id="dunning-enabled" ${state.appSettings && state.appSettings.dunningEnabled ? "checked" : ""} style="width:auto;min-height:auto" /> Enviar recordatorios de pago (WhatsApp diario + correo a los 3 dias de mora)</label></div>
             <div class="field span-4"><label>Mensaje WhatsApp de recordatorio (usa {cliente} y {saldo})</label><textarea id="dunning-wa-message" rows="2">${escapeHtml((state.appSettings && state.appSettings.dunningWhatsappMessage) || "Hola {cliente}, ayer no registramos el pago correspondiente, su saldo es {saldo} por favor regularizar su deuda")}</textarea></div>
+            <div class="field span-2"><label>Asunto del correo de mora (usa {cliente})</label><input id="dunning-mail-subject" value="${escapeAttr((state.appSettings && state.appSettings.dunningMailSubject) || "Demora de pago: {cliente}")}" /></div>
             <div class="field span-4"><label>Mensaje de correo de mora (usa {cliente}, {diassinpago} y {saldo})</label><textarea id="dunning-mail-message" rows="2">${escapeHtml((state.appSettings && state.appSettings.dunningMailMessage) || "El cliente {cliente} tiene una demora de pago de {diassinpago} y su saldo es {saldo}.")}</textarea></div>
             <div class="field span-2"><label>Nombre de plantilla Meta (recordatorio de pago)</label><input id="dunning-template" value="${escapeAttr((state.appSettings && state.appSettings.dunningWhatsappTemplate) || "")}" placeholder="ej: recordatorio_pago" /></div>
             <div class="field span-4"><label>Mensaje de aviso de suba de precio (usa {producto}, {porcentaje}, {precioAnterior}, {precioNuevo})</label><textarea id="priceinc-message" rows="2">${escapeHtml(getPriceIncreaseMessageText())}</textarea></div>
@@ -11763,7 +11809,7 @@
     if (holidayMessageInput) holidayMessageInput.addEventListener("change", () => { state.appSettings.holidayMessage = holidayMessageInput.value.trim(); saveState(); });
     const holidayTemplateInput = document.getElementById("holiday-template");
     if (holidayTemplateInput) holidayTemplateInput.addEventListener("change", () => { state.appSettings.holidayTemplateName = holidayTemplateInput.value.trim(); saveState(); });
-    const settingsHolidaysBtn = document.getElementById("settings-holidays-btn");
+    const settingsHolidaysBtn = document.getElementById("config-holidays-btn");
     if (settingsHolidaysBtn) settingsHolidaysBtn.addEventListener("click", openHolidaysModal);
     const ocEnabled = document.getElementById("orderchange-enabled");
     if (ocEnabled) ocEnabled.addEventListener("change", () => { state.appSettings.orderChangeNotifyEnabled = ocEnabled.checked; saveState(); });
@@ -11777,6 +11823,8 @@
     if (dnWa) dnWa.addEventListener("change", () => { state.appSettings.dunningWhatsappMessage = dnWa.value.trim(); saveState(); });
     const dnMail = document.getElementById("dunning-mail-message");
     if (dnMail) dnMail.addEventListener("change", () => { state.appSettings.dunningMailMessage = dnMail.value.trim(); saveState(); });
+    const dnMailSubj = document.getElementById("dunning-mail-subject");
+    if (dnMailSubj) dnMailSubj.addEventListener("change", () => { state.appSettings.dunningMailSubject = dnMailSubj.value.trim(); saveState(); });
     const dnTpl = document.getElementById("dunning-template");
     if (dnTpl) dnTpl.addEventListener("change", () => { state.appSettings.dunningWhatsappTemplate = dnTpl.value.trim(); saveState(); });
     const piMsg = document.getElementById("priceinc-message");
