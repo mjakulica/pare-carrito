@@ -11503,6 +11503,8 @@
             <div class="field span-4"><label>Mensaje de aviso de cambio de pedido (usa {cliente} y {detalle})</label><textarea id="orderchange-message" rows="2">${escapeHtml(getOrderChangeMessageText())}</textarea></div>
             <div class="field span-2"><label>Nombre de plantilla Meta (cambios de pedido)</label><input id="orderchange-template" value="${escapeAttr((state.appSettings && state.appSettings.orderChangeTemplateName) || "")}" placeholder="ej: pedido_modificado" /></div>
             <div class="field span-4"><label><input type="checkbox" id="mailing-enabled" ${!state.appSettings || state.appSettings.mailingEnabled !== false ? "checked" : ""} style="width:auto;min-height:auto" /> Enviar correos automáticos (facturación y correo de mora). Destildá para desactivar todos los correos.</label></div>
+            <div class="field span-4"><label><input type="checkbox" id="whatsapp-enabled" ${!state.appSettings || state.appSettings.whatsappEnabled !== false ? "checked" : ""} style="width:auto;min-height:auto" /> Enviar WhatsApp automáticos (mora, avisos de cambio de pedido, suba de precio, feriados). Destildá para desactivar todos los WhatsApp automáticos.</label></div>
+            <div class="field span-4"><label><input type="checkbox" id="billing-enabled" ${!state.appSettings || state.appSettings.billingEnabled !== false ? "checked" : ""} style="width:auto;min-height:auto" /> Facturación automática activada. Destildá para pausar la emisión automática de facturas (la facturación manual sigue disponible).</label></div>
             <div class="field span-4"><label><input type="checkbox" id="dunning-enabled" ${state.appSettings && state.appSettings.dunningEnabled ? "checked" : ""} style="width:auto;min-height:auto" /> Enviar recordatorios de pago (WhatsApp diario + correo a los 3 dias de mora)</label></div>
             <div class="field span-4"><label>Mensaje WhatsApp de recordatorio (usa {cliente} y {saldo})</label><textarea id="dunning-wa-message" rows="2">${escapeHtml((state.appSettings && state.appSettings.dunningWhatsappMessage) || "Hola {cliente}, ayer no registramos el pago correspondiente, su saldo es {saldo} por favor regularizar su deuda")}</textarea></div>
             <div class="field span-2"><label>Asunto del correo de mora (usa {cliente})</label><input id="dunning-mail-subject" value="${escapeAttr((state.appSettings && state.appSettings.dunningMailSubject) || "Demora de pago: {cliente}")}" /></div>
@@ -11820,6 +11822,10 @@
     if (ocTemplate) ocTemplate.addEventListener("change", () => { state.appSettings.orderChangeTemplateName = ocTemplate.value.trim(); saveState(); });
     const mailingEnabled = document.getElementById("mailing-enabled");
     if (mailingEnabled) mailingEnabled.addEventListener("change", () => { state.appSettings.mailingEnabled = mailingEnabled.checked; saveState(); });
+    const whatsappEnabled = document.getElementById("whatsapp-enabled");
+    if (whatsappEnabled) whatsappEnabled.addEventListener("change", () => { state.appSettings.whatsappEnabled = whatsappEnabled.checked; saveState(); });
+    const billingEnabled = document.getElementById("billing-enabled");
+    if (billingEnabled) billingEnabled.addEventListener("change", () => { state.appSettings.billingEnabled = billingEnabled.checked; saveState(); });
     const dnEnabled = document.getElementById("dunning-enabled");
     if (dnEnabled) dnEnabled.addEventListener("change", () => { state.appSettings.dunningEnabled = dnEnabled.checked; saveState(); });
     const dnWa = document.getElementById("dunning-wa-message");

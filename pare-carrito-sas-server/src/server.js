@@ -57,6 +57,9 @@ function getMailTransport() {
   return mailTransport;
 }
 
+function whatsappOff(settings) {
+  return !!process.env.WHATSAPP_DISABLED || (settings && settings.whatsappEnabled === false);
+}
 async function sendMail(to, subject, html, attachments) {
   if (process.env.MAILING_DISABLED) {
     console.log("[mail deshabilitado por MAILING_DISABLED] Para:", to, "| Asunto:", subject);
@@ -1807,6 +1810,7 @@ app.post("/clients/holiday-broadcast", authenticate, requireRole("manager", "adm
   if (!stored) return res.status(404).json({ error: "Sin datos." });
   const d = stored.data || {};
   const settings = d.appSettings || {};
+  if (whatsappOff(settings)) return res.json({ ok: true, skipped: "whatsapp desactivado" });
   const templateName = settings.holidayTemplateName || "";
   if (!templateName) return res.status(400).json({ error: "Configura el nombre de la plantilla de Meta en Configuracion." });
   const lang = settings.holidayTemplateLang || "es";
@@ -1846,6 +1850,7 @@ app.post("/clients/order-change-notify", authenticate, async (req, res) => {
   if (!stored) return res.status(404).json({ error: "Sin datos." });
   const d = stored.data || {};
   const settings = d.appSettings || {};
+  if (whatsappOff(settings)) return res.json({ ok: true, skipped: "whatsapp desactivado" });
   if (!settings.orderChangeNotifyEnabled) return res.json({ ok: true, skipped: "deshabilitado" });
   const templateName = settings.orderChangeTemplateName || "";
   if (!templateName) return res.status(400).json({ error: "Configura la plantilla de aviso de cambios en Configuracion." });
@@ -1882,6 +1887,7 @@ app.post("/clients/price-increase-notify", authenticate, async (req, res) => {
   if (!stored) return res.status(404).json({ error: "Sin datos." });
   const d = stored.data || {};
   const settings = d.appSettings || {};
+  if (whatsappOff(settings)) return res.json({ ok: true, skipped: "whatsapp desactivado" });
   const templateName = settings.priceIncreaseTemplateName || "";
   if (!templateName) return res.status(400).json({ error: "Configura la plantilla de aviso de suba en Configuracion." });
   const lang = settings.priceIncreaseTemplateLang || "es";
@@ -1956,6 +1962,8 @@ function startBillingScheduler() {
     try {
       const art = nowArt();
       if (art.hour >= 23 && billingLastRunDate !== art.dateISO) {
+        const bcfg = await pool.query("SELECT data->'appSettings'->>'billingEnabled' AS b FROM app_state WHERE id = 'main'").catch(() => ({ rows: [] }));
+        if (bcfg.rows[0] && bcfg.rows[0].b === "false") { return; }
         const result = await runBilling({ pool, lastRunDate: billingLastRunDate });
         try { await emailBillingResults(result.results); } catch (e) { console.error("emailBillingResults:", e.message); }
         if (result.lastRunDate) {
@@ -2045,7 +2053,7 @@ async function runDunning({ pool, now = new Date() }) {
       }
       const phone = String(c.phone || (Array.isArray(c.phones) ? c.phones[0] : "") || "").replace(/\D/g, "");
       // WhatsApp: una vez por dia.
-      if (botUrl && templateName && phone && st.lastWhatsappDate !== today) {
+      if (botUrl && templateName && phone && st.lastWhatsappDate !== today && !whatsappOff(settings)) {
         const msg = waTpl.replace(/{cliente}/g, c.name || "").replace(/{saldo}/g, money(bal));
         try {
           await fetch(botUrl, { method: "POST", headers: { "content-type": "application/json", "x-broadcast-key": botKey }, body: JSON.stringify({ numbers: [phone], templateName, lang, params: [msg] }) });
