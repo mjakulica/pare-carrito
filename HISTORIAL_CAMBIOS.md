@@ -1,5 +1,12 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.50 - Interruptores de WhatsApp y Facturacion (2026-07-04)
+
+- Nuevo check "Enviar WhatsApp automaticos" (`appSettings.whatsappEnabled`, default activado): destildado, no se envian los WhatsApp de mora, aviso de cambio de pedido, suba de precio ni feriados. Kill-switch por env `WHATSAPP_DISABLED`.
+- Nuevo check "Facturacion automatica activada" (`appSettings.billingEnabled`, default activado): destildado, el scheduler no emite facturas automaticamente (la facturacion manual desde la pagina sigue disponible).
+
+---
+
 ## v12.9.49 - Interruptor de correos automaticos (2026-07-04)
 
 - Nuevo check en Configuracion "Enviar correos automaticos" (`appSettings.mailingEnabled`, default activado). Destildado, no se envian los correos de facturacion ni los de mora (dunning). El WhatsApp de mora no se ve afectado.
