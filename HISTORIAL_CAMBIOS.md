@@ -1,5 +1,17 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.42 - Impresion +3pt y fixes de parser (2026-07-04)
+
+### Impresion
+- Se aumentaron en 3 puntos (px) todas las fuentes de los documentos imprimibles (remitos, dividir, vehiculos, historiales, proveedores, etc.).
+
+### Parser de WhatsApp (Nuevo Pedido)
+- "cebolla blanca" (por bolsa o kg) ahora se toma como Cebolla sin dejar "blanca" como nota (blanca es la variedad por defecto).
+- "cebolla verde" / "cebolla verdeo" / "cebolla de verdeo" ahora mapean a Verdeo (antes caia en Cebolla Kg con nota).
+- "N docena y media" (y atados/bolsas/cajones/jaulas/plantas/unidades/maples/kg) se interpreta como N,5 de esa unidad. Ej: "Banana 1 docena y media" -> Banana docena 1,5.
+
+---
+
 ## v12.9.41 - Compras: fix boton Guardar en Otro gasto y favoritos del vendedor (2026-07-04)
 
 - Compras/Gastos: al elegir Tipo "Otro gasto" (y otros tipos sin grilla) el boton "Guardar egreso" volvia a desaparecer porque quedaba dentro del bloque de items que se oculta. Se movio el Total y la fila de botones fuera de ese bloque, asi el boton Guardar egreso queda siempre visible; el recuadro Productos se oculta en esos tipos.
