@@ -1,5 +1,11 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.44 - Vehiculos: pedidos sin vehiculo (2026-07-04)
+
+- La pagina Vehiculos solo mostraba los pedidos cuyo vehiculo coincidia con un vehiculo activo, por lo que los pedidos sin vehiculo asignado (o con un vehiculo borrado/inactivo) quedaban huerfanos y no se podian reasignar (ej. Charrua). Ahora aparece una columna "Sin vehiculo" con esos pedidos del dia y el selector incluye la opcion "Sin asignar".
+
+---
+
 ## v12.9.43 - Parser: minimo por atado (2026-07-04)
 
 - Los productos por atado no se dividen a menos de 0,5: si el parser interpreta una fraccion menor (ej. "un poquito" = 0,2), se sube a 0,5. Excepcion: perejil, que admite minimo 0,25. Ej: "un poquito de menta" -> 0,5 menta; "un poquito de perejil" -> 0,25 perejil. (Aplica a pedidos nuevos; los ya cargados no se recalculan solos.)
