@@ -11442,7 +11442,7 @@
         </form>` : ""}
         ${canEditSidebarOrder ? `<div class="panel">
           <h2 class="page-title" style="font-size:18px">Orden del sidebar</h2>
-          <div class="sidebar-order-list" style="margin-top:10px">${sidebarRows}</div>
+          <div class="sidebar-order-list" style="margin-top:10px;max-height:240px;overflow:auto">${sidebarRows}</div>
           <div class="page-actions" style="margin-top:12px"><button class="btn ghost" type="button" id="reset-sidebar-order">Restablecer orden</button></div>
         </div>` : ""}
         ${canManageProductCategories ? `<div class="panel">
@@ -11479,7 +11479,7 @@
         ${canManageUnitTypes ? `<div class="panel">
           <h2 class="page-title" style="font-size:18px">Productos con leyenda "kg" (detalle de Remitos/Pedidos)</h2>
           <p class="muted">En el detalle desplegable se oculta el tipo de unidad; estos productos muestran "kg".</p>
-          <div class="sidebar-order-list" style="margin-top:10px">${getKgLegendIds().map((pid) => { const prod = getProduct(pid); return `<div class="page-actions" style="justify-content:space-between"><span>${escapeHtml(prod ? prod.name : pid)}</span><button class="btn small danger" type="button" data-remove-kg-legend="${escapeAttr(pid)}">Quitar</button></div>`; }).join("") || `<span class="muted">Sin productos.</span>`}</div>
+          <div class="sidebar-order-list" style="margin-top:10px;max-height:240px;overflow:auto">${getKgLegendIds().map((pid) => { const prod = getProduct(pid); return `<div class="page-actions" style="justify-content:space-between"><span>${escapeHtml(prod ? prod.name : pid)}</span><button class="btn small danger" type="button" data-remove-kg-legend="${escapeAttr(pid)}">Quitar</button></div>`; }).join("") || `<span class="muted">Sin productos.</span>`}</div>
           <div class="form-grid" style="margin-top:12px">
             <div class="field span-2"><label>Agregar producto</label><select id="kg-legend-add">${activeProducts().slice().sort((a, b) => a.name.localeCompare(b.name)).map((p) => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join("")}</select></div>
             <div class="field"><label>&nbsp;</label><button class="btn primary" type="button" id="kg-legend-add-btn">Agregar</button></div>
@@ -11495,7 +11495,7 @@
         ${(currentUser.role === "manager" || currentUser.role === "admin") ? `<div class="panel">
           <h2 class="page-title" style="font-size:18px">Aviso de feriados (WhatsApp)</h2>
           <p class="muted">Texto que se manda a los clientes al bloquear un feriado. Podes usar {fecha} y {feriado}.</p>
-          <div class="form-grid" style="margin-top:8px">
+          <div class="form-grid" style="margin-top:8px;max-height:320px;overflow:auto;padding-right:6px">
             <div class="field span-4"><label>Mensaje</label><textarea id="holiday-message" rows="2">${escapeHtml(getHolidayMessageText())}</textarea></div>
             <div class="field span-2"><label>Nombre de plantilla Meta</label><input id="holiday-template" value="${escapeAttr((state.appSettings && state.appSettings.holidayTemplateName) || "")}" placeholder="ej: aviso_feriado" /></div>
             <div class="field span-2"><label>&nbsp;</label><button type="button" class="btn ghost full" id="config-holidays-btn">Gestionar feriados</button></div>
@@ -11641,7 +11641,7 @@
         <div class="grid two" style="margin-top:12px">
           <div>
             <strong>Paginas visibles y orden</strong>
-            <div class="sidebar-order-list" style="margin-top:8px">
+            <div class="sidebar-order-list" style="margin-top:8px;max-height:240px;overflow:auto">
               ${orderedMenu.map((item) => `
                 <div class="sidebar-order-row">
                   <label class="check-item" style="padding:0"><input type="checkbox" data-perm-page="${item.id}" ${pageVisibleForRole(item, role) ? "checked" : ""} /><span>${escapeHtml(item.label)}</span></label>
