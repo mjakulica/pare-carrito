@@ -17458,7 +17458,7 @@
         // No auto-cerramos la ventana (en Android Chrome eso deja la hoja en blanco o cancela
         // la impresion). Mostramos el contenido + un boton "Imprimir" visible como fallback,
         // e intentamos disparar el dialogo de impresion una vez cargado.
-        printWindow.document.write(`<!doctype html><html><head><base href="${escapeAttr(baseHref)}"><title>${escapeHtml(title)}</title><style>${printDocumentStyles(options)}</style></head><body>${body}<button type="button" class="print-now-btn" id="print-now-btn">Imprimir / Guardar PDF</button><script>function pcPrint(){try{window.focus();window.print();}catch(e){}}document.getElementById("print-now-btn").addEventListener("click",pcPrint);window.addEventListener("load",function(){setTimeout(pcPrint,450);});<\/script></body></html>`);
+        printWindow.document.write(`<!doctype html><html><head><meta name="color-scheme" content="light only"><base href="${escapeAttr(baseHref)}"><title>${escapeHtml(title)}</title><style>${printDocumentStyles(options)}</style></head><body>${body}<button type="button" class="print-now-btn" id="print-now-btn">Imprimir / Guardar PDF</button><script>function pcPrint(){try{window.focus();window.print();}catch(e){}}document.getElementById("print-now-btn").addEventListener("click",pcPrint);window.addEventListener("load",function(){setTimeout(pcPrint,450);});<\/script></body></html>`);
         printWindow.document.close();
         setTimeout(() => {
           document.title = previousTitle;
@@ -17478,7 +17478,7 @@
     const doc = frame.contentWindow.document;
     doc.open();
     const baseHref = location.origin + location.pathname.replace(/[^/]*$/, "");
-    doc.write(`<!doctype html><html><head><base href="${escapeAttr(baseHref)}"><title>${escapeHtml(title)}</title><style>${printDocumentStyles(options)}</style></head><body>${body}</body></html>`);
+    doc.write(`<!doctype html><html><head><meta name="color-scheme" content="light only"><base href="${escapeAttr(baseHref)}"><title>${escapeHtml(title)}</title><style>${printDocumentStyles(options)}</style></head><body>${body}</body></html>`);
     doc.close();
     const cleanup = () => {
       setTimeout(() => {
@@ -17503,9 +17503,11 @@
     const pageMargin = options.margin || "8mm";
     return `
       @page{size:${pageSize};margin:${pageMargin}}
+      :root{color-scheme:light only}
+      html,body{background:#fff !important}
       *{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}
       .no-print{display:none !important}
-      body{font-family:Arial,sans-serif;margin:0;color:#111;background:#fff;font-size:14px}
+      body{font-family:Arial,sans-serif;margin:0;color:#111 !important;background:#fff !important;font-size:14px;color-scheme:light only}
       table{width:100%;border-collapse:collapse}
       th,td{padding:4px 6px;text-align:left}
       .num{text-align:right}
