@@ -8112,6 +8112,21 @@
         </section>
       `;
     }).join("");
+    const activeVehicleIdSet = new Set(activeVehicles().map((v) => v.id));
+    const unassignedOrders = ordersByDate(date).filter((o) => !["cancelado", "anulado"].includes(o.status) && !activeVehicleIdSet.has(o.deliveryVehicleId));
+    const unassignedColumn = unassignedOrders.length ? `
+        <section class="vehicle-column">
+          <div class="vehicle-head">
+            <div>
+              <strong>Sin vehículo</strong>
+              <div class="muted">Pedidos sin vehículo asignado</div>
+            </div>
+          </div>
+          <div class="vehicle-body">
+            <div class="metric-note">Pedidos: ${unassignedOrders.length}</div>
+            ${unassignedOrders.map((order) => renderVehicleOrderCard(order)).join("")}
+          </div>
+        </section>` : "";
     afterRender.push(bindVehicles);
     return pageShell(
       "Vehículos",
@@ -8127,7 +8142,7 @@
          <button class="btn ghost" data-copy-vehicle="flat">${WHATSAPP_SVG} Sin dividir</button>
          ${canManageVehicles ? `<button class="btn primary" data-add-vehicle>Agregar vehículo</button>` : ""}
        </div>`,
-      `<div class="vehicle-board">${columns}</div>`,
+      `<div class="vehicle-board">${unassignedColumn}${columns}</div>`,
       "vehiculos"
     );
   }
@@ -8142,6 +8157,7 @@
         <div class="field" style="margin-top:8px">
           <label>Mover a vehículo</label>
           <select data-move-order="${order.id}">
+            <option value="" ${activeVehicles().some((v) => v.id === order.deliveryVehicleId) ? "" : "selected"}>— Sin asignar —</option>
             ${activeVehicles().map((vehicle) => `<option value="${vehicle.id}" ${order.deliveryVehicleId === vehicle.id ? "selected" : ""}>${escapeHtml(vehicle.name)}</option>`).join("")}
           </select>
         </div>
