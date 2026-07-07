@@ -1,5 +1,11 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.51 - Config: recuadros con scroll (2026-07-04)
+
+- En Configuracion (gerente) se agrego scroll (alto maximo + barra) a los paneles "Orden del sidebar", "Productos con leyenda kg", "Aviso de feriados (WhatsApp)" y "Permisos y sidebar por rol", para que no ocupen tanto alto.
+
+---
+
 ## v12.9.50 - Interruptores de WhatsApp y Facturacion (2026-07-04)
 
 - Nuevo check "Enviar WhatsApp automaticos" (`appSettings.whatsappEnabled`, default activado): destildado, no se envian los WhatsApp de mora, aviso de cambio de pedido, suba de precio ni feriados. Kill-switch por env `WHATSAPP_DISABLED`.
