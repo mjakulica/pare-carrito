@@ -1,5 +1,25 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.48 - Alineacion al plan: dunning, recambio y feriados (2026-07-04)
+
+### Recordatorios de pago (dunning, backend)
+- Estado por cliente persistido (`dunningState` en app_state: dueDate, daysWithoutPayment, lastWhatsappDate, emailSent).
+- "Dia esperado" segun tipo de pago: contado/contra factura = tuvo pedido ayer; semanal/cuenta corriente = coincide el dia de semana (cuenta corriente SIN dia de pago no se molesta); 10/15/20 dias y mensual = ultimo pago (o primer saldo) + N.
+- WhatsApp una vez por dia; el correo de mora se manda UNA sola vez al llegar a 3 dias (antes se reenviaba todos los dias). Se sale de mora al pagar en/despues del dia esperado o si el saldo queda en 0.
+- Asunto del correo de mora configurable en Configuracion (`dunningMailSubject`, usa {cliente}).
+
+### Recambio
+- "Proximo pedido" ahora genera un PEDIDO SEPARADO a $0 (no se mezcla con el pedido del cliente).
+- Idempotencia por nota "[REC-id]" en el pedido materializado (ademas del estado).
+- Se valida que la cantidad a recambiar no supere la pedida.
+- Las reposiciones "manana" se materializan cuando llega la fecha (createdDate+1 <= hoy) y se procesan al cargar la app (gerente/admin/empleado).
+- Nueva pagina "Reposiciones" (gerente/admin/empleado) con tabla (fecha, cliente, productos recambio/pedido, reponer en, estado, foto) y boton Eliminar para pendientes; el banner "Prod reposicion" lleva a esa pagina.
+
+### Feriados
+- Boton en Configuracion renombrado a "Gestionar feriados" (id config-holidays-btn), como en el plan.
+
+---
+
 ## v12.9.47 - Motor de precios dinamicos (2026-07-04)
 
 ### Motor (app.js, default APAGADO - sin cambios hasta activarlo)
