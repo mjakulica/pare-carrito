@@ -1,5 +1,11 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.43 - Parser: minimo por atado (2026-07-04)
+
+- Los productos por atado no se dividen a menos de 0,5: si el parser interpreta una fraccion menor (ej. "un poquito" = 0,2), se sube a 0,5. Excepcion: perejil, que admite minimo 0,25. Ej: "un poquito de menta" -> 0,5 menta; "un poquito de perejil" -> 0,25 perejil. (Aplica a pedidos nuevos; los ya cargados no se recalculan solos.)
+
+---
+
 ## v12.9.42 - Impresion +3pt y fixes de parser (2026-07-04)
 
 ### Impresion
