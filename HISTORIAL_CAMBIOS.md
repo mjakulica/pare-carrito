@@ -1,5 +1,12 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.49 - Interruptor de correos automaticos (2026-07-04)
+
+- Nuevo check en Configuracion "Enviar correos automaticos" (`appSettings.mailingEnabled`, default activado). Destildado, no se envian los correos de facturacion ni los de mora (dunning). El WhatsApp de mora no se ve afectado.
+- Ademas, kill-switch a nivel servidor: si `MAILING_DISABLED` esta seteada en el .env, `sendMail` no envia ningun correo.
+
+---
+
 ## v12.9.48 - Alineacion al plan: dunning, recambio y feriados (2026-07-04)
 
 ### Recordatorios de pago (dunning, backend)
