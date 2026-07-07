@@ -475,6 +475,12 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 - Gerente/Admin: en Empleados y Caja, recuadro "Cierres de caja (empleados)" con los ultimos cierres, diferencias de cobro y de caja por empleado activo (30/60/120/todos).
 - Datos: coleccion `state.cashClosings` {id,userId,userName,date,expectedCollected,actualCollected,collectDiff,expectedCash,actualCash,cashDiff,orderIds,createdAt}. Estados UI: `ui.cashClosingLimit`, `ui.cashClosingAdminLimit`, `ui.ccChecked`/`ui.ccCheckedDate`.
 
+### 12.26 Motor de precios dinamicos (v12.9.47)
+- Motor client-side (app.js) que ajusta el margen segun el exceso del cambio de costo de cada producto sobre una canasta interna (mediana del cambio % de costos, ventana configurable). Subas comprimen margen (aplican de una); bajas expanden margen y bajan el precio en pasos del 30% con agenda de recalculo cada 14 dias; zona neutral recupera hacia el margen normal. Funciones: getMarginSection, getPriceAutoSettings, computeBasketIndexPct, computeTargetMargin, computeStepPrice, applyCostChange, runScheduledRepricing (corre al cargar para gerente/admin, guard `appSettings.priceAutoLastRun`).
+- Modo `appSettings.priceAuto.mode`: off (comportamiento historico) / simulation (loguea sin aplicar) / on. Secciones `state.marginSections` (min/normal/max). Producto: `marginSectionId`, `priceAutoExempt`, `isBasketReference`. Log `state.priceAutoLog` (180 dias) y agenda `state.priceAutoSchedule`.
+- Hooks: updateProductCostsFromPurchase y applyCostRelations ("Mantener") pasan por applyCostChange; edicion manual en Precios gana y se loguea; endpoint Compra Hoy marca `pendingReprice`.
+- UI: panel en Configuracion (gerente), columnas Seccion/Auto en Precios, pagina "Ajustes de precios" (log + revertir + agenda).
+
 ### 12.14 Modelo de datos agregado
 - `client.paymentDay`; coleccion `state.replacements` (recambios/reposiciones); `user.providerId` (vinculo del rol proveedor); appSettings: dunning (`dunningEnabled`, `dunningWhatsappMessage`, `dunningMailMessage`, `dunningWhatsappTemplate`) y aviso de cambios (`orderChangeNotifyEnabled`, `orderChangeMessage`, `orderChangeTemplateName`); `purchase.proofFile` (comprobante), tipo de gasto `freight`.
 - `appSettings.stockGroups` (grupos/equivalencias de stock: `{id,name,members:[{productId,factorKg}],wholeProductId,wholeKg,bulkProductId,bulkKg}`); `client.condicionIva` (respaldo de condicion frente al IVA para facturacion); `ui.omittedUnitLines` (lineas de Unidades enviadas/ocultas); appSettings de aviso de suba (`priceIncreaseMessage`, `priceIncreaseTemplateName`, `priceIncreaseTemplateLang`). Estados de UI (no persistidos): `ui.purchaseProductView` / `ui.unitsProductView` (vista cuadricula/lista), `ui.cajaLimit` (30/60/120/todos), `ui.lastActiveDay` (reajuste de fechas por cambio de dia). Cliente: `client.condicionIva`.
@@ -483,7 +489,7 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 
 ## 13. Ultimo Cambio y Version
 
-**Version operativa:** 12.9.46
+**Version operativa:** 12.9.47
 **Fecha:** 2026-06-30
 **Commit GitHub del cambio funcional:** `7fc43f2`
 **Entorno actualizado:** VPS productivo `/opt/pare-carrito` con frontend estatico y API Docker Compose saludable.

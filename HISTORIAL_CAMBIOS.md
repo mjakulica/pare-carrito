@@ -1,5 +1,25 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.47 - Motor de precios dinamicos (2026-07-04)
+
+### Motor (app.js, default APAGADO - sin cambios hasta activarlo)
+- Ajusta el margen segun cuanto subio/bajo el costo de un producto POR ENCIMA de la inflacion general (canasta interna = mediana del cambio % de costos de los productos, ventana 14 dias). Subas fuertes comprimen el margen (hasta el minimo de la seccion) y el precio sube de una; bajas fuertes expanden el margen y el precio baja progresivamente (30% de la brecha por paso), con recalculo programado cada 14 dias para las bajas grandes. Zona neutral: el margen se recupera hacia el normal.
+- Secciones de margen (min/normal/max) editables; cada producto pertenece a una seccion (default "Otros").
+- Modo: Apagado (comportamiento actual) / Simulacion (calcula y registra sin tocar precios) / Activado. La edicion manual en Precios siempre gana y queda logueada.
+
+### UI
+- Configuracion (gerente): panel "Precios automaticos" con modo, secciones, parametros avanzados e indicador de canasta.
+- Precios: columnas "Seccion" y "Auto" (pill del ultimo ajuste + checkbox "No ajustar").
+- Nueva pagina "Ajustes de precios" (gerente/admin): metricas, registro de ajustes (con Revertir) y agenda de convergencia.
+
+### Backend
+- Endpoint Compra Hoy (server.js): marca `pendingReprice`; el frontend reprecia al cargar (bajo modo off el resultado es el mismo).
+
+### Datos
+- `state.marginSections`, `state.priceAutoLog`, `state.priceAutoSchedule`; `appSettings.priceAuto`; `product.marginSectionId/priceAutoExempt/isBasketReference`. Sincronizados y mergeados.
+
+---
+
 ## v12.9.46 - Compras: hora de cada movimiento (2026-07-04)
 
 - Las compras/gastos ahora guardan la hora de creacion (`createdAt`). En la tabla de movimientos de Compras/Gastos se muestra la hora (hh:mm) junto al nombre del usuario que registro el egreso, igual que en Pedidos. Aplica a los egresos nuevos (los cargados antes no tienen la marca de hora).
