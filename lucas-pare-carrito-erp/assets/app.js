@@ -7207,6 +7207,7 @@
         if (amount > getCajaBalance(sourceCashBoxId)) return alert("El monto supera el balance disponible de su caja efectivo.");
         const movement = {
           id: nextDatedId("MOV", state.purchases),
+          createdAt: new Date().toISOString(),
           date: document.getElementById("purchase-date").value || todayISO(),
           expenseType: "cash_movement",
           providerId: "",
@@ -7293,6 +7294,7 @@
       }
       const purchase = {
         id: nextDatedId("CMP", state.purchases),
+        createdAt: new Date().toISOString(),
         date: document.getElementById("purchase-date").value || todayISO(),
         expenseType,
         providerId: provider ? provider.id : "",
@@ -11868,6 +11870,7 @@
     const item = { productId: product.id, productName: product.name, quantity, unitCost, totalCost: quantity * unitCost, unitType: product.unitType };
     const purchase = {
       id: nextDatedId("CMP", state.purchases),
+      createdAt: new Date().toISOString(),
       date: row.date || todayISO(),
       expenseType: "purchase",
       providerId: provider ? provider.id : "",
@@ -13496,6 +13499,7 @@
           if (quantity <= 0 || unitCost <= 0) return alert("Complete cantidad y monto.");
           const purchase = {
             id: nextDatedId("CMP", state.purchases),
+            createdAt: new Date().toISOString(),
             date: document.getElementById("item-expense-date").value || todayISO(),
             expenseType: "product_expense",
             providerId: item.assignedProviderId || "",
@@ -15714,6 +15718,7 @@
     state.providerPayments.push(payment);
     state.purchases.push({
       id: nextDatedId("CMP", state.purchases),
+      createdAt: new Date().toISOString(),
       date: payment.date,
       expenseType: "provider_payment",
       providerId: provider.id,
