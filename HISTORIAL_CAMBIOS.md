@@ -1,5 +1,11 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.45 - Impresion: forzar tema claro (2026-07-04)
+
+- Los documentos imprimibles ahora fuerzan `color-scheme: light only` (meta + CSS con fondo blanco). Evita que el "modo oscuro forzado" del navegador (Chrome/Android) oscurezca el remito y muestre barras negras tapando los nombres de los productos. Antes salia bien en un dispositivo sin ese modo y mal en uno con force-dark activado.
+
+---
+
 ## v12.9.44 - Vehiculos: pedidos sin vehiculo (2026-07-04)
 
 - La pagina Vehiculos solo mostraba los pedidos cuyo vehiculo coincidia con un vehiculo activo, por lo que los pedidos sin vehiculo asignado (o con un vehiculo borrado/inactivo) quedaban huerfanos y no se podian reasignar (ej. Charrua). Ahora aparece una columna "Sin vehiculo" con esos pedidos del dia y el selector incluye la opcion "Sin asignar".
