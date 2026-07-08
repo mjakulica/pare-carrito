@@ -1,5 +1,11 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.52 - Fix: sincronizacion del rol proveedor (2026-07-04)
+
+- El rol proveedor cargaba compras/gastos y precios pero NO se sincronizaban al servidor: quedaban solo en su localStorage y no aparecian en el resto del sistema. Causa: `canWritePatchCloudSync()` (frontend) no incluia a `proveedor`, asi que su patch nunca se enviaba (el servidor ya lo aceptaba via PATCH_SYNC_ROLES). Se agrego `proveedor` a esa funcion.
+
+---
+
 ## v12.9.51 - Config: recuadros con scroll (2026-07-04)
 
 - En Configuracion (gerente) se agrego scroll (alto maximo + barra) a los paneles "Orden del sidebar", "Productos con leyenda kg", "Aviso de feriados (WhatsApp)" y "Permisos y sidebar por rol", para que no ocupen tanto alto.
