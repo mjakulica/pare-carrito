@@ -1342,7 +1342,9 @@
   }
 
   function canWritePatchCloudSync() {
-    return !currentUser || ["manager", "admin", "employee", "contador"].includes(currentUser.role);
+    // proveedor incluido: carga compras/precios de sus productos y debe sincronizar al servidor
+    // (antes solo persistia en localStorage y no se veia en el resto del sistema).
+    return !currentUser || ["manager", "admin", "employee", "contador", "proveedor"].includes(currentUser.role);
   }
 
   function canUseFullCloudSync() {
