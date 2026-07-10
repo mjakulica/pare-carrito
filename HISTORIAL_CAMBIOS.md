@@ -1,5 +1,11 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.58 - Proveedores: recuadro de precios del proveedor para empleado (2026-07-04)
+
+- El rol empleado ahora tambien ve, al seleccionar un proveedor en Proveedores, el recuadro "Precios de <proveedor> (lo que vende)" con Producto, Precio y Ultima actualizacion (antes solo gerente/admin).
+
+---
+
 ## v12.9.57 - Modales mas faciles de cerrar en mobile (2026-07-04)
 
 - Todos los popups/modales ahora tienen alto maximo (92vh) con el cuerpo scrolleable y la cabecera (boton Cerrar) y el pie (Cancelar/Guardar) fijos y siempre visibles, incluso en modales largos. Antes, en mobile, esos botones podian quedar fuera de pantalla.
