@@ -10171,7 +10171,7 @@
       </div>` : ""}
       ${!isAllProviders && selectedProvider && ["manager", "admin"].includes(currentUser.role) ? `<div class="panel" style="margin-bottom:14px">
         <h2 class="page-title" style="font-size:18px">Precios de ${escapeHtml(selectedProvider.name)} (lo que vende)</h2>
-        <div class="table-wrap" style="margin-top:8px"><table><thead><tr><th>Producto</th><th>Precio</th><th>Última actualización</th></tr></thead><tbody>${(selectedProvider.productsSupplied || []).map((pid) => { const p = getProduct(pid); if (!p) return ""; const dp = getProviderDeclaredPrice(selectedProvider, pid); return `<tr><td>${escapeHtml(p.name)}</td><td class="num">${dp ? formatMoney(dp.cost) : "-"}</td><td>${dp && dp.date ? formatDate(dp.date) : "-"}</td></tr>`; }).join("") || emptyRow(3, "Sin productos cargados.")}</tbody></table></div>
+        <div class="table-wrap" style="margin-top:8px"><table><thead><tr><th>Producto</th><th>Precio</th><th>Última actualización</th></tr></thead><tbody>${(selectedProvider.productsSupplied || []).map((pid) => { const p = getProduct(pid); if (!p) return ""; const ef = getProviderEffectivePrice(selectedProvider, pid); return `<tr><td>${escapeHtml(p.name)}</td><td class="num">${ef ? formatMoney(ef.cost) : "-"}</td><td>${ef && ef.date ? formatDate(ef.date) : "-"}</td></tr>`; }).join("") || emptyRow(3, "Sin productos cargados.")}</tbody></table></div>
       </div>` : ""}
       <div class="panel" style="margin-bottom:14px">
         <h2 class="page-title" style="font-size:18px">Precios por proveedor de un producto</h2>
@@ -16104,6 +16104,22 @@
     if (!provider.productPrices) provider.productPrices = {};
     provider.productPrices[pid] = { cost: Number(cost || 0), marketPrice: Number(marketPrice || 0), date: todayISO() };
   }
+  function getProviderEffectivePrice(provider, pid) {
+    let lastP = null;
+    (state.purchases || []).forEach((pu) => {
+      if (!pu || pu.providerId !== provider.id || pu.expenseType !== "purchase") return;
+      (pu.items || []).forEach((it) => {
+        if (it.productId !== pid || !(Number(it.unitCost) > 0)) return;
+        const dt = String(pu.date || "");
+        if (!lastP || dt >= lastP.date) lastP = { cost: Number(it.unitCost || 0), date: dt };
+      });
+    });
+    const dp = getProviderDeclaredPrice(provider, pid);
+    if (dp && (!lastP || String(dp.date || "") > String(lastP.date || ""))) return { cost: dp.cost, date: dp.date, source: "mis precios" };
+    if (lastP) return { cost: lastP.cost, date: lastP.date, source: "compra" };
+    if (dp) return { cost: dp.cost, date: dp.date, source: "mis precios" };
+    return null;
+  }
   function getProviderProductHistory(productId) {
     const latest = new Map();
     state.purchases.forEach((purchase) => {
@@ -16145,7 +16161,7 @@
       const dp = getProviderDeclaredPrice(provider, productId);
       if (!dp) return;
       const ex = latest.get(provider.id);
-      if (!ex || String(dp.date || "") >= String(ex.date || "")) {
+      if (!ex || String(dp.date || "") > String(ex.date || "")) {
         latest.set(provider.id, { providerId: provider.id, providerName: provider.name, date: dp.date || "", purchaseId: ex ? ex.purchaseId : "", unitCost: dp.cost, quantity: ex ? ex.quantity : null, unitType: (getProduct(productId) || {}).unitType || "", linkedOnly: !ex && !dp.date });
       }
     });
