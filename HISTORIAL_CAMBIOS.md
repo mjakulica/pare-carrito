@@ -1,5 +1,14 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.53 - Sincronizacion: envio confirmado + indicador de pendientes (2026-07-04)
+
+- Pedido de cliente y compra de proveedor ahora confirman contra el servidor al enviarse (fail-fast): si hay internet, avisan "enviado"; si no, avisan claramente "SIN CONEXION: todavia no se envio, quedo pendiente" en vez de decir "guardado" en silencio.
+- Indicador visible arriba de "N cambio(s) sin enviar al sistema" cuando la cola offline tiene items (cualquier rol).
+- Al presionar Salir con cambios pendientes, pide confirmacion; ademas, aviso del navegador (beforeunload) si se intenta cerrar la pestania con pendientes.
+- El resto de acciones (empleados en la calle) mantienen la cola offline resiliente, ahora con el indicador para que nunca sea silencioso.
+
+---
+
 ## v12.9.52 - Fix: sincronizacion del rol proveedor (2026-07-04)
 
 - El rol proveedor cargaba compras/gastos y precios pero NO se sincronizaban al servidor: quedaban solo en su localStorage y no aparecian en el resto del sistema. Causa: `canWritePatchCloudSync()` (frontend) no incluia a `proveedor`, asi que su patch nunca se enviaba (el servidor ya lo aceptaba via PATCH_SYNC_ROLES). Se agrego `proveedor` a esa funcion.
