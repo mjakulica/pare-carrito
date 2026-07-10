@@ -1,5 +1,12 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.57 - Modales mas faciles de cerrar en mobile (2026-07-04)
+
+- Todos los popups/modales ahora tienen alto maximo (92vh) con el cuerpo scrolleable y la cabecera (boton Cerrar) y el pie (Cancelar/Guardar) fijos y siempre visibles, incluso en modales largos. Antes, en mobile, esos botones podian quedar fuera de pantalla.
+- Se cierra tocando el fondo oscuro afuera del cuadro. Tap targets mas grandes en mobile.
+
+---
+
 ## v12.9.56 - Prioridad de precio por proveedor (2026-07-04)
 
 - El precio mostrado por proveedor (buscador de producto y panel del proveedor en Proveedores) prioriza la ULTIMA modificacion; en caso de empate de fecha, gana el precio de la ultima COMPRA sobre el de "Mis Precios". Si no hay compra, se usa Mis Precios; si no hay ninguno, "-".
