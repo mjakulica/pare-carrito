@@ -1,5 +1,11 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.56 - Prioridad de precio por proveedor (2026-07-04)
+
+- El precio mostrado por proveedor (buscador de producto y panel del proveedor en Proveedores) prioriza la ULTIMA modificacion; en caso de empate de fecha, gana el precio de la ultima COMPRA sobre el de "Mis Precios". Si no hay compra, se usa Mis Precios; si no hay ninguno, "-".
+
+---
+
 ## v12.9.55 - Precios por proveedor (2026-07-04)
 
 - Nuevo: precio por proveedor por producto (`provider.productPrices[pid] = {cost, marketPrice, date}`), sincronizado con el proveedor.
