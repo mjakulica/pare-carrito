@@ -9991,11 +9991,18 @@
 
   function renderProviderCosts() {
     const prov = getProvider(currentProviderId());
-    const products = providerSuppliedProducts();
-    const rows = products.map((p) => {
-      const rec = state.prices[p.id] || { cost: p.baseCost || 0, marketPrice: 0 };
-      return `<tr data-pcost-row="${escapeAttr(p.id)}"><td>${escapeHtml(p.name)}</td><td><input data-pcost-cost inputmode="decimal" value="${formatAmountInput(rec.cost || 0)}" style="max-width:130px" /></td><td><input data-pcost-market inputmode="decimal" value="${formatAmountInput(rec.marketPrice || 0)}" style="max-width:130px" /></td><td><button class="btn small danger" type="button" data-pcost-remove="${escapeAttr(p.id)}" title="Sacar de mis productos">Desactivar</button></td></tr>`;
-    }).join("");
+    const assignedList = providerAssignedProducts();
+    const assignedIds = new Set(assignedList.map((p) => p.id));
+    const otherList = providerSuppliedProducts().filter((p) => !assignedIds.has(p.id));
+    const rowFor = (p, removable) => {
+      const dp = getProviderDeclaredPrice(prov, p.id);
+      const g = state.prices[p.id] || {};
+      const cost = dp ? dp.cost : Number(g.cost || p.baseCost || 0);
+      const market = dp ? dp.marketPrice : Number(g.marketPrice || 0);
+      const date = dp && dp.date ? dp.date : (g.date || "");
+      return `<tr data-pcost-row="${escapeAttr(p.id)}"><td>${escapeHtml(p.name)}</td><td><input data-pcost-cost inputmode="decimal" value="${formatAmountInput(cost)}" style="max-width:120px" /></td><td><input data-pcost-market inputmode="decimal" value="${formatAmountInput(market)}" style="max-width:120px" /></td><td>${date ? formatDate(date) : "-"}</td><td>${removable ? `<button class="btn small danger" type="button" data-pcost-remove="${escapeAttr(p.id)}" title="Sacar de mis productos">Quitar</button>` : ""}</td></tr>`;
+    };
+    const tbl = (list, removable, emptyTxt) => `<div class="table-wrap"><table><thead><tr><th>Producto</th><th>Costo</th><th>Precio mercado</th><th>Última modif.</th><th></th></tr></thead><tbody>${list.map((p) => rowFor(p, removable)).join("") || emptyRow(5, emptyTxt)}</tbody></table></div>`;
     afterRender.push(() => {
       const btn = document.getElementById("pcost-save");
       if (btn) btn.addEventListener("click", () => {
@@ -10003,10 +10010,14 @@
           const rid = row.dataset.pcostRow;
           const cost = parseAmount(row.querySelector("[data-pcost-cost]").value);
           const market = parseAmount(row.querySelector("[data-pcost-market]").value);
-          const prev = state.prices[rid] || {};
-          const prod = getProduct(rid);
-          state.prices[rid] = { productId: rid, date: todayISO(), cost, marketPrice: market, marginPct: prev.marginPct != null ? prev.marginPct : (prod ? calcMargin(prod.baseCost, prod.salePrice) : 0), price: prev.price != null ? prev.price : (prod ? prod.salePrice || 0 : 0) };
-          if (prod) prod.baseCost = cost;
+          if (prov) setProviderDeclaredPrice(prov, rid, cost, market);
+          // Si el producto esta asignado a este proveedor, ademas actualiza el precio global (afecta ventas).
+          if (assignedIds.has(rid)) {
+            const prev = state.prices[rid] || {};
+            const prod = getProduct(rid);
+            state.prices[rid] = { productId: rid, date: todayISO(), cost, marketPrice: market, marginPct: prev.marginPct != null ? prev.marginPct : (prod ? calcMargin(prod.baseCost, prod.salePrice) : 0), price: prev.price != null ? prev.price : (prod ? prod.salePrice || 0 : 0) };
+            if (prod) prod.baseCost = cost;
+          }
         });
         saveState();
         alert("Precios actualizados.");
@@ -10024,9 +10035,10 @@
     });
     return pageShell(
       "Mis Precios",
-      "Carga el costo y el precio de mercado de tus productos.",
+      "Carga el costo y el precio de mercado de tus productos. Arriba los asignados a vos; abajo los que vendés pero todavia no te asignaron.",
       `<button class="btn primary" id="pcost-save">Guardar precios</button><button class="btn ghost" id="pcost-add">Agregar productos</button>`,
-      `<div class="panel"><div class="table-wrap"><table><thead><tr><th>Producto</th><th>Costo</th><th>Precio mercado</th><th></th></tr></thead><tbody>${rows || emptyRow(4, "No tenes productos cargados. Usa 'Agregar productos'.")}</tbody></table></div></div>`,
+      `<div class="panel"><h2 class="page-title" style="font-size:16px">Mis productos asignados</h2>${tbl(assignedList, false, "Todavia no tenes productos asignados.")}</div>
+       <div class="panel" style="margin-top:14px"><h2 class="page-title" style="font-size:16px">Otros productos que vendo (sin asignar todavia)</h2>${tbl(otherList, true, "No tenes otros productos cargados. Usa 'Agregar productos'.")}</div>`,
       "mis-costos"
     );
   }
@@ -10047,10 +10059,9 @@
     const providerProductRows = providerProductHistory.map((entry) => `
       <tr>
         <td>${escapeHtml(entry.providerName)}${entry.linkedOnly ? ` <span class="pill gray">Vinculado</span>` : ""}</td>
-        <td class="num">${entry.unitCost == null ? "" : formatMoney(entry.unitCost)}</td>
+        <td class="num">${entry.unitCost == null ? "-" : formatMoney(entry.unitCost)}</td>
         <td class="num">${entry.quantity == null ? "" : formatNumber(entry.quantity) + " " + escapeHtml(entry.unitType || "")}</td>
-        <td>${entry.date ? formatDate(entry.date) : ""}</td>
-        <td>${escapeHtml(entry.purchaseId || "")}</td>
+        <td>${entry.date ? formatDate(entry.date) : "-"}</td>
       </tr>
     `).join("");
     const rows = providers.map((provider) => `
@@ -10158,6 +10169,15 @@
         <h2 class="page-title" style="font-size:18px">Productos que vende ${escapeHtml(selectedProvider.name)}</h2>
         ${(currentUser && roleFlag(currentUser.role, "editarProveedores")) ? `<input id="prov-products-filter" placeholder="Filtrar productos..." autocomplete="off" style="margin:6px 0" /><div id="prov-products-grid" class="check-grid">${activeProducts().map((p) => `<label class="check-item" data-check-name="${escapeAttr(normalizeText(p.name))}"><input type="checkbox" data-prov-product value="${p.id}" ${(selectedProvider.productsSupplied || []).includes(p.id) ? "checked" : ""} /><span>${escapeHtml(p.name)} - ${escapeHtml(p.unitType)}</span></label>`).join("")}</div>` : `<ul class="divide-print-list">${(selectedProvider.productsSupplied || []).map((pid) => { const p = getProduct(pid); return p ? `<li>${escapeHtml(p.name)} - ${escapeHtml(p.unitType)}</li>` : ""; }).join("") || "<li class='muted'>Sin productos cargados.</li>"}</ul>`}
       </div>` : ""}
+      ${!isAllProviders && selectedProvider && ["manager", "admin"].includes(currentUser.role) ? `<div class="panel" style="margin-bottom:14px">
+        <h2 class="page-title" style="font-size:18px">Precios de ${escapeHtml(selectedProvider.name)} (lo que vende)</h2>
+        <div class="table-wrap" style="margin-top:8px"><table><thead><tr><th>Producto</th><th>Precio</th><th>Última actualización</th></tr></thead><tbody>${(selectedProvider.productsSupplied || []).map((pid) => { const p = getProduct(pid); if (!p) return ""; const dp = getProviderDeclaredPrice(selectedProvider, pid); return `<tr><td>${escapeHtml(p.name)}</td><td class="num">${dp ? formatMoney(dp.cost) : "-"}</td><td>${dp && dp.date ? formatDate(dp.date) : "-"}</td></tr>`; }).join("") || emptyRow(3, "Sin productos cargados.")}</tbody></table></div>
+      </div>` : ""}
+      <div class="panel" style="margin-bottom:14px">
+        <h2 class="page-title" style="font-size:18px">Precios por proveedor de un producto</h2>
+        <div class="form-grid" style="margin-top:8px"><div class="field span-2"><label>Producto</label><select id="provider-product-search"><option value="">Elegí un producto...</option>${activeProducts().slice().sort((a, b) => a.name.localeCompare(b.name)).map((p) => `<option value="${p.id}" ${ui.providerProductId === p.id ? "selected" : ""}>${escapeHtml(p.name)}</option>`).join("")}</select></div></div>
+        ${ui.providerProductId ? `<div class="table-wrap" style="margin-top:8px"><table><thead><tr><th>Proveedor</th><th>Precio</th><th>Cant. últ.</th><th>Última act.</th></tr></thead><tbody>${providerProductRows || emptyRow(4, "Ningún proveedor tiene cargado este producto.")}</tbody></table></div>` : `<p class="muted">Elegí un producto para ver qué proveedores lo venden, su precio y la última actualización.</p>`}
+      </div>
       <div class="panel no-print">
         <div class="table-wrap">
           <table>
@@ -16076,6 +16096,14 @@
     );
   }
 
+  function getProviderDeclaredPrice(provider, pid) {
+    const m = provider && provider.productPrices ? provider.productPrices[pid] : null;
+    return m ? { cost: Number(m.cost || 0), marketPrice: Number(m.marketPrice || 0), date: m.date || "" } : null;
+  }
+  function setProviderDeclaredPrice(provider, pid, cost, marketPrice) {
+    if (!provider.productPrices) provider.productPrices = {};
+    provider.productPrices[pid] = { cost: Number(cost || 0), marketPrice: Number(marketPrice || 0), date: todayISO() };
+  }
   function getProviderProductHistory(productId) {
     const latest = new Map();
     state.purchases.forEach((purchase) => {
@@ -16112,6 +16140,14 @@
         unitType: "",
         linkedOnly: true
       });
+    });
+    activeProviders().forEach((provider) => {
+      const dp = getProviderDeclaredPrice(provider, productId);
+      if (!dp) return;
+      const ex = latest.get(provider.id);
+      if (!ex || String(dp.date || "") >= String(ex.date || "")) {
+        latest.set(provider.id, { providerId: provider.id, providerName: provider.name, date: dp.date || "", purchaseId: ex ? ex.purchaseId : "", unitCost: dp.cost, quantity: ex ? ex.quantity : null, unitType: (getProduct(productId) || {}).unitType || "", linkedOnly: !ex && !dp.date });
+      }
     });
     return Array.from(latest.values()).sort((a, b) => a.providerName.localeCompare(b.providerName));
   }
