@@ -15862,7 +15862,7 @@
     const provider = getProvider(providerId);
     if (!provider) return;
     const ids = new Set(Array.isArray(provider.productsSupplied) ? provider.productsSupplied : []);
-    items.forEach((item) => ids.add(item.productId));
+    items.forEach((item) => { if (item && item.productId) ids.add(item.productId); });
     provider.productsSupplied = Array.from(ids);
   }
 
@@ -16111,7 +16111,7 @@
   function getProviderEffectivePrice(provider, pid) {
     let lastP = null;
     (state.purchases || []).forEach((pu) => {
-      if (!pu || pu.providerId !== provider.id || pu.expenseType !== "purchase") return;
+      if (!pu || pu.providerId !== provider.id || !["purchase", "product_expense"].includes(pu.expenseType)) return;
       (pu.items || []).forEach((it) => {
         if (it.productId !== pid || !(Number(it.unitCost) > 0)) return;
         const dt = String(pu.date || "");
@@ -16127,7 +16127,7 @@
   function getProviderProductHistory(productId) {
     const latest = new Map();
     state.purchases.forEach((purchase) => {
-      if (!purchase.providerId || purchase.expenseType !== "purchase") return;
+      if (!purchase.providerId || !["purchase", "product_expense"].includes(purchase.expenseType)) return;
       (purchase.items || []).forEach((item) => {
         if (item.productId !== productId) return;
         const previous = latest.get(purchase.providerId);
