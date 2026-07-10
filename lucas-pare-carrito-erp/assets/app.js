@@ -459,6 +459,7 @@
     try { runScheduledRepricing(); } catch (e) { console.warn("runScheduledRepricing:", e.message); }
     try { if (currentUser && ["manager", "admin", "employee"].includes(currentUser.role)) generatePendingReplacements(); } catch (e) { console.warn("generatePendingReplacements:", e.message); }
   });
+  window.addEventListener("beforeunload", (e) => { try { if (pendingSyncCount() > 0) { e.preventDefault(); e.returnValue = ""; return ""; } } catch (err) { /* ignore */ } });
   window.addEventListener("online", () => {
     const banner = document.getElementById("offline-banner");
     if (banner) banner.style.display = "none";
@@ -1262,6 +1263,12 @@
     ));
   }
 
+  function pendingSyncCount() {
+    let n = 0;
+    try { n += (loadPatchQueue() || []).length; } catch (e) { /* ignore */ }
+    try { n += (loadClientWriteQueue() || []).length; } catch (e) { /* ignore */ }
+    return n;
+  }
   function loadPatchQueue() {
     try {
       return JSON.parse(localStorage.getItem(PATCH_QUEUE_KEY) || "[]");
@@ -2049,6 +2056,7 @@
     const page = renderRoute(route);
     app.innerHTML = `
       <div id="offline-banner" class="offline-banner" style="display:${typeof navigator !== "undefined" && navigator.onLine === false ? "block" : "none"}">Sin conexión a internet: los cambios se guardan en este dispositivo y se sincronizarán al volver la conexión.</div>
+      ${(() => { const n = pendingSyncCount(); return n ? `<div class="offline-banner" style="display:block;background:#b45309;color:#fff">\u26A0 ${n} cambio(s) sin enviar al sistema. Se enviarán al reconectar; no cierres el sistema con internet apagado.</div>` : ""; })()}
       <div class="app-shell">
         ${renderSidebar(route.base)}
         <div class="sidebar-overlay" aria-hidden="true"></div>
@@ -4552,7 +4560,7 @@
         }
       });
     }
-    form.addEventListener("submit", (event) => {
+    form.addEventListener("submit", async (event) => {
       event.preventDefault();
       if (rejectSunday(dateInput.value)) {
         alert("No se pueden crear pedidos para domingo");
@@ -4636,17 +4644,21 @@
       });
       saveState();
       if (isCustomerOrder) {
-        syncCustomerOrderToCloud(order).catch((error) => {
-          console.warn("Pedido de cliente pendiente:", error.message);
+        try {
+          await syncCustomerOrderToCloud(order);
+          alert("Pedido enviado: " + order.id);
+        } catch (error) {
           queueClientWrite("order", { order });
-        });
+          alert("\u26A0 SIN CONEXIÓN: tu pedido TODAVÍA NO se envió al sistema. Quedó guardado en este dispositivo y se reintentará al volver internet. No cierres el sistema hasta que tengas conexión, o volvé a enviarlo.");
+        }
+      } else {
+        alert("Pedido guardado: " + order.id);
       }
       ui.selectedClientId = "";
       ui.orderProductFilter = "";
       ui.orderDraft = {};
       ui.orderRenderedLimit = getOrderProductBatchLimit();
       ui.selectedDate = defaultNewOrderDate();
-      alert("Pedido guardado: " + order.id);
       render();
     });
     recalc();
@@ -7431,6 +7443,15 @@
         });
       }
       saveState();
+      if (currentUser.role === "proveedor") {
+        try {
+          if (typeof navigator !== "undefined" && navigator.onLine === false) throw new Error("sin conexión");
+          const ok = await flushPatchQueue(false);
+          if (ok === false) throw new Error("pendiente");
+        } catch (e) {
+          alert("\u26A0 SIN CONEXIÓN: la compra TODAVÍA NO se envió al sistema. Quedó guardada en este dispositivo y se reintentará al volver internet. No cierres el sistema hasta tener conexión.");
+        }
+      }
       render();
     });
     document.querySelectorAll("[data-annul-purchase]").forEach((button) => button.addEventListener("click", () => {
@@ -13798,6 +13819,8 @@
     });
     document.querySelectorAll("[data-logout]").forEach((button) => {
       button.addEventListener("click", () => {
+        const pend = pendingSyncCount();
+        if (pend > 0 && !confirm("Tenés " + pend + " cambio(s) sin enviar al sistema. Si salís ahora podrían no llegar hasta que vuelvas a entrar con internet. ¿Salir igual?")) return;
         setCurrentUser(null);
         render();
       });
