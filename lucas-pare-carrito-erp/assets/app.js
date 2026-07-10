@@ -13815,6 +13815,10 @@
     if (!ui.modal) return "";
     afterRender.push(() => {
       document.querySelectorAll("[data-close-modal]").forEach((button) => button.addEventListener("click", closeModal));
+      // Cerrar tocando el fondo oscuro (afuera del cuadro), salvo que el modal pida no hacerlo.
+      if (!ui.modal || !ui.modal.noBackdropClose) {
+        document.querySelectorAll(".modal-backdrop").forEach((bd) => bd.addEventListener("click", (e) => { if (e.target === bd) closeModal(); }));
+      }
       if (ui.modal && ui.modal.bind) ui.modal.bind();
     });
     return `
