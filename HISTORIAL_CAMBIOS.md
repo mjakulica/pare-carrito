@@ -1,5 +1,11 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.59 - Proveedores: compra/gasto agrega producto a lo que vende (2026-07-04)
+
+- Al registrar una compra o gasto de producto a un proveedor con un producto que no estaba en sus "Productos que vende", el producto se agrega automaticamente (lo hacia rememberProviderProducts) y aparece en el recuadro "Precios de <proveedor> (lo que vende)". Ademas, el precio efectivo por proveedor ahora considera tambien los gastos de producto (no solo las compras) para mostrar precio y fecha. Se evita agregar productId vacio.
+
+---
+
 ## v12.9.58 - Proveedores: recuadro de precios del proveedor para empleado (2026-07-04)
 
 - El rol empleado ahora tambien ve, al seleccionar un proveedor en Proveedores, el recuadro "Precios de <proveedor> (lo que vende)" con Producto, Precio y Ultima actualizacion (antes solo gerente/admin).
