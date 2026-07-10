@@ -1,5 +1,12 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.54 - Facturacion cuenta corriente forzada + aviso de feriado al cliente (2026-07-04)
+
+- Facturacion: TODAS las facturas enviadas a TusFacturas van con `condicion_pago` = "205" (Cuenta corriente) forzado en el payload, sin depender de la variable de entorno.
+- Cliente (Inicio): si hay un feriado aprobado en los proximos 7 dias, aparece un recuadro "El Mercado permanecera cerrado el dia DD/MM, no vamos a operar ese dia. Faltan X dias" (X = dias desde hoy; "Es hoy" / "Falta 1 dia" segun corresponda).
+
+---
+
 ## v12.9.53 - Sincronizacion: envio confirmado + indicador de pendientes (2026-07-04)
 
 - Pedido de cliente y compra de proveedor ahora confirman contra el servidor al enviarse (fail-fast): si hay internet, avisan "enviado"; si no, avisan claramente "SIN CONEXION: todavia no se envio, quedo pendiente" en vez de decir "guardado" en silencio.
