@@ -69,7 +69,7 @@ function billingConfig(env = process.env) {
     puntoVenta: env.TUSFACTURAS_PUNTO_VENTA || "1",
     provincia: env.TUSFACTURAS_PROVINCIA || "17",
     rubro: env.TUSFACTURAS_RUBRO || "Frutas y verduras",
-    condicionPago: env.TUSFACTURAS_CONDICION_PAGO || "205" // 205 = Cuenta corriente (211 era Tarjeta de credito)
+    condicionPago: "205" // 205 = Cuenta corriente (forzado para todas las facturas)
   };
   cfg.enabled = !!(cfg.apikey && cfg.apitoken && cfg.usertoken);
   return cfg;
@@ -329,7 +329,7 @@ function buildInvoicePayload(invoice, cfg, options = {}) {
       domicilio: String(domicilio).slice(0, 255),
       provincia: provinciaCodigo,
       envia_por_mail: email ? "S" : "N",
-      condicion_pago: cfg.condicionPago,
+      condicion_pago: "205", // Cuenta corriente - forzado para TODAS las facturas (no depende de env)
       condicion_iva: condicionIva,
       // No enviamos 'codigo' para evitar conflictos cuando el cliente ya existe en
       // TusFacturas con otro codigo interno. La API identifica al cliente por CUIT.

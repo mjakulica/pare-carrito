@@ -3617,6 +3617,20 @@
     );
   }
 
+  function upcomingHolidayBannerHtml() {
+    const today = todayISO();
+    const limit = addDaysISO(today, 7);
+    const next = getHolidays()
+      .filter((h) => h && h.status === "aprobado" && h.date >= today && h.date <= limit)
+      .sort((a, b) => String(a.date).localeCompare(String(b.date)))[0];
+    if (!next) return "";
+    const days = Math.round((new Date(next.date + "T12:00:00") - new Date(today + "T12:00:00")) / 86400000);
+    const faltan = days <= 0 ? "Es hoy" : days === 1 ? "Falta 1 día" : "Faltan " + days + " días";
+    const parts = String(next.date).split("-");
+    const fechaTxt = parts.length === 3 ? parts[2] + "/" + parts[1] : String(next.date);
+    return `<div class="panel highlight-panel" style="border-left:5px solid #b91c1c;margin-bottom:14px"><strong style="font-size:15px">\u26A0 El Mercado permanecerá cerrado el día ${escapeHtml(fechaTxt)}, no vamos a operar ese día. ${faltan}.</strong>${next.name ? `<div class="muted">${escapeHtml(next.name)}</div>` : ""}</div>`;
+  }
+
   function renderCustomerDashboard() {
     const clientIds = getCustomerVisibleClientIds();
     if (!Array.isArray(ui.customerDashboardClients)) ui.customerDashboardClients = clientIds.slice();
@@ -3654,6 +3668,7 @@
       `<button class="btn primary" data-route="nuevo-pedido">Nuevo pedido</button>
        <button class="btn ghost" data-route="mis-pedidos">Ver rango de pedidos</button>`,
       `
+      ${upcomingHolidayBannerHtml()}
       <div class="customer-hero">
         <img src="./assets/logo.png" alt="Pare Carrito SAS" />
         <div class="customer-hero-text">Insumos Frescos para Gastronomicos</div>
