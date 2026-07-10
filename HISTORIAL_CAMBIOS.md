@@ -1,5 +1,14 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.55 - Precios por proveedor (2026-07-04)
+
+- Nuevo: precio por proveedor por producto (`provider.productPrices[pid] = {cost, marketPrice, date}`), sincronizado con el proveedor.
+- Mis Precios (proveedor): dos secciones - arriba los productos ASIGNADOS a el, abajo los que vende pero todavia no le asignaron (los seleccionados como "Productos que vende"). Columna "Ultima modif." con la fecha. Al guardar, si el producto esta asignado tambien actualiza el precio global (afecta ventas).
+- Proveedores (gerente/admin): recuadro "Precios de <proveedor>" con producto, precio y ultima actualizacion.
+- Proveedores (empleado/admin/gerente): buscador de producto que muestra todos los proveedores que lo venden, su precio y la fecha de ultima actualizacion (prioriza el precio declarado en Mis Precios; si no, el ultimo costo de compra).
+
+---
+
 ## v12.9.54 - Facturacion cuenta corriente forzada + aviso de feriado al cliente (2026-07-04)
 
 - Facturacion: TODAS las facturas enviadas a TusFacturas van con `condicion_pago` = "205" (Cuenta corriente) forzado en el payload, sin depender de la variable de entorno.
