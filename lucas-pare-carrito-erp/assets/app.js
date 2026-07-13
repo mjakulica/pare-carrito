@@ -14793,6 +14793,12 @@
       }
       const resolved = resolveParsedProductNameAndNote(nameTokens, rawNameTokens, unitType, clientId);
       if (!resolved.name) continue;
+      // Fraccion sin unidad explicita (ej "1/2 de morron rojo"): media unidad no tiene sentido,
+      // preferir la variante por Kg si el producto la tiene.
+      if (!unitType && quantity > 0 && !Number.isInteger(quantity)) {
+        const kgProduct = findProductForParsedLine(resolved.name, "kg", clientId);
+        if (kgProduct && normalizeText(kgProduct.unitType) === "kg") unitType = "kg";
+      }
       const product = findProductForParsedLine(resolved.name, unitType, clientId);
       const adjusted = adjustParsedQuantityAndUnitForProduct(quantity, unitType, product, nameTokens);
       return { name: resolved.name, quantity: adjusted.quantity, unitType: adjusted.unitType, note: resolved.note };
@@ -14858,7 +14864,7 @@
       .replace(/(\d)([a-zA-Z\u00c0-\u017f]+)/g, "$1 $2")
       .replace(/([a-zA-Z\u00c0-\u017f])(\d)/g, "$1 $2")
       .replace(/(\d)\s*\/\s*(\d)/g, "$1/$2")
-      .replace(/\bmaples?\b/gi, "bandeja")
+      .replace(/\bma+p+les?\b/gi, "bandeja")
       .replace(/\briestra\b/gi, "ristra")
       .replace(/\bkilo\s*n?de\b/gi, "kilo de")
       .replace(/\bkilonde\b/gi, "kilo de")

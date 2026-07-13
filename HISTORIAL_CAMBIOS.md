@@ -1,5 +1,13 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.64 - Parser: fraccion sin unidad -> Kg; typo "mapple" (2026-07-13)
+
+### Parser de WhatsApp (Nuevo Pedido)
+- Fraccion sin unidad explicita (ej "1/2 de morron rojo", "1/2 de morron verde"): media unidad no tiene sentido, ahora toma la variante por Kg si el producto la tiene -> "Morron Rojo Kg 0,5", "Morron Verde Kg 0,5". Antes tomaba la variante Unidades.
+- "mapple" (con doble p, typo de "maple") tambien se interpreta como unidad "bandeja".
+
+---
+
 ## v12.9.63 - Checklist operativo del empleado + PDF dividir solo N cliente (2026-07-13)
 
 ### Inicio (rol empleado) - Checklist del dia
