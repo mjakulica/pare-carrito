@@ -2925,6 +2925,32 @@
       return { productId: row.productId, units: row.units, productName: product ? product.name : row.productId, unitType: product ? product.unitType : "", kg: row.units * getKgFactor(product) };
     }).sort((a, b) => b.kg - a.kg);
   }
+  // Registro de conteos de stock cargados por dia (persistente en stockMovements type "conteo").
+  function getStockCountLog(fromDate, toDate) {
+    const rows = [];
+    (state.stockMovements || []).forEach((m) => {
+      if (m.type !== "conteo") return;
+      if (fromDate && m.date < fromDate) return;
+      if (toDate && m.date > toDate) return;
+      let name;
+      let unit = "";
+      if (String(m.productId || "").indexOf("GRPKG:") === 0) {
+        const gid = String(m.productId).slice(6);
+        const g = getStockGroups().find((gg) => gg.id === gid);
+        name = "Grupo: " + (g ? g.name : gid);
+        unit = "kg";
+      } else {
+        const p = getProduct(m.productId);
+        name = p ? p.name : m.productId;
+        unit = p ? p.unitType : "";
+      }
+      const u = getUser(m.userId);
+      rows.push({ date: m.date, name, qty: Number(m.qty || 0), unit, user: u ? u.name : (m.userId || ""), createdAt: m.createdAt || "" });
+    });
+    rows.sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.createdAt).localeCompare(String(a.createdAt)) || String(a.name).localeCompare(String(b.name)));
+    return rows;
+  }
+
   function getStockGroups() {
     if (!state.appSettings) state.appSettings = {};
     if (!Array.isArray(state.appSettings.stockGroups)) state.appSettings.stockGroups = [];
@@ -3125,6 +3151,9 @@
     const from = ui.stockMermaFrom || addDaysISO(todayISO(), -29);
     const to = ui.stockMermaTo || todayISO();
     const mermaRows = getStockMermaSummary(from, to).map((row) => `<tr><td>${escapeHtml(row.productName)}</td><td class="num">${formatNumber(row.units)} ${escapeHtml(row.unitType)}</td><td class="num">${formatNumber(row.kg)} kg</td></tr>`).join("");
+    const logFrom = ui.stockLogFrom || addDaysISO(todayISO(), -29);
+    const logTo = ui.stockLogTo || todayISO();
+    const logRows = getStockCountLog(logFrom, logTo).map((row) => `<tr><td>${escapeHtml(formatDate(row.date))}</td><td>${escapeHtml(row.name)}</td><td class="num">${formatNumber(row.qty)} ${escapeHtml(row.unit)}</td><td>${escapeHtml(row.user)}</td></tr>`).join("");
     afterRender.push(bindStock);
     return pageShell(
       "Stock",
@@ -3151,6 +3180,19 @@
           <table>
             <thead><tr><th>Producto</th><th>Merma (unidades)</th><th>Merma (kg)</th></tr></thead>
             <tbody>${mermaRows || emptyRow(3, "Sin merma registrada en el rango.")}</tbody>
+          </table>
+        </div>
+      </div>
+      <div class="panel" style="margin-top:14px">
+        <div class="page-actions" style="justify-content:space-between"><h2 class="page-title" style="font-size:18px">Registro de conteos de stock por dia</h2></div>
+        <div class="form-grid" style="margin-top:8px">
+          <div class="field"><label>Desde</label><input type="date" id="stock-log-from" value="${logFrom}" /></div>
+          <div class="field"><label>Hasta</label><input type="date" id="stock-log-to" value="${logTo}" /></div>
+        </div>
+        <div class="table-wrap" style="margin-top:10px">
+          <table>
+            <thead><tr><th>Fecha</th><th>Producto / Grupo</th><th>Stock cargado</th><th>Usuario</th></tr></thead>
+            <tbody>${logRows || emptyRow(4, "Sin conteos de stock en el rango.")}</tbody>
           </table>
         </div>
       </div>
@@ -3190,6 +3232,10 @@
     const mTo = document.getElementById("stock-merma-to");
     if (mFrom) mFrom.addEventListener("change", () => { ui.stockMermaFrom = mFrom.value || addDaysISO(todayISO(), -29); render(); });
     if (mTo) mTo.addEventListener("change", () => { ui.stockMermaTo = mTo.value || todayISO(); render(); });
+    const lFrom = document.getElementById("stock-log-from");
+    const lTo = document.getElementById("stock-log-to");
+    if (lFrom) lFrom.addEventListener("change", () => { ui.stockLogFrom = lFrom.value || addDaysISO(todayISO(), -29); render(); });
+    if (lTo) lTo.addEventListener("change", () => { ui.stockLogTo = lTo.value || todayISO(); render(); });
   }
 
   function getKgLegendDefaults() {
@@ -9137,21 +9183,29 @@
     }).filter((group) => group.unitProduct || group.shortageQuantity > 0).sort((a, b) => a.productName.localeCompare(b.productName));
   }
 
+  // Un producto por unidades deja de figurar como "pendiente" solo cuando el stock del dia
+  // (conteo cargado hoy + compras del dia) CUBRE LA DEMANDA COMPLETA. No basta con una compra
+  // parcial: se exige que no quede faltante.
   function isUnitProductStockCovered(productId, date) {
     if (!productId) return false;
     const d = date || todayISO();
     const next = addDaysISO(d, 1);
-    if (stockMovementsFor(productId).some((m) => m.type === "conteo" && m.date === d)) return true;
-    if (stockComprasBetween(productId, d, next) > 0) return true;
+    // (c) Grupo/equivalencia (conteo en kg): cubierto solo si hubo conteo o compra por mayor
+    // hoy Y el stock del grupo cubre toda la demanda en kg (netPool <= 0).
     const groups = getStockGroups().filter((g) =>
       (Array.isArray(g.members) && g.members.some((m) => m.productId === productId)) || g.wholeProductId === productId
     );
-    for (let i = 0; i < groups.length; i += 1) {
-      const g = groups[i];
-      if (getGroupCountToday(g)) return true;
-      if (groupComprasKg(g, d, next) > 0) return true;
+    if (groups.length) {
+      return groups.some((g) => {
+        const hadActivity = !!getGroupCountToday(g) || groupComprasKg(g, d, next) > 0;
+        if (!hadActivity) return false;
+        return stockGroupComputation(g, d).netPool <= 1e-6;
+      });
     }
-    return false;
+    // (a/b) Producto individual: cubierto solo si hubo conteo o compra hoy Y no queda faltante.
+    const hadActivity = stockMovementsFor(productId).some((m) => (m.type === "conteo" || m.type === "compra") && m.date === d);
+    if (!hadActivity) return false;
+    return getStockSuggestion(productId).faltante <= 1e-6;
   }
 
   function updateUnitWeightGroup(key, date, newQuantity) {

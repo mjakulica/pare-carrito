@@ -1,5 +1,15 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.66 - Stock: registro de conteos por dia + cobertura por demanda completa (2026-07-13)
+
+### Stock
+- Nuevo recuadro "Registro de conteos de stock por dia" en la pagina Stock: lista, con filtro Desde/Hasta, cada conteo cargado (fecha, producto o grupo, stock cargado y usuario). Usa los conteos ya persistidos (stockMovements).
+
+### Unidades - ocultar pendientes (ajuste)
+- Un producto por unidades ahora se oculta de "pendientes" SOLO cuando el stock del dia (conteo cargado hoy + compras del dia) cubre la demanda COMPLETA: producto individual sin faltante, o grupo/equivalencia con netPool <= 0. Ya no se oculta ante una compra parcial.
+
+---
+
 ## v12.9.65 - Unidades: enviar persiste para todos + ocultar por stock/compra mayorista (2026-07-13)
 
 ### Unidades - "Productos por unidades pendientes"
