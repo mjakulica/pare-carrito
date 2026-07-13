@@ -1,5 +1,23 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.63 - Checklist operativo del empleado + PDF dividir solo N cliente (2026-07-13)
+
+### Inicio (rol empleado) - Checklist del dia
+- Nuevo recuadro "Checklist del dia" con un click por accion (ejecuta y marca/tacha la linea):
+  - Stock / Compras / Unidades / Vehiculos / Pagos / Horario y cierre de caja -> abren la pagina.
+  - Generar Imprimibles -> genera de corrido 4 PDF: Dividir Compras "Todos menos Miriam", Dividir "Antonia", Dividir "Miriam" y Vehiculos "Sin dividir".
+  - Miriam / Mario / Chicho -> copian el clipboard de WhatsApp del proveedor (Seleccionado) y abren el chat wa.me correspondiente.
+  - Imprimibles Vehiculos y Remitos -> genera el PDF de Vehiculos "Todos" y el PDF de "Remitos de hoy".
+- El checklist se reinicia (todo desmarcado) automaticamente a las 04:00 (dia operativo 04:00 a 04:00). Boton "Reiniciar" manual.
+
+### Dividir Compras
+- En el PDF, el bloque "Agrupado por cliente" muestra solo el numero de cliente (sin nombre), igual que el clipboard de WhatsApp.
+
+### Unidades (verificado, ya activo)
+- Al enviar/actualizar la cantidad de una linea en "Productos por unidades pendientes", la linea desaparece; si la tarjeta del producto queda sin lineas, se elimina la tarjeta.
+
+---
+
 ## v12.9.62 - Parser (notas/maple/fracciones) y cambio de cliente sin borrar pedido (2026-07-04)
 
 ### Parser de WhatsApp (Nuevo Pedido)
