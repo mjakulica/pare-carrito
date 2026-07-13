@@ -4374,8 +4374,9 @@
       const pasteEl = document.getElementById("order-whatsapp-paste");
       const pasteText = pasteEl ? pasteEl.value : "";
       const hasDraftItems = ui.orderDraft && Object.keys(ui.orderDraft).length > 0;
-      // Si no habia cliente y ya hay pedido cargado o texto de WhatsApp, no borrarlos al elegir cliente.
-      const preserveContent = !previousClientId && (hasDraftItems || pasteText.trim().length > 0);
+      // Cambiar de cliente NO borra el pedido ya cargado ni el texto pegado: se conserva y se
+      // reprecia para el nuevo cliente (updateOrderPricesForClient). Antes se vaciaba al cambiar.
+      const preserveContent = hasDraftItems || pasteText.trim().length > 0;
       clientSelect.value = clientId;
       ui.selectedClientId = clientId;
       if (shouldRender) {
