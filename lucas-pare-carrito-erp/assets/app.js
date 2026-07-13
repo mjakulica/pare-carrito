@@ -8099,7 +8099,7 @@
     return `<ul class="divide-print-list divide-print-cols">${Object.keys(groups).sort(compareClientIdStrings).map((clientId) => {
       const group = groups[clientId];
       const itemsHtml = group.items.map((item) => `<li>${formatDivideQty(item.quantity)} ${escapeHtml(divideItemUnit(item))} ${escapeHtml(item.productName)}${isAll ? " - " + escapeHtml(item.assigneeName) : ""}${item.note ? " (" + escapeHtml(item.note) + ")" : ""}</li>`).join("");
-      return `<li><strong>${escapeHtml(formatClientIdShort(clientId))}) ${escapeHtml(group.clientName)}</strong><ul>${itemsHtml}</ul></li>`;
+      return `<li><strong>${escapeHtml(formatClientIdShort(clientId))})</strong><ul>${itemsHtml}</ul></li>`;
     }).join("")}</ul>`;
   }
 
