@@ -3724,19 +3724,21 @@
     return list.sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
   }
 
-  function openRecambioModal() {
-    const orders = recentOrdersForRecambio();
+  function openRecambioModal(preselectOrderId) {
+    const pre = typeof preselectOrderId === "string" ? preselectOrderId : "";
+    let orders = recentOrdersForRecambio();
+    if (pre && !orders.some((o) => o.id === pre)) { const o = getOrder(pre); if (o) orders = [o, ...orders]; }
     if (!orders.length) return alert("No hay pedidos de los ultimos 3 dias para pedir recambio.");
     const body = `
-      <div class="field"><label>Pedido</label><select id="recambio-order"><option value="">Elegir pedido...</option>${orders.map((o) => { const c = getClient(o.clientId); return `<option value="${escapeAttr(o.id)}">${formatDate(o.date)} - ${escapeHtml(o.id)} - ${escapeHtml(c ? c.name : o.clientId)}</option>`; }).join("")}</select></div>
+      <div class="field"><label>Pedido</label><select id="recambio-order"><option value="">Elegir pedido...</option>${orders.map((o) => { const c = getClient(o.clientId); return `<option value="${escapeAttr(o.id)}" ${o.id === pre ? "selected" : ""}>${formatDate(o.date)} - ${escapeHtml(o.id)} - ${escapeHtml(c ? c.name : o.clientId)}</option>`; }).join("")}</select></div>
       <div id="recambio-products" style="margin-top:8px"></div>
       <div id="recambio-selected" style="margin-top:10px"></div>
       <div class="field" style="margin-top:10px"><label>Reponer en</label><select id="recambio-when"><option value="proximo">Proximo pedido</option><option value="manana">Manana</option></select></div>
     `;
-    showModal("Pedir recambio", body, bindRecambioModal, { className: "wide" });
+    showModal("Pedir recambio", body, () => bindRecambioModal(pre), { className: "wide" });
   }
 
-  function bindRecambioModal() {
+  function bindRecambioModal(preselectOrderId) {
     const orderSel = document.getElementById("recambio-order");
     const prodBox = document.getElementById("recambio-products");
     const selBox = document.getElementById("recambio-selected");
@@ -3770,6 +3772,7 @@
       selBox.querySelectorAll("[data-recambio-del]").forEach((btn) => btn.addEventListener("click", () => { delete selected[btn.dataset.recambioDel]; renderSelected(); }));
     }
     if (orderSel) orderSel.addEventListener("change", renderProducts);
+    if (orderSel && (preselectOrderId || orderSel.value)) { if (preselectOrderId) orderSel.value = preselectOrderId; renderProducts(); }
     const saveBtn = document.getElementById("modal-save");
     if (saveBtn) saveBtn.addEventListener("click", () => {
       const order = getOrder(orderSel.value);
@@ -4915,6 +4918,7 @@
             ${deletedView ? `${["manager", "admin"].includes(currentUser.role) ? `<button class="btn small primary" data-restore-deleted-order="${order.id}">Restaurar</button>` : ""}` : `
             ${["manager", "admin", "employee"].includes(currentUser.role) ? `<button class="btn small ghost" data-edit-order="${order.id}">Editar</button>` : ""}
             ${["manager", "admin", "employee"].includes(currentUser.role) ? `<button class="btn small ghost" data-print-order-remito="${order.id}" title="Imprimir" aria-label="Imprimir">&#128424;</button>` : ""}
+            ${["manager", "admin", "employee"].includes(currentUser.role) ? `<button class="btn small ghost" data-add-recambio-order="${order.id}" title="Pedir recambio de este pedido" aria-label="Pedir recambio">&#8635;</button>` : ""}
             ${order.handwrittenImage ? `<button class="btn small ghost" data-view-handwritten="${order.id}" title="Ver pedido manuscrito" aria-label="Pedido manuscrito">&#128196;</button>` : ""}
             ${order.whatsappText ? `<button class="btn small ghost" data-view-whatsapp="${order.id}" title="Ver texto interpretado" aria-label="Texto del pedido">&#128221;</button>` : ""}
             ${["manager", "admin"].includes(currentUser.role) ? (annulledView ? `<button class="btn small primary" data-restore-order="${order.id}">Restaurar</button>` : `<button class="btn small danger" data-annul-order="${order.id}" title="Anular pedido" aria-label="Anular">X</button>`) : ""}
@@ -4932,6 +4936,7 @@
     afterRender.push(bindOrders);
     afterRender.push(() => {
       document.querySelectorAll("[data-open-recambio]").forEach((b) => b.addEventListener("click", openRecambioModal));
+      document.querySelectorAll("[data-add-recambio-order]").forEach((b) => b.addEventListener("click", () => openRecambioModal(b.dataset.addRecambioOrder)));
       document.querySelectorAll("[data-recambio-photo-view]").forEach((img) => img.addEventListener("click", () => showModal("Foto de recambio", `<img src="${img.dataset.recambioPhotoView}" style="max-width:100%;height:auto;display:block;margin:0 auto" />`, null, { className: "wide" })));
     });
     return pageShell(
