@@ -1,5 +1,15 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.65 - Unidades: enviar persiste para todos + ocultar por stock/compra mayorista (2026-07-13)
+
+### Unidades - "Productos por unidades pendientes"
+- Al presionar enviar (actualizar cantidad) de una linea, ahora se marca el item como ajustado de forma PERSISTENTE (item.unitAdjusted, se sincroniza): desaparece para todos los usuarios, no solo en la sesion actual. Antes quedaba visible al entrar con otro usuario.
+- Un producto por unidades deja de figurar como pendiente si ya hay certeza de stock:
+  (a) se conto el stock del producto hoy, (b) se le imputo una compra por mayor hoy (via relaciones minorista<-mayorista), o (c) pertenece a un grupo/equivalencia (conteo en kg) que fue contado hoy o que recibio una compra por mayor hoy.
+- Aplica tanto al recuadro como a la advertencia previa al exportar remitos.
+
+---
+
 ## v12.9.64 - Parser: fraccion sin unidad -> Kg; typo "mapple" (2026-07-13)
 
 ### Parser de WhatsApp (Nuevo Pedido)

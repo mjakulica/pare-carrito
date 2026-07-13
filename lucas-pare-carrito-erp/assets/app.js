@@ -8945,7 +8945,7 @@
   function renderUnits() {
     if (!ui.unitsDate || ui.unitsDate < todayISO()) ui.unitsDate = todayISO();
     const date = ui.unitsDate;
-    const unitItems = getUnitWeightGroups(date).filter((group) => group.unitProduct && group.pendingEntries.length);
+    const unitItems = getUnitWeightGroups(date).filter((group) => group.unitProduct && group.pendingEntries.length && !isUnitProductStockCovered(group.productId, date));
     const missingPurchases = getProductPurchaseShortages(date);
     const todaysNotes = getProductNotesByDate(date);
     const omittedUnitCards = ui.omittedUnitCards || {};
@@ -9059,6 +9059,9 @@
         item.subtotal = item.quantity * item.unitPrice;
         item.ivaAmount = item.subtotal * ((item.ivaRate || 0) / 100);
         item.totalWithIva = item.subtotal + item.ivaAmount;
+        // Marca persistente (se sincroniza a todos los usuarios): saca la linea de
+        // "pendientes" para todos, no solo en la sesion local.
+        item.unitAdjusted = true;
         recalcOrderTotals(order);
         updateOrderAccounting(order);
         order.updatedAt = new Date().toISOString();
@@ -9105,7 +9108,7 @@
     document.querySelectorAll("[data-export-today-remitos]").forEach((button) => {
       button.addEventListener("click", () => {
         const date = ui.unitsDate || todayISO();
-        const unitItems = getUnitWeightGroups(date).filter((group) => group.unitProduct && group.pendingEntries.length);
+        const unitItems = getUnitWeightGroups(date).filter((group) => group.unitProduct && group.pendingEntries.length && !isUnitProductStockCovered(group.productId, date));
         const missingPurchases = getProductPurchaseShortages(date);
         const notes = getProductNotesByDate(date);
         if (unitItems.length && !confirm("Hay productos por unidades pendientes. Exportar remitos igual?")) return;
@@ -9132,6 +9135,23 @@
         pendingQuantity
       };
     }).filter((group) => group.unitProduct || group.shortageQuantity > 0).sort((a, b) => a.productName.localeCompare(b.productName));
+  }
+
+  function isUnitProductStockCovered(productId, date) {
+    if (!productId) return false;
+    const d = date || todayISO();
+    const next = addDaysISO(d, 1);
+    if (stockMovementsFor(productId).some((m) => m.type === "conteo" && m.date === d)) return true;
+    if (stockComprasBetween(productId, d, next) > 0) return true;
+    const groups = getStockGroups().filter((g) =>
+      (Array.isArray(g.members) && g.members.some((m) => m.productId === productId)) || g.wholeProductId === productId
+    );
+    for (let i = 0; i < groups.length; i += 1) {
+      const g = groups[i];
+      if (getGroupCountToday(g)) return true;
+      if (groupComprasKg(g, d, next) > 0) return true;
+    }
+    return false;
   }
 
   function updateUnitWeightGroup(key, date, newQuantity) {
