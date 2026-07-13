@@ -9,6 +9,7 @@
 
 ### Nuevo pedido
 - Cambiar de cliente ya NO borra el pedido cargado (ni el texto pegado): se conserva y se reprecia para el nuevo cliente. Antes, al cambiar de cliente se vaciaba todo.
+- La autodeteccion de cliente desde el texto pegado ya no se dispara por solapamiento de palabras del pedido (ej. "de" -> "Del Milagro"). Solo detecta con senales explicitas: linea "pedido para X", linea de cliente ("006"), o numero + nombre.
 
 ---
 
