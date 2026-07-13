@@ -1,5 +1,11 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.61 - Fix cantidad de recambio (2026-07-04)
+
+- La cantidad a recambiar (input numerico) se leia con parseAmount, que borra el punto decimal (lo toma como separador de miles): 0,4 se convertia en 4 y aparecia "La cantidad de recambio no puede superar la del pedido" aunque no se superara. Ahora se lee con punto decimal correcto.
+
+---
+
 ## v12.9.60 - Recambio por pedido + confirmacion logout proveedor (2026-07-04)
 
 - Pedidos (manager/admin/employee): boton de "Pedir recambio" en cada fila de pedido, que abre el modal de recambio con ese pedido ya seleccionado y sus productos listos para marcar.
