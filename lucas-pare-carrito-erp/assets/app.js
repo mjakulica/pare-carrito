@@ -3761,8 +3761,12 @@
       const keys = Object.keys(selected);
       selBox.innerHTML = keys.length ? `<strong>Recambio de:</strong>${keys.map((k) => { const r = selected[k]; return `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:4px 0"><span style="flex:1;min-width:120px">${escapeHtml(r.productName)} <small class="muted">(pedido: ${formatNumber(r.originalQty)} ${escapeHtml(r.unitType || "")})</small></span><input type="number" min="0" step="0.1" value="${r.qty}" data-recambio-qty="${escapeAttr(k)}" style="width:80px" /><input type="file" accept="image/*" capture="environment" data-recambio-photo="${escapeAttr(k)}" /><span data-recambio-photook="${escapeAttr(k)}" style="color:#16a34a">${r.photo ? "&#10003;" : ""}</span><button type="button" class="btn small danger" data-recambio-del="${escapeAttr(k)}">X</button></div>`; }).join("")}` : "";
       selBox.querySelectorAll("[data-recambio-qty]").forEach((inp) => inp.addEventListener("change", () => {
-        const k = inp.dataset.recambioQty; let v = parseAmount(inp.value);
-        if (v > selected[k].originalQty) { v = selected[k].originalQty; inp.value = formatAmountInput(v); alert("La cantidad de recambio no puede superar la del pedido."); }
+        const k = inp.dataset.recambioQty;
+        // input type=number: el decimal es con punto, no usar parseAmount (que borra el punto).
+        let v = Number(String(inp.value).replace(",", "."));
+        if (!isFinite(v) || v < 0) v = 0;
+        if (v > selected[k].originalQty) { v = selected[k].originalQty; alert("La cantidad de recambio no puede superar la del pedido."); }
+        inp.value = String(v);
         selected[k].qty = v;
       }));
       selBox.querySelectorAll("[data-recambio-photo]").forEach((inp) => inp.addEventListener("change", async () => {
