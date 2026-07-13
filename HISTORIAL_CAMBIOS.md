@@ -1,5 +1,17 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.62 - Parser (notas/maple/fracciones) y cambio de cliente sin borrar pedido (2026-07-04)
+
+### Parser de WhatsApp (Nuevo Pedido)
+- Ya no genera notas basura: palabras de unidad (atado, planta, bolsa, "x fardo x 12", etc.) y palabras que ya forman parte del nombre del producto (ej. "roja" en Manzana Roja, "soja" en Brotes de Soja) no quedan como nota. Se mantienen las notas utiles (ej. "grandes", "para ensalada").
+- "maple" se interpreta como unidad "bandeja": "1 maple manzana roja deliciosa" -> Manzana Roja Bandeja; "1 maple de pera" -> Pera Bandeja.
+- Fracciones con espacio como "1/ 2 docena" se leen como 1/2 (0,5) en vez de romperse.
+
+### Nuevo pedido
+- Cambiar de cliente ya NO borra el pedido cargado (ni el texto pegado): se conserva y se reprecia para el nuevo cliente. Antes, al cambiar de cliente se vaciaba todo.
+
+---
+
 ## v12.9.61 - Fix cantidad de recambio (2026-07-04)
 
 - La cantidad a recambiar (input numerico) se leia con parseAmount, que borra el punto decimal (lo toma como separador de miles): 0,4 se convertia en 4 y aparecia "La cantidad de recambio no puede superar la del pedido" aunque no se superara. Ahora se lee con punto decimal correcto.
