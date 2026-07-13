@@ -8105,7 +8105,7 @@
     }).join("")}</ul>`;
   }
 
-  function buildDivideClipboardText(assigneeValues) {
+  function buildDivideClipboardText(assigneeValues, includeClientsOverride) {
     const assignables = filterDivideAssignables(getDivideAssignables(), assigneeValues);
     const isAll = !Array.isArray(assigneeValues) || assigneeValues.includes("all");
     const labels = assigneeValues.length === 0 ? "Ninguno" : (isAll ? "Todos" : assigneeValues.map((value) => {
@@ -8130,8 +8130,13 @@
       const total = Object.values(group.clients).reduce((sum, q) => sum + Number(q || 0), 0);
       return `${group.name}${isAll ? " - " + group.assigneeName : ""}: ${clients} = ${formatDivideQty(total)} ${group.unitType}`;
     }).join("\n");
-    const includeClientsEl = document.getElementById("divide-include-clients");
-    const includeClients = includeClientsEl ? includeClientsEl.checked : true;
+    let includeClients;
+    if (typeof includeClientsOverride === "boolean") {
+      includeClients = includeClientsOverride;
+    } else {
+      const includeClientsEl = document.getElementById("divide-include-clients");
+      includeClients = includeClientsEl ? includeClientsEl.checked : true;
+    }
     if (!includeClients) {
       return `${title}\n\nAgrupado por producto\n${productText || "Sin productos"}`;
     }
@@ -8192,11 +8197,11 @@
     runSequentialJobs(jobs, 1300);
   }
 
-  function sendDivideWhatsappForName(name, phone) {
+  function sendDivideWhatsappForName(name, phone, includeClients) {
     const value = assigneeValueByName(name);
     const openLink = () => { try { window.open("https://wa.me/" + phone, "_blank"); } catch (e) {} };
     if (!value) { alert("No se encontro el proveedor " + name + " para copiar su pedido."); openLink(); return; }
-    const text = buildDivideClipboardText([value]);
+    const text = buildDivideClipboardText([value], includeClients);
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(text).then(openLink, openLink);
     } else {
@@ -8213,7 +8218,7 @@
     else if (key === "imprimibles-veh") { printVehicleDirect("all"); setTimeout(() => printTodayRemitosDirect(), 1300); }
     else if (key === "miriam") sendDivideWhatsappForName("Miriam", "5493876340895");
     else if (key === "mario") sendDivideWhatsappForName("Mario", "5493874662116");
-    else if (key === "chicho") sendDivideWhatsappForName("Chicho", "5493874630413");
+    else if (key === "chicho") sendDivideWhatsappForName("Chicho", "5493874630413", false);
     render();
   }
 
