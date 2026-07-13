@@ -14733,6 +14733,8 @@
       .replace(/\.(?=\d)/g, " ")
       .replace(/(\d)([a-zA-Z\u00c0-\u017f]+)/g, "$1 $2")
       .replace(/([a-zA-Z\u00c0-\u017f])(\d)/g, "$1 $2")
+      .replace(/(\d)\s*\/\s*(\d)/g, "$1/$2")
+      .replace(/\bmaples?\b/gi, "bandeja")
       .replace(/\briestra\b/gi, "ristra")
       .replace(/\bkilo\s*n?de\b/gi, "kilo de")
       .replace(/\bkilonde\b/gi, "kilo de")
@@ -14851,6 +14853,10 @@
     return ["g", "gr", "grs", "grms"].includes(clean) || clean.startsWith("gram");
   }
 
+  function noteFromRest(rawTokens, product) {
+    const pt = normalizeText(product ? product.name : "");
+    return (rawTokens || []).filter((w) => { const n = normalizeText(w).replace(/[^a-z0-9]/g, ""); return n && !pt.includes(n); }).join(" ");
+  }
   function resolveParsedProductNameAndNote(nameTokens, rawNameTokens, unitType, clientId) {
     const cleanTokens = (nameTokens || []).filter(Boolean);
     if (!cleanTokens.length) return { name: "", note: "" };
@@ -14871,7 +14877,7 @@
         const restTokens = cleanTokens.slice(index);
         const restAllInName = restTokens.every((word) => productText.includes(word));
         if (restAllInName) continue; // las palabras restantes son parte del nombre: no pelar
-        return { name: candidateName, note: cleanupParsedProductNote((rawNameTokens || []).slice(index).join(" ")) };
+        return { name: candidateName, note: cleanupParsedProductNote(noteFromRest((rawNameTokens || []).slice(index), fullMatch.product)) };
       }
       return { name: fullName, note: "" };
     }
@@ -14882,16 +14888,22 @@
       if (!candidateName) continue;
       const match = matchProductForParsedLine(candidateName, unitType, clientId);
       if (!match || !match.product) continue;
-      return { name: candidateName, note: cleanupParsedProductNote((rawNameTokens || []).slice(index).join(" ")) };
+      return { name: candidateName, note: cleanupParsedProductNote(noteFromRest((rawNameTokens || []).slice(index), match.product)) };
     }
     return { name: fullName, note: "" };
   }
 
   function cleanupParsedProductNote(value) {
-    return String(value || "")
-      .replace(/^[\s.,;:()/-]+|[\s.,;:()/-]+$/g, "")
-      .replace(/\s+/g, " ")
-      .trim();
+    const IGN = new Set(["kg", "kgs", "kilo", "kilos", "gr", "grs", "gramo", "gramos", "unidad", "unidades", "atado", "atados", "planta", "plantas", "bolsa", "bolsas", "jaula", "jaulas", "cajon", "cajones", "maple", "maples", "bandeja", "bandejas", "docena", "docenas", "ristra", "ristras", "cabeza", "cabezas", "fardo", "fardos", "x", "de", "del", "la", "el", "por", "deliciosa", "delicia"]);
+    const raw = String(value || "").replace(/^[\s.,;:()/-]+|[\s.,;:()/-]+$/g, "").replace(/\s+/g, " ").trim();
+    if (!raw) return "";
+    const kept = raw.split(/\s+/).filter((w) => {
+      const n = normalizeText(w).replace(/[^a-z0-9]/g, "");
+      if (!n) return false;
+      if (/^\d+$/.test(n)) return false;
+      return !IGN.has(n);
+    });
+    return kept.join(" ").trim();
   }
 
   function findProductForParsedLine(name, unitType, clientId) {
