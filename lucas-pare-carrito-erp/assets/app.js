@@ -3467,6 +3467,7 @@
         </tr>
       `;
     }).join("");
+    afterRender.push(bindEmployeeChecklist);
     return pageShell(
       "Inicio",
       "Vista de empleado para pedidos de hoy, reparto, division de productos, gastos y cobros.",
@@ -3478,6 +3479,7 @@
         ${metricCard("Mi caja", formatMoney(employeeCaja), "Cobros registrados a mi nombre")}
         ${metricCard("Cobro semanal", formatMoney(weeklyPay), "Horas presentes de esta semana")}
       </div>
+      ${renderEmployeeChecklistPanel()}
       <div class="grid two" style="margin-top:14px">
         <div class="panel">
           <h2 class="page-title" style="font-size:18px">Vehículos de hoy</h2>
@@ -8135,6 +8137,127 @@
     }
     const clientText = Object.keys(byClient).sort(compareClientIdStrings).map((clientId) => `${formatClientIdShort(clientId)})\n${byClient[clientId].join("\n")}`).join("\n\n");
     return `${title}\n\nAgrupado por producto\n${productText || "Sin productos"}\n\nAgrupado por cliente\n${clientText || "Sin productos"}`;
+  }
+
+  // ===== Checklist operativo del empleado (home) =====
+  function employeeChecklistDayKey() {
+    // Reinicia a las 04:00 (dia operativo: 04:00 de hoy a 04:00 de manana).
+    const shifted = new Date(Date.now() - 4 * 60 * 60 * 1000);
+    const y = shifted.getFullYear();
+    const m = String(shifted.getMonth() + 1).padStart(2, "0");
+    const d = String(shifted.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+
+  function getEmployeeChecklistStore() {
+    const dayKey = employeeChecklistDayKey();
+    if (!ui.employeeChecklist || ui.employeeChecklist.dayKey !== dayKey || typeof ui.employeeChecklist.done !== "object") {
+      ui.employeeChecklist = { dayKey, done: {} };
+    }
+    return ui.employeeChecklist;
+  }
+
+  function assigneeValueByName(name) {
+    const clean = normalizeText(name);
+    if (!clean) return null;
+    const list = activeAssignees();
+    let entry = list.find((a) => normalizeText(a.name) === clean);
+    if (!entry) entry = list.find((a) => normalizeText(a.name).includes(clean));
+    if (!entry) entry = list.find((a) => clean.includes(normalizeText(a.name)));
+    return entry ? entry.value : null;
+  }
+
+  function runSequentialJobs(jobs, gap) {
+    let i = 0;
+    const next = () => {
+      if (i >= jobs.length) return;
+      const job = jobs[i++];
+      try { if (job) job(); } catch (e) { /* seguir con el siguiente */ }
+      setTimeout(next, gap);
+    };
+    next();
+  }
+
+  function runChecklistImprimibles() {
+    const all = activeAssignees().map((a) => a.value);
+    const miriam = assigneeValueByName("Miriam");
+    const antonia = assigneeValueByName("Antonia");
+    const allSinMiriam = all.filter((v) => v !== miriam);
+    const jobs = [
+      () => printDivideDocument(allSinMiriam),
+      () => { if (antonia) printDivideDocument([antonia]); },
+      () => { if (miriam) printDivideDocument([miriam]); },
+      () => printVehicleDirect("flat")
+    ];
+    runSequentialJobs(jobs, 1300);
+  }
+
+  function sendDivideWhatsappForName(name, phone) {
+    const value = assigneeValueByName(name);
+    const openLink = () => { try { window.open("https://wa.me/" + phone, "_blank"); } catch (e) {} };
+    if (!value) { alert("No se encontro el proveedor " + name + " para copiar su pedido."); openLink(); return; }
+    const text = buildDivideClipboardText([value]);
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(openLink, openLink);
+    } else {
+      openLink();
+    }
+  }
+
+  function runEmployeeChecklistAction(key) {
+    const store = getEmployeeChecklistStore();
+    store.done[key] = true;
+    const navMap = { stock: "stock", compras: "compras", unidades: "unidades", vehiculos: "vehiculos", pagos: "pagos", horario: "horarios" };
+    if (navMap[key]) { navigate(navMap[key]); return; }
+    if (key === "imprimibles") runChecklistImprimibles();
+    else if (key === "imprimibles-veh") { printVehicleDirect("all"); setTimeout(() => printTodayRemitosDirect(), 1300); }
+    else if (key === "miriam") sendDivideWhatsappForName("Miriam", "5493876340895");
+    else if (key === "mario") sendDivideWhatsappForName("Mario", "5493874662116");
+    else if (key === "chicho") sendDivideWhatsappForName("Chicho", "5493874630413");
+    render();
+  }
+
+  function renderEmployeeChecklistPanel() {
+    const items = [
+      { key: "stock", label: "Stock" },
+      { key: "imprimibles", label: "Generar Imprimibles" },
+      { key: "miriam", label: "Miriam" },
+      { key: "mario", label: "Mario" },
+      { key: "chicho", label: "Chicho" },
+      { key: "compras", label: "Compras" },
+      { key: "unidades", label: "Unidades" },
+      { key: "vehiculos", label: "Vehiculos" },
+      { key: "imprimibles-veh", label: "Imprimibles Vehiculos y Remitos" },
+      { key: "pagos", label: "Pagos" },
+      { key: "horario", label: "Horario y cierre de caja" }
+    ];
+    const done = getEmployeeChecklistStore().done;
+    return `
+      <div class="panel checklist-panel">
+        <div class="checklist-head">
+          <h2 class="page-title" style="font-size:18px;margin:0">Checklist del dia</h2>
+          <button type="button" class="btn small ghost" data-checklist-reset>Reiniciar</button>
+        </div>
+        <ul class="employee-checklist">
+          ${items.map((it) => `<li class="checklist-item ${done[it.key] ? "done" : ""}" data-checklist="${it.key}">
+              <span class="checklist-box">${done[it.key] ? "&#10003;" : ""}</span>
+              <span class="checklist-text">${escapeHtml(it.label)}</span>
+            </li>`).join("")}
+        </ul>
+      </div>
+    `;
+  }
+
+  function bindEmployeeChecklist() {
+    document.querySelectorAll("[data-checklist]").forEach((row) => {
+      row.addEventListener("click", () => runEmployeeChecklistAction(row.dataset.checklist));
+    });
+    const resetBtn = document.querySelector("[data-checklist-reset]");
+    if (resetBtn) resetBtn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      getEmployeeChecklistStore().done = {};
+      render();
+    });
   }
 
   function printDivideDocument(assigneeValues) {
