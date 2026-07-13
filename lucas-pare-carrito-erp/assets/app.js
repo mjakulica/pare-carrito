@@ -15178,7 +15178,10 @@
         remember(looseClient, 55 - index);
       }
     });
-    return best && best.score >= 45 ? best.client : null;
+    // Solo autodetectar cliente con senales fuertes/explicitas ('pedido para X', linea de
+    // cliente '006', o numero + nombre). Umbral alto para evitar falsos positivos por
+    // solapamiento de palabras del pedido (ej. 'de' -> 'Del Milagro').
+    return best && best.score >= 70 ? best.client : null;
   }
 
   function isExplicitClientHeaderLine(clean) {
