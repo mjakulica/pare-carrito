@@ -1,5 +1,12 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.60 - Recambio por pedido + confirmacion logout proveedor (2026-07-04)
+
+- Pedidos (manager/admin/employee): boton de "Pedir recambio" en cada fila de pedido, que abre el modal de recambio con ese pedido ya seleccionado y sus productos listos para marcar.
+- El cierre de sesion por inactividad (4 h) ya aplica a TODOS los roles, incluido proveedor (la logica no filtra por rol). Sin cambios necesarios.
+
+---
+
 ## v12.9.59 - Proveedores: compra/gasto agrega producto a lo que vende (2026-07-04)
 
 - Al registrar una compra o gasto de producto a un proveedor con un producto que no estaba en sus "Productos que vende", el producto se agrega automaticamente (lo hacia rememberProviderProducts) y aparece en el recuadro "Precios de <proveedor> (lo que vende)". Ademas, el precio efectivo por proveedor ahora considera tambien los gastos de producto (no solo las compras) para mostrar precio y fecha. Se evita agregar productId vacio.
