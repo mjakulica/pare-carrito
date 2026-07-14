@@ -1,5 +1,16 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.67 - Backend sync: cierres de caja y otros arrays de patch (2026-07-13)
+
+### Sincronizacion (servidor)
+- BUG: el rol empleado (y proveedor/contador) sincroniza solo por "patch". El backend descartaba en el merge las colecciones que no estaban en su whitelist ARRAY_PATCH_KEYS, por lo que los CIERRES DE CAJA cargados por un empleado nunca llegaban al servidor: no se veian al recargar ni para otros usuarios (solo quedaban en memoria de esa sesion).
+- Fix: se agregaron al ARRAY_PATCH_KEYS del servidor: cashClosings, stockMovements, replacements, marginSections, priceAutoLog y priceAutoSchedule.
+- priceAutoSchedule se mergea por productId (no por id).
+- Se habilito a empleados a enviar cashClosings, stockMovements y replacements tambien en patches con base algo desactualizada (stale).
+- REQUIERE ./deploy.sh (cambio de backend).
+
+---
+
 ## v12.9.66 - Stock: registro de conteos por dia + cobertura por demanda completa (2026-07-13)
 
 ### Stock

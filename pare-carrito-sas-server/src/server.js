@@ -476,7 +476,8 @@ const PATCH_SYNC_ROLES = ["manager", "admin", "employee", "contador", "proveedor
 const EMPLOYEE_STALE_PATCH_ARRAY_KEYS = new Set([
   "orders", "remitos", "saldos", "purchases", "payments", "caja",
   "providerLedger", "providerPayments", "clientTransfers", "vendorLedger",
-  "attendance", "employeePayments", "employeeReimbursements", "performanceAdjustments"
+  "attendance", "employeePayments", "employeeReimbursements", "performanceAdjustments",
+  "replacements", "stockMovements", "cashClosings"
 ]);
 const HISTORY_KEYS = ["productListPriceHistory", "productSalesQuantityHistory", "productPurchaseHistory"];
 const ARRAY_PATCH_KEYS = [
@@ -485,7 +486,8 @@ const ARRAY_PATCH_KEYS = [
   "attendance", "employeePayments", "employeeReimbursements", "performanceAdjustments",
   "clients", "products", "providers", "vehicles", "users", "cashBoxes",
   "preferences", "productAliases", "clientProductAliases", "quantityAliases", "clientQuantityAliases",
-  "costRelations", "productRelations", "billingLog"
+  "costRelations", "productRelations", "billingLog",
+  "replacements", "stockMovements", "cashClosings", "marginSections", "priceAutoLog", "priceAutoSchedule"
 ];
 const OBJECT_PATCH_KEYS = ["prices", "appSettings"];
 
@@ -634,6 +636,7 @@ function patchKeyForItem(key, item) {
   if (key === "clientQuantityAliases") return String(item.clientId || "") + "|" + String(item.alias || "");
   if (key === "costRelations") return item.id || JSON.stringify([item.sourceProductId, item.targetProductId, item.productId]);
   if (key === "productRelations") return item.id || String(item.retailProductId || "") + "|" + String(item.wholesaleProductId || "");
+  if (key === "priceAutoSchedule") return String(item.productId || "");
   return String(item.id || "");
 }
 
