@@ -6669,6 +6669,7 @@
       const itemText = purchaseItemsCollapsible(purchase);
       const isAnnulled = purchase.status === "anulado";
       const annulButton = isManager && !isAnnulled ? `<button class="btn small danger" data-annul-purchase="${purchase.id}" title="Anular egreso">X</button>` : "";
+      const editButton = canBasicEditPurchase(purchase) ? `<button class="btn small ghost" data-edit-purchase="${purchase.id}" title="Editar gasto">\u270e Editar</button>` : "";
       const annulledLabel = isAnnulled ? `<span class="pill gray">Anulado</span>` : "";
       return `
         <tr style="${isAnnulled ? "text-decoration:line-through;opacity:0.6" : ""}">
@@ -6681,7 +6682,7 @@
           <td class="num">${formatMoney(purchase.totalCost)}</td>
           <td>${escapeHtml(purchase.recordedBy || "")}${purchase.createdAt ? ` <span class="muted">\u00b7 ${formatClockHM(purchase.createdAt)}</span>` : ""}</td>
           <td>${escapeHtml(purchase.notes || "")}</td>
-          <td>${annulButton}${annulledLabel}</td>
+          <td>${editButton}${annulButton}${annulledLabel}</td>
         </tr>
       `;
     }).join("");
@@ -7534,6 +7535,9 @@
       annulPurchase(purchase);
       saveState();
       render();
+    }));
+    document.querySelectorAll("[data-edit-purchase]").forEach((button) => button.addEventListener("click", () => {
+      openPurchaseEditModal(button.dataset.editPurchase);
     }));
   }
 
@@ -17084,6 +17088,90 @@
     order.updatedAt = new Date().toISOString();
     state.saldos = state.saldos.filter((entry) => !(entry.relatedEntityType === "order_annul" && entry.relatedEntityId === order.id));
     recomputeClientSaldoBalances(order.clientId);
+  }
+
+  function canBasicEditPurchase(purchase) {
+    if (!purchase || purchase.status === "anulado") return false;
+    if ((purchase.expenseType || "") === "provider_payment") return false;
+    if (!currentUser) return false;
+    if (["manager", "admin"].includes(currentUser.role)) return true;
+    if (currentUser.role === "employee") return purchase.userRole === "employee" || purchase.recordedBy === currentUser.name;
+    if (currentUser.role === "proveedor") return purchase.recordedBy === currentUser.name;
+    return false;
+  }
+
+  function applyPurchaseBasicEdit(purchase, patch) {
+    if (!purchase) return;
+    const et = purchase.expenseType || "purchase";
+    const isCashMove = et === "cash_movement";
+    const newDate = patch.date || purchase.date;
+    const newTotal = Math.round(Number(patch.totalCost || 0) * 100) / 100;
+    const newNotes = String(patch.notes || "");
+    const newBox = patch.cashBoxId || purchase.cashBoxId;
+    purchase.date = newDate;
+    purchase.notes = newNotes;
+    purchase.totalCost = newTotal;
+    if (isCashMove) purchase.unitCost = newTotal;
+    if (!isCashMove) purchase.cashBoxId = newBox;
+    if (purchase.paymentStatus === "account_current" && purchase.providerId) {
+      (state.providerLedger || []).forEach((e) => {
+        if (e.relatedEntityId === purchase.id && e.relatedEntityType === "purchase") {
+          e.amount = newTotal; e.date = newDate; e.notes = newNotes;
+        }
+      });
+    }
+    (state.caja || []).forEach((e) => {
+      if (e.relatedEntityId !== purchase.id) return;
+      if (e.relatedEntityType === "purchase") {
+        e.date = newDate; e.notes = newNotes; e.cashBoxId = newBox;
+        if (Number(e.amountEgreso) > 0) e.amountEgreso = newTotal;
+        if (Number(e.amountIngreso) > 0) e.amountIngreso = newTotal;
+      } else if (e.relatedEntityType === "cash_movement") {
+        e.date = newDate; e.notes = newNotes;
+        if (Number(e.amountEgreso) > 0) e.amountEgreso = newTotal;
+        if (Number(e.amountIngreso) > 0) e.amountIngreso = newTotal;
+      }
+    });
+    purchase.updatedAt = new Date().toISOString();
+    purchase.updatedBy = currentUser ? currentUser.name : "";
+    saveState();
+  }
+
+  function openPurchaseEditModal(purchaseId) {
+    const purchase = state.purchases.find((p) => p.id === purchaseId);
+    if (!purchase || !canBasicEditPurchase(purchase)) return;
+    const et = purchase.expenseType || "purchase";
+    const isCashMove = et === "cash_movement";
+    const noCaja = ["prepared", "market_price"].includes(et);
+    const body = `
+      <div class="form-grid">
+        <div class="field"><label>Fecha</label><input type="date" id="pe-date" value="${escapeAttr(purchase.date || todayISO())}" /></div>
+        <div class="field"><label>Monto total</label><input id="pe-total" inputmode="decimal" value="${formatAmountInput(purchase.totalCost)}" /></div>
+        ${isCashMove || noCaja ? "" : `<div class="field"><label>Caja</label><select id="pe-cashbox">${renderCashBoxOptions(getPurchaseCashBoxId(purchase))}</select></div>`}
+        <div class="field span-2"><label>Notas</label><input id="pe-notes" value="${escapeAttr(purchase.notes || "")}" /></div>
+      </div>
+      <p class="muted" style="margin-top:8px;font-size:12px">${isCashMove ? "Movimiento de caja: se ajusta el monto en ambas cajas (origen y destino)." : "Se ajusta el egreso en Caja" + (purchase.paymentStatus === "account_current" ? " / la deuda del proveedor" : "") + "."} No modifica el detalle de productos ni recalcula stock/costos.</p>
+      <div class="page-actions" style="margin-top:12px;justify-content:flex-end;gap:8px"><button class="btn ghost" type="button" data-close-modal>Cancelar</button><button class="btn primary" type="button" id="pe-save">Guardar cambios</button></div>
+    `;
+    showModal("Editar gasto " + purchase.id, body, () => {
+      const saveBtn = document.getElementById("pe-save");
+      if (saveBtn) saveBtn.addEventListener("click", () => {
+        const dateEl = document.getElementById("pe-date");
+        const totalEl = document.getElementById("pe-total");
+        const boxEl = document.getElementById("pe-cashbox");
+        const notesEl = document.getElementById("pe-notes");
+        const newTotal = parseAmount(totalEl ? totalEl.value : purchase.totalCost);
+        if (!noCaja && !(newTotal > 0)) return alert("Ingrese un monto mayor a cero.");
+        applyPurchaseBasicEdit(purchase, {
+          date: dateEl ? dateEl.value : purchase.date,
+          totalCost: newTotal,
+          cashBoxId: boxEl ? boxEl.value : purchase.cashBoxId,
+          notes: notesEl ? notesEl.value.trim() : purchase.notes
+        });
+        closeModal();
+        render();
+      });
+    });
   }
 
   function annulPurchase(purchase) {
