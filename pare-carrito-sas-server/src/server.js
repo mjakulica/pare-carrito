@@ -487,7 +487,8 @@ const ARRAY_PATCH_KEYS = [
   "clients", "products", "providers", "vehicles", "users", "cashBoxes",
   "preferences", "productAliases", "clientProductAliases", "quantityAliases", "clientQuantityAliases",
   "costRelations", "productRelations", "billingLog",
-  "replacements", "stockMovements", "cashClosings", "marginSections", "priceAutoLog", "priceAutoSchedule"
+  "replacements", "stockMovements", "cashClosings", "marginSections", "priceAutoLog", "priceAutoSchedule",
+  "holidays"
 ];
 const OBJECT_PATCH_KEYS = ["prices", "appSettings"];
 

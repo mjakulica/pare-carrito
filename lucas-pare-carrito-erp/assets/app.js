@@ -1186,7 +1186,8 @@
     "attendance", "employeePayments", "employeeReimbursements", "performanceAdjustments",
     "clients", "products", "providers", "vehicles", "users", "cashBoxes",
     "preferences", "productAliases", "clientProductAliases", "quantityAliases", "clientQuantityAliases",
-    "costRelations", "productRelations", "billingLog", "stockMovements", "cashClosings", "marginSections", "priceAutoLog", "priceAutoSchedule"
+    "costRelations", "productRelations", "billingLog", "stockMovements", "cashClosings", "marginSections", "priceAutoLog", "priceAutoSchedule",
+    "holidays"
   ];
   const PATCH_OBJECT_KEYS = ["prices", "appSettings"];
   const HISTORY_STATE_KEYS = ["productListPriceHistory", "productSalesQuantityHistory", "productPurchaseHistory"];

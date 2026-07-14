@@ -1,5 +1,17 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.68 - Sync: feriados + editar gastos cargados (2026-07-13)
+
+### Compras/Gastos
+- Nuevo boton "Editar" en la lista de gastos: permite corregir datos basicos de un gasto ya cargado (fecha, monto total, caja, notas), ajustando el egreso en Caja o la deuda del proveedor (cuenta corriente). No modifica el detalle de productos ni recalcula stock/costos. Empleado y proveedor editan los gastos que cargaron; gerente/admin editan todos. Los pagos a proveedor no se editan (se anulan y recargan).
+
+### Sincronizacion (revision del bug de patch)
+- Se reviso toda coleccion de estado que sincroniza por patch. Se detecto que "holidays" (feriados) no estaba en las listas de patch: un feriado cargado por un rol que sincroniza solo por patch (empleado/proveedor/contador) no llegaba al servidor. Se agrego "holidays" a PATCH_ARRAY_KEYS (front) y ARRAY_PATCH_KEYS (server).
+- Verificado: el resto de las colecciones (36) coinciden entre front y back; no quedan otras diferencias.
+- REQUIERE ./deploy.sh (cambio de backend).
+
+---
+
 ## v12.9.67 - Backend sync: cierres de caja y otros arrays de patch (2026-07-13)
 
 ### Sincronizacion (servidor)
