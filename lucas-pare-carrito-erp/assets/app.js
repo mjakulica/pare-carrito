@@ -1795,12 +1795,21 @@
       });
     }
     [
-      "exampleOrders", "remitos", "saldos", "purchases", "payments", "caja", "replacements",
+      "exampleOrders", "remitos", "saldos", "payments", "caja", "replacements",
       "providerLedger", "providerPayments", "clientTransfers", "vendorLedger",
       "attendance", "employeePayments", "employeeReimbursements", "performanceAdjustments",
-      "clients", "products", "providers", "vehicles", "users", "cashBoxes", "stockMovements"
+      "stockMovements"
     ].forEach((key) => {
       merged[key] = unionByKey(remote[key], local[key], byId);
+    });
+    // Entidades que se editan en el lugar (config + compras): ante un mismo id gana la version
+    // mas nueva por updatedAt; sin updatedAt gana el REMOTO (el servidor es autoritativo).
+    // Antes gana SIEMPRE el local, por lo que un navegador con snapshot viejo (tipico despues de
+    // un deploy, cuando todos recargan) revertia proveedores, clientes y productos y los re-pusheaba.
+    [
+      "clients", "products", "providers", "vehicles", "users", "cashBoxes", "purchases"
+    ].forEach((key) => {
+      merged[key] = unionByKeyPreferNewest(remote[key], local[key], byId, "updatedAt");
     });
     merged.prices = { ...(remote.prices || {}), ...(local.prices || {}) };
     merged.appSettings = { ...(remote.appSettings || {}), ...(local.appSettings || {}) };
@@ -13007,6 +13016,7 @@
             visibleToAdmin: document.getElementById("cash-box-visible-admin").checked,
             notes: document.getElementById("cash-box-notes").value.trim()
           };
+          payload.updatedAt = new Date().toISOString();
           if (box) Object.assign(box, payload);
           else state.cashBoxes.push(payload);
           saveState();
@@ -13225,6 +13235,7 @@
           if (payload.email && isEmailTaken(payload.email, customerUser ? customerUser.id : "", allowsLinkedEmailDuplicate("customer", customerUser ? customerUser.linkedClientIds : [idValue]))) {
             return alert("Ese correo ya esta usado por otro usuario.");
           }
+          payload.updatedAt = new Date().toISOString();
           if (client) {
             Object.assign(client, payload);
             syncCustomerUserForClient(payload);
@@ -13449,6 +13460,7 @@
           const [assignedType, assignedId] = String(document.getElementById("product-assignee-modal").value || "").split(":");
           payload.assignedToType = assignedType || "";
           payload.assignedToId = assignedId || "";
+          payload.updatedAt = new Date().toISOString();
           if (product) Object.assign(product, payload);
           else state.products.push(payload);
           state.prices[productId] = {
@@ -13552,6 +13564,7 @@
             isActive: provider ? provider.isActive : true,
             notes: document.getElementById("provider-notes").value.trim()
           };
+          payload.updatedAt = new Date().toISOString();
           if (provider) Object.assign(provider, payload);
           else state.providers.push(payload);
           saveState();
@@ -13587,6 +13600,7 @@
             capacity: parseAmount(document.getElementById("vehicle-capacity").value) || 10,
             isActive: true
           };
+          payload.updatedAt = new Date().toISOString();
           if (vehicle) Object.assign(vehicle, payload);
           else state.vehicles.push(payload);
           saveState();

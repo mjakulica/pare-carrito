@@ -1,5 +1,16 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.69 - Fix critico: deploy revertia proveedores/clientes/productos (2026-07-13)
+
+### Sincronizacion (merge local vs servidor)
+- BUG CRITICO: en el merge de estado (mergeCloudStates), las entidades clientes, productos, proveedores, vehiculos, usuarios y cajas se unian con "unionByKey", que ante un mismo id hace ganar SIEMPRE a la copia local. Un navegador con snapshot viejo (situacion tipica despues de un deploy de backend, cuando todos recargan/reconectan a la vez) revertia esas entidades a su version vieja y las volvia a pushear al servidor -> "se desconfiguraban" proveedores, datos de clientes y algunos productos.
+- Fix: esas colecciones (mas "purchases") ahora usan "unionByKeyPreferNewest" por updatedAt: ante un mismo id gana la version mas nueva; sin updatedAt gana el REMOTO (el servidor es autoritativo). Se preservan las entidades nuevas creadas offline (ids que solo existen local).
+- Se estampa updatedAt al guardar clientes, productos, proveedores, vehiculos y cajas, para que una edicion reciente gane sobre una copia remota vieja.
+- La base NO se borra en el deploy (volumen pgdata persistente); el problema era 100% del merge en el navegador.
+- Solo frontend: se aplica con git pull.
+
+---
+
 ## v12.9.68 - Sync: feriados + editar gastos cargados (2026-07-13)
 
 ### Compras/Gastos
