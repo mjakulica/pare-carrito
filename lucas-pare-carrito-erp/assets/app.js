@@ -2830,11 +2830,15 @@
       .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.createdAt || "").localeCompare(String(b.createdAt || "")));
     return counts.length ? counts[counts.length - 1] : null;
   }
+  // Stock de APERTURA de "today". El conteo es de CIERRE de dia (= apertura del dia siguiente),
+  // por eso la acumulacion arranca el dia SIGUIENTE al ultimo conteo (no se re-suman las compras/
+  // ventas del propio dia del conteo, que ya estan reflejadas en el numero contado).
   function getStockEstimated(productId, asOfDate) {
     const today = asOfDate || todayISO();
     const last = lastStockCountBefore(productId, today);
     if (!last) return 0;
-    return Number(last.qty || 0) + stockComprasBetween(productId, last.date, today) - stockOrdersBetween(productId, last.date, today);
+    const from = addDaysISO(last.date, 1);
+    return Number(last.qty || 0) + stockComprasBetween(productId, from, today) - stockOrdersBetween(productId, from, today);
   }
   function getStockDemandToday(productId) {
     return stockOrdersBetween(productId, todayISO(), addDaysISO(todayISO(), 1));
@@ -2877,7 +2881,9 @@
   function getStockSuggestion(productId) {
     const today = todayISO();
     const countToday = getStockCountToday(productId);
-    const morning = countToday ? Number(countToday.qty || 0) : getStockEstimated(productId, today);
+    // Apertura de hoy = estimado (arrastre del cierre de ayer). El conteo de hoy es el CIERRE,
+    // no la apertura, por eso no se usa como stock de la manana.
+    const morning = getStockEstimated(productId, today);
     const comprasHoy = stockComprasBetween(productId, today, addDaysISO(today, 1));
     const stockReal = morning + comprasHoy;
     const demand = getStockDemandToday(productId);
@@ -2900,7 +2906,10 @@
   function recordStockCount(productId, realValue) {
     const today = todayISO();
     const hadPrior = !!lastStockCountBefore(productId, today);
-    const estimated = getStockEstimated(productId, today);
+    // El conteo es de CIERRE de dia: se compara contra el cierre ESPERADO = apertura + compras de
+    // hoy - ventas de hoy. La diferencia con lo contado es la merma.
+    const nextDay = addDaysISO(today, 1);
+    const estimated = getStockEstimated(productId, today) + stockComprasBetween(productId, today, nextDay) - stockOrdersBetween(productId, today, nextDay);
     const real = Math.round(Number(realValue || 0) * 100) / 100;
     const diff = hadPrior ? Math.round((estimated - real) * 100) / 100 : 0;
     state.stockMovements = (state.stockMovements || []).filter((m) => !(m.productId === productId && m.date === today && ["conteo", "merma", "ajuste"].includes(m.type)));
@@ -3069,13 +3078,13 @@
     const today = asOfDate || todayISO();
     const last = lastStockCountBefore(groupCountKey(group), today);
     if (!last) return 0;
-    return Number(last.qty || 0) + groupComprasKg(group, last.date, today) - groupOrdersKg(group, last.date, today);
+    const from = addDaysISO(last.date, 1);
+    return Number(last.qty || 0) + groupComprasKg(group, from, today) - groupOrdersKg(group, from, today);
   }
   // Stock del grupo al inicio de hoy (conteo de hoy si existe, si no el estimado) + compras de hoy.
   function getGroupStockKgToday(group, asOfDate) {
     const today = asOfDate || todayISO();
-    const countToday = getGroupCountToday(group);
-    const morning = countToday ? Number(countToday.qty || 0) : getGroupEstimatedKg(group, today);
+    const morning = getGroupEstimatedKg(group, today);
     const comprasHoy = groupComprasKg(group, today, addDaysISO(today, 1));
     return Math.round((morning + comprasHoy) * 100) / 100;
   }

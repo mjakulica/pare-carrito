@@ -1,5 +1,17 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.71 - Stock: control al finalizar el dia (conteo = apertura de maniana) (2026-07-13)
+
+### Stock - nuevo modelo de conteo
+- El conteo de stock ahora se interpreta como el CIERRE del dia: queda guardado como stock de APERTURA del dia siguiente.
+- getStockEstimated (apertura de hoy) acumula compras/ventas desde el dia SIGUIENTE al ultimo conteo, para no volver a sumar las del propio dia del conteo (que ya estan reflejadas en el numero contado).
+- La sugerencia de compra usa como stock de la manana el estimado (arrastre del cierre de ayer), no el conteo de hoy.
+- La merma se calcula comparando el CIERRE esperado (apertura + compras de hoy - ventas de hoy) contra lo contado.
+- Mismo criterio para los Grupos / equivalencias (conteo en kg).
+- Verificado con simulacion (apertura/cierre/merma/arrastre con huecos de dias). Solo frontend (git pull).
+
+---
+
 ## v12.9.70 - Seed no pisa datos reales + anti-duplicado de compra (2026-07-13)
 
 ### Sincronizacion (datos por defecto)
