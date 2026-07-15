@@ -1806,10 +1806,17 @@
     // mas nueva por updatedAt; sin updatedAt gana el REMOTO (el servidor es autoritativo).
     // Antes gana SIEMPRE el local, por lo que un navegador con snapshot viejo (tipico despues de
     // un deploy, cuando todos recargan) revertia proveedores, clientes y productos y los re-pusheaba.
+    // Si el estado local es el "seed" (datos de ejemplo con los que viene el sistema, sin datos
+    // operativos reales), NO se inyectan esos defaults sobre el servidor: se usa el remoto tal cual.
+    // Esto evita que, en una carga fresca (post-deploy, incognito, cache limpio), los clientes/
+    // productos/proveedores por defecto reemplacen a los reales.
+    const localIsSeed = looksLikeSeedState(local);
     [
       "clients", "products", "providers", "vehicles", "users", "cashBoxes", "purchases"
     ].forEach((key) => {
-      merged[key] = unionByKeyPreferNewest(remote[key], local[key], byId, "updatedAt");
+      merged[key] = localIsSeed
+        ? (Array.isArray(remote[key]) ? remote[key].slice() : [])
+        : unionByKeyPreferNewest(remote[key], local[key], byId, "updatedAt");
     });
     merged.prices = { ...(remote.prices || {}), ...(local.prices || {}) };
     merged.appSettings = { ...(remote.appSettings || {}), ...(local.appSettings || {}) };
@@ -7367,6 +7374,8 @@
     }
     document.getElementById("purchase-form").addEventListener("submit", async (event) => {
       event.preventDefault();
+      const purchaseSubmitBtn = event.target.querySelector("button[type=submit]");
+      if (purchaseSubmitBtn && purchaseSubmitBtn.dataset.busy === "1") return;
       const expenseType = currentUser.role === "proveedor" ? "purchase" : kind.value;
       const providerParsed = providerInput ? parsePurchaseProviderValue(providerInput.value) : { provider: null };
       const provider = currentUser.role === "proveedor" ? getProvider(currentProviderId()) : providerParsed.provider;
@@ -7491,6 +7500,22 @@
         userRole: currentUser.role,
         proofFile
       };
+      // Anti-duplicado: si ya se registro un egreso identico (mismo tipo, proveedor, total, items
+      // y usuario) en el ultimo minuto, no volver a cargarlo (evita doble tap / doble envio).
+      const purchaseSig = (list) => (Array.isArray(list) ? list : []).map((it) => (it.productId || "") + ":" + Number(it.quantity || 0) + ":" + Number(it.unitCost || 0)).sort().join("|");
+      const nowMs = Date.now();
+      const dupPurchase = state.purchases.find((p) => p && p.status !== "anulado"
+        && (p.expenseType || "") === (purchase.expenseType || "")
+        && (p.providerId || "") === (purchase.providerId || "")
+        && (p.recordedBy || "") === (purchase.recordedBy || "")
+        && Math.abs(Number(p.totalCost || 0) - Number(purchase.totalCost || 0)) < 0.01
+        && purchaseSig(p.items) === purchaseSig(purchase.items)
+        && p.createdAt && (nowMs - new Date(p.createdAt).getTime()) < 60000);
+      if (dupPurchase) {
+        alert("Ese egreso ya se registro recien (hace menos de un minuto). No se duplica.");
+        return;
+      }
+      if (purchaseSubmitBtn) { purchaseSubmitBtn.dataset.busy = "1"; purchaseSubmitBtn.disabled = true; }
       state.purchases.push(purchase);
       recordStockPurchaseMovements(purchase);
       if (provider && items.length) rememberProviderProducts(provider.id, items);

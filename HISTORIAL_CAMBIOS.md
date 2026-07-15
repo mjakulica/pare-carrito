@@ -1,5 +1,15 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.70 - Seed no pisa datos reales + anti-duplicado de compra (2026-07-13)
+
+### Sincronizacion (datos por defecto)
+- Refuerzo del fix anterior: si el estado local es el "seed" (los datos de ejemplo con los que viene el sistema, sin datos operativos reales), en el merge NO se inyectan esos defaults sobre el servidor; se usa el remoto tal cual. Esto evita que en una carga fresca (post-deploy, incognito, cache limpio) los clientes/productos/proveedores por defecto reemplacen a los reales.
+
+### Compras (proveedor) - anti doble carga
+- El boton "Guardar egreso" no deshabilitaba durante el envio del proveedor (await de sincronizacion), por lo que un segundo toque cargaba el mismo egreso 2 veces. Ahora: se bloquea un egreso identico (mismo tipo, proveedor, total, items y usuario) cargado hace menos de un minuto, y se deshabilita el boton mientras se procesa.
+
+---
+
 ## v12.9.69 - Fix critico: deploy revertia proveedores/clientes/productos (2026-07-13)
 
 ### Sincronizacion (merge local vs servidor)
