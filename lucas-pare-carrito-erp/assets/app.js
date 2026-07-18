@@ -8282,13 +8282,16 @@
     const miriam = assigneeValueByName("Miriam");
     const antonia = assigneeValueByName("Antonia");
     const allSinMiriam = all.filter((v) => v !== miriam);
-    const jobs = [
-      () => printDivideDocument(allSinMiriam),
-      () => { if (antonia) printDivideDocument([antonia]); },
-      () => { if (miriam) printDivideDocument([miriam]); },
-      () => printVehicleDirect("flat")
-    ];
-    runSequentialJobs(jobs, 1300);
+    const date = ui.vehicleDate || todayISO();
+    // Un solo archivo con los 4 imprimibles separados por salto de pagina: una sola ventana de
+    // impresion (no cuelga el celular). La impresion por separado en Dividir/Vehiculos no cambia.
+    const pageBreak = "<div style=\"break-before:page;page-break-before:always\"></div>";
+    const sections = [];
+    sections.push(buildDivideDocumentBody(allSinMiriam));
+    if (antonia) sections.push(buildDivideDocumentBody([antonia]));
+    if (miriam) sections.push(buildDivideDocumentBody([miriam]));
+    sections.push(stripPrintControls(renderVehicleFlatPrint(date)));
+    printHtmlDocument(fileDate(todayISO()) + " Imprimibles", sections.join(pageBreak));
   }
 
   function sendDivideWhatsappForName(name, phone, includeClients) {
@@ -8359,7 +8362,7 @@
     });
   }
 
-  function printDivideDocument(assigneeValues) {
+  function buildDivideDocumentBody(assigneeValues) {
     const assignables = getDivideAssignables();
     const isAll = !Array.isArray(assigneeValues) || assigneeValues.includes("all");
     const labels = assigneeValues.length === 0 ? "Ninguno" : (isAll ? "Todos" : assigneeValues.map((value) => {
@@ -8372,7 +8375,7 @@
       ? `<h3 style="margin:10px 0 4px;font-size:12px">Agrupado por cliente</h3>
         ${renderDivideClientList(assignables, isAll ? "all" : assigneeValues)}`
       : "";
-    const body = `
+    return `
       <div class="print-compact">
         <h1 style="margin:0 0 2px;font-size:18px">${BUSINESS_NAME}</h1>
         <h2 style="margin:0 0 2px;font-size:14px">${escapeHtml(tplGet("dividir", "titulo", "Dividir compras"))} - ${escapeHtml(labels)}</h2>
@@ -8382,10 +8385,18 @@
         ${clientSection}
       </div>
     `;
+  }
+
+  function printDivideDocument(assigneeValues) {
+    const isAll = !Array.isArray(assigneeValues) || assigneeValues.includes("all");
+    const labels = assigneeValues.length === 0 ? "Ninguno" : (isAll ? "Todos" : assigneeValues.map((value) => {
+      const entry = activeAssignees().find((a) => a.value === value);
+      return entry ? entry.label : value;
+    }).join(", "));
     const title = isAll
       ? fileDate(todayISO()) + " Compras"
       : fileDate(todayISO()) + " Compras " + labels;
-    printHtmlDocument(title, body);
+    printHtmlDocument(title, buildDivideDocumentBody(assigneeValues));
   }
 
   function compareClientIdStrings(a, b) {

@@ -1,5 +1,14 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.73 - Checklist empleado: "Generar Imprimibles" en un solo archivo (2026-07-13)
+
+### Inicio (empleado) - Generar Imprimibles
+- Antes generaba 4 archivos de impresion uno tras otro (colgaba el celular y no imprimia). Ahora arma UN solo documento con los 4 imprimibles separados por salto de pagina (Dividir "Todos menos Miriam" + Dividir "Antonia" + Dividir "Miriam" + Vehiculos "Sin dividir"): una sola ventana de impresion.
+- La impresion por separado en Dividir Compras y en Vehiculos no cambia (se refactorizo el cuerpo del documento de dividir a buildDivideDocumentBody; printDivideDocument y printVehicleDirect siguen igual).
+- Solo frontend (git pull).
+
+---
+
 ## v12.9.72 - Precios: desvincular planilla->sistema (Sheets solo como control) (2026-07-13)
 
 ### Precios / Google Sheets
