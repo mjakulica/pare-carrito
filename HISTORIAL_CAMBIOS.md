@@ -1,5 +1,14 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.74 - Sidebar mobile: boton Salir y items siempre accesibles (2026-07-13)
+
+### Sidebar (mobile)
+- En Chrome mobile la sidebar usaba 100vh, que incluye el area detras de la barra inferior del navegador, por lo que el footer (boton "Salir de la cuenta") y a veces otros items quedaban tapados e inalcanzables.
+- Fix: la sidebar mobile ahora usa 100dvh (altura visible real), con overflow scrollable y padding inferior (+ safe-area) para que el ultimo boton nunca quede pegado a la barra del navegador. La lista de navegacion scrollea y el footer queda siempre visible.
+- Solo frontend (git pull).
+
+---
+
 ## v12.9.73 - Checklist empleado: "Generar Imprimibles" en un solo archivo (2026-07-13)
 
 ### Inicio (empleado) - Generar Imprimibles

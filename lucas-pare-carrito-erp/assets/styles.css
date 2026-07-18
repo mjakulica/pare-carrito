@@ -2627,6 +2627,17 @@ tr:last-child td {
     transition: transform 0.25s ease;
     z-index: 101;
     box-shadow: var(--shadow);
+    /* En Chrome mobile 100vh queda por detras de la barra inferior del navegador y tapa el
+       footer (boton Salir). 100dvh = altura visible real. El padding extra + safe-area deja
+       que el ultimo boton nunca quede pegado a la barra del navegador. */
+    min-height: 0;
+    height: 100vh;
+    height: 100dvh;
+    max-height: 100vh;
+    max-height: 100dvh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 28px);
   }
 
   .sidebar.open {
@@ -3974,9 +3985,4 @@ tr:last-child td {
 .employee-checklist { list-style:none; margin:12px 0 0; padding:0; display:flex; flex-direction:column; gap:6px; }
 .checklist-item { display:flex; align-items:center; gap:10px; padding:10px 12px; border:1px solid var(--border, #e2e2e6); border-radius:10px; cursor:pointer; user-select:none; transition:background .12s ease, opacity .12s ease; }
 .checklist-item:hover { background:rgba(0,0,0,.04); }
-.checklist-item:active { background:rgba(0,0,0,.08); }
-.checklist-box { flex:0 0 auto; width:22px; height:22px; border:2px solid var(--accent, #7a3bd0); border-radius:6px; display:inline-flex; align-items:center; justify-content:center; font-size:14px; font-weight:700; color:#fff; }
-.checklist-item.done .checklist-box { background:var(--accent, #7a3bd0); }
-.checklist-text { font-size:15px; }
-.checklist-item.done { opacity:.6; }
-.checklist-item.done .checklist-text { text-decoration:line-through; }
+.checklist
