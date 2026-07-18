@@ -1,5 +1,16 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.72 - Precios: desvincular planilla->sistema (Sheets solo como control) (2026-07-13)
+
+### Precios / Google Sheets
+- BUG: los precios del sistema no se actualizaban tras una compra/gasto porque la planilla (via Apps Script) posteaba "Compra Hoy" a POST /external/compra-hoy y SOBREESCRIBIA el costo/precio del producto con el valor del sheet.
+- Fix: se desvinculo el sentido planilla->sistema. El endpoint /external/compra-hoy ahora NO modifica precios (responde skipped). El sistema es la unica fuente de verdad de precios: una compra/gasto define el costo/precio.
+- El sentido sistema->planilla se mantiene intacto: syncSheetsFromStateDiff sigue empujando los cambios de venta/costo a la planilla en cada guardado (/state y /state/patch). La planilla queda como control.
+- Para reactivar planilla->sistema (si alguna vez se necesita): env SHEETS_INBOUND_PRICES=on.
+- REQUIERE ./deploy.sh (cambio de backend).
+
+---
+
 ## v12.9.71 - Stock: control al finalizar el dia (conteo = apertura de maniana) (2026-07-13)
 
 ### Stock - nuevo modelo de conteo

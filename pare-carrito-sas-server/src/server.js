@@ -1771,6 +1771,14 @@ function matchProductBySheetName(data, sheetName) {
 // El valor de "Compra Hoy" del sheet actualiza el costo del producto (cost + marketPrice),
 // igual que el efecto de una compra/gasto sobre el precio del producto.
 app.post("/external/compra-hoy", externalAuth, async (req, res) => {
+  // DESVINCULADO: la planilla de Google Sheets ya NO actualiza los precios del sistema.
+  // Desde ahora el sistema es la unica fuente de verdad de precios (una compra/gasto define el
+  // costo/precio) y solo el sistema actualiza la planilla (salida via syncSheetsFromStateDiff /
+  // pushPrecio). La planilla queda como control. Para reactivar el sentido planilla->sistema,
+  // setear SHEETS_INBOUND_PRICES=on en el entorno.
+  if (String(process.env.SHEETS_INBOUND_PRICES || "").toLowerCase() !== "on") {
+    return res.json({ ok: true, skipped: "sheets->sistema desactivado: la planilla ya no actualiza precios" });
+  }
   const body = req.body || {};
   const value = Number(body.costo != null ? body.costo : body.compraHoy);
   if (!body.producto || !Number.isFinite(value) || value <= 0) {
