@@ -1453,9 +1453,15 @@
     const op = queue[0];
     try {
       ui.syncStatus = "Sincronizando cambios pendientes...";
+      // keepalive: le pide al navegador que COMPLETE el envio aunque la pagina se congele,
+      // se mande a segundo plano o se cierre (caso tipico: el empleado guarda y bloquea el
+      // celular al instante). El estandar limita keepalive a 64KB de cuerpo, asi que solo se
+      // usa cuando el patch entra en ese limite; si es mas grande, va como envio normal.
+      const opBody = JSON.stringify(op);
       const response = await cloudRequest(config, "/state/patch", {
         method: "POST",
-        body: JSON.stringify(op)
+        body: opBody,
+        ...(opBody.length < 60000 ? { keepalive: true } : {})
       });
       if (response.status === 409) {
         const merged = !resolvingConflict && await mergePendingPatchConflictWithRemote(config, manual);

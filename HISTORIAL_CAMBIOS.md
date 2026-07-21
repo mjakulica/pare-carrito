@@ -1,5 +1,14 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.78 - Envio de cambios con keepalive (celular bloqueado al instante) (2026-07-13)
+
+### Cola de sincronizacion
+- El POST de /state/patch ahora usa keepalive cuando el patch entra en el limite del estandar (64KB): el navegador COMPLETA el envio aunque la pagina se congele, pase a segundo plano o se cierre. Cubre el caso de guardar un egreso y bloquear el celular al instante sin reabrir la app.
+- Si el patch supera ese limite, se envia de forma normal (y queda en cola para reintento).
+- Solo frontend (git pull).
+
+---
+
 ## v12.9.77 - Sincronizacion mas confiable en mobile (2026-07-13)
 
 ### Cola de sincronizacion
