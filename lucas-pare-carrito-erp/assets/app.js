@@ -8767,6 +8767,39 @@
     return lines.join("\n");
   }
 
+  // Aviso de frescura de datos antes de imprimir remitos. Muestra hace cuanto se sincronizo
+  // este dispositivo y avisa si hay cambios propios sin enviar. Ojo: NO puede saber si OTRO
+  // dispositivo tiene cambios sin enviar (eso vive en el celular de esa persona); por eso se
+  // ofrece el boton para traer la ultima version del servidor antes de imprimir.
+  function renderRemitosFreshnessBanner() {
+    const config = getCloudSyncConfig();
+    if (!cloudSyncReady(config)) return "";
+    const pending = pendingSyncCount();
+    const lastMs = config.lastSync ? new Date(config.lastSync).getTime() : 0;
+    const ageMin = lastMs ? Math.floor((Date.now() - lastMs) / 60000) : null;
+    const ageText = ageMin === null ? "sin datos de sincronizacion"
+      : ageMin <= 0 ? "hace menos de 1 minuto"
+      : ageMin === 1 ? "hace 1 minuto"
+      : ageMin < 60 ? "hace " + ageMin + " minutos"
+      : "hace " + Math.floor(ageMin / 60) + " h " + (ageMin % 60) + " min";
+    const stale = ageMin === null || ageMin >= 5;
+    const warn = pending > 0 || stale;
+    const bg = warn ? "#fdf2d5" : "#e8f5ee";
+    const border = warn ? "#e0a800" : "#1c7c4c";
+    const parts = [];
+    parts.push("Datos actualizados <strong>" + escapeHtml(ageText) + "</strong>.");
+    if (pending > 0) parts.push("<strong>Tenes " + pending + " cambio(s) sin enviar desde este dispositivo.</strong>");
+    parts.push("Si alguien acaba de cargar algo desde otro celular, actualiza antes de imprimir.");
+    return `
+      <div class="panel" style="margin-bottom:14px;background:${bg};border-left:4px solid ${border}">
+        <div class="page-actions" style="justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+          <div style="font-size:13px">${parts.join(" ")}</div>
+          <button class="btn small primary" type="button" id="remitos-refresh-sync">Actualizar datos ahora</button>
+        </div>
+      </div>
+    `;
+  }
+
   function renderRemitos() {
     const todaysNotes = getTodaysProductNotes();
     const missingPurchases = getProductPurchaseShortages(todayISO());
@@ -8785,6 +8818,19 @@
       .map((order) => renderRemitosClientOrderRow(order))
       .join("");
     afterRender.push(() => {
+      const refreshBtn = document.getElementById("remitos-refresh-sync");
+      if (refreshBtn) refreshBtn.addEventListener("click", async () => {
+        refreshBtn.disabled = true;
+        refreshBtn.textContent = "Actualizando...";
+        try {
+          if (pendingSyncCount() > 0) await flushPatchQueue(false);
+          await cloudPull(true);
+        } catch (e) {
+          alert("No se pudo actualizar: " + (e && e.message ? e.message : "error de conexion"));
+          refreshBtn.disabled = false;
+          refreshBtn.textContent = "Actualizar datos ahora";
+        }
+      });
       const clientSelect = document.getElementById("remitos-client-filter");
       const linkedSelect = document.getElementById("remitos-linked-client-filter");
       const fromInput = document.getElementById("remitos-from");
@@ -8845,6 +8891,7 @@
       "Generacion e impresion de remitos por pedido.",
       `<button class="btn primary" data-export-today-remitos>Exportar PDF remitos de hoy</button>`,
       `
+      ${renderRemitosFreshnessBanner()}
       <div class="panel ${todaysNotes.length ? "highlight-panel" : ""}" style="margin-bottom:14px">
         <div class="page-actions" style="justify-content:space-between">
           <div>

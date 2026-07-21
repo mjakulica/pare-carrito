@@ -1,5 +1,16 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.79 - Remitos: aviso de frescura de datos antes de imprimir (2026-07-13)
+
+### Remitos
+- Nuevo aviso arriba de la pagina Remitos que muestra hace cuanto se sincronizaron los datos de este dispositivo y advierte si hay cambios propios sin enviar.
+- Si la ultima sincronizacion tiene 5 minutos o mas (o hay cambios sin enviar) el aviso se muestra en amarillo; si esta fresco, en verde.
+- Boton "Actualizar datos ahora": primero empuja lo pendiente de este dispositivo y despues descarga la ultima version del servidor. Recomendado antes de imprimir si alguien acaba de cargar algo desde otro celular.
+- Limitacion honesta indicada en el aviso: no puede saber si OTRO dispositivo tiene cambios sin enviar (eso vive en ese telefono); por eso se ofrece actualizar antes de imprimir.
+- Solo frontend (git pull).
+
+---
+
 ## v12.9.78 - Envio de cambios con keepalive (celular bloqueado al instante) (2026-07-13)
 
 ### Cola de sincronizacion
