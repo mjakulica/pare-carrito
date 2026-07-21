@@ -17099,10 +17099,16 @@
     return state.saldos.filter((entry) => entry.clientId === clientId).reduce((sum, entry) => sum + Number(entry.amount || 0), 0);
   }
 
+  // Punto unico por el que pasan TODAS las mutaciones de un pedido (alta/baja de items, cambio
+  // de cantidad, actualizacion de precios por compra, etc). Se sella updatedAt aca para que el
+  // merge de sincronizacion sepa cual es la version mas nueva. Sin esto, cambios como borrar un
+  // item en Unidades o actualizar precios tras una compra quedaban "empatados" y una copia vieja
+  // de otro dispositivo los revertia (item que reaparece / remito con precios viejos).
   function recalcOrderTotals(order) {
     order.subtotalAmount = order.items.reduce((sum, item) => sum + Number(item.subtotal || 0), 0);
     order.ivaAmount = order.items.reduce((sum, item) => sum + Number(item.ivaAmount || 0), 0);
     order.totalAmount = order.subtotalAmount + order.ivaAmount;
+    order.updatedAt = new Date().toISOString();
   }
 
   function updateOrderAccounting(order) {

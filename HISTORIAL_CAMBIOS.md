@@ -1,5 +1,19 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.76 - Fix: cambios revertidos (remitos con precios viejos / item que reaparece) (2026-07-13)
+
+### Causa raiz
+- Varias mutaciones de pedido NO sellaban order.updatedAt: updateOrdersWithNewPrices (precios tras una compra), removeProductFromOrders, updateUnitWeightGroup y el borrado de un item en Unidades. Como el merge de sincronizacion resuelve por timestamp, esos cambios quedaban "empatados" con la copia previa y una version vieja de otro dispositivo los revertia.
+- Sintomas: el remito se imprimia con precios anteriores a la ultima compra, y un producto borrado con la X en Unidades volvia a aparecer.
+- NO era la cola offline / localStorage.
+
+### Fix
+- Frontend: recalcOrderTotals (punto unico por el que pasan todas las mutaciones de pedido) ahora sella order.updatedAt.
+- Backend: al aplicar un patch, una copia mas vieja ya no puede pisar una mas nueva (si ambas tienen updatedAt y la entrante es anterior, se ignora). Evita que un dispositivo desactualizado revierta cambios ya confirmados.
+- El backend REQUIERE ./deploy.sh; el frontend va con git pull.
+
+---
+
 ## v12.9.75 - Parser: decimales con punto y abreviatura "doc." (2026-07-13)
 
 ### Parser de WhatsApp (Nuevo Pedido)

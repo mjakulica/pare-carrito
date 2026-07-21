@@ -651,7 +651,14 @@ function applyArrayPatch(target, key, changes) {
   (Array.isArray(changes && changes.delete) ? changes.delete : []).forEach((id) => map.delete(String(id)));
   (Array.isArray(changes && changes.upsert) ? changes.upsert : []).forEach((item) => {
     const id = patchKeyForItem(key, item);
-    if (id) map.set(id, item);
+    if (!id) return;
+    // No dejar que una copia MAS VIEJA pise una MAS NUEVA: si ambas tienen updatedAt y la que
+    // llega es anterior a la guardada, se ignora. Evita que un dispositivo con datos
+    // desactualizados revierta cambios ya confirmados (ej. precios actualizados por una compra
+    // o un item borrado que "reaparece").
+    const existing = map.get(id);
+    if (existing && existing.updatedAt && item && item.updatedAt && String(item.updatedAt) < String(existing.updatedAt)) return;
+    map.set(id, item);
   });
   target[key] = Array.from(map.values());
 }
