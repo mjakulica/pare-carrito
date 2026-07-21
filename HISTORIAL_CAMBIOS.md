@@ -1,5 +1,15 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.75 - Parser: decimales con punto y abreviatura "doc." (2026-07-13)
+
+### Parser de WhatsApp (Nuevo Pedido)
+- Decimales con punto: "Cherry 1.5 k" y "Zuccini 1.5kg" se leian como 1 kg porque el punto separaba el numero ("1 5"). Ahora "1.5" se interpreta como 1,5 -> Tomate Cherry Kg 1,5 y Zukini Kg 1,5.
+- Abreviatura con punto: "2doc. pomelo", "1doc. Limones", "1doc. Bananas" (y las variantes sin espacio "1doc.Limones") quedaban pegadas en un solo token, lo que provocaba cantidades erroneas (0,1 docena) y matches equivocados (aparecia Banana donde no correspondia). Ahora cualquier punto separa tokens -> Pomelo Docena 2, Limon Docena 1, Bananas Docena 1.
+- Notas: se ignoran las palabras de cortesia ("por favor", "porfa", "gracias"): "Palta 2 kg lindas por favor" queda con la nota util "lindas".
+- Verificado con los tres pedidos reportados. Solo frontend (git pull).
+
+---
+
 ## v12.9.74 - Sidebar mobile: boton Salir y items siempre accesibles (2026-07-13)
 
 ### Sidebar (mobile)

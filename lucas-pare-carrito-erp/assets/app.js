@@ -15002,8 +15002,12 @@
 
   function normalizeWhatsappOrderSyntax(line) {
     return String(line || "")
-      .replace(/([a-zA-Z\u00c0-\u017f])\.(?=\d)/g, "$1 ")
-      .replace(/\.(?=\d)/g, " ")
+      // Decimales con punto: "1.5" -> "1,5" (se preserva la fraccion). Debe ir ANTES de
+      // separar por punto, si no "1.5 kg" quedaba como "1 5 kg" y se leia 1 kg.
+      .replace(/(\d)\s*\.\s*(\d)/g, "$1,$2")
+      // Cualquier otro punto separa tokens: "1doc. Limones" y "1doc.Limones" -> "1 doc limones".
+      // Sin esto, "doc.limones" quedaba pegado y el producto no matcheaba (caia en un match raro).
+      .replace(/\./g, " ")
       .replace(/(\d)([a-zA-Z\u00c0-\u017f]+)/g, "$1 $2")
       .replace(/([a-zA-Z\u00c0-\u017f])(\d)/g, "$1 $2")
       .replace(/(\d)\s*\/\s*(\d)/g, "$1/$2")
@@ -15167,7 +15171,7 @@
   }
 
   function cleanupParsedProductNote(value) {
-    const IGN = new Set(["kg", "kgs", "kilo", "kilos", "gr", "grs", "gramo", "gramos", "unidad", "unidades", "atado", "atados", "planta", "plantas", "bolsa", "bolsas", "jaula", "jaulas", "cajon", "cajones", "maple", "maples", "bandeja", "bandejas", "docena", "docenas", "ristra", "ristras", "cabeza", "cabezas", "fardo", "fardos", "x", "de", "del", "la", "el", "por", "deliciosa", "delicia"]);
+    const IGN = new Set(["kg", "kgs", "kilo", "kilos", "gr", "grs", "gramo", "gramos", "unidad", "unidades", "atado", "atados", "planta", "plantas", "bolsa", "bolsas", "jaula", "jaulas", "cajon", "cajones", "maple", "maples", "bandeja", "bandejas", "docena", "docenas", "ristra", "ristras", "cabeza", "cabezas", "fardo", "fardos", "x", "de", "del", "la", "el", "por", "deliciosa", "delicia", "favor", "porfavor", "porfa", "gracias"]);
     const raw = String(value || "").replace(/^[\s.,;:()/-]+|[\s.,;:()/-]+$/g, "").replace(/\s+/g, " ").trim();
     if (!raw) return "";
     const kept = raw.split(/\s+/).filter((w) => {
