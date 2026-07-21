@@ -1,5 +1,17 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.77 - Sincronizacion mas confiable en mobile (2026-07-13)
+
+### Cola de sincronizacion
+- Aclaracion de como funciona: la cola guarda UN patch coalescido (el diff completo contra el ultimo estado sincronizado), persistido en localStorage. Varios cambios pendientes viajan juntos en un mismo envio; no se pierden ni se mandan a medias.
+- Refuerzos:
+  - El EMPLEADO ahora espera la confirmacion del envio al guardar un egreso (antes solo lo hacia el proveedor). El cambio sale mientras la app esta en primer plano y, si falla, avisa en el momento.
+  - Al VOLVER a la app (celular bloqueado / cambio de pestania) primero se empuja lo pendiente y recien despues se descarga. Antes solo se descargaba y lo pendiente dependia de un camino indirecto.
+  - Al ABRIR la app, si quedo algo pendiente de una sesion anterior, se envia de inmediato.
+- Solo frontend (git pull).
+
+---
+
 ## v12.9.76 - Fix: cambios revertidos (remitos con precios viejos / item que reaparece) (2026-07-13)
 
 ### Causa raiz

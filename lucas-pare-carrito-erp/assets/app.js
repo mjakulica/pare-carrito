@@ -453,6 +453,9 @@
     }
     render();
     startCloudAutoSync();
+    // Si quedo un cambio pendiente de una sesion anterior (ej. se bloqueo el celular antes de
+    // que saliera), se envia apenas abre la app.
+    if (loadPatchQueue().length) { try { flushPatchQueue(false); } catch (e) { /* se reintenta */ } }
     flushClientWriteQueue(false);
     startVersionWatch();
     startIdleLogout();
@@ -478,7 +481,14 @@
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState !== "visible") return;
     const cloudConfig = getCloudSyncConfig();
-    if (canReadCloudState() && cloudSyncReady(cloudConfig) && cloudConfig.auto !== false) cloudPull(false);
+    // Al volver a la app (ej. el celular estuvo bloqueado), primero se EMPUJA lo que haya quedado
+    // pendiente y recien despues se descarga. Antes solo se descargaba, y lo pendiente dependia
+    // de un camino indirecto para salir.
+    if (loadPatchQueue().length && canWritePatchCloudSync() && cloudSyncReady(cloudConfig) && configAutoEnabled(cloudConfig)) {
+      flushPatchQueue(false).then(() => { if (canReadCloudState()) cloudPull(false); });
+    } else if (canReadCloudState() && cloudSyncReady(cloudConfig) && cloudConfig.auto !== false) {
+      cloudPull(false);
+    }
     flushClientWriteQueue(false);
   });
   window.addEventListener("beforeunload", (event) => {
@@ -7561,13 +7571,16 @@
         });
       }
       saveState();
-      if (currentUser.role === "proveedor") {
+      // Empleado y proveedor: se espera la confirmacion del envio ANTES de dar por cerrado el
+      // guardado. Asi el cambio sale mientras la app sigue en primer plano (si el celular se
+      // bloquea 500ms despues, el envio ya salio) y, si falla, el usuario se entera en el momento.
+      if (["proveedor", "employee"].includes(currentUser.role)) {
         try {
           if (typeof navigator !== "undefined" && navigator.onLine === false) throw new Error("sin conexión");
           const ok = await flushPatchQueue(false);
           if (ok === false) throw new Error("pendiente");
         } catch (e) {
-          alert("\u26A0 SIN CONEXIÓN: la compra TODAVÍA NO se envió al sistema. Quedó guardada en este dispositivo y se reintentará al volver internet. No cierres el sistema hasta tener conexión.");
+          alert("\u26A0 SIN CONEXIÓN: el egreso TODAVÍA NO se envió al sistema. Quedó guardado en este dispositivo y se reintentará al volver internet. No cierres el sistema hasta tener conexión.");
         }
       }
       render();
