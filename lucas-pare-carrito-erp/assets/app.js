@@ -8834,6 +8834,20 @@
       .map((order) => renderRemitosClientOrderRow(order))
       .join("");
     afterRender.push(() => {
+      const repriceBtn = document.getElementById("reprice-day-btn");
+      if (repriceBtn) repriceBtn.addEventListener("click", () => {
+        const dateEl = document.getElementById("reprice-day-date");
+        const dateISO = dateEl ? dateEl.value : todayISO();
+        if (!dateISO) return alert("Elegi una fecha.");
+        const costs = getDayPurchaseCosts(dateISO);
+        const nprod = Object.keys(costs).length;
+        if (!nprod) return alert("No hay compras de producto registradas el " + formatDate(dateISO) + ", asi que no hay costos con que recalcular.");
+        if (!confirm("Recalcular precios de los pedidos del " + formatDate(dateISO) + " segun las compras de ese dia?\n\nSe actualizan precios y saldos de esos clientes. Conviene tener un backup y estar seguro de que los datos estan sincronizados.")) return;
+        const res = recalcDayPricesFromPurchases(dateISO);
+        saveState();
+        render();
+        alert("Listo — " + formatDate(dateISO) + ": " + res.changedOrders + " pedido(s) actualizados, " + res.changedItems + " item(s) reprecidados (sobre " + res.orders + " pedidos y " + res.products + " productos comprados). Ya podes reimprimir los remitos.");
+      });
       const refreshBtn = document.getElementById("remitos-refresh-sync");
       if (refreshBtn) refreshBtn.addEventListener("click", async () => {
         refreshBtn.disabled = true;
@@ -8908,6 +8922,19 @@
       `<button class="btn primary" data-export-today-remitos>Exportar PDF remitos de hoy</button>`,
       `
       ${renderRemitosFreshnessBanner()}
+      ${["manager", "admin"].includes(currentUser.role) ? `
+      <div class="panel" style="margin-bottom:14px">
+        <div class="page-actions" style="justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+          <div>
+            <h2 class="page-title" style="font-size:16px;margin:0">Recalcular precios de un dia</h2>
+            <p class="muted" style="margin:2px 0 0;font-size:12px">Reprecia los pedidos de la fecha elegida segun el costo de las compras de ESE dia (costo x margen + ajuste% del cliente) y actualiza los saldos. Usalo si una compra no actualizo los precios ese dia. Despues reimprimi los remitos.</p>
+          </div>
+          <div class="page-actions" style="gap:8px;align-items:center">
+            <input type="date" id="reprice-day-date" value="${todayISO()}" />
+            <button class="btn primary" type="button" id="reprice-day-btn">Recalcular precios</button>
+          </div>
+        </div>
+      </div>` : ""}
       <div class="panel ${todaysNotes.length ? "highlight-panel" : ""}" style="margin-bottom:14px">
         <div class="page-actions" style="justify-content:space-between">
           <div>
@@ -16786,6 +16813,67 @@
       rec.updatedAt = new Date().toISOString();
       state.prices[item.productId] = rec;
     });
+  }
+
+  // === Recalcular precios de un dia segun las compras de ese dia ===
+  // Costo por producto de las compras de un dia (ultima compra del dia gana). Solo compras de
+  // producto (no otros gastos, flete, pago proveedor, movimientos de caja, ni market_price).
+  function getDayPurchaseCosts(dateISO) {
+    const EXCL = ["other_expense", "freight", "market_price", "provider_payment", "cash_movement", "prepared"];
+    const map = {};
+    (state.purchases || [])
+      .filter((p) => p && p.date === dateISO && p.status !== "anulado" && !EXCL.includes(p.expenseType || "purchase"))
+      .slice()
+      .sort((a, b) => String(a.createdAt || "").localeCompare(String(b.createdAt || "")))
+      .forEach((p) => {
+        const items = Array.isArray(p.items) && p.items.length ? p.items : (p.productId ? [{ productId: p.productId, unitCost: p.unitCost }] : []);
+        items.forEach((it) => {
+          const uc = Number(it.unitCost || 0);
+          if (it.productId && uc > 0) map[it.productId] = uc;
+        });
+      });
+    return map;
+  }
+
+  // Reprecia los pedidos (no anulados) de una fecha usando el costo de las compras de ESE dia:
+  // precio de lista = ceil(costo x (1 + margen del producto)); precio al cliente = lista x
+  // (1 + ajuste% del cliente). Mantiene la tasa de IVA de cada item y recalcula el IVA. Actualiza
+  // los totales del pedido y el saldo del cliente (updateOrderAccounting).
+  function recalcDayPricesFromPurchases(dateISO) {
+    const costs = getDayPurchaseCosts(dateISO);
+    const orders = (state.orders || []).filter((o) => o.date === dateISO && !["cancelado", "anulado"].includes(o.status));
+    let changedOrders = 0;
+    let changedItems = 0;
+    orders.forEach((order) => {
+      const client = getClient(order.clientId);
+      const adj = Number(order.priceAdjustmentPct != null ? order.priceAdjustmentPct : (client ? client.priceAdjustmentPct || 0 : 0)) || 0;
+      let changed = false;
+      (order.items || []).forEach((item) => {
+        const cost = costs[item.productId];
+        if (!(cost > 0)) return;
+        const product = getProduct(item.productId);
+        if (!product) return;
+        const rec = state.prices[item.productId] || {};
+        let margin = Number(rec.marginPct);
+        if (!Number.isFinite(margin)) margin = calcMargin(rec.cost || product.baseCost, rec.price || product.salePrice);
+        const listPrice = ceilMoney(cost * (1 + margin / 100));
+        const newUnit = Math.max(0, listPrice * (1 + adj / 100));
+        if (Math.abs(newUnit - Number(item.unitPrice || 0)) < 0.5) return;
+        item.unitPrice = newUnit;
+        item.subtotal = Number(item.quantity || 0) * newUnit;
+        const ivaRate = Number(item.ivaRate || 0);
+        item.ivaAmount = item.subtotal * (ivaRate / 100);
+        item.totalWithIva = item.subtotal + item.ivaAmount;
+        changed = true;
+        changedItems += 1;
+      });
+      if (changed) {
+        recalcOrderTotals(order);
+        updateOrderAccounting(order);
+        changedOrders += 1;
+      }
+    });
+    return { changedOrders, changedItems, orders: orders.length, products: Object.keys(costs).length };
   }
 
   function updateOrdersWithNewPrices(purchaseDate, items) {

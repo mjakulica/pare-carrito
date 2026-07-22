@@ -1,5 +1,16 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.81 - Remitos: boton "Recalcular precios de un dia" (2026-07-13)
+
+### Remitos (gerente/admin)
+- Nuevo panel "Recalcular precios de un dia": se elige una fecha y el sistema reprecia los pedidos (no anulados) de ese dia segun el costo de las COMPRAS de ese mismo dia.
+- Formula (motor en off): precio de lista = ceil(costo x (1 + margen del producto)); precio al cliente = lista x (1 + ajuste% del cliente). Mantiene la tasa de IVA de cada item y recalcula el IVA. Solo toca items cuyo producto tuvo compra ese dia.
+- Actualiza los totales del pedido y el saldo del cliente (updateOrderAccounting), y sella updatedAt.
+- Pensado para corregir dias en que una compra no habia actualizado los precios de los remitos. Verificado contra el recalculo offline del 18/07 y 20/07 (numeros identicos).
+- Solo frontend (git pull).
+
+---
+
 ## v12.9.80 - Fix: el precio actualizado por una compra se revertia en la pagina Precios (2026-07-13)
 
 ### Precios / sincronizacion
