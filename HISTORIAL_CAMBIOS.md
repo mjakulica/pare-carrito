@@ -1,5 +1,15 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.80 - Fix: el precio actualizado por una compra se revertia en la pagina Precios (2026-07-13)
+
+### Precios / sincronizacion
+- Sintoma: tras una compra/gasto, el remito salia con el precio nuevo (queda congelado dentro del pedido) pero la pagina Precios seguia mostrando el costo/precio viejo.
+- Causa: state.prices se fusionaba con "local gana siempre" por clave. El pedido esta protegido por updatedAt, pero prices no tenia timestamp, asi que una copia vieja (tipicamente el gerente, que hace push del estado completo) revertia el precio actualizado por la compra.
+- Fix: cada escritura de precio (compra via applyCostChange, precio de mercado, edicion manual) sella updatedAt, y el merge de prices pasa a "gana el mas nuevo por producto" (remoto en empate o si el local no tiene timestamp).
+- Los patches de objetos ya viajaban como diff (solo claves cambiadas), asi que no requiere cambio de backend. Solo frontend (git pull).
+
+---
+
 ## v12.9.79 - Remitos: aviso de frescura de datos antes de imprimir (2026-07-13)
 
 ### Remitos

@@ -1834,7 +1834,22 @@
         ? (Array.isArray(remote[key]) ? remote[key].slice() : [])
         : unionByKeyPreferNewest(remote[key], local[key], byId, "updatedAt");
     });
-    merged.prices = { ...(remote.prices || {}), ...(local.prices || {}) };
+    // prices: merge por producto, gana el rec con updatedAt mas nuevo (remoto en empate o si
+    // el local no tiene timestamp). Antes era "local gana siempre", por lo que una copia vieja
+    // (tipico el gerente que hace push completo) revertia el precio actualizado por una compra.
+    merged.prices = (function () {
+      const out = { ...(remote.prices || {}) };
+      const loc = local.prices || {};
+      Object.keys(loc).forEach((pid) => {
+        const r = out[pid];
+        const l = loc[pid];
+        if (!r) { out[pid] = l; return; }
+        const rt = r && r.updatedAt ? Date.parse(r.updatedAt) || 0 : 0;
+        const lt = l && l.updatedAt ? Date.parse(l.updatedAt) || 0 : 0;
+        out[pid] = lt > rt ? l : r;
+      });
+      return out;
+    })();
     merged.appSettings = { ...(remote.appSettings || {}), ...(local.appSettings || {}) };
     merged.preferences = unionByKey(remote.preferences, local.preferences, (item) => item.clientId + "|" + item.productId);
     merged.productAliases = unionByKey(remote.productAliases, local.productAliases, (item) => item.productId + "|" + String(item.alias));
@@ -5931,6 +5946,7 @@
         state.prices[productId] = {
           productId,
           date: todayISO(),
+          updatedAt: new Date().toISOString(),
           cost,
           marketPrice,
           marginPct,
@@ -16676,6 +16692,7 @@
       rec.marginPct = roundOne(margin);
       rec.price = price;
       rec.date = todayISO();
+      rec.updatedAt = new Date().toISOString();
       state.prices[product.id] = rec;
       product.baseCost = rec.cost;
       product.salePrice = rec.price;
@@ -16766,6 +16783,7 @@
       const rec = state.prices[item.productId] || { productId: item.productId, cost: product.baseCost || 0, price: product.salePrice || 0, marginPct: calcMargin(product.baseCost, product.salePrice) };
       rec.marketPrice = item.marketPrice;
       rec.date = todayISO();
+      rec.updatedAt = new Date().toISOString();
       state.prices[item.productId] = rec;
     });
   }
