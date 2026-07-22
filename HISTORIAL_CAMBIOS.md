@@ -1,5 +1,13 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.82 - Remitos: exportar PDF de un dia puntual (2026-07-13)
+
+### Remitos (gerente/admin)
+- En el panel "Recalcular precios de un dia" se agrego el boton "Exportar PDF remitos de ese dia": arma un solo documento con todos los remitos (no anulados) de la fecha elegida, listo para imprimir/guardar como PDF. Antes solo existia "remitos de hoy" o imprimir pedido por pedido.
+- Solo frontend (git pull).
+
+---
+
 ## v12.9.81 - Remitos: boton "Recalcular precios de un dia" (2026-07-13)
 
 ### Remitos (gerente/admin)

@@ -8834,6 +8834,13 @@
       .map((order) => renderRemitosClientOrderRow(order))
       .join("");
     afterRender.push(() => {
+      const repriceDayPrint = document.getElementById("reprice-day-print");
+      if (repriceDayPrint) repriceDayPrint.addEventListener("click", () => {
+        const dateEl = document.getElementById("reprice-day-date");
+        const dateISO = dateEl ? dateEl.value : todayISO();
+        if (!dateISO) return alert("Elegi una fecha.");
+        printRemitosRangeDirect(dateISO, dateISO);
+      });
       const repriceBtn = document.getElementById("reprice-day-btn");
       if (repriceBtn) repriceBtn.addEventListener("click", () => {
         const dateEl = document.getElementById("reprice-day-date");
@@ -8932,6 +8939,7 @@
           <div class="page-actions" style="gap:8px;align-items:center">
             <input type="date" id="reprice-day-date" value="${todayISO()}" />
             <button class="btn primary" type="button" id="reprice-day-btn">Recalcular precios</button>
+            <button class="btn ghost" type="button" id="reprice-day-print">Exportar PDF remitos de ese dia</button>
           </div>
         </div>
       </div>` : ""}
@@ -9032,6 +9040,22 @@
       },
       { saveLabel: "Imprimir", cancelLabel: "Cerrar", className: "wide" }
     );
+  }
+
+  // Exporta en un solo documento todos los remitos de los pedidos (no anulados) del rango
+  // de fechas indicado. Usado por el boton "Exportar PDF remitos del periodo".
+  function printRemitosRangeDirect(fromISO, toISO) {
+    const from = fromISO || todayISO();
+    const to = toISO || from;
+    const orders = (state.orders || [])
+      .filter((o) => o && !["cancelado", "anulado"].includes(o.status) && !o.exampleOnly && isDateInRange(o.date, from, to))
+      .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.id).localeCompare(String(b.id)));
+    if (!orders.length) { alert("No hay pedidos para remitir en ese rango de fechas."); return; }
+    const remitos = orders.map((order) => generateRemito(order.id));
+    saveState();
+    const body = `<section class="print-page remito-print-page">${remitos.map((remito) => renderRemitoPrintSheet(remito.id)).join("")}</section>`;
+    const label = from === to ? fileDate(from) : fileDate(from) + " a " + fileDate(to);
+    printHtmlDocument(label + " Remitos Pare carrito", body);
   }
 
   function printTodayRemitosDirect() {
