@@ -12,6 +12,13 @@
 
 	handle {
 		root * /srv/frontend
+		# HTML/JS/CSS: revalidar SIEMPRE contra el servidor (ETag). Asi cada deploy se aplica al
+		# recargar la pagina, sin necesidad de Ctrl+F5. Evita que los dispositivos queden con una
+		# version vieja del frontend (que, por ejemplo, no sellaba updatedAt y perdia cambios).
+		@revalidate {
+			path / *.html *.js *.css
+		}
+		header @revalidate Cache-Control "no-cache, must-revalidate"
 		file_server
 	}
 }

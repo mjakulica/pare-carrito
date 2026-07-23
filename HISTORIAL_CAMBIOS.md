@@ -1,5 +1,17 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.83 - Fix cache: los dispositivos quedaban con frontend viejo (2026-07-13)
+
+### Infra / cache del frontend
+- Sintoma probable del bug de Unidades (cambio de cantidad de frutilla que no se actualizaba, X que no borraba del remito): el dispositivo del empleado corria una version VIEJA del frontend cacheada. Esa version no sellaba updatedAt, por lo que sus cambios perdian en el merge de sincronizacion contra otra copia.
+- Causa: index.html referenciaba app.js/styles.css con un query fijo (?v=20260626-safety) que no cambiaba en cada deploy, y Caddy no enviaba Cache-Control, por lo que el navegador servia el archivo cacheado hasta un Ctrl+F5.
+- Fix:
+  - Caddy ahora manda Cache-Control: no-cache, must-revalidate para /, *.html, *.js y *.css -> el navegador revalida contra el servidor en cada carga (ETag) y aplica el deploy al recargar, sin Ctrl+F5.
+  - Se bumpeo el query de cache-busting a ?v=20260723-sync para forzar la actualizacion en los dispositivos que ya tenian cache vieja.
+- REQUIERE ./deploy.sh (cambia el Caddyfile, que esta bajo pare-carrito-sas-server/).
+
+---
+
 ## v12.9.82 - Remitos: exportar PDF de un dia puntual (2026-07-13)
 
 ### Remitos (gerente/admin)
