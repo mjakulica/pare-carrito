@@ -1329,6 +1329,37 @@ function clientBalanceFromState(data, clientId) {
   return (data.saldos || []).filter((e) => e.clientId === clientId).reduce((sum, e) => sum + Number(e.amount || 0), 0);
 }
 
+// ---------- Lista de precios PUBLICA (sin login) ----------
+// Devuelve nombre + precio de lista (general) + IVA de los productos activos. Se mantiene al dia
+// sola porque lee el estado actual. La columna "con IVA" usa la tasa real del producto, salvo el
+// 10,5% que se calcula al 12% (buffer para venta con factura).
+function publicIvaSurcharge(ivaType) {
+  const s = String(ivaType == null ? "10.5" : ivaType).toLowerCase().replace(",", ".");
+  if (s === "exento" || s === "no_gravado") return 0;
+  const n = parseFloat(s);
+  const rate = Number.isFinite(n) ? n : 10.5;
+  return rate === 10.5 ? 12 : rate; // 10,5% -> 12%
+}
+app.get("/public/price-list", async (req, res) => {
+  const stored = await loadStateData();
+  if (!stored) return res.json({ businessName: "Pare Carrito", updatedAt: null, items: [] });
+  const d = stored.data || {};
+  const settings = d.appSettings || {};
+  if (settings.publicPriceListEnabled === false) return res.status(404).json({ error: "Lista no disponible." });
+  const prices = d.prices || {};
+  const items = (d.products || [])
+    .filter((p) => p && p.isActive !== false)
+    .map((p) => {
+      const rec = prices[p.id] || {};
+      const price = Number(rec.price || p.salePrice || 0);
+      return { name: p.name, category: p.category || "", unitType: p.unitType || "", price, ivaSurcharge: publicIvaSurcharge(p.ivaType) };
+    })
+    .filter((it) => it.price > 0)
+    .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  res.set("Cache-Control", "public, max-age=120");
+  res.json({ businessName: "Pare Carrito", updatedAt: stored.updatedAt, items });
+});
+
 app.get("/external/summary", externalAuth, async (req, res) => {
   const stored = await loadStateData();
   if (!stored) return res.status(404).json({ error: "Sin datos." });

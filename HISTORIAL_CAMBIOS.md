@@ -1,5 +1,17 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.84 - Lista de precios publica (sin login) con toggle IVA (2026-07-13)
+
+### Lista de precios publica
+- Nuevo endpoint publico (sin autenticacion) GET /public/price-list: devuelve nombre + precio de lista (general) + recargo de IVA de los productos activos. Se mantiene al dia solo porque lee el estado actual.
+- Nueva pagina publica en /precios (precios.html): al entrar pregunta "Ver precios SIN IVA" o "CON IVA". Muestra la lista alfabetica con buscador, fecha de ultima actualizacion y auto-refresh cada 5 min. Mobile-first, ideal para compartir por WhatsApp.
+- "Con IVA": suma el IVA real de cada producto, salvo el 10,5% que se calcula al 12% (buffer para venta con factura). Los de 21% quedan al 21%.
+- Se puede desactivar con appSettings.publicPriceListEnabled = false.
+- Caddy: /precios sirve precios.html.
+- REQUIERE ./deploy.sh (endpoint nuevo en el backend + Caddyfile). La pagina precios.html es frontend.
+
+---
+
 ## v12.9.83 - Fix cache: los dispositivos quedaban con frontend viejo (2026-07-13)
 
 ### Infra / cache del frontend
