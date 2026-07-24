@@ -1367,6 +1367,18 @@ app.get("/public/price-list", async (req, res) => {
   const unitCfg = Array.isArray((d.appSettings || {}).unitTypes) && d.appSettings.unitTypes.length ? d.appSettings.unitTypes : DEF_UNITS;
   const wholesaleSet = new Set(unitCfg.filter((u) => u && u.wholesale).map((u) => String(u.name || "").toLowerCase()));
   const categoryRank = (c) => ({ FRUTAS: 1, VERDURAS: 2, HUEVOS: 3, OTROS: 4 }[String(c || "").toUpperCase()] || 99);
+  // Ultima compra directa por producto (para la fecha de "ultima actualizacion").
+  const EXCL_P = ["other_expense", "freight", "market_price", "provider_payment", "cash_movement", "prepared"];
+  const lastPurchaseByProduct = {};
+  (d.purchases || []).forEach((p) => {
+    if (!p || p.status === "anulado" || EXCL_P.includes(p.expenseType || "purchase") || !p.date) return;
+    const items = Array.isArray(p.items) && p.items.length ? p.items : (p.productId ? [{ productId: p.productId }] : []);
+    items.forEach((it) => {
+      if (it && it.productId && (!lastPurchaseByProduct[it.productId] || p.date > lastPurchaseByProduct[it.productId])) {
+        lastPurchaseByProduct[it.productId] = p.date;
+      }
+    });
+  });
   const items = (d.products || [])
     .filter((p) => p && p.isActive !== false)
     .map((p) => {
@@ -1387,7 +1399,12 @@ app.get("/public/price-list", async (req, res) => {
         ivaSurcharge: publicIvaSurcharge(p.ivaType),
         ivaLabel: publicIvaLabel(p.ivaType),
         image,
-        date: rec.date || null
+        date: (function () {
+          const rd = rec.date || "";
+          const lp = lastPurchaseByProduct[p.id] || "";
+          const best = rd > lp ? rd : lp;
+          return best || null;
+        })()
       };
     })
     .filter((it) => it.price > 0)

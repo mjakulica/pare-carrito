@@ -125,10 +125,10 @@
   // Fecha de ultima actualizacion del precio por producto (dd/mm/aaaa). Si no hay, usa hoy,
   // igual que la lista de precios del rol cliente.
   function fmtDay(iso){
-    var d;
-    if(iso){ var p=String(iso).slice(0,10).split("-"); d = p.length===3 ? new Date(+p[0],+p[1]-1,+p[2]) : new Date(iso); }
-    else { d = new Date(); }
-    if(isNaN(d.getTime())) d = new Date();
+    if(!iso) return "—";
+    var p=String(iso).slice(0,10).split("-");
+    var d = p.length===3 ? new Date(+p[0],+p[1]-1,+p[2]) : new Date(iso);
+    if(isNaN(d.getTime())) return "—";
     return d.toLocaleDateString("es-AR");
   }
   function net(it){ return it.price; }

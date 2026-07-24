@@ -11198,7 +11198,7 @@
               <div><span>IVA ${ivaLabel(product.ivaType)}</span><strong>${formatMoney(ivaAmount)}</strong></div>
               <div><span>Precio final</span><strong>${formatMoney(finalPrice)}</strong></div>
             ` : `<div><span>Precio unitario</span><strong>${formatMoney(finalPrice)}</strong></div>`}
-            <div><span>Ult act</span><strong>${formatDate(priceRecord.date || todayISO())}</strong></div>
+            <div><span>Ult act</span><strong>${(() => { const ld = getProductLastPriceUpdate(product.id); return ld ? formatDate(ld) : "—"; })()}</strong></div>
           </div>
         </article>
       `;
@@ -11213,7 +11213,7 @@
         <tr>
           <td><div class="product-name"><img class="product-thumb" src="${productThumb(product)}" alt="" /> ${escapeHtml(product.name)}</div></td>
           <td class="num"><strong>${formatMoney(finalPrice)}</strong>${ivaRate > 0 ? `<br><small>+IVA ${formatMoney(ivaAmount)}</small>` : ""}</td>
-          <td>${formatDate(priceRecord.date || todayISO())}</td>
+          <td>${(() => { const ld = getProductLastPriceUpdate(product.id); return ld ? formatDate(ld) : "—"; })()}</td>
         </tr>
       `;
     }).join("");
@@ -16751,11 +16751,15 @@
     const currentMargin = Number.isFinite(Number(rec.marginPct)) ? Number(rec.marginPct) : (opts.fallbackMargin != null ? Number(opts.fallbackMargin) : calcMargin(rec.cost, rec.price));
     const currentPrice = Number(rec.price || product.salePrice || 0);
     const persist = (margin, price) => {
+      // La fecha ("ultima actualizacion de precio") solo se toca si el costo o el precio
+      // realmente cambian. Antes se ponia hoy siempre, aunque no cambiara nada (reprocesos,
+      // relaciones de costo), por lo que figuraba "actualizado hoy" sin motivo.
+      const priceChanged = Number(rec.cost || 0) !== Number(costNew || 0) || Number(rec.price || 0) !== Number(price || 0);
       rec.cost = costNew;
       rec.marketPrice = opts.marketPrice != null ? opts.marketPrice : (rec.marketPrice || 0);
       rec.marginPct = roundOne(margin);
       rec.price = price;
-      rec.date = todayISO();
+      if (priceChanged || !rec.date) rec.date = todayISO();
       rec.updatedAt = new Date().toISOString();
       state.prices[product.id] = rec;
       product.baseCost = rec.cost;
@@ -17214,6 +17218,22 @@
 
   function ordersByDate(date) {
     return state.orders.filter((order) => order.date === date && !["cancelado", "anulado"].includes(order.status));
+  }
+
+  // Fecha de la ultima "actualizacion" real del precio de un producto: la mas reciente entre
+  // el ultimo cambio de precio guardado (rec.date) y la ultima COMPRA directa de ese producto.
+  // No cae en "hoy" por defecto: si nunca cambio ni se compro, devuelve "".
+  function getProductLastPriceUpdate(productId) {
+    const rec = (state.prices && state.prices[productId]) || {};
+    let d = rec.date || "";
+    const EXCL = ["other_expense", "freight", "market_price", "provider_payment", "cash_movement", "prepared"];
+    (state.purchases || []).forEach((p) => {
+      if (!p || p.status === "anulado" || EXCL.includes(p.expenseType || "purchase")) return;
+      if (!p.date || p.date <= d) return;
+      const items = Array.isArray(p.items) && p.items.length ? p.items : (p.productId ? [{ productId: p.productId }] : []);
+      if (items.some((it) => it && it.productId === productId)) d = p.date;
+    });
+    return d;
   }
 
   function getProductPrice(productId) {

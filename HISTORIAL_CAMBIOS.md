@@ -1,5 +1,18 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.93 - Fecha de ultima actualizacion de precio real (2026-07-13)
+
+### Precios (lista cliente y lista publica)
+- Sintoma: figuraba que TODOS los productos se actualizaron hoy, aunque muchos no se compraron ni cambiaron de precio.
+- Causa: applyCostChange ponia rec.date = hoy SIEMPRE (aunque el costo/precio no cambiaran; se dispara tambien por reprocesos y relaciones de costo), y la vista usaba "hoy" como fallback.
+- Fix:
+  - rec.date solo se actualiza si el costo o el precio CAMBIAN de verdad.
+  - La fecha mostrada = la mas reciente entre el ultimo cambio de precio (rec.date) y la ultima COMPRA DIRECTA del producto. Si nunca cambio ni se compro, muestra "—" (ya no "hoy").
+  - Aplica a la lista de precios del rol cliente y a la lista publica (/precios), en grilla y lista.
+- Frontend (app.js + precios.html) con git pull; el endpoint publico requiere ./deploy.sh.
+
+---
+
 ## v12.9.92 - Lista de precios publica: IVA solo se elige al ingresar (2026-07-13)
 
 ### Lista de precios publica (/precios)
