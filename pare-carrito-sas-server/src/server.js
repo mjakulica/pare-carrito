@@ -1340,6 +1340,13 @@ function publicIvaSurcharge(ivaType) {
   const rate = Number.isFinite(n) ? n : 10.5;
   return rate === 10.5 ? 12 : rate; // 10,5% -> 12%
 }
+function publicIvaLabel(ivaType) {
+  const s = String(ivaType == null ? "10.5" : ivaType).toLowerCase().replace(",", ".");
+  if (s === "exento" || s === "no_gravado") return "Exento";
+  const n = parseFloat(s);
+  const rate = Number.isFinite(n) ? n : 10.5;
+  return (rate === 10.5 ? 12 : rate).toString().replace(".", ",") + "%";
+}
 app.get("/public/price-list", async (req, res) => {
   const stored = await loadStateData();
   if (!stored) return res.json({ businessName: "Pare Carrito", updatedAt: null, items: [] });
@@ -1347,17 +1354,39 @@ app.get("/public/price-list", async (req, res) => {
   const settings = d.appSettings || {};
   if (settings.publicPriceListEnabled === false) return res.status(404).json({ error: "Lista no disponible." });
   const prices = d.prices || {};
+  // Unidades marcadas como "por mayor" (jaula, cajon, bolsa, etc.) segun la config del sistema.
+  const DEF_UNITS = [
+    { name: "kg", wholesale: false }, { name: "docena", wholesale: false }, { name: "jaula", wholesale: true },
+    { name: "cajon", wholesale: true }, { name: "bolsa", wholesale: true }, { name: "unidad", wholesale: false },
+    { name: "maple", wholesale: false }, { name: "ristra", wholesale: false }, { name: "cabeza", wholesale: false },
+    { name: "bandeja", wholesale: false }, { name: "atado", wholesale: false }
+  ];
+  const unitCfg = Array.isArray((d.appSettings || {}).unitTypes) && d.appSettings.unitTypes.length ? d.appSettings.unitTypes : DEF_UNITS;
+  const wholesaleSet = new Set(unitCfg.filter((u) => u && u.wholesale).map((u) => String(u.name || "").toLowerCase()));
+  const categoryRank = (c) => ({ FRUTAS: 1, VERDURAS: 2, HUEVOS: 3, OTROS: 4 }[String(c || "").toUpperCase()] || 99);
   const items = (d.products || [])
     .filter((p) => p && p.isActive !== false)
     .map((p) => {
       const rec = prices[p.id] || {};
       const price = Number(rec.price || p.salePrice || 0);
-      return { name: p.name, category: p.category || "", unitType: p.unitType || "", price, ivaSurcharge: publicIvaSurcharge(p.ivaType) };
+      const unitType = String(p.unitType || "");
+      return {
+        name: p.name,
+        category: (p.category || "OTROS").toUpperCase(),
+        unitType,
+        wholesale: wholesaleSet.has(unitType.toLowerCase()),
+        price,
+        ivaSurcharge: publicIvaSurcharge(p.ivaType),
+        ivaLabel: publicIvaLabel(p.ivaType),
+        date: rec.date || null
+      };
     })
     .filter((it) => it.price > 0)
-    .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    .sort((a, b) => (categoryRank(a.category) - categoryRank(b.category)) || String(a.category).localeCompare(String(b.category)) || String(a.name).localeCompare(String(b.name)));
+  const categories = [];
+  items.forEach((it) => { if (!categories.includes(it.category)) categories.push(it.category); });
   res.set("Cache-Control", "public, max-age=120");
-  res.json({ businessName: "Pare Carrito", updatedAt: stored.updatedAt, items });
+  res.json({ businessName: "Pare Carrito", updatedAt: stored.updatedAt, categories, items });
 });
 
 app.get("/external/summary", externalAuth, async (req, res) => {

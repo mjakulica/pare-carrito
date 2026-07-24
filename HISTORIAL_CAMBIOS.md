@@ -1,5 +1,15 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.85 - Lista de precios publica: formato cliente (mayor/menor, grilla/lista, categorias) (2026-07-13)
+
+### Lista de precios publica (/precios)
+- Ahora con el mismo formato que ve el rol cliente: filtro Por Mayor / Por Menor (segun la unidad del producto), vista Cuadricula / Lista, y chips de categorias para seleccionar/deseleccionar (con "Todos"). Ademas del gate inicial Sin/Con IVA y buscador.
+- En vista Lista los productos se agrupan por categoria. Cada producto muestra una etiqueta Mayor/Menor.
+- Endpoint /public/price-list ampliado: devuelve category, unitType, wholesale (bool segun appSettings.unitTypes), ivaLabel y la lista de categorias.
+- REQUIERE ./deploy.sh (endpoint backend). precios.html es frontend.
+
+---
+
 ## v12.9.84 - Lista de precios publica (sin login) con toggle IVA (2026-07-13)
 
 ### Lista de precios publica
