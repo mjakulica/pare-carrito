@@ -18547,7 +18547,7 @@
     const frame = document.createElement("iframe");
     // Fuera de pantalla PERO con dimensiones reales (~A4): un iframe de 0x0 hace que Chrome
     // aplaste las columnas CSS al imprimir y que "Guardar como PDF" se cuelgue en desktop.
-    frame.style.position = "fixed";
+    frame.style.position = "absolute";
     frame.style.left = "-10000px";
     frame.style.top = "0";
     frame.style.width = "820px";
@@ -18636,21 +18636,21 @@
       .borderless-table th,.borderless-table td{border:0 !important;border-bottom:1px solid #ececec !important;padding:2px 5px;font-size:14px}
       .borderless-table th{background:transparent;border-bottom:1px solid #999 !important;text-transform:uppercase;font-size:12px;color:#333}
       .divide-print-list,.vehicle-print-list{list-style:none;padding:0;margin:0;font-size:13px}
-      .divide-print-cols{column-count:3;column-gap:6px}
-      .divide-print-cols>li{-webkit-column-break-inside:avoid;page-break-inside:avoid;break-inside:avoid}
+      .divide-print-cols{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0 10px;align-items:start}
+      .divide-print-cols>li{-webkit-column-break-inside:avoid;page-break-inside:avoid;break-inside:avoid;overflow:hidden}
       .divide-print-list li,.vehicle-print-list li{padding:2px 0;border-bottom:1px solid #ececec}
       .divide-print-list ul,.vehicle-print-list ul{list-style:none;padding-left:14px;margin:2px 0 4px}
       .divide-print-list li:last-child,.vehicle-print-list li:last-child{border-bottom:0}
       .vehicle-print-line{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
-      .vehicle-print-cols{column-count:3;column-gap:6px}
-      .vehicle-print-cols>li{-webkit-column-break-inside:avoid;page-break-inside:avoid;break-inside:avoid;border-bottom:1px solid #ececec;padding:2px 0 4px;margin-bottom:2px}
+      .vehicle-print-cols{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0 10px;align-items:start}
+      .vehicle-print-cols>li{-webkit-column-break-inside:avoid;page-break-inside:avoid;break-inside:avoid;border-bottom:1px solid #ececec;padding:2px 0 4px;margin-bottom:2px;overflow:hidden}
       .vehicle-print-num{font-weight:700}
       .vehicle-print-total{display:flex;justify-content:space-between;border-top:1px solid #ddd;margin-top:2px;padding-top:1px}
       .vehicle-print-line span{color:#475467}
       .vehicle-print-sub{font-size:12px;color:#475467;margin:1px 0 2px}
       .divide-two-col{display:grid;grid-template-columns:1fr 1fr;gap:2px 18px;align-items:start}
       .divide-two-col .assigned-group{break-inside:avoid;page-break-inside:avoid}
-      .product-sum-grid{column-count:3;column-gap:10px;font-size:13px}
+      .product-sum-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0 10px;font-size:13px;align-items:start}
       .product-sum-line{display:flex;justify-content:flex-start;gap:6px;break-inside:avoid;padding:1px 0}
       .product-sum-line strong{white-space:nowrap}
       .print-title{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #111;padding-bottom:6px;margin-bottom:8px}

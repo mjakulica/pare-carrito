@@ -1,5 +1,15 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.87 - Impresion en columnas: grid en vez de column-count (2026-07-13)
+
+### Impresion en 3 columnas (Dividir Compras, Vehiculos, resumen por producto)
+- Sintoma: en mobile el formato de la pestaña no coincidia con el archivo impreso (las columnas se perdian o cambiaban), y en desktop la generacion del PDF tardaba varios minutos.
+- Causa: se usaba CSS column-count, que el navegador respeta en pantalla pero NO de forma confiable al imprimir (sobre todo en mobile) y que, al paginar, obliga a balancear columnas entre paginas -> lento e inconsistente.
+- Fix: las 3 columnas ahora se arman con CSS grid (repeat(3, 1fr)), que se renderiza IGUAL en pantalla y en el impreso, en mobile y desktop, y sin el costo de balanceo -> rapido y consistente. Aplica a "Agrupado por cliente" y "por producto" de Dividir Compras, y a Vehiculos.
+- Solo frontend (git pull).
+
+---
+
 ## v12.9.86 - Fix impresion desktop: columnas y "Guardar PDF" que se colgaba (2026-07-13)
 
 ### Impresion (Dividir Compras y demas PDF por iframe)
