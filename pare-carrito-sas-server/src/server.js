@@ -1334,11 +1334,14 @@ function clientBalanceFromState(data, clientId) {
 // sola porque lee el estado actual. La columna "con IVA" usa la tasa real del producto, salvo el
 // 10,5% que se calcula al 12% (buffer para venta con factura).
 function publicIvaSurcharge(ivaType) {
+  // Recargo total para la lista "con IVA": IVA real del producto (10,5% o 21%) MAS un 2% extra
+  // por gastos bancarios (multiplicativo sobre el precio con IVA). No se discrimina en la pagina.
   const s = String(ivaType == null ? "10.5" : ivaType).toLowerCase().replace(",", ".");
-  if (s === "exento" || s === "no_gravado") return 0;
-  const n = parseFloat(s);
-  const rate = Number.isFinite(n) ? n : 10.5;
-  return rate === 10.5 ? 12 : rate; // 10,5% -> 12%
+  let rate;
+  if (s === "exento" || s === "no_gravado") rate = 0;
+  else { const n = parseFloat(s); rate = Number.isFinite(n) ? n : 10.5; }
+  const factor = (1 + rate / 100) * 1.02;
+  return Math.round((factor - 1) * 10000) / 100; // porcentaje con 2 decimales
 }
 function publicIvaLabel(ivaType) {
   const s = String(ivaType == null ? "10.5" : ivaType).toLowerCase().replace(",", ".");

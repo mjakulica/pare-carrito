@@ -1,5 +1,13 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.91 - Lista de precios publica: con IVA = IVA real + 2% gastos bancarios (2026-07-13)
+
+### Lista de precios publica (/precios)
+- El precio "con IVA" ahora aplica el IVA REAL del producto (10,5% o 21%) y encima un 2% extra por gastos bancarios (multiplicativo), mostrando solo el precio final (sin discriminar). Ej: 10,5% -> recargo total 12,71%; 21% -> 23,42%; exento -> 2%.
+- REQUIERE ./deploy.sh (cambio en el endpoint). precios.html (nota aclaratoria) es frontend.
+
+---
+
 ## v12.9.90 - Lista de precios publica: fecha por producto + con IVA sin desglose (2026-07-13)
 
 ### Lista de precios publica (/precios)
