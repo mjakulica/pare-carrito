@@ -1,5 +1,14 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.92 - Lista de precios publica: IVA solo se elige al ingresar (2026-07-13)
+
+### Lista de precios publica (/precios)
+- Se quito el boton Sin IVA / Con IVA de adentro de la pagina: la opcion se elige solo al ingresar (pantalla inicial) y para cambiarla hay que volver a entrar. Evita cambiarla sin querer.
+- Se borro la leyenda "Con IVA: se suma el IVA..." de la pantalla inicial.
+- Solo frontend (git pull).
+
+---
+
 ## v12.9.91 - Lista de precios publica: con IVA = IVA real + 2% gastos bancarios (2026-07-13)
 
 ### Lista de precios publica (/precios)

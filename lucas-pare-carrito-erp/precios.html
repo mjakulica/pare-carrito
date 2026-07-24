@@ -85,17 +85,12 @@
       <button class="sin" data-mode="sin">Ver precios SIN IVA</button>
       <button class="con" data-mode="con">Ver precios CON IVA</button>
     </div>
-    <p class="ivanote">Con IVA: incluye el IVA (10,5% o 21%) de cada producto más gastos bancarios.</p>
   </div>
 
   <div id="app">
     <div class="toolbar">
       <div class="row1">
         <div class="search"><input id="q" type="search" placeholder="Buscar producto..." autocomplete="off" /></div>
-        <div class="seg iva">
-          <button data-iva="sin">Sin IVA</button>
-          <button data-iva="con">Con IVA</button>
-        </div>
         <div class="seg who">
           <button data-who="mayor">Por Mayor</button>
           <button data-who="menor">Por Menor</button>
@@ -182,7 +177,6 @@
 
   function renderList(){
     var items = filtered();
-    document.querySelectorAll(".seg.iva button").forEach(function(b){ b.classList.toggle("active", b.dataset.iva===st.mode); });
     document.querySelectorAll(".seg.who button").forEach(function(b){ b.classList.toggle("active", !!st.who[b.dataset.who]); });
     document.querySelectorAll(".seg.view button").forEach(function(b){ b.classList.toggle("active", b.dataset.view===st.view); });
     document.getElementById("meta").textContent = (st.mode==="con"?"Precios CON IVA":"Precios SIN IVA") + " · " + items.length + " productos" + (st.updatedAt?" · actualizado "+fmtDate(st.updatedAt):"");
@@ -221,7 +215,6 @@
   }
 
   document.querySelectorAll(".gate-btns button").forEach(function(b){ b.addEventListener("click", function(){ st.mode=b.dataset.mode; showApp(); load(); }); });
-  document.querySelectorAll(".seg.iva button").forEach(function(b){ b.addEventListener("click", function(){ st.mode=b.dataset.iva; renderList(); }); });
   document.querySelectorAll(".seg.who button").forEach(function(b){ b.addEventListener("click", function(){ var k=b.dataset.who; st.who[k]=!st.who[k]; if(!st.who.mayor&&!st.who.menor){ st.who[k]=true; } renderList(); }); });
   document.querySelectorAll(".seg.view button").forEach(function(b){ b.addEventListener("click", function(){ st.view=b.dataset.view; renderList(); }); });
   document.getElementById("q").addEventListener("input", function(e){ st.q=e.target.value; renderList(); });
