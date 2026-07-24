@@ -1,5 +1,14 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.89 - Lista de precios publica: imagenes reales de los productos (2026-07-13)
+
+### Lista de precios publica (/precios)
+- Cada producto ahora muestra su imagen real (la misma del sistema, /assets/product-images/...), en vista Cuadricula y Lista. Si un producto no tiene imagen o no carga, cae al placeholder de color con iniciales.
+- Endpoint /public/price-list: agrega el campo image (imageUrl del producto pasado a ruta absoluta, o imageData propio si tuviera).
+- REQUIERE ./deploy.sh (endpoint backend). precios.html es frontend.
+
+---
+
 ## v12.9.88 - Impresion: columnas estilo diario + pestaña que se cierra sola (2026-07-13)
 
 ### Dividir Compras (PDF)

@@ -1370,6 +1370,11 @@ app.get("/public/price-list", async (req, res) => {
       const rec = prices[p.id] || {};
       const price = Number(rec.price || p.salePrice || 0);
       const unitType = String(p.unitType || "");
+      // Imagen: misma que en el sistema. imageUrl "./assets/..." -> "/assets/..." (ruta absoluta
+      // servida por Caddy). Si el producto tiene imagen propia (imageData), se manda esa.
+      let image = null;
+      if (p.imageUrl) image = String(p.imageUrl).replace(/^\.\//, "/");
+      else if (p.imageData) image = p.imageData;
       return {
         name: p.name,
         category: (p.category || "OTROS").toUpperCase(),
@@ -1378,6 +1383,7 @@ app.get("/public/price-list", async (req, res) => {
         price,
         ivaSurcharge: publicIvaSurcharge(p.ivaType),
         ivaLabel: publicIvaLabel(p.ivaType),
+        image,
         date: rec.date || null
       };
     })

@@ -49,7 +49,9 @@
   .card .top{ display:flex; align-items:center; gap:8px; justify-content:space-between; }
   .card .name{ font-weight:700; font-size:14px; line-height:1.2; }
   .card .unit{ color:#7a8a82; font-weight:600; font-size:11px; }
-  .thumb{ width:40px; height:40px; border-radius:8px; flex:0 0 auto; }
+  .thumb{ width:46px; height:46px; border-radius:8px; flex:0 0 auto; object-fit:cover; background:#eef2f0; }
+  .lprod{ display:flex; align-items:center; gap:10px; }
+  .lthumb{ width:34px; height:34px; border-radius:7px; flex:0 0 auto; object-fit:cover; background:#eef2f0; }
   .card .price{ font-size:18px; font-weight:800; color:var(--green); }
   .card .brk{ font-size:11px; color:#7a8a82; }
   .tag{ display:inline-block; font-size:10px; font-weight:700; padding:2px 6px; border-radius:6px; }
@@ -117,6 +119,12 @@
   var st = { items:[], categories:[], updatedAt:null, mode:"sin", who:{mayor:true,menor:true}, view:"grid", q:"", selCats:null };
 
   function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];}); }
+  // <img> con la imagen real del producto y fallback al placeholder de color si no carga.
+  function imgTag(it, cls){
+    var ph = thumb(it);
+    var src = it.image || ph;
+    return '<img class="'+cls+'" loading="lazy" src="'+esc(src)+'" data-fb="'+esc(ph)+'" onerror="this.onerror=null;this.src=this.dataset.fb" alt="" />';
+  }
   function fmt(n){ return "$" + Math.round(Number(n||0)).toLocaleString("es-AR"); }
   function fmtDate(iso){ if(!iso) return ""; try{ var d=new Date(iso); return d.toLocaleDateString("es-AR")+" "+d.toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit"}); }catch(e){ return ""; } }
   function net(it){ return it.price; }
@@ -178,7 +186,7 @@
       box.innerHTML = '<div class="grid">'+items.map(function(it){
         var tag = it.wholesale ? '<span class="tag may">Mayor</span>' : '<span class="tag men">Menor</span>';
         return '<div class="card"><div class="top"><div><div class="name">'+esc(it.name)+'</div><div class="unit">'+esc(it.unitType||"")+' '+tag+'</div></div>'+
-               '<img class="thumb" src="'+thumb(it)+'" alt=""/></div>'+priceCell(it)+'</div>';
+               imgTag(it,"thumb")+'</div>'+priceCell(it)+'</div>';
       }).join("")+'</div>';
       return;
     }
@@ -188,7 +196,7 @@
       if(it.category!==lastCat){ rows += '<tr class="catrow"><td colspan="2">'+esc(it.category)+'</td></tr>'; lastCat=it.category; }
       var tag = it.wholesale ? '<span class="tag may">Mayor</span>' : '<span class="tag men">Menor</span>';
       var brk = (st.mode==="con" && Number(it.ivaSurcharge)>0) ? '<br><span class="brk">sin IVA '+fmt(net(it))+'</span>' : '';
-      rows += '<tr><td>'+esc(it.name)+' <span class="unit">('+esc(it.unitType||"")+')</span> '+tag+'</td><td class="price">'+fmt(shown(it))+brk+'</td></tr>';
+      rows += '<tr><td><div class="lprod">'+imgTag(it,"lthumb")+'<span>'+esc(it.name)+' <span class="unit">('+esc(it.unitType||"")+')</span> '+tag+'</span></div></td><td class="price">'+fmt(shown(it))+brk+'</td></tr>';
     });
     box.innerHTML = '<table><thead><tr><th>Producto</th><th style="text-align:right">Precio</th></tr></thead><tbody>'+rows+'</tbody></table>';
   }
