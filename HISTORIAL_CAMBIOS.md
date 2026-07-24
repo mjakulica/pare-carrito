@@ -1,5 +1,18 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.88 - Impresion: columnas estilo diario + pestaña que se cierra sola (2026-07-13)
+
+### Dividir Compras (PDF)
+- "Agrupado por cliente" y "Agrupado por producto" ahora se acomodan en 3 columnas "estilo diario": la columna 1 se llena de arriba a abajo, luego la 2 y la 3 (un item abajo del otro), en vez de la grilla que dejaba huecos y arrancaba todo en la misma fila.
+- Se arma con reparto manual en 3 columnas (no column-count): se renderiza IGUAL en pantalla y al imprimir, es rapido (sin balanceo) y ningun item se corta en el salto de pagina.
+
+### Impresion (todos los PDF que abren pestaña, ej. mobile)
+- La pestaña de impresion ahora se cierra sola al terminar de imprimir o al cancelar (evento afterprint).
+
+Solo frontend (git pull).
+
+---
+
 ## v12.9.87 - Impresion en columnas: grid en vez de column-count (2026-07-13)
 
 ### Impresion en 3 columnas (Dividir Compras, Vehiculos, resumen por producto)

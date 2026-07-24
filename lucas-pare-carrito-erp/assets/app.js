@@ -8192,6 +8192,17 @@
     }).join("");
   }
 
+  // Reparte una lista de items (bloques HTML) en 3 columnas "estilo diario": la columna 1 se
+  // llena de arriba a abajo, luego la 2, luego la 3. Se renderiza IGUAL en pantalla y al imprimir
+  // (no usa column-count, que es lento e inconsistente al paginar) y cada item no se corta.
+  function printColumnsHtml(itemHtmls) {
+    const n = (itemHtmls || []).length;
+    if (!n) return "";
+    const per = Math.ceil(n / 3);
+    const col = (start) => itemHtmls.slice(start, start + per).join("");
+    return `<div class="print-cols3"><div class="pcol">${col(0)}</div><div class="pcol">${col(per)}</div><div class="pcol">${col(per * 2)}</div></div>`;
+  }
+
   function renderDivideProductList(assignables, assigneeValues) {
     const filtered = filterDivideAssignables(assignables, assigneeValues);
     if (!filtered.length) return `<p class="muted" style="font-size:11px;margin:0">Sin productos asignados para esta vista.</p>`;
@@ -8206,12 +8217,13 @@
       groups[key].clients[order.clientId] = (groups[key].clients[order.clientId] || 0) + Number(item.quantity || 0);
     });
     const sorted = sortDivideGroupsByAssignee(Object.values(groups));
-    return `<ul class="divide-print-list">${sorted.map((group) => {
+    const prodItems = sorted.map((group) => {
       const clientIds = Object.keys(group.clients).sort(compareClientIdStrings);
       const clients = clientIds.map((clientId) => `${escapeHtml(formatClientIdShort(clientId))}) ${formatDivideQty(group.clients[clientId])}`).join(" / ");
       const total = clientIds.reduce((sum, clientId) => sum + Number(group.clients[clientId] || 0), 0);
-      return `<li><strong>${escapeHtml(group.productName)}${isAll ? " - " + escapeHtml(group.assigneeName) : ""}</strong>: ${clients} = ${formatDivideQty(total)} ${escapeHtml(group.unitType)}</li>`;
-    }).join("")}</ul>`;
+      return `<div class="pitem"><strong>${escapeHtml(group.productName)}${isAll ? " - " + escapeHtml(group.assigneeName) : ""}</strong>: ${clients} = ${formatDivideQty(total)} ${escapeHtml(group.unitType)}</div>`;
+    });
+    return printColumnsHtml(prodItems);
   }
 
   function renderDivideClientList(assignables, assigneeValues) {
@@ -8227,11 +8239,12 @@
       const assigned = getAssigneeByValue(getEffectiveItemAssigneeValue(item));
       groups[order.clientId].items.push({ ...item, assigneeName: assigned ? assigned.name : "Sin asignar" });
     });
-    return `<ul class="divide-print-list divide-print-cols">${Object.keys(groups).sort(compareClientIdStrings).map((clientId) => {
+    const clientItems = Object.keys(groups).sort(compareClientIdStrings).map((clientId) => {
       const group = groups[clientId];
-      const itemsHtml = group.items.map((item) => `<li>${formatDivideQty(item.quantity)} ${escapeHtml(divideItemUnit(item))} ${escapeHtml(item.productName)}${isAll ? " - " + escapeHtml(item.assigneeName) : ""}${item.note ? " (" + escapeHtml(item.note) + ")" : ""}</li>`).join("");
-      return `<li><strong>${escapeHtml(formatClientIdShort(clientId))})</strong><ul>${itemsHtml}</ul></li>`;
-    }).join("")}</ul>`;
+      const linesHtml = group.items.map((item) => `<div class="pline">${formatDivideQty(item.quantity)} ${escapeHtml(divideItemUnit(item))} ${escapeHtml(item.productName)}${isAll ? " - " + escapeHtml(item.assigneeName) : ""}${item.note ? " (" + escapeHtml(item.note) + ")" : ""}</div>`).join("");
+      return `<div class="pitem"><strong>${escapeHtml(formatClientIdShort(clientId))})</strong>${linesHtml}</div>`;
+    });
+    return printColumnsHtml(clientItems);
   }
 
   function buildDivideClipboardText(assigneeValues, includeClientsOverride) {
@@ -18536,7 +18549,7 @@
         // No auto-cerramos la ventana (en Android Chrome eso deja la hoja en blanco o cancela
         // la impresion). Mostramos el contenido + un boton "Imprimir" visible como fallback,
         // e intentamos disparar el dialogo de impresion una vez cargado.
-        printWindow.document.write(`<!doctype html><html><head><meta name="color-scheme" content="light only"><base href="${escapeAttr(baseHref)}"><title>${escapeHtml(title)}</title><style>${printDocumentStyles(options)}</style></head><body>${body}<button type="button" class="print-now-btn" id="print-now-btn">Imprimir / Guardar PDF</button><script>function pcPrint(){try{window.focus();window.print();}catch(e){}}document.getElementById("print-now-btn").addEventListener("click",pcPrint);window.addEventListener("load",function(){setTimeout(pcPrint,450);});<\/script></body></html>`);
+        printWindow.document.write(`<!doctype html><html><head><meta name="color-scheme" content="light only"><base href="${escapeAttr(baseHref)}"><title>${escapeHtml(title)}</title><style>${printDocumentStyles(options)}</style></head><body>${body}<button type="button" class="print-now-btn" id="print-now-btn">Imprimir / Guardar PDF</button><script>function pcPrint(){try{window.focus();window.print();}catch(e){}}document.getElementById("print-now-btn").addEventListener("click",pcPrint);window.addEventListener("load",function(){setTimeout(pcPrint,450);});window.addEventListener("afterprint",function(){setTimeout(function(){try{window.close();}catch(e){}},300);});<\/script></body></html>`);
         printWindow.document.close();
         setTimeout(() => {
           document.title = previousTitle;
@@ -18637,6 +18650,11 @@
       .borderless-table th{background:transparent;border-bottom:1px solid #999 !important;text-transform:uppercase;font-size:12px;color:#333}
       .divide-print-list,.vehicle-print-list{list-style:none;padding:0;margin:0;font-size:13px}
       .divide-print-cols{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0 10px;align-items:start}
+      .print-cols3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0 12px;align-items:start;font-size:13px}
+      .print-cols3 .pcol{min-width:0}
+      .print-cols3 .pitem{break-inside:avoid;page-break-inside:avoid;padding:2px 0 3px;margin:0 0 2px;border-bottom:1px solid #ececec}
+      .print-cols3 .pitem>strong{display:block}
+      .print-cols3 .pline{padding-left:12px;line-height:1.25}
       .divide-print-cols>li{-webkit-column-break-inside:avoid;page-break-inside:avoid;break-inside:avoid;overflow:hidden}
       .divide-print-list li,.vehicle-print-list li{padding:2px 0;border-bottom:1px solid #ececec}
       .divide-print-list ul,.vehicle-print-list ul{list-style:none;padding-left:14px;margin:2px 0 4px}
