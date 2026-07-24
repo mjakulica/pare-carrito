@@ -1,5 +1,14 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.90 - Lista de precios publica: fecha por producto + con IVA sin desglose (2026-07-13)
+
+### Lista de precios publica (/precios)
+- Cada producto muestra la fecha de ultima actualizacion ("Ult. act: dd/mm/aaaa"), igual que la lista de precios del rol cliente (usa el date del precio; si no hay, el dia actual).
+- En modo "Con IVA" ya no se muestra el precio sin IVA ni el % de IVA: solo el precio final.
+- Solo frontend (git pull).
+
+---
+
 ## v12.9.89 - Lista de precios publica: imagenes reales de los productos (2026-07-13)
 
 ### Lista de precios publica (/precios)

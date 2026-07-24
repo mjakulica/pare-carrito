@@ -127,6 +127,15 @@
   }
   function fmt(n){ return "$" + Math.round(Number(n||0)).toLocaleString("es-AR"); }
   function fmtDate(iso){ if(!iso) return ""; try{ var d=new Date(iso); return d.toLocaleDateString("es-AR")+" "+d.toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit"}); }catch(e){ return ""; } }
+  // Fecha de ultima actualizacion del precio por producto (dd/mm/aaaa). Si no hay, usa hoy,
+  // igual que la lista de precios del rol cliente.
+  function fmtDay(iso){
+    var d;
+    if(iso){ var p=String(iso).slice(0,10).split("-"); d = p.length===3 ? new Date(+p[0],+p[1]-1,+p[2]) : new Date(iso); }
+    else { d = new Date(); }
+    if(isNaN(d.getTime())) d = new Date();
+    return d.toLocaleDateString("es-AR");
+  }
   function net(it){ return it.price; }
   function con(it){ return it.price * (1 + (Number(it.ivaSurcharge)||0)/100); }
   function shown(it){ return st.mode==="con" ? con(it) : net(it); }
@@ -167,10 +176,8 @@
   }
 
   function priceCell(it){
-    if(st.mode==="con" && Number(it.ivaSurcharge)>0){
-      return '<div class="price">'+fmt(con(it))+'</div><div class="brk">sin IVA '+fmt(net(it))+' · IVA '+esc(it.ivaLabel||"")+'</div>';
-    }
-    return '<div class="price">'+fmt(shown(it))+'</div>';
+    var upd = '<div class="brk upd">Últ. act: '+fmtDay(it.date)+'</div>';
+    return '<div class="price">'+fmt(shown(it))+'</div>'+upd;
   }
 
   function renderList(){
@@ -195,8 +202,7 @@
     items.forEach(function(it){
       if(it.category!==lastCat){ rows += '<tr class="catrow"><td colspan="2">'+esc(it.category)+'</td></tr>'; lastCat=it.category; }
       var tag = it.wholesale ? '<span class="tag may">Mayor</span>' : '<span class="tag men">Menor</span>';
-      var brk = (st.mode==="con" && Number(it.ivaSurcharge)>0) ? '<br><span class="brk">sin IVA '+fmt(net(it))+'</span>' : '';
-      rows += '<tr><td><div class="lprod">'+imgTag(it,"lthumb")+'<span>'+esc(it.name)+' <span class="unit">('+esc(it.unitType||"")+')</span> '+tag+'</span></div></td><td class="price">'+fmt(shown(it))+brk+'</td></tr>';
+      rows += '<tr><td><div class="lprod">'+imgTag(it,"lthumb")+'<span>'+esc(it.name)+' <span class="unit">('+esc(it.unitType||"")+')</span> '+tag+'</span></div></td><td class="price">'+fmt(shown(it))+'<br><span class="brk upd">Últ. act: '+fmtDay(it.date)+'</span></td></tr>';
     });
     box.innerHTML = '<table><thead><tr><th>Producto</th><th style="text-align:right">Precio</th></tr></thead><tbody>'+rows+'</tbody></table>';
   }
