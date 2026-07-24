@@ -18545,11 +18545,13 @@
       }
     }
     const frame = document.createElement("iframe");
+    // Fuera de pantalla PERO con dimensiones reales (~A4): un iframe de 0x0 hace que Chrome
+    // aplaste las columnas CSS al imprimir y que "Guardar como PDF" se cuelgue en desktop.
     frame.style.position = "fixed";
-    frame.style.right = "0";
-    frame.style.bottom = "0";
-    frame.style.width = "0";
-    frame.style.height = "0";
+    frame.style.left = "-10000px";
+    frame.style.top = "0";
+    frame.style.width = "820px";
+    frame.style.height = "1160px";
     frame.style.border = "0";
     frame.setAttribute("aria-hidden", "true");
     document.body.appendChild(frame);
@@ -18558,22 +18560,28 @@
     const baseHref = location.origin + location.pathname.replace(/[^/]*$/, "");
     doc.write(`<!doctype html><html><head><meta name="color-scheme" content="light only"><base href="${escapeAttr(baseHref)}"><title>${escapeHtml(title)}</title><style>${printDocumentStyles(options)}</style></head><body>${body}</body></html>`);
     doc.close();
+    let cleaned = false;
     const cleanup = () => {
-      setTimeout(() => {
-        if (frame.parentNode) frame.parentNode.removeChild(frame);
-        document.title = previousTitle;
-      }, 500);
+      if (cleaned) return;
+      cleaned = true;
+      if (frame.parentNode) frame.parentNode.removeChild(frame);
+      document.title = previousTitle;
     };
     let printed = false;
     const runPrint = () => {
       if (printed || !frame.parentNode) return;
       printed = true;
-      frame.contentWindow.focus();
-      frame.contentWindow.print();
-      cleanup();
+      const win = frame.contentWindow;
+      try { win.focus(); } catch (e) { /* noop */ }
+      // Limpiar RECIEN despues de imprimir / guardar el PDF (onafterprint). Antes se quitaba el
+      // iframe a los 500ms, lo que en desktop cortaba el "Guardar como PDF" (se colgaba).
+      try { win.onafterprint = () => setTimeout(cleanup, 1500); } catch (e) { /* noop */ }
+      try { win.print(); } catch (e) { cleanup(); return; }
+      // Fallback por si onafterprint no dispara en algun navegador: limpiar bien tarde.
+      setTimeout(cleanup, 60000);
     };
     frame.onload = runPrint;
-    setTimeout(runPrint, 300);
+    setTimeout(runPrint, 400);
   }
 
   function printDocumentStyles(options = {}) {

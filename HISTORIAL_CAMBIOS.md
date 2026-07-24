@@ -1,5 +1,15 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.86 - Fix impresion desktop: columnas y "Guardar PDF" que se colgaba (2026-07-13)
+
+### Impresion (Dividir Compras y demas PDF por iframe)
+- Sintoma: en desktop, al exportar el PDF seleccionado de Dividir Compras, los clientes agrupados salian uno debajo del otro (sin las 3 columnas) aunque la vista previa se veia bien, y al "Guardar como PDF" se colgaba y no terminaba.
+- Causa: la impresion usaba un iframe oculto de 0x0 px. Chrome, con un iframe sin dimensiones reales, aplasta las columnas CSS al imprimir y traba el guardado del PDF.
+- Fix: el iframe de impresion ahora tiene dimensiones reales (~A4) pero fuera de pantalla, y se elimina RECIEN despues de imprimir/guardar (evento onafterprint, con fallback tardio) en vez de a los 500ms. Asi las columnas se respetan y el "Guardar como PDF" no se corta.
+- Solo frontend (git pull).
+
+---
+
 ## v12.9.85 - Lista de precios publica: formato cliente (mayor/menor, grilla/lista, categorias) (2026-07-13)
 
 ### Lista de precios publica (/precios)
