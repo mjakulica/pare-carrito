@@ -180,10 +180,11 @@ Tablas adicionales:
 ### 6.2 Sincronización de Estado
 
 1. Frontend obtiene estado remoto con `GET /state` (roles operativos).
-2. Al modificar datos, `saveState()` persiste en `localStorage`.
-3. Si sync cloud está activo, `cloudPush()` envía `PUT /state` con `baseUpdatedAt`.
-4. Backend bloquea la fila `app_state`; detecta conflictos (409) si `baseUpdatedAt` no coincide.
-5. Al guardar, actualiza `updated_at`, `state_history`, espejo relacional y sincroniza usuarios.
+2. Al modificar datos, `saveState()` persiste en `localStorage` (solo manager/admin guardan snapshot completo) y encola el cambio.
+3. Roles con snapshot completo (manager/admin/contador) hacen `PUT /state` (full) con `baseUpdatedAt`; los demas (employee/proveedor) hacen `POST /state/patch` (solo el diff coalescido). El POST de patch usa `keepalive`.
+4. Backend bloquea la fila `app_state`; en `PUT /state` detecta conflictos (409) por `baseUpdatedAt`; en `/state/patch` aplica el diff por coleccion y una copia mas VIEJA (por `updatedAt`) no pisa una mas nueva.
+5. Al guardar, actualiza `updated_at`, `state_history`, espejo relacional, sincroniza usuarios y empuja a Google Sheets (`syncSheetsFromStateDiff`).
+6. Merge local vs remoto (`mergeCloudStates`): pedidos y entidades editables (clientes, productos, proveedores, vehiculos, usuarios, cajas, compras) y `prices` se resuelven por "mas nuevo gana" (`updatedAt`; remoto en empate). Toda mutacion de pedido sella `updatedAt` via `recalcOrderTotals`. Ver seccion 12.28.
 
 ### 6.3 Ciclo de Pedido
 
@@ -245,8 +246,16 @@ Tablas adicionales:
 | GET | `/exports/backup.json` | manager | Backup completo JSON |
 | GET | `/billing/status` | manager, admin, contador | Vista previa facturación |
 | POST | `/billing/run` | manager | Ejecutar facturación manual/simulada |
-| GET/POST | `/external/*` | API key (`x-api-key`) | API externa para integraciones |
+| GET/POST | `/external/*` | API key (`x-api-key`) | API externa para integraciones (bot de WhatsApp, etc.) |
 | POST | `/external/transfers/:id/:action` | API key | Aprobar/rechazar transferencia |
+| POST | `/external/compra-hoy` | API key | **Desvinculado**: ya no actualiza precios (Sheets solo control). Reactivable con env `SHEETS_INBOUND_PRICES=on` |
+| POST | `/clients/price-increase-notify` | manager, admin | Aviso de suba de precio por WhatsApp a clientes con ese producto |
+| POST | `/clients/holiday-broadcast` | manager, admin | Aviso de feriado por WhatsApp (plantilla Meta) |
+| GET | `/public/price-list` | **Público (sin auth)** | Lista de precios publica (nombre, precio, IVA+2%, categoria, unidad, mayor/menor, imagen, fecha). Sirve a `/precios` (`precios.html`). Desactivable con `appSettings.publicPriceListEnabled=false` |
+
+Notas:
+- Caddy: `handle_path /api/*` -> API; `/precios` reescribe a `precios.html`; `Cache-Control: no-cache, must-revalidate` para `/`, `*.html`, `*.js`, `*.css`.
+- Salida sistema -> Google Sheets (`syncSheetsFromStateDiff`, `pushPrecio`) sigue activa; el sentido inverso (planilla -> sistema) esta desactivado.
 
 ---
 
@@ -492,28 +501,85 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 - `client.paymentDay`; coleccion `state.replacements` (recambios/reposiciones); `user.providerId` (vinculo del rol proveedor); appSettings: dunning (`dunningEnabled`, `dunningWhatsappMessage`, `dunningMailMessage`, `dunningWhatsappTemplate`) y aviso de cambios (`orderChangeNotifyEnabled`, `orderChangeMessage`, `orderChangeTemplateName`); `purchase.proofFile` (comprobante), tipo de gasto `freight`. appSettings: `mailingEnabled`, `whatsappEnabled`, `billingEnabled` (interruptores, default true), `dunningMailSubject`. Estado server (top-level en app_state, fuera del data sincronizado): `dunningState`, `dunningLastRunDate`.
 - `appSettings.stockGroups` (grupos/equivalencias de stock: `{id,name,members:[{productId,factorKg}],wholeProductId,wholeKg,bulkProductId,bulkKg}`); `client.condicionIva` (respaldo de condicion frente al IVA para facturacion); `ui.omittedUnitLines` (lineas de Unidades enviadas/ocultas); appSettings de aviso de suba (`priceIncreaseMessage`, `priceIncreaseTemplateName`, `priceIncreaseTemplateLang`). Estados de UI (no persistidos): `ui.purchaseProductView` / `ui.unitsProductView` (vista cuadricula/lista), `ui.cajaLimit` (30/60/120/todos), `ui.lastActiveDay` (reajuste de fechas por cambio de dia). Cliente: `client.condicionIva`.
 
+### 12.28 Sincronizacion robusta y anti-perdida de datos (v12.9.62 a v12.9.92)
+- Sello de `updatedAt`: `recalcOrderTotals` (punto unico de toda mutacion de pedido: alta/baja de items, cambio de cantidad, actualizacion de precios por compra, borrado en Unidades) sella `order.updatedAt`. Tambien se sella al editar clientes/productos/proveedores/vehiculos/cajas y en cada escritura de precio.
+- Merge por "mas nuevo gana": el merge local vs servidor (`mergeCloudStates`) usa `unionByKeyPreferNewest` (por `updatedAt`, remoto gana en empate) para pedidos, clientes, productos, proveedores, vehiculos, usuarios, cajas y compras; y para `prices` un merge por producto con `updatedAt`. Antes ganaba SIEMPRE la copia local -> un dispositivo con snapshot viejo revertia datos (tipico despues de un deploy). Los datos "seed" (ejemplo) ya no pisan datos reales en una carga fresca.
+- Guard del servidor: al aplicar un patch, una copia con `updatedAt` anterior no puede pisar una mas nueva.
+- Envio confiable: el egreso del empleado/proveedor espera confirmacion antes de cerrar; al volver a la app o abrirla se empujan los pendientes antes de descargar; el POST de patch usa `keepalive` (se completa aunque se bloquee el celular / se cierre la pagina).
+- Cache: Caddy envia `Cache-Control: no-cache, must-revalidate` para `/`, `*.html`, `*.js`, `*.css` (los deploy se aplican al recargar, sin Ctrl+F5); bump del query `?v=`. Antes los dispositivos quedaban con frontend viejo (que no sellaba `updatedAt`).
+- Sidebar mobile con `100dvh` + safe-area (el boton Salir y los items siempre alcanzables).
+
+### 12.29 Claves de sincronizacion por patch (backend) (v12.9.67, v12.9.68)
+- El backend descartaba en el merge de patches las colecciones que no estaban en `ARRAY_PATCH_KEYS`, por lo que los cierres de caja de un empleado (y stockMovements, replacements, marginSections, priceAutoLog, priceAutoSchedule, holidays) no llegaban al servidor. Se agregaron todas. `priceAutoSchedule` se mergea por `productId`. Paridad verificada front/back (36 claves).
+
+### 12.30 Facturacion, WhatsApp e Inicio del cliente (v12.9.52 a v12.9.55)
+- TusFacturas: prioridad a los datos de AFIP (solo el CUIT se toma de lo cargado a mano); `condicion_pago` forzado a "205" (cuenta corriente).
+- Interruptores de mailing / WhatsApp / facturacion (Configuracion, gerente).
+- Inicio del rol cliente: banner de feriados proximos.
+- Hibrido offline: el pedido del cliente y la compra del proveedor fallan-rapido (avisan si no salieron); el resto usa indicador + advertencia.
+
+### 12.31 Stock: control al finalizar el dia, registro y cobertura (v12.9.65, v12.9.66, v12.9.71)
+- El conteo de stock es de CIERRE de dia = apertura del dia siguiente: `getStockEstimated` acumula desde el dia siguiente al ultimo conteo; la sugerencia usa el arrastre del cierre de ayer; la merma compara el cierre esperado (apertura + compras - ventas de hoy) contra lo contado. Mismo criterio en grupos/equivalencias.
+- "Registro de conteos de stock por dia" en la pagina Stock (fecha, producto/grupo, cantidad, usuario; con filtro).
+- Unidades: al enviar una linea se marca `item.unitAdjusted` persistente (desaparece para todos). Un producto por unidades se oculta de "pendientes" solo si el stock del dia (conteo + compras) cubre la demanda COMPLETA (producto sin faltante, o grupo con `netPool <= 0`).
+
+### 12.32 Precios: fuente de verdad y fecha real (v12.9.72, v12.9.80, v12.9.93)
+- Desvinculada la planilla -> sistema: el endpoint `/external/compra-hoy` ya NO sobreescribe precios (Sheets queda como control; reactivable con env `SHEETS_INBOUND_PRICES=on`). El sistema es la unica fuente de verdad; el sentido sistema -> planilla se mantiene.
+- La actualizacion de precio por compra ya no se revierte (merge de `prices` por `updatedAt`).
+- Fecha de "ultima actualizacion" real: `rec.date` solo cambia si el costo/precio cambia de verdad; la fecha mostrada = la mas reciente entre el ultimo cambio de precio y la ultima compra directa del producto (sin fallback a "hoy"). Aplica a la lista del rol cliente y a la publica.
+
+### 12.33 Remitos: recalculo y frescura (v12.9.79, v12.9.81, v12.9.82)
+- Aviso de frescura de datos en Remitos (hace cuanto se sincronizo + cambios sin enviar) con boton "Actualizar datos ahora".
+- Boton "Recalcular precios de un dia" (gerente/admin): reprecia los pedidos de la fecha segun el costo de las compras de ese dia (ceil(costo x (1+margen)) x (1+ajuste% cliente), IVA por item) y actualiza saldos.
+- Boton "Exportar PDF remitos de ese dia" (fecha puntual).
+
+### 12.34 Sistema de impresion (v12.9.73, v12.9.86, v12.9.87, v12.9.88)
+- Iframe de impresion con dimensiones reales fuera de pantalla + limpieza por `onafterprint` (corrige columnas aplastadas y "Guardar PDF" colgado en desktop).
+- Columnas de Dividir/Vehiculos en "estilo diario": reparto manual en 3 columnas (`printColumnsHtml`), consistente pantalla/impreso, rapido, sin cortar items (antes `column-count` era lento e inconsistente).
+- La pestaña de impresion (mobile) se cierra sola al terminar/cancelar.
+- Checklist "Generar Imprimibles" arma UN solo documento con los 4 imprimibles (saltos de pagina).
+
+### 12.35 Checklist operativo del empleado (Inicio) (v12.9.63)
+- Recuadro "Checklist del dia" (11 lineas). Un click ejecuta la accion y marca/tacha: Stock, Generar Imprimibles, Miriam/Mario/Chicho (copian clipboard de WhatsApp + abren wa.me), Compras, Unidades, Vehiculos, Imprimibles Vehiculos+Remitos, Pagos, Horario. Se reinicia a las 04:00.
+
+### 12.36 Editar gastos cargados (v12.9.70)
+- Boton "Editar" en Compras/Gastos: edita datos basicos (fecha, monto, caja, notas) y ajusta el egreso en Caja / la deuda del proveedor. No toca el detalle de productos ni recalcula stock/costos. Empleado/proveedor editan los suyos; gerente/admin todos (pagos a proveedor se anulan y recargan). Anti-duplicado de egreso identico en menos de un minuto.
+
+### 12.37 Lista de precios publica (`/precios`) (v12.9.84 a v12.9.93)
+- Pagina publica sin login `precios.html` servida por Caddy (`rewrite /precios /precios.html`), respaldada por el endpoint `GET /public/price-list` (sin auth).
+- Formato del rol cliente: al ingresar elige Sin IVA / Con IVA (no cambiable adentro); filtro Por Mayor / Por Menor (por unidad); vista Cuadricula / Lista; chips de categorias select/deselect; buscador; imagenes reales del producto (con fallback); fecha de ultima actualizacion por producto; auto-refresh.
+- "Con IVA": IVA real del producto (10,5% o 21%) + 2% de gastos bancarios (multiplicativo), mostrando solo el precio final (sin discriminar). Desactivable con `appSettings.publicPriceListEnabled = false`.
+
+### 12.38 Parser: correcciones (v12.9.62, v12.9.64, v12.9.75)
+- Sin notas basura; "maple"/"mapple" -> unidad bandeja; fracciones con espacio ("1/ 2" -> 1/2); fraccion sin unidad prefiere variante Kg (ej. "1/2 morron" -> Kg); decimales con punto ("1.5 k" -> 1,5); el punto separa tokens ("1doc." -> docena, sin match espureo); se ignoran cortesias en notas ("por favor", "gracias").
+- Nuevo pedido: cambiar de cliente ya no borra el pedido; no se autoselecciona cliente por solapamiento de palabras.
+
 ---
 
 ## 13. Ultimo Cambio y Version
 
 **Version operativa:** 12.9.93
-**Fecha:** 2026-06-30
-**Commit GitHub del cambio funcional:** `7fc43f2`
-**Entorno actualizado:** VPS productivo `/opt/pare-carrito` con frontend estatico y API Docker Compose saludable.
+**Fecha:** 2026-07-27
+**Commit GitHub del cambio funcional:** `ab9d4de`
+**Entorno:** VPS productivo `/opt/pare-carrito` con frontend estatico servido por Caddy y API Docker Compose. Frontend `sistema.parecarrito.com.ar`, API en `/api`, lista de precios publica en `/precios`.
 
-### Detalle del ultimo cambio
+### Detalle del ultimo cambio (v12.9.93)
 
-- Parser: match por palabra completa (no substring), "Palta 1kg" -> Palta Madura Kg, bonus por unidad en el nombre (`e73afc6`). Dividir: agrupa resolviendo producto por nombre (suma Menta sin productId) (`e73afc6`). Orden de productos agrupa variantes (`e73afc6`). Sheets: cantidades decimales como numero sin "uni" (`64e272c`).
-- (Previo) Parser: resolver que no pela palabras discriminantes (tomate cherry), "N kg y medio" -> N,5, zuccini -> zukini (`44d5398`). Dividir: suma por unidad canonica (Huevos Maple, Remolacha atado) y "agrupado por cliente" en 3 columnas a 10px (`d8522fb`). Vehiculos: sin hoja vacia inicial, N de orden arriba y total al final, 3 columnas a 10px (`5618a29`). Sheets: cliente como "NNN) Nombre" (`602c7c6`).
-- (Previo) Facturacion: popup de pedidos que acumulan IVA con impresion de remitos y "Imprimir todo", y envio automatico por correo (PDF de detalle + factura de TusFacturas) a clientes semanal/quincenal/mensual. Commits `9bac557`, `5e00f18`.
-- (Previo) Correcciones del parser de pedidos para casos reales (#19/#30/#48): cantidad por defecto 1, `un poquito`->0,2, `pimiento`->`morron`, `aji molido`->`en polvo`, `queso de cabra` por nombre completo, `x <unidad>` como unidad y descarte de matches debiles. Commit `e579ded`.
-- Remitos con interlineado minimo legible. Commit `78be0a0`.
-- Dividir compras: agrupado por nombre (fusiona duplicados, separa los que se perdian), total por producto en pantalla/PDF/WhatsApp, numeros de cliente sin ceros y cantidades enteras, y export de WhatsApp respetando el toggle de cliente. Commit `adaee20`.
-- Estos cambios son de frontend (`assets/app.js`); el deploy de frontend no requiere rebuild de la API (solo `git pull` en el VPS). Los cambios de backend/billing previos (`4f73e53`) si requieren `./deploy.sh`.
-- No se registraron credenciales en este documento ni en el historial.
+- Precios: la fecha de "ultima actualizacion" ahora es real. `rec.date` (en `applyCostChange`) solo cambia si el costo o el precio cambian de verdad (antes se ponia hoy siempre, incluso por reprocesos y relaciones de costo). La fecha mostrada = la mas reciente entre el ultimo cambio de precio y la ultima compra directa del producto; si nunca cambio ni se compro, muestra "—" (sin fallback a hoy). Aplica a la lista de precios del rol cliente y a la publica (`/precios`).
+- Requiere `./deploy.sh` por el endpoint `GET /public/price-list`; la lista del rol cliente y `precios.html` van con `git pull`.
 
-### Backups asociados
+### Rango de cambios recientes documentados (v12.9.52 a v12.9.93)
 
-- PC post-cambio: `auditoria/repo-backup-20260624-post-sync-parser-merge.zip`.
-- VPS pre-deploy: `pare-carrito-code-pre-sync-parser-merge-retry_20260624_104900.tar.gz`.
-- VPS post-deploy: `pare-carrito-code-post-sync-parser-merge_20260624_104900.tar.gz`.
+Ver secciones 12.28 a 12.38. Resumen por tema:
+- Sincronizacion robusta: sello de `updatedAt` en toda mutacion, merge "mas nuevo gana" (config y precios), guard del servidor, `keepalive`, empuje de pendientes, cache `no-cache` en Caddy, seed que no pisa reales, claves de patch faltantes agregadas al backend.
+- Stock: control al finalizar el dia (conteo = apertura de manana), registro de conteos, cobertura por demanda completa en Unidades.
+- Precios: desvinculada la planilla -> sistema (Sheets solo control), recalculo de precios de un dia en Remitos, fecha de actualizacion real.
+- Impresion: iframe robusto, columnas "estilo diario", pestaña que se cierra sola, imprimibles combinados.
+- Nuevas funciones: checklist del empleado en Inicio, editar gastos, lista de precios publica `/precios` con formato cliente (mayor/menor, grilla/lista, categorias, imagenes, Sin/Con IVA con 2% de gastos bancarios).
+- Parser: multiples correcciones (maple/mapple, fracciones a Kg, decimales con punto, "1doc.", cortesias en notas) y fixes de nuevo pedido (cambio de cliente no borra; sin autoseleccion espurea).
+
+### Deploy
+
+- Frontend (`assets/app.js`, `styles.css`, `index.html`, `precios.html`): `git pull` en el VPS (Caddy sirve estatico; con `Cache-Control: no-cache` el cambio se aplica al recargar). Conviene Ctrl+F5 la primera vez.
+- Backend (`pare-carrito-sas-server/`, incluido `Caddyfile`, `server.js`, `billing.js`): `./deploy.sh` (rebuild de contenedores).
+- No se registran credenciales en este documento ni en el historial.
