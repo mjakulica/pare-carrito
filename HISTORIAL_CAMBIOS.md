@@ -1,5 +1,13 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.94 - Revertir impresion a v12.9.82 (2026-07-27)
+
+- Se revirtieron SOLO las funciones de impresion (printHtmlDocument, printDocumentStyles, renderDivideClientList, renderDivideProductList) al estado exacto de v12.9.82, por un error de impresion posterior que no se pudo resolver. Se elimino el helper printColumnsHtml y el auto-cierre de pestaña.
+- Se mantienen intactos: lista de precios publica, fix de cache (Caddy), y la fecha real de ultima actualizacion de precios (v12.9.93).
+- Solo frontend (git pull).
+
+---
+
 ## v12.9.93 - Fecha de ultima actualizacion de precio real (2026-07-13)
 
 ### Precios (lista cliente y lista publica)
