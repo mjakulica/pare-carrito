@@ -11493,7 +11493,7 @@
         <div class="field"><label>Monto TOTAL a emitir</label><input id="mb-total" inputmode="decimal" /></div>
         <div class="field span-2"><span class="muted" id="mb-neto-info" style="font-size:12px"></span></div>
       </div>
-      <p class="muted" style="font-size:12px;margin-top:4px">Se muestra el acumulado pendiente del cliente. Si edit\u00e1s el TOTAL, se emite un comprobante de un solo rengl\u00f3n por ese monto con el IVA elegido; si lo dej\u00e1s igual, se emite el detalle por producto. El vencimiento no puede ser anterior a hoy.</p>
+      <p class="muted" style="font-size:12px;margin-top:4px">Se muestra el acumulado pendiente del cliente. Si edit\u00e1s el TOTAL, se emite un comprobante de un solo rengl\u00f3n por ese monto con el IVA elegido; si lo dej\u00e1s igual, se emite el detalle por producto. La FECHA del comprobante debe ser HOY o posterior a la del \u00faltimo comprobante autorizado (AFIP los ordena por fecha); el per\u00edodo facturado puede ser anterior. El vencimiento no puede ser anterior a hoy.</p>
       <div class="page-actions" style="justify-content:flex-end;gap:8px;margin-top:12px"><button class="btn ghost" type="button" data-close-modal>Cancelar</button><button class="btn primary" type="button" id="mb-emit">Emitir factura</button></div>
     `;
     showModal("Emitir factura manual", body, () => {
@@ -11521,7 +11521,7 @@
         pendingTotal = Number(p.total || 0);
         if (!elDesde.value) elDesde.value = p.from || getMonthStartISO(todayISO());
         if (!elHasta.value) elHasta.value = todayISO();
-        elFecha.value = elFecha.value || elHasta.value;
+        elFecha.value = elFecha.value || todayISO();
         elIva.value = String(rateFor(p));
         elTotal.value = formatAmountInput(pendingTotal);
         updateNetoInfo();
@@ -11545,6 +11545,7 @@
         const rate = Number(elIva.value) || 10.5;
         const total = parseAmount(elTotal.value);
         if (venc && venc < todayISO()) return alert("El vencimiento no puede ser anterior a hoy.");
+        if (fecha && fecha < todayISO() && !confirm("La fecha del comprobante (" + formatDate(fecha) + ") es anterior a hoy. AFIP puede rechazarla si ya hay comprobantes con fecha posterior. Emitir igual?")) return;
         if (!(total > 0)) return alert("El monto total debe ser mayor a cero.");
         const overrides = { fecha, vencimiento: venc, periodoDesde: desde, periodoHasta: hasta, concepto };
         const edited = Math.abs(total - pendingTotal) >= 1;

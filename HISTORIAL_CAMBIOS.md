@@ -1,5 +1,14 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.100 - Emision manual: fecha del comprobante = hoy (cronologia AFIP) (2026-07-31)
+
+### Facturacion - Emitir manual
+- AFIP rechazaba con "El numero o fecha del comprobante no se corresponde con el proximo a autorizar" cuando se emitia con fecha anterior a la del ultimo comprobante autorizado.
+- Fix: la FECHA del comprobante por defecto ahora es HOY (no el fin del periodo). El periodo facturado y el vencimiento pueden ser distintos. Si el usuario pone una fecha anterior a hoy, se avisa antes de emitir.
+- Solo frontend (git pull).
+
+---
+
 ## v12.9.99 - Backup de DB mas rapido (2026-07-31)
 
 ### Deploy / base de datos
