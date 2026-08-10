@@ -1,5 +1,16 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.101 - Facturacion manual: elegir punto de venta (2026-07-31)
+
+### Facturacion - Emitir manual
+- El modal permite elegir el PUNTO DE VENTA (campo "Punto de venta"; vacio = el configurado por defecto). Se prellena con el PDV que informa el servidor.
+- Backend: buildInvoicePayload usa ov.puntoVenta si viene (override); si no, cfg.puntoVenta.
+- Util cuando hay 2+ puntos de venta en TusFacturas: el error de ARCA "el numero o fecha del comprobante no se corresponde con el proximo a autorizar" suele ser porque la fecha (ej. 31/7) es anterior al ultimo comprobante autorizado en ESE PDV; emitir en un PDV cuyo ultimo comprobante sea <= a esa fecha lo resuelve.
+- Nota: las credenciales (apikey/apitoken/usertoken) son de la cuenta, no del PDV: los 2 puntos de venta usan las mismas.
+- REQUIERE ./deploy.sh (backend) + git pull (frontend).
+
+---
+
 ## v12.9.100 - Emision manual: fecha del comprobante = hoy (cronologia AFIP) (2026-07-31)
 
 ### Facturacion - Emitir manual

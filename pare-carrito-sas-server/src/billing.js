@@ -359,7 +359,7 @@ function buildInvoicePayload(invoice, cfg, options = {}) {
       // cuando se pide por override (emision manual); si hay vencimiento manual conviene 2 o 3.
       ...(ov.concepto ? { concepto: String(ov.concepto) } : {}),
       idioma: 1,
-      punto_venta: cfg.puntoVenta,
+      punto_venta: ov.puntoVenta ? String(ov.puntoVenta) : cfg.puntoVenta,
       moneda: "PES",
       cotizacion: 1,
       vencimiento: ov.vencimiento ? ddmmyyyy(ov.vencimiento) : ddmmyyyy(invoice.to),

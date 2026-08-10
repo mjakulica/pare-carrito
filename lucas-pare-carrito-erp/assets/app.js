@@ -11489,6 +11489,7 @@
         <div class="field"><label>Periodo desde</label><input type="date" id="mb-desde" /></div>
         <div class="field"><label>Periodo hasta</label><input type="date" id="mb-hasta" /></div>
         <div class="field"><label>Vencimiento para el pago</label><input type="date" id="mb-venc" value="${escapeAttr(vencDefault)}" /></div>
+        <div class="field"><label>Punto de venta</label><input id="mb-pv" inputmode="numeric" value="${escapeAttr(ui.billingPuntoVenta || "")}" placeholder="vacio = el configurado" /></div>
         <div class="field"><label>IVA</label><select id="mb-iva"><option value="10.5">10,5%</option><option value="21">21%</option></select></div>
         <div class="field"><label>Monto TOTAL a emitir</label><input id="mb-total" inputmode="decimal" /></div>
         <div class="field span-2"><span class="muted" id="mb-neto-info" style="font-size:12px"></span></div>
@@ -11547,7 +11548,10 @@
         if (venc && venc < todayISO()) return alert("El vencimiento no puede ser anterior a hoy.");
         if (fecha && fecha < todayISO() && !confirm("La fecha del comprobante (" + formatDate(fecha) + ") es anterior a hoy. AFIP puede rechazarla si ya hay comprobantes con fecha posterior. Emitir igual?")) return;
         if (!(total > 0)) return alert("El monto total debe ser mayor a cero.");
+        const pvEl = document.getElementById("mb-pv");
+        const pv = pvEl ? String(pvEl.value || "").trim() : "";
         const overrides = { fecha, vencimiento: venc, periodoDesde: desde, periodoHasta: hasta, concepto };
+        if (pv) overrides.puntoVenta = pv;
         const edited = Math.abs(total - pendingTotal) >= 1;
         if (edited) { overrides.customNeto = Math.round((total / (1 + rate / 100)) * 100) / 100; overrides.customAlicuota = rate; }
         const cli = getClient(clientId);
@@ -11627,6 +11631,7 @@
           .then((response) => response.ok ? response.json() : null)
           .then((payload) => {
             if (!payload || !statusNode) return;
+            if (payload.puntoVenta != null) ui.billingPuntoVenta = String(payload.puntoVenta);
             statusNode.innerHTML = payload.enabled
               ? `<span class="pill green">TusFacturas conectado (PDV ${escapeHtml(String(payload.puntoVenta))})</span>`
               : `<span class="pill amber">Credenciales de TusFacturas pendientes (modo simulacion)</span>`;
