@@ -1,5 +1,15 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.96 - Facturacion: external_reference invalida al dividir en tandas (2026-07-31)
+
+### Facturacion (TusFacturas)
+- Sintoma: facturas de clientes con muchos items (ej. Factury) fallaban con "La external reference enviada, posee caracteres no validos" y "Error al crear al cliente. No se podra generar el comprobante".
+- Causa: cuando la factura supera el maximo de items por comprobante se divide en tandas y se agrega el sufijo " (1/2)" a la external_reference. Los espacios, parentesis y barra de ese sufijo no son validos para TusFacturas.
+- Fix: la external_reference usa un sufijo seguro ("-1-2") y se sanea a [A-Za-z0-9_-]. La leyenda del comprobante mantiene el texto legible " (1/2)".
+- REQUIERE ./deploy.sh. Despues del deploy, reintentar la facturacion de los clientes que quedaron en Error.
+
+---
+
 ## v12.9.95 - Parser: "banana unidad" ya no matchea Anana (2026-07-27)
 
 ### Parser de WhatsApp (Nuevo Pedido)

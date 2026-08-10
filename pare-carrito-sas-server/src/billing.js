@@ -315,7 +315,11 @@ function buildInvoicePayload(invoice, cfg, options = {}) {
   }));
 
   const suffix = batchTotal > 1 ? ` (${batchNumber}/${batchTotal})` : "";
-  const externalReference = `PC-${invoice.clientId}-${invoice.from}-${invoice.to}${suffix}`;
+  // La external_reference de TusFacturas solo admite caracteres simples: cuando la factura se
+  // divide en tandas, el sufijo " (1/2)" (espacios, parentesis, barra) la invalidaba. Se usa un
+  // sufijo seguro y se sanea toda la referencia a [A-Za-z0-9_-].
+  const refSuffix = batchTotal > 1 ? `-${batchNumber}-${batchTotal}` : "";
+  const externalReference = `PC-${invoice.clientId}-${invoice.from}-${invoice.to}${refSuffix}`.replace(/[^A-Za-z0-9_-]/g, "");
 
   return {
     apikey: cfg.apikey,
