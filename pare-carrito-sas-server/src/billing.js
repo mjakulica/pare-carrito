@@ -359,7 +359,9 @@ function buildInvoicePayload(invoice, cfg, options = {}) {
       // cuando se pide por override (emision manual); si hay vencimiento manual conviene 2 o 3.
       ...(ov.concepto ? { concepto: String(ov.concepto) } : {}),
       idioma: 1,
-      punto_venta: ov.puntoVenta ? String(ov.puntoVenta) : cfg.puntoVenta,
+      // Punto de venta: se saean solo digitos y se quitan ceros a la izquierda ("0003"->"3").
+      // Debe coincidir EXACTO con un PDV configurado en la cuenta de TusFacturas.
+      punto_venta: (ov.puntoVenta != null && String(ov.puntoVenta).replace(/\D/g, "").replace(/^0+(?=\d)/, "")) ? String(ov.puntoVenta).replace(/\D/g, "").replace(/^0+(?=\d)/, "") : cfg.puntoVenta,
       moneda: "PES",
       cotizacion: 1,
       vencimiento: ov.vencimiento ? ddmmyyyy(ov.vencimiento) : ddmmyyyy(invoice.to),
