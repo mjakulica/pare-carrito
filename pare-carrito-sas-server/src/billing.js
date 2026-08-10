@@ -388,7 +388,9 @@ function buildInvoicePayload(invoice, cfg, options = {}) {
       idioma: 1,
       // Punto de venta: se saean solo digitos y se quitan ceros a la izquierda ("0003"->"3").
       // Debe coincidir EXACTO con un PDV configurado en la cuenta de TusFacturas.
-      punto_venta: (ov.puntoVenta != null && String(ov.puntoVenta).replace(/\D/g, "").replace(/^0+(?=\d)/, "")) ? String(ov.puntoVenta).replace(/\D/g, "").replace(/^0+(?=\d)/, "") : cfg.puntoVenta,
+      // Se envia el PDV tal cual (solo digitos, CONSERVANDO ceros a la izquierda: ej "00004").
+      // Antes se quitaban los ceros ("00004"->"4") y TusFacturas lo rechazaba por no concordar.
+      punto_venta: (ov.puntoVenta != null && String(ov.puntoVenta).replace(/\D/g, "")) ? String(ov.puntoVenta).replace(/\D/g, "") : cfg.puntoVenta,
       moneda: "PES",
       cotizacion: 1,
       vencimiento: ov.vencimiento ? ddmmyyyy(ov.vencimiento) : ddmmyyyy(invoice.to),

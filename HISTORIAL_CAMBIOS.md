@@ -1,5 +1,13 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.103 - Facturacion: PDV con ceros a la izquierda (2026-08-10)
+
+### Facturacion - punto de venta
+- El PDV manual ahora se envia a TusFacturas tal cual (solo digitos, conservando ceros a la izquierda: "00004"). Antes se quitaban los ceros ("00004" -> "4") y TusFacturas rechazaba por no concordar con el PDV configurado. La busqueda del usertoken por PDV en el mapa del .env sigue tolerando ambos formatos ("4" o "00004").
+- REQUIERE ./deploy.sh.
+
+---
+
 ## v12.9.102 - Facturacion: credenciales por punto de venta (2026-08-10)
 
 ### Facturacion - Emitir manual / TusFacturas
