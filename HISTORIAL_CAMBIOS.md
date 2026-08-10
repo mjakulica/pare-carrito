@@ -1,5 +1,15 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.95 - Parser: "banana unidad" ya no matchea Anana (2026-07-27)
+
+### Parser de WhatsApp (Nuevo Pedido)
+- "Banana unidad" (o cualquier producto cuya unidad tipeada no exista como variante) ya no cae en un producto parecido por error (ej. Anana, distancia 1 de "banana"). Ahora, si el nombre-base coincide exactamente, matchea ese producto aunque la unidad no coincida (elige la variante mas adecuada), en vez de pasar al match difuso.
+- El match difuso por levenshtein ahora exige misma primera letra: evita falsos positivos como "anana"~"banana" o "granada"~"naranja".
+- Nota: el caso "3doc. naranjas" -> 0,1 ya estaba resuelto en el codigo actual (fix del punto, v12.9.75). Si sigue apareciendo es por una version vieja cacheada en el dispositivo: entrar con Ctrl+F5 (o aplicar el fix de cache v12.9.83 con deploy).
+- Solo frontend (git pull).
+
+---
+
 ## v12.9.94 - Revertir impresion a v12.9.82 (2026-07-27)
 
 - Se revirtieron SOLO las funciones de impresion (printHtmlDocument, printDocumentStyles, renderDivideClientList, renderDivideProductList) al estado exacto de v12.9.82, por un error de impresion posterior que no se pudo resolver. Se elimino el helper printColumnsHtml y el auto-cierre de pestaña.

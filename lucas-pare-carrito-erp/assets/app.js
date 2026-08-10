@@ -15363,7 +15363,7 @@
       const unitMatches = !unitText || normalizeText(product.unitType) === unitText || productText.endsWith(" " + unitText);
       const sortWords = (t) => t.split(" ").filter(Boolean).sort().join(" ");
       const sameWordSet = sortWords(productSearchText) === sortWords(searchable) || (sortWords(productWithoutUnitSearch) === sortWords(searchable) && unitMatches);
-      const exact = productSearchText === searchable || productSearchText === searchableWithUnit || (productWithoutUnitSearch === searchable && unitMatches) || sameWordSet;
+      const exact = productSearchText === searchable || productSearchText === searchableWithUnit || productWithoutUnitSearch === searchable || sameWordSet;
       if (!exact) return null;
       return {
         product,
@@ -15383,10 +15383,10 @@
       const wordScore = words.reduce((sum, word) => {
         if (productWords.includes(word)) return sum + 2;
         if (productWords.some((pword) => pword.startsWith(word) || word.startsWith(pword))) return sum + 1;
-        if (word.length > 3 && productWords.some((pword) => Math.abs(pword.length - word.length) <= 2 && levenshtein(pword, word) <= (word.length <= 5 ? 1 : 2))) return sum + 1.5;
+        if (word.length > 3 && productWords.some((pword) => pword[0] === word[0] && Math.abs(pword.length - word.length) <= 2 && levenshtein(pword, word) <= (word.length <= 5 ? 1 : 2))) return sum + 1.5;
         return sum - 1;
       }, 0);
-      const firstWordBonus = words.length && productWords.length && (productWords[0] === words[0] || productWords[0].startsWith(words[0]) || (words[0].length > 3 && levenshtein(productWords[0], words[0]) <= 1)) ? 3 : 0;
+      const firstWordBonus = words.length && productWords.length && (productWords[0] === words[0] || productWords[0].startsWith(words[0]) || (words[0].length > 3 && productWords[0][0] === words[0][0] && levenshtein(productWords[0], words[0]) <= 1)) ? 3 : 0;
       const exactBonus = productText.includes(searchableWithUnit || searchable) ? 4 : productText.includes(searchable) ? 2 : 0;
       const hasNameSignal = wordScore > 0 || firstWordBonus > 0 || exactBonus > 0;
       const unitScore = !hasNameSignal ? 0 : unitType && (product.unitType === unitType || productText.endsWith(" " + unitText)) ? 8 : unitType ? -6 : 0;
