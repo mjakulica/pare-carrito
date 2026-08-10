@@ -1,5 +1,15 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.97 - Facturacion: emision manual con vencimiento + selector de historial (2026-07-31)
+
+### Facturacion (gerente/admin/contador)
+- Nuevo boton "Emitir manual": abre un modal para emitir la factura de un cliente eligiendo fecha del comprobante, periodo desde/hasta, VENCIMIENTO para el pago y concepto (Productos / Servicios / Productos y servicios). Pensado para re-emitir casos que fallaron o que necesitan vencimiento futuro (AFIP rechaza vencimiento anterior a hoy). Se valida que el vencimiento no sea anterior a hoy.
+- Backend: buildInvoicePayload acepta overrides (fecha, vencimiento, periodo, concepto); runBilling y /billing/run los propagan (body.overrides). El concepto solo se envia si se especifica.
+- El historial de emisiones ahora tiene selector 30 / 60 / 120 / Todas (ui.billingLogLimit).
+- REQUIERE ./deploy.sh (backend) + git pull (frontend).
+
+---
+
 ## v12.9.96 - Facturacion: external_reference invalida al dividir en tandas (2026-07-31)
 
 ### Facturacion (TusFacturas)

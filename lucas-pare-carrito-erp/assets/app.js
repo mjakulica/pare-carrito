@@ -11476,6 +11476,60 @@
     document.querySelectorAll("[data-billing-pdf]").forEach((button) => button.addEventListener("click", () => abrirFacturaPdf(button.dataset.pdfInv, button.dataset.pdfNum)));
   }
 
+  function openManualBillingModal() {
+    const clients = activeClients().filter((c) => c.needsInvoice && ["Factura A", "Factura B"].includes(c.invoiceType));
+    if (!clients.length) return alert("No hay clientes con factura A o B.");
+    const from = ui.billingFrom || getMonthStartISO(todayISO());
+    const to = ui.billingTo || todayISO();
+    const vencDefault = addDaysISO(todayISO(), 10);
+    const body = `
+      <div class="form-grid">
+        <div class="field span-2"><label>Cliente</label><select id="mb-client">${clients.map((c) => `<option value="${escapeAttr(c.id)}">${escapeHtml(c.id + " - " + c.name)} (${escapeHtml(c.invoiceType)})</option>`).join("")}</select></div>
+        <div class="field"><label>Fecha del comprobante</label><input type="date" id="mb-fecha" value="${escapeAttr(to)}" /></div>
+        <div class="field"><label>Concepto</label><select id="mb-concepto"><option value="1">Productos</option><option value="2">Servicios</option><option value="3" selected>Productos y servicios</option></select></div>
+        <div class="field"><label>Periodo desde</label><input type="date" id="mb-desde" value="${escapeAttr(from)}" /></div>
+        <div class="field"><label>Periodo hasta</label><input type="date" id="mb-hasta" value="${escapeAttr(to)}" /></div>
+        <div class="field span-2"><label>Vencimiento para el pago</label><input type="date" id="mb-venc" value="${escapeAttr(vencDefault)}" /></div>
+      </div>
+      <p class="muted" style="font-size:12px;margin-top:6px">Se factura el acumulado pendiente del cliente; estos campos solo cambian las fechas y el concepto del comprobante. El vencimiento no puede ser anterior a hoy (AFIP lo rechaza).</p>
+      <div class="page-actions" style="justify-content:flex-end;gap:8px;margin-top:12px"><button class="btn ghost" type="button" data-close-modal>Cancelar</button><button class="btn primary" type="button" id="mb-emit">Emitir factura</button></div>
+    `;
+    showModal("Emitir factura manual", body, () => {
+      const btn = document.getElementById("mb-emit");
+      if (!btn) return;
+      btn.addEventListener("click", async () => {
+        const cfg = getCloudSyncConfig();
+        if (!cfg.username || !cloudSyncReady(cfg)) return alert("La emision corre en el servidor propio. Ingrese con usuario y contraseña.");
+        const clientId = document.getElementById("mb-client").value;
+        const fecha = document.getElementById("mb-fecha").value;
+        const venc = document.getElementById("mb-venc").value;
+        const desde = document.getElementById("mb-desde").value;
+        const hasta = document.getElementById("mb-hasta").value;
+        const concepto = document.getElementById("mb-concepto").value;
+        if (venc && venc < todayISO()) return alert("El vencimiento no puede ser anterior a hoy.");
+        const cli = getClient(clientId);
+        if (!confirm("Emitir AHORA la factura de " + (cli ? cli.name : clientId) + " con vencimiento " + formatDate(venc) + "?")) return;
+        btn.disabled = true; btn.textContent = "Emitiendo...";
+        try {
+          const overrides = { fecha, vencimiento: venc, periodoDesde: desde, periodoHasta: hasta, concepto };
+          const response = await cloudRequest(cfg, "/billing/run", { method: "POST", body: JSON.stringify({ clientId, overrides }) });
+          const result = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(result.error || "HTTP " + response.status);
+          const r = (result.results || [])[0];
+          if (!result.count) { alert("No habia comprobante pendiente para ese cliente en el periodo."); }
+          else if (r && r.status === "error") { alert("TusFacturas rechazo la emision: " + (r.detail || "revise los datos")); }
+          else { alert("Factura emitida correctamente."); }
+          closeModal();
+          await cloudPull(false);
+          render();
+        } catch (e) {
+          alert("No se pudo emitir: " + e.message);
+          btn.disabled = false; btn.textContent = "Emitir factura";
+        }
+      });
+    });
+  }
+
   function renderFacturacion() {
     const today = todayISO();
     const defaultFrom = getMonthStartISO(today);
@@ -11510,7 +11564,9 @@
         </tr>
       `;
     }).join("");
-    const logRows = (state.billingLog || []).slice(-30).reverse().map((log) => `
+    const billingLogLimit = Number(ui.billingLogLimit) || 30;
+    const allBillingLogs = (state.billingLog || []).slice().reverse();
+    const logRows = (billingLogLimit >= 100000 ? allBillingLogs : allBillingLogs.slice(0, billingLogLimit)).map((log) => `
       <tr>
         <td>${formatTimestampShort(log.emittedAt)}</td>
         <td>${escapeHtml(log.clientName || log.clientId)}</td>
@@ -11589,6 +11645,9 @@
       }));
       document.querySelectorAll("[data-billing-pdf]").forEach((button) => button.addEventListener("click", () => abrirFacturaPdf(button.dataset.pdfInv, button.dataset.pdfNum)));
       document.querySelectorAll("[data-billing-pending]").forEach((button) => button.addEventListener("click", () => openBillingPendingModal(button.dataset.billingPending)));
+      const logLimitSel = document.getElementById("billing-log-limit");
+      if (logLimitSel) logLimitSel.addEventListener("change", () => { ui.billingLogLimit = Number(logLimitSel.value) || 30; render(); });
+      document.querySelectorAll("[data-billing-manual]").forEach((button) => button.addEventListener("click", () => openManualBillingModal()));
       document.querySelectorAll("[data-billing-run]").forEach((button) => button.addEventListener("click", async () => {
         const simulate = button.dataset.billingRun === "simulate";
         const cfg = getCloudSyncConfig();
@@ -11618,6 +11677,7 @@
       "Facturacion",
       "Clientes con factura, acumulados del periodo y emision automatica via TusFacturasAPP (diaria 23hs, semanal sabados 23hs con corte de fin de mes, mensual ultimo dia 23hs).",
       ["manager", "admin", "contador"].includes(currentUser.role) ? `<button class="btn ghost" data-billing-run="simulate">Simular emision</button>
+       <button class="btn blue" data-billing-manual>Emitir manual</button>
        <button class="btn primary" data-billing-run="real">Emitir pendientes ahora</button>` : "",
       `
       <div class="panel" style="margin-bottom:14px">
@@ -11651,7 +11711,10 @@
         </div>
       </div>
       <div class="panel">
-        <h2 class="page-title" style="font-size:18px">Historial de emisiones</h2>
+        <div class="page-actions" style="justify-content:space-between;align-items:center">
+          <h2 class="page-title" style="font-size:18px">Historial de emisiones</h2>
+          <label style="display:inline-flex;gap:6px;align-items:center;font-size:13px">Mostrar <select id="billing-log-limit">${[30, 60, 120, 100000].map((n) => `<option value="${n}" ${billingLogLimit === n ? "selected" : ""}>${n >= 100000 ? "Todas" : n}</option>`).join("")}</select></label>
+        </div>
         <div class="table-wrap" style="margin-top:10px">
           <table>
             <thead><tr><th>Fecha</th><th>Cliente</th><th>Periodo</th><th>Total</th><th>Estado</th><th>CAE / Detalle</th></tr></thead>

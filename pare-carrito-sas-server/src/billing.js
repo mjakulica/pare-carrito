@@ -295,6 +295,7 @@ function buildInvoicePayload(invoice, cfg, options = {}) {
   const clientCondIva = VALID_CONDICION_IVA.includes(String(client.condicionIva || "").toUpperCase()) ? String(client.condicionIva).toUpperCase() : "";
   const condicionIva = contributor.condicionIva || clientCondIva || (client.invoiceType === "Factura A" ? "RI" : "CF");
 
+  const ov = options.overrides || {};
   const batchNumber = options.batchNumber || 1;
   const batchTotal = options.batchTotal || 1;
   const batchItems = options.items || invoice.items;
@@ -340,16 +341,19 @@ function buildInvoicePayload(invoice, cfg, options = {}) {
       rg5329: "N"
     },
     comprobante: {
-      fecha: ddmmyyyy(invoice.to),
+      fecha: ov.fecha ? ddmmyyyy(ov.fecha) : ddmmyyyy(invoice.to),
       tipo: client.invoiceType.toUpperCase(),
       operacion: "V",
+      // concepto TusFacturas: 1=Productos, 2=Servicios, 3=Productos y Servicios. Se envia solo
+      // cuando se pide por override (emision manual); si hay vencimiento manual conviene 2 o 3.
+      ...(ov.concepto ? { concepto: String(ov.concepto) } : {}),
       idioma: 1,
       punto_venta: cfg.puntoVenta,
       moneda: "PES",
       cotizacion: 1,
-      vencimiento: ddmmyyyy(invoice.to),
-      periodo_facturado_desde: ddmmyyyy(invoice.from),
-      periodo_facturado_hasta: ddmmyyyy(invoice.to),
+      vencimiento: ov.vencimiento ? ddmmyyyy(ov.vencimiento) : ddmmyyyy(invoice.to),
+      periodo_facturado_desde: ov.periodoDesde ? ddmmyyyy(ov.periodoDesde) : ddmmyyyy(invoice.from),
+      periodo_facturado_hasta: ov.periodoHasta ? ddmmyyyy(ov.periodoHasta) : ddmmyyyy(invoice.to),
       rubro: cfg.rubro,
       rubro_grupo_contable: cfg.rubro,
       detalle,
@@ -369,6 +373,7 @@ function splitPeriodIntoInvoices(invoice) {
     batches.push(items.slice(i, i + TF_ITEMS_PER_INVOICE));
   }
   return batches.map((batch, idx) => ({
+    overrides: invoice.overrides || null,
     ...invoice,
     items: batch,
     batchNumber: idx + 1,
@@ -445,7 +450,8 @@ async function emitInvoice(invoice, cfg, fetchImpl = fetch) {
     items: invoice.items,
     batchNumber: invoice.batchNumber,
     batchTotal: invoice.batchTotal,
-    contributorData
+    contributorData,
+    overrides: invoice.overrides || null
   });
   console.log("[TusFacturas payload] cliente:", JSON.stringify(payload.cliente));
   console.log("[TusFacturas payload] comprobante:", JSON.stringify(payload.comprobante));
@@ -548,7 +554,7 @@ function buildBillingEntry(invoice, emittedAt, periodResult, simulate, cfg) {
 
 // Corre la facturacion sobre el estado central, registra resultados en billingLog
 // Retorna { ran, simulate, count, results, lastRunDate }
-async function runBilling({ pool, force = false, simulate = false, onlyClientId = "", onlyClientIds = null, ivaOverrides = null, fetchImpl = fetch, now = new Date(), lastRunDate = "" }) {
+async function runBilling({ pool, force = false, simulate = false, onlyClientId = "", onlyClientIds = null, ivaOverrides = null, invoiceOverrides = null, fetchImpl = fetch, now = new Date(), lastRunDate = "" }) {
   const cfg = billingConfig();
   if (!cfg.enabled) simulate = true;
   const stateRow = await pool.query("SELECT data FROM app_state WHERE id = 'main'");
@@ -566,6 +572,15 @@ async function runBilling({ pool, force = false, simulate = false, onlyClientId 
   due = due.map((invoice) => Object.prototype.hasOwnProperty.call(manualIvaByClient, invoice.clientId)
     ? applyManualIvaOverride(invoice, manualIvaByClient[invoice.clientId])
     : invoice);
+  // Overrides de emision manual (fecha, vencimiento, periodo, concepto), por cliente o para todos.
+  if (invoiceOverrides && typeof invoiceOverrides === "object") {
+    const byClient = invoiceOverrides.byClient || {};
+    const forAll = invoiceOverrides.all || null;
+    due = due.map((invoice) => {
+      const ov = byClient[invoice.clientId] || forAll;
+      return ov ? { ...invoice, overrides: ov } : invoice;
+    });
+  }
 
   const results = [];
   const emittedAt = new Date();
