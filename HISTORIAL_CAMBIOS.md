@@ -1,5 +1,15 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.99 - Backup de DB mas rapido (2026-07-31)
+
+### Deploy / base de datos
+- El pg_dump del backup tardaba mucho al comprimir porque incluia la tabla state_history: cada guardado completo inserta una copia entera del estado (~31 MB) y se guardaban las ultimas 200 -> hasta ~6 GB de snapshots.
+- deploy.sh: el pg_dump ahora excluye los DATOS de state_history y state_operations (tablas internas de historial/idempotencia, no datos de negocio; la estructura se mantiene) y usa gzip -1 (compresion rapida).
+- Retencion de snapshots STATE_HISTORY_KEEP bajada de 200 a 30 (default; configurable por env). Se auto-recorta en el proximo guardado, achicando la tabla en la base viva.
+- deploy.sh se aplica con git pull (se corre a mano en el VPS); el cambio de STATE_HISTORY_KEEP requiere ./deploy.sh.
+
+---
+
 ## v12.9.98 - Emision manual: muestra y permite editar el monto (2026-07-31)
 
 ### Facturacion - Emitir manual

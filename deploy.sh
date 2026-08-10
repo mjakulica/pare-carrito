@@ -17,7 +17,13 @@ mkdir -p "$BACKUP_DIR"
 { ls -t "$BACKUP_DIR"/db_*.sql.gz 2>/dev/null | tail -n +5 | xargs -r rm -f; } || true
 { ls -t "$BACKUP_DIR"/code_*.tar.gz 2>/dev/null | tail -n +3 | xargs -r rm -f; } || true
 if docker ps --format '{{.Names}}' | grep -q "^${DB_CONTAINER}$"; then
-  if docker exec "$DB_CONTAINER" pg_dump -U parecarrito parecarrito | gzip > "$BACKUP_DIR/db_${DATE}.sql.gz"; then
+  # Se excluyen los DATOS de las tablas internas de historial/idempotencia (no son datos de
+  # negocio y pueden pesar varios GB): la estructura se mantiene, pero sin las filas gigantes.
+  # gzip -1 = compresion rapida (el cuello de botella era comprimir varios GB de snapshots).
+  if docker exec "$DB_CONTAINER" pg_dump -U parecarrito \
+       --exclude-table-data=state_history \
+       --exclude-table-data=state_operations \
+       parecarrito | gzip -1 > "$BACKUP_DIR/db_${DATE}.sql.gz"; then
     echo "    OK -> $BACKUP_DIR/db_${DATE}.sql.gz ($(du -h "$BACKUP_DIR/db_${DATE}.sql.gz" | cut -f1))"
   else
     echo "    WARN: fallo el pg_dump (revisar espacio). Continuo igual."
