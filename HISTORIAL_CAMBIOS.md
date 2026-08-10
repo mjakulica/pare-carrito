@@ -1,5 +1,16 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.102 - Facturacion: credenciales por punto de venta (2026-08-10)
+
+### Facturacion - Emitir manual / TusFacturas
+- Soporte de usertoken distinto por punto de venta (el error "El punto de venta enviado no concuerda..." era por usar el usertoken del PDV por defecto).
+- Prioridad de credenciales por emision: (1) override manual del modal, (2) mapa por PDV en el .env, (3) credenciales por defecto.
+- .env: TUSFACTURAS_PV_CREDS = JSON {"2":{"usertoken":"..","apikey":"..","apitoken":".."}} para configurar de forma persistente (recomendado). apikey/apitoken opcionales si son los mismos.
+- Modal: campo opcional "User token del PDV" para el caso puntual sin tocar el .env. Tambien se saea el numero de PDV (solo digitos, sin ceros a la izquierda).
+- REQUIERE ./deploy.sh (backend) + git pull (frontend).
+
+---
+
 ## v12.9.101 - Facturacion manual: elegir punto de venta (2026-07-31)
 
 ### Facturacion - Emitir manual

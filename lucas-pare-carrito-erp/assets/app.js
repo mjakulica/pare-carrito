@@ -11490,6 +11490,7 @@
         <div class="field"><label>Periodo hasta</label><input type="date" id="mb-hasta" /></div>
         <div class="field"><label>Vencimiento para el pago</label><input type="date" id="mb-venc" value="${escapeAttr(vencDefault)}" /></div>
         <div class="field"><label>Punto de venta</label><input id="mb-pv" inputmode="numeric" value="${escapeAttr(ui.billingPuntoVenta || "")}" placeholder="vacio = el configurado" /></div>
+        <div class="field span-2"><label>User token del PDV (opcional)</label><input id="mb-usertoken" autocomplete="off" placeholder="dejar vacio si el PDV usa el token de siempre" /></div>
         <div class="field"><label>IVA</label><select id="mb-iva"><option value="10.5">10,5%</option><option value="21">21%</option></select></div>
         <div class="field"><label>Monto TOTAL a emitir</label><input id="mb-total" inputmode="decimal" /></div>
         <div class="field span-2"><span class="muted" id="mb-neto-info" style="font-size:12px"></span></div>
@@ -11552,6 +11553,9 @@
         const pv = pvEl ? String(pvEl.value || "").trim() : "";
         const overrides = { fecha, vencimiento: venc, periodoDesde: desde, periodoHasta: hasta, concepto };
         if (pv) overrides.puntoVenta = pv;
+        const utEl = document.getElementById("mb-usertoken");
+        const ut = utEl ? String(utEl.value || "").trim() : "";
+        if (ut) overrides.usertoken = ut;
         const edited = Math.abs(total - pendingTotal) >= 1;
         if (edited) { overrides.customNeto = Math.round((total / (1 + rate / 100)) * 100) / 100; overrides.customAlicuota = rate; }
         const cli = getClient(clientId);

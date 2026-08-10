@@ -71,8 +71,35 @@ function billingConfig(env = process.env) {
     rubro: env.TUSFACTURAS_RUBRO || "Frutas y verduras",
     condicionPago: "205" // 205 = Cuenta corriente (forzado para todas las facturas)
   };
+  // Credenciales por punto de venta (cuando el usertoken cambia entre PDV). JSON en el .env:
+  // TUSFACTURAS_PV_CREDS={"2":{"usertoken":"..","apikey":"..","apitoken":".."},"3":{"usertoken":".."}}
+  cfg.pvCreds = {};
+  try {
+    const raw = env.TUSFACTURAS_PV_CREDS || "";
+    if (raw.trim()) {
+      const parsed = JSON.parse(raw);
+      Object.keys(parsed || {}).forEach((k) => {
+        const key = String(k).replace(/\D/g, "").replace(/^0+(?=\d)/, "");
+        if (key) cfg.pvCreds[key] = parsed[k] || {};
+      });
+    }
+  } catch (e) { console.warn("TUSFACTURAS_PV_CREDS invalido (JSON):", e.message); }
   cfg.enabled = !!(cfg.apikey && cfg.apitoken && cfg.usertoken);
   return cfg;
+}
+
+// Devuelve las credenciales efectivas para una emision: prioridad (1) override manual del modal,
+// (2) mapa por PDV del .env, (3) credenciales por defecto de la cuenta.
+function credsForEmission(cfg, ov) {
+  ov = ov || {};
+  const pv = ov.puntoVenta != null ? String(ov.puntoVenta).replace(/\D/g, "").replace(/^0+(?=\d)/, "") : "";
+  const map = (pv && cfg.pvCreds && cfg.pvCreds[pv]) || {};
+  return {
+    ...cfg,
+    apikey: ov.apikey || map.apikey || cfg.apikey,
+    apitoken: ov.apitoken || map.apitoken || cfg.apitoken,
+    usertoken: ov.usertoken || map.usertoken || cfg.usertoken
+  };
 }
 
 // Hora de Argentina (UTC-3, sin horario de verano)
@@ -456,10 +483,11 @@ async function fetchContributorData(cuit, cfg, fetchImpl = fetch) {
 }
 
 async function emitInvoice(invoice, cfg, fetchImpl = fetch) {
-  const contributorData = cfg.enabled
-    ? await fetchContributorData(invoice.client.cuit, cfg, fetchImpl)
+  const effCfg = credsForEmission(cfg, invoice.overrides);
+  const contributorData = effCfg.enabled
+    ? await fetchContributorData(invoice.client.cuit, effCfg, fetchImpl)
     : null;
-  const payload = buildInvoicePayload(invoice, cfg, {
+  const payload = buildInvoicePayload(invoice, effCfg, {
     items: invoice.items,
     batchNumber: invoice.batchNumber,
     batchTotal: invoice.batchTotal,
