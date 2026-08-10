@@ -558,7 +558,7 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 
 ## 13. Ultimo Cambio y Version
 
-**Version operativa:** 12.9.103
+**Version operativa:** 12.9.104
 **Fecha:** 2026-07-27
 **Commit GitHub del cambio funcional:** `ab9d4de`
 **Entorno:** VPS productivo `/opt/pare-carrito` con frontend estatico servido por Caddy y API Docker Compose. Frontend `sistema.parecarrito.com.ar`, API en `/api`, lista de precios publica en `/precios`.

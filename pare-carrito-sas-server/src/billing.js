@@ -84,6 +84,16 @@ function billingConfig(env = process.env) {
       });
     }
   } catch (e) { console.warn("TUSFACTURAS_PV_CREDS invalido (JSON):", e.message); }
+  // Forma alternativa SIN JSON (mas robusta en .env): variables por PDV, p.ej:
+  //   TUSFACTURAS_PV4_USERTOKEN=..., TUSFACTURAS_PV4_APIKEY=..., TUSFACTURAS_PV4_APITOKEN=...
+  Object.keys(env).forEach((k) => {
+    const m = /^TUSFACTURAS_PV(\d+)_(USERTOKEN|APIKEY|APITOKEN)$/.exec(k);
+    if (!m) return;
+    const key = String(m[1]).replace(/^0+(?=\d)/, "");
+    const field = m[2].toLowerCase();
+    if (!cfg.pvCreds[key]) cfg.pvCreds[key] = {};
+    if (env[k]) cfg.pvCreds[key][field] = env[k];
+  });
   cfg.enabled = !!(cfg.apikey && cfg.apitoken && cfg.usertoken);
   return cfg;
 }

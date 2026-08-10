@@ -1,5 +1,17 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.104 - Facturacion: credenciales por PDV sin JSON en .env (2026-08-10)
+
+### Facturacion - credenciales por punto de venta
+- Confirmado en produccion: emitir manual pasando el usertoken del PDV en el modal FUNCIONA (para el PDV 00004 alcanza con su usertoken; apikey/apitoken son de la cuenta).
+- Se agrego una forma persistente SIN JSON (mas robusta en .env, evita problemas de comillas):
+    TUSFACTURAS_PV4_USERTOKEN=...   (y opcional TUSFACTURAS_PV4_APIKEY / TUSFACTURAS_PV4_APITOKEN)
+  El sistema arma el mapa por PDV automaticamente. Sigue soportando TUSFACTURAS_PV_CREDS (JSON) como alternativa.
+- Con eso, al elegir el PDV en el modal se usa su usertoken sin pegar nada.
+- REQUIERE ./deploy.sh.
+
+---
+
 ## v12.9.103 - Facturacion: PDV con ceros a la izquierda (2026-08-10)
 
 ### Facturacion - punto de venta
