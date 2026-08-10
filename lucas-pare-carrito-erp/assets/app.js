@@ -11562,7 +11562,7 @@
         if (!confirm("Emitir AHORA la factura de " + (cli ? cli.name : clientId) + " por " + formatMoney(total) + " con vencimiento " + formatDate(venc) + "?" + (edited ? "\n(Se emite como un renglon unico con el monto editado.)" : ""))) return;
         btn.disabled = true; btn.textContent = "Emitiendo...";
         try {
-          const response = await cloudRequest(cfg, "/billing/run", { method: "POST", body: JSON.stringify({ clientId, overrides }) });
+          const response = await cloudRequest(cfg, "/billing/run", { method: "POST", body: JSON.stringify({ clientId, overrides, manual: true }) });
           const result = await response.json().catch(() => ({}));
           if (!response.ok) throw new Error(result.error || "HTTP " + response.status);
           const r = (result.results || [])[0];

@@ -1,5 +1,15 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.105 - Emision manual independiente de "pendiente" (2026-08-10)
+
+### Facturacion - Emitir manual
+- Antes la emision manual dependia de computeDueInvoices ("pendientes de hoy"): si el cliente ya estaba facturado o no estaba "due" segun calendario, daba "No habia comprobante pendiente".
+- Ahora la emision manual arma la factura del cliente para el PERIODO elegido con buildPeriod (sin depender del calendario ni de si ya se facturo), aplica el monto editado si corresponde, y emite. Permite re-emitir o emitir montos/periodos puntuales.
+- El confirm del modal es el resguardo contra duplicados (ojo: puede generar un comprobante AFIP aunque el periodo ya se haya facturado).
+- REQUIERE ./deploy.sh (backend) + git pull (frontend).
+
+---
+
 ## v12.9.104 - Facturacion: credenciales por PDV sin JSON en .env (2026-08-10)
 
 ### Facturacion - credenciales por punto de venta

@@ -1305,7 +1305,7 @@ app.post("/billing/run", authenticate, requireRole("manager", "admin", "contador
     // Overrides de emision manual (fecha/vencimiento/periodo/concepto). Se aplican a los clientes
     // seleccionados. body.overrides = { fecha, vencimiento, periodoDesde, periodoHasta, concepto }.
     const invoiceOverrides = body.overrides && typeof body.overrides === "object" ? { all: body.overrides } : null;
-    const result = await runBilling({ pool, force: true, simulate: body.simulate === true, onlyClientId: String(body.clientId || ""), onlyClientIds: clientIds, ivaOverrides, invoiceOverrides });
+    const result = await runBilling({ pool, force: true, simulate: body.simulate === true, onlyClientId: String(body.clientId || ""), onlyClientIds: clientIds, ivaOverrides, invoiceOverrides, manual: body.manual === true });
     try { await emailBillingResults(result.results); } catch (e) { console.error("emailBillingResults:", e.message); }
     res.json(result);
   } catch (error) {

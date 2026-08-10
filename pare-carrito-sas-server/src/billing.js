@@ -607,7 +607,7 @@ function buildBillingEntry(invoice, emittedAt, periodResult, simulate, cfg) {
 
 // Corre la facturacion sobre el estado central, registra resultados en billingLog
 // Retorna { ran, simulate, count, results, lastRunDate }
-async function runBilling({ pool, force = false, simulate = false, onlyClientId = "", onlyClientIds = null, ivaOverrides = null, invoiceOverrides = null, fetchImpl = fetch, now = new Date(), lastRunDate = "" }) {
+async function runBilling({ pool, force = false, simulate = false, onlyClientId = "", onlyClientIds = null, ivaOverrides = null, invoiceOverrides = null, manual = false, fetchImpl = fetch, now = new Date(), lastRunDate = "" }) {
   const cfg = billingConfig();
   if (!cfg.enabled) simulate = true;
   const stateRow = await pool.query("SELECT data FROM app_state WHERE id = 'main'");
@@ -615,7 +615,43 @@ async function runBilling({ pool, force = false, simulate = false, onlyClientId 
   const data = stateRow.rows[0].data;
   data.billingLog = Array.isArray(data.billingLog) ? data.billingLog : [];
   const art = nowArt(now);
-  let due = computeDueInvoices(data, art, force);
+  let due;
+  if (manual && onlyClientId) {
+    // Emision MANUAL: se arma la factura del cliente para el periodo elegido (o el mes en curso),
+    // sin depender de "due"/calendario ni de si ya fue facturado. Permite re-emitir o emitir un
+    // monto editado. El confirm del modal es el resguardo contra duplicados.
+    const mClient = (data.clients || []).find((c) => c.id === String(onlyClientId).trim());
+    if (!mClient) return { ran: false, reason: "cliente no encontrado" };
+    const mov = (invoiceOverrides && invoiceOverrides.all) || {};
+    const mFrom = mov.periodoDesde || firstOfMonth(art.dateISO);
+    const mTo = mov.periodoHasta || art.dateISO;
+    let mInvoice = buildPeriod(data, mClient, normalizeFrequency(mClient.invoiceFrequency), mFrom, mTo);
+    if (!mInvoice) mInvoice = { clientId: mClient.id, client: mClient, freq: normalizeFrequency(mClient.invoiceFrequency), from: mFrom, to: mTo, total: 0, iva: 0, neto: 0, items: [], orders: 0, orderIds: [] };
+    if (mov.customNeto != null && mov.customNeto !== "" && mov.customAlicuota != null) {
+      mInvoice = applyAmountOverride(mInvoice, mov.customNeto, mov.customAlicuota);
+    }
+    mInvoice.overrides = mov;
+    due = mInvoice.total > 0 ? [mInvoice] : [];
+    // saltar los filtros de seleccion/ivaOverrides normales
+    const results = [];
+    const emittedAt = new Date();
+    for (const invoice of due) {
+      let periodResult = { ok: true, results: [] };
+      if (!simulate) {
+        try { periodResult = await emitPeriodInvoices(invoice, cfg, fetchImpl); }
+        catch (error) { periodResult = { ok: false, results: [{ ok: false, errors: [error.message] }] }; }
+      }
+      const entry = buildBillingEntry(invoice, emittedAt, periodResult, simulate, cfg);
+      entry.id = `FAC-${Date.now()}-${invoice.clientId}${periodResult.results.length > 1 ? "-M" : ""}`;
+      data.billingLog.push(entry);
+      results.push(entry);
+    }
+    if (results.length) {
+      await pool.query("UPDATE app_state SET data = $1, updated_at = now(), updated_by = 'facturacion-manual' WHERE id = 'main'", [data]);
+    }
+    return { ran: true, simulate, manual: true, count: results.length, results, lastRunDate };
+  }
+  due = computeDueInvoices(data, art, force);
   const selectedClientIds = Array.isArray(onlyClientIds)
     ? new Set(onlyClientIds.map((id) => String(id || "").trim()).filter(Boolean))
     : new Set();
