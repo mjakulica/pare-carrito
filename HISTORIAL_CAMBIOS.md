@@ -1,5 +1,14 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.98 - Emision manual: muestra y permite editar el monto (2026-07-31)
+
+### Facturacion - Emitir manual
+- El modal ahora muestra el MONTO total a emitir (acumulado pendiente del cliente) y permite editarlo, con selector de IVA (10,5% / 21%) y el neto/IVA calculados en vivo.
+- Si se edita el total, se emite un comprobante de un solo renglon ("Productos y servicios") por ese monto con el IVA elegido (backend: applyAmountOverride reemplaza el detalle por un renglon unico => no se divide en tandas). Si se deja igual al pendiente, se emite el detalle por producto.
+- REQUIERE ./deploy.sh (backend) + git pull (frontend).
+
+---
+
 ## v12.9.97 - Facturacion: emision manual con vencimiento + selector de historial (2026-07-31)
 
 ### Facturacion (gerente/admin/contador)

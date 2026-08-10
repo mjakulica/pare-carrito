@@ -219,6 +219,17 @@ function buildPeriod(state, client, freq, from, to) {
   };
 }
 
+function applyAmountOverride(invoice, netoNum, alicNum) {
+  // Reemplaza el detalle por UN solo renglon con el neto y la alicuota indicados. Se usa en la
+  // emision manual cuando se edita el monto. Un solo renglon => no se divide en tandas.
+  const neto = d(netoNum);
+  if (neto.isNegative()) return invoice;
+  const rate = d(alicNum);
+  const iva = neto.times(rate).dividedBy(100);
+  const item = { descripcion: "Productos y servicios", codigo: "", cantidad: d(1), precio: neto, alicuota: rate, neto: neto, iva: iva };
+  return { ...invoice, items: [item], iva: round2(iva), neto: round2(neto), total: round2(neto.plus(iva)) };
+}
+
 function applyManualIvaOverride(invoice, ivaAmount) {
   if (!invoice || ivaAmount == null || ivaAmount === "") return invoice;
   const manualIva = d(ivaAmount);
@@ -578,7 +589,12 @@ async function runBilling({ pool, force = false, simulate = false, onlyClientId 
     const forAll = invoiceOverrides.all || null;
     due = due.map((invoice) => {
       const ov = byClient[invoice.clientId] || forAll;
-      return ov ? { ...invoice, overrides: ov } : invoice;
+      if (!ov) return invoice;
+      let inv = invoice;
+      if (ov.customNeto != null && ov.customNeto !== "" && ov.customAlicuota != null) {
+        inv = applyAmountOverride(inv, ov.customNeto, ov.customAlicuota);
+      }
+      return { ...inv, overrides: ov };
     });
   }
 

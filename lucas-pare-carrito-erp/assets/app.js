@@ -11479,39 +11479,80 @@
   function openManualBillingModal() {
     const clients = activeClients().filter((c) => c.needsInvoice && ["Factura A", "Factura B"].includes(c.invoiceType));
     if (!clients.length) return alert("No hay clientes con factura A o B.");
-    const from = ui.billingFrom || getMonthStartISO(todayISO());
-    const to = ui.billingTo || todayISO();
     const vencDefault = addDaysISO(todayISO(), 10);
+    const rateFor = (p) => (p && p.neto > 0 && (p.iva / p.neto) > 0.15 ? 21 : 10.5);
     const body = `
       <div class="form-grid">
         <div class="field span-2"><label>Cliente</label><select id="mb-client">${clients.map((c) => `<option value="${escapeAttr(c.id)}">${escapeHtml(c.id + " - " + c.name)} (${escapeHtml(c.invoiceType)})</option>`).join("")}</select></div>
-        <div class="field"><label>Fecha del comprobante</label><input type="date" id="mb-fecha" value="${escapeAttr(to)}" /></div>
+        <div class="field"><label>Fecha del comprobante</label><input type="date" id="mb-fecha" /></div>
         <div class="field"><label>Concepto</label><select id="mb-concepto"><option value="1">Productos</option><option value="2">Servicios</option><option value="3" selected>Productos y servicios</option></select></div>
-        <div class="field"><label>Periodo desde</label><input type="date" id="mb-desde" value="${escapeAttr(from)}" /></div>
-        <div class="field"><label>Periodo hasta</label><input type="date" id="mb-hasta" value="${escapeAttr(to)}" /></div>
-        <div class="field span-2"><label>Vencimiento para el pago</label><input type="date" id="mb-venc" value="${escapeAttr(vencDefault)}" /></div>
+        <div class="field"><label>Periodo desde</label><input type="date" id="mb-desde" /></div>
+        <div class="field"><label>Periodo hasta</label><input type="date" id="mb-hasta" /></div>
+        <div class="field"><label>Vencimiento para el pago</label><input type="date" id="mb-venc" value="${escapeAttr(vencDefault)}" /></div>
+        <div class="field"><label>IVA</label><select id="mb-iva"><option value="10.5">10,5%</option><option value="21">21%</option></select></div>
+        <div class="field"><label>Monto TOTAL a emitir</label><input id="mb-total" inputmode="decimal" /></div>
+        <div class="field span-2"><span class="muted" id="mb-neto-info" style="font-size:12px"></span></div>
       </div>
-      <p class="muted" style="font-size:12px;margin-top:6px">Se factura el acumulado pendiente del cliente; estos campos solo cambian las fechas y el concepto del comprobante. El vencimiento no puede ser anterior a hoy (AFIP lo rechaza).</p>
+      <p class="muted" style="font-size:12px;margin-top:4px">Se muestra el acumulado pendiente del cliente. Si edit\u00e1s el TOTAL, se emite un comprobante de un solo rengl\u00f3n por ese monto con el IVA elegido; si lo dej\u00e1s igual, se emite el detalle por producto. El vencimiento no puede ser anterior a hoy.</p>
       <div class="page-actions" style="justify-content:flex-end;gap:8px;margin-top:12px"><button class="btn ghost" type="button" data-close-modal>Cancelar</button><button class="btn primary" type="button" id="mb-emit">Emitir factura</button></div>
     `;
     showModal("Emitir factura manual", body, () => {
+      const selClient = document.getElementById("mb-client");
+      const elFecha = document.getElementById("mb-fecha");
+      const elDesde = document.getElementById("mb-desde");
+      const elHasta = document.getElementById("mb-hasta");
+      const elIva = document.getElementById("mb-iva");
+      const elTotal = document.getElementById("mb-total");
+      const elNetoInfo = document.getElementById("mb-neto-info");
+      let pendingTotal = 0;
+      const currentPending = () => {
+        const c = getClient(selClient.value);
+        if (!c) return { neto: 0, iva: 0, total: 0, from: todayISO() };
+        return getBillingPendingForClient(c, elDesde.value || undefined, elHasta.value || undefined);
+      };
+      const updateNetoInfo = () => {
+        const total = parseAmount(elTotal.value);
+        const rate = Number(elIva.value) || 10.5;
+        const neto = total / (1 + rate / 100);
+        elNetoInfo.textContent = "Neto: " + formatMoney(neto) + " + IVA " + rate + "%: " + formatMoney(total - neto) + " = " + formatMoney(total);
+      };
+      const prefill = () => {
+        const p = currentPending();
+        pendingTotal = Number(p.total || 0);
+        if (!elDesde.value) elDesde.value = p.from || getMonthStartISO(todayISO());
+        if (!elHasta.value) elHasta.value = todayISO();
+        elFecha.value = elFecha.value || elHasta.value;
+        elIva.value = String(rateFor(p));
+        elTotal.value = formatAmountInput(pendingTotal);
+        updateNetoInfo();
+      };
+      prefill();
+      selClient.addEventListener("change", () => { elDesde.value = ""; elHasta.value = ""; elFecha.value = ""; prefill(); });
+      elDesde.addEventListener("change", () => { const p = currentPending(); pendingTotal = Number(p.total || 0); elTotal.value = formatAmountInput(pendingTotal); elIva.value = String(rateFor(p)); updateNetoInfo(); });
+      elHasta.addEventListener("change", () => { const p = currentPending(); pendingTotal = Number(p.total || 0); elTotal.value = formatAmountInput(pendingTotal); elIva.value = String(rateFor(p)); updateNetoInfo(); });
+      elIva.addEventListener("change", updateNetoInfo);
+      elTotal.addEventListener("input", updateNetoInfo);
       const btn = document.getElementById("mb-emit");
-      if (!btn) return;
-      btn.addEventListener("click", async () => {
+      if (btn) btn.addEventListener("click", async () => {
         const cfg = getCloudSyncConfig();
-        if (!cfg.username || !cloudSyncReady(cfg)) return alert("La emision corre en el servidor propio. Ingrese con usuario y contraseña.");
-        const clientId = document.getElementById("mb-client").value;
-        const fecha = document.getElementById("mb-fecha").value;
-        const venc = document.getElementById("mb-venc").value;
-        const desde = document.getElementById("mb-desde").value;
-        const hasta = document.getElementById("mb-hasta").value;
+        if (!cfg.username || !cloudSyncReady(cfg)) return alert("La emision corre en el servidor propio. Ingrese con usuario y contrase\u00f1a.");
+        const clientId = selClient.value;
+        const fecha = elFecha.value;
+        const venc = elVenc();
+        const desde = elDesde.value;
+        const hasta = elHasta.value;
         const concepto = document.getElementById("mb-concepto").value;
+        const rate = Number(elIva.value) || 10.5;
+        const total = parseAmount(elTotal.value);
         if (venc && venc < todayISO()) return alert("El vencimiento no puede ser anterior a hoy.");
+        if (!(total > 0)) return alert("El monto total debe ser mayor a cero.");
+        const overrides = { fecha, vencimiento: venc, periodoDesde: desde, periodoHasta: hasta, concepto };
+        const edited = Math.abs(total - pendingTotal) >= 1;
+        if (edited) { overrides.customNeto = Math.round((total / (1 + rate / 100)) * 100) / 100; overrides.customAlicuota = rate; }
         const cli = getClient(clientId);
-        if (!confirm("Emitir AHORA la factura de " + (cli ? cli.name : clientId) + " con vencimiento " + formatDate(venc) + "?")) return;
+        if (!confirm("Emitir AHORA la factura de " + (cli ? cli.name : clientId) + " por " + formatMoney(total) + " con vencimiento " + formatDate(venc) + "?" + (edited ? "\n(Se emite como un renglon unico con el monto editado.)" : ""))) return;
         btn.disabled = true; btn.textContent = "Emitiendo...";
         try {
-          const overrides = { fecha, vencimiento: venc, periodoDesde: desde, periodoHasta: hasta, concepto };
           const response = await cloudRequest(cfg, "/billing/run", { method: "POST", body: JSON.stringify({ clientId, overrides }) });
           const result = await response.json().catch(() => ({}));
           if (!response.ok) throw new Error(result.error || "HTTP " + response.status);
@@ -11527,6 +11568,7 @@
           btn.disabled = false; btn.textContent = "Emitir factura";
         }
       });
+      function elVenc() { const v = document.getElementById("mb-venc"); return v ? v.value : ""; }
     });
   }
 
