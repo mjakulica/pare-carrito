@@ -295,7 +295,8 @@ El frontend es estático; basta copiar los archivos actualizados a `lucas-pare-c
 - **Local**: copia del directorio del proyecto con fecha/hora.
 - **GitHub**: commit + push al repo.
 - **Servidor**: `GET /exports/backup.json` genera JSON completo descargable.
-- **History**: PostgreSQL conserva las últimas 50 versiones en `state_history`.
+- **History**: PostgreSQL conserva las ultimas versiones en `state_history` (`STATE_HISTORY_KEEP`, default **30**; antes 200).
+- **Backup del deploy (v12.9.99)**: `deploy.sh` hace `pg_dump | gzip -1` EXCLUYENDO los datos de `state_history` y `state_operations` (son historial/idempotencia internos y pueden pesar varios GB por los snapshots completos del estado). Se conserva la estructura, no las filas gigantes -> backup de decenas de MB y de segundos (antes tardaba mucho al comprimir). El contenido de `state_history` no es necesario para restaurar los datos reales.
 
 ---
 
@@ -533,11 +534,9 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 - Boton "Recalcular precios de un dia" (gerente/admin): reprecia los pedidos de la fecha segun el costo de las compras de ese dia (ceil(costo x (1+margen)) x (1+ajuste% cliente), IVA por item) y actualiza saldos.
 - Boton "Exportar PDF remitos de ese dia" (fecha puntual).
 
-### 12.34 Sistema de impresion (v12.9.73, v12.9.86, v12.9.87, v12.9.88)
-- Iframe de impresion con dimensiones reales fuera de pantalla + limpieza por `onafterprint` (corrige columnas aplastadas y "Guardar PDF" colgado en desktop).
-- Columnas de Dividir/Vehiculos en "estilo diario": reparto manual en 3 columnas (`printColumnsHtml`), consistente pantalla/impreso, rapido, sin cortar items (antes `column-count` era lento e inconsistente).
-- La pestaña de impresion (mobile) se cierra sola al terminar/cancelar.
-- Checklist "Generar Imprimibles" arma UN solo documento con los 4 imprimibles (saltos de pagina).
+### 12.34 Sistema de impresion (v12.9.73, v12.9.86-88, REVERTIDO en v12.9.94)
+- Checklist "Generar Imprimibles" arma UN solo documento con los 4 imprimibles (saltos de pagina) (v12.9.73, sigue vigente).
+- IMPORTANTE: los cambios de impresion de v12.9.86-88 (iframe con dimensiones reales, columnas "estilo diario" con `printColumnsHtml`, cierre automatico de pestaña) se REVIRTIERON en **v12.9.94** por un problema de impresion que no se pudo resolver. Las funciones `printHtmlDocument`, `printDocumentStyles`, `renderDivideClientList`, `renderDivideProductList` volvieron al estado de v12.9.82 (iframe original, columnas con `column-count`). El resto (lista de precios, cache, fecha de precios) se mantuvo.
 
 ### 12.35 Checklist operativo del empleado (Inicio) (v12.9.63)
 - Recuadro "Checklist del dia" (11 lineas). Un click ejecuta la accion y marca/tacha: Stock, Generar Imprimibles, Miriam/Mario/Chicho (copian clipboard de WhatsApp + abren wa.me), Compras, Unidades, Vehiculos, Imprimibles Vehiculos+Remitos, Pagos, Horario. Se reinicia a las 04:00.
@@ -553,24 +552,45 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 ### 12.38 Parser: correcciones (v12.9.62, v12.9.64, v12.9.75)
 - Sin notas basura; "maple"/"mapple" -> unidad bandeja; fracciones con espacio ("1/ 2" -> 1/2); fraccion sin unidad prefiere variante Kg (ej. "1/2 morron" -> Kg); decimales con punto ("1.5 k" -> 1,5); el punto separa tokens ("1doc." -> docena, sin match espureo); se ignoran cortesias en notas ("por favor", "gracias").
 - Nuevo pedido: cambiar de cliente ya no borra el pedido; no se autoselecciona cliente por solapamiento de palabras.
+- (v12.9.95) "banana unidad" ya no matchea "Anana": si el nombre-base coincide exacto, matchea ese producto aunque la unidad no exista; el match difuso por levenshtein exige misma primera letra (evita "anana"~"banana", "granada"~"naranja").
+
+### 12.39 Facturacion: emision manual completa y correcciones (v12.9.96 a v12.9.105)
+- external_reference (v12.9.96): al dividir en tandas, el sufijo " (1/2)" invalidaba la referencia (espacios/parentesis/barra). Se usa sufijo seguro "-N-M" y se sanea a [A-Za-z0-9_-].
+- Boton "Emitir manual" en Facturacion (gerente/admin/contador): modal para emitir la factura de un cliente eligiendo fecha del comprobante, periodo desde/hasta, VENCIMIENTO (no anterior a hoy; AFIP lo rechaza), CONCEPTO (1 productos / 2 servicios / 3 ambos) y MONTO total editable con IVA (10,5/21) y neto en vivo.
+  - Si se edita el monto, se emite un comprobante de UN renglon ("Productos y servicios") por ese importe (`applyAmountOverride`) => no se divide en tandas.
+  - PUNTO DE VENTA editable (se envia con ceros a la izquierda, ej. 00004).
+  - USERTOKEN por punto de venta: campo opcional en el modal, o configuracion persistente en .env por PDV: `TUSFACTURAS_PV<N>_USERTOKEN` (+ opcional `_APIKEY` / `_APITOKEN`), o el JSON `TUSFACTURAS_PV_CREDS`. Prioridad: modal > .env por PDV > cuenta por defecto. (apikey/apitoken suelen ser de la cuenta; el usertoken puede diferir por PDV.)
+  - INDEPENDIENTE de "due" (v12.9.105): la emision manual arma la factura del cliente para el periodo elegido con `buildPeriod`, sin depender del calendario ni de si ya se facturo (permite re-emitir; el confirm es el resguardo contra duplicados AFIP).
+- Backend: `buildInvoicePayload`/`runBilling`/`/billing/run` aceptan `overrides` (fecha, vencimiento, periodo, concepto, puntoVenta, credenciales, customNeto/customAlicuota) y `manual`.
+- Historial de emisiones con selector 30 / 60 / 120 / Todas (`ui.billingLogLimit`).
+
+### 12.40 Reversion de impresion (v12.9.94)
+- Ver 12.34: las funciones de impresion volvieron al estado de v12.9.82. `deploy.sh` y `deploy-vps.sh` quedaron marcados como ejecutables (100755) para evitar "Permission denied" tras `git pull`.
 
 ---
 
 ## 13. Ultimo Cambio y Version
 
 **Version operativa:** 12.9.105
-**Fecha:** 2026-07-27
-**Commit GitHub del cambio funcional:** `ab9d4de`
+**Fecha:** 2026-08-10
+**Commit GitHub del cambio funcional:** `8aecda8`
 **Entorno:** VPS productivo `/opt/pare-carrito` con frontend estatico servido por Caddy y API Docker Compose. Frontend `sistema.parecarrito.com.ar`, API en `/api`, lista de precios publica en `/precios`.
 
-### Detalle del ultimo cambio (v12.9.93)
+### Detalle del ultimo cambio (v12.9.105)
 
-- Precios: la fecha de "ultima actualizacion" ahora es real. `rec.date` (en `applyCostChange`) solo cambia si el costo o el precio cambian de verdad (antes se ponia hoy siempre, incluso por reprocesos y relaciones de costo). La fecha mostrada = la mas reciente entre el ultimo cambio de precio y la ultima compra directa del producto; si nunca cambio ni se compro, muestra "—" (sin fallback a hoy). Aplica a la lista de precios del rol cliente y a la publica (`/precios`).
-- Requiere `./deploy.sh` por el endpoint `GET /public/price-list`; la lista del rol cliente y `precios.html` van con `git pull`.
+- Emision manual de facturas independiente de "pendiente": arma la factura del cliente para el periodo elegido con `buildPeriod`, sin depender del calendario ni de si ya se facturo (antes daba "No habia comprobante pendiente"). Permite re-emitir y emitir montos/periodos puntuales; el confirm del modal es el resguardo contra duplicados AFIP.
+- Requiere `./deploy.sh` (backend billing.js/server.js) + `git pull` (frontend).
 
-### Rango de cambios recientes documentados (v12.9.52 a v12.9.93)
+### Rango de cambios recientes documentados (v12.9.52 a v12.9.105)
 
-Ver secciones 12.28 a 12.38. Resumen por tema:
+Ver secciones 12.28 a 12.40. Resumen por tema (ademas de v12.9.52-93):
+- Impresion: los cambios de v12.9.86-88 se REVIRTIERON a v12.9.82 en v12.9.94.
+- Parser: "banana unidad" ya no matchea "Anana" (v12.9.95).
+- Facturacion (v12.9.96-105): fix de external_reference al dividir en tandas; emision manual con fecha/periodo/vencimiento/concepto/monto editables, punto de venta y usertoken por PDV, e independiente de "due"; selector 30/60/120/Todas en el historial.
+- Backup (v12.9.99): `pg_dump` excluye `state_history`/`state_operations` + `gzip -1`; retencion 200->30.
+- Ops: `deploy.sh` marcado ejecutable (100755).
+
+Resumen v12.9.52 a v12.9.93 (secciones 12.28 a 12.38):
 - Sincronizacion robusta: sello de `updatedAt` en toda mutacion, merge "mas nuevo gana" (config y precios), guard del servidor, `keepalive`, empuje de pendientes, cache `no-cache` en Caddy, seed que no pisa reales, claves de patch faltantes agregadas al backend.
 - Stock: control al finalizar el dia (conteo = apertura de manana), registro de conteos, cobertura por demanda completa en Unidades.
 - Precios: desvinculada la planilla -> sistema (Sheets solo control), recalculo de precios de un dia en Remitos, fecha de actualizacion real.
