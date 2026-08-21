@@ -1,5 +1,23 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.108 - Parser: "banana" ya no se confunde con "Anana" (2026-08-21)
+
+### Diagnostico (con backup real)
+- El pedido "12 bananas" salia como "12 ananas". No era un alias (no habia ninguno banana->anana).
+- Causa real: hay DOS productos anana -> "Ananá" (con tilde, inactivo, PROD-093) y "Anana" (sin tilde, ACTIVO, PROD-185). El activo es el que interceptaba.
+- Bug de codigo: `parsedBaseEquivalent` (usado por `findUnitSensitiveParsedProduct`) trataba "anana" y "banana" como equivalentes, porque solo difieren en la "b" inicial (distancia de edicion 1). Como las bananas se venden por docena/cajon y ninguna es "unidad", al pedir "banana" sin unidad el buscador por unidad "unidad" caia en el unico con base parecida y unidad "unidad": el Anana.
+- Los otros caminos del matcher (nombre y fuzzy) ya tenian guarda de primera letra; a `parsedBaseEquivalent` le faltaba.
+
+### Fix
+- `parsedBaseEquivalent`: se agrego guarda de primera letra (`word[0] === other[0]`). Asi "anana" y "banana" dejan de ser equivalentes, pero se mantienen los matches legitimos por acento/plural/typo interno (mismo inicio).
+- Verificado con harness sobre el backup real: "12 bananas" -> Bananas Docena (1 docena); "1 banana"/"12 banana" -> Bananas Docena; "1 anana"/"2 anana" -> Anana (sigue funcionando); morron, pimiento verde, tomate perita, naranja, lechuga, papa, zucchini, pera sin cambios.
+- Solo frontend (git pull).
+
+### Recomendacion de datos (opcional)
+- Convendria renombrar el producto activo "Anana" (PROD-185) a "Ananá" con tilde para unificar, y dejar/eliminar el inactivo PROD-093. No es necesario para el fix.
+
+---
+
 ## v12.9.107 - Alias: poder borrarlos (banana -> anana) (2026-08-10)
 
 ### Parser / Alias de productos

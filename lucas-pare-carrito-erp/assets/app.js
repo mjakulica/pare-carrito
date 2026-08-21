@@ -15616,7 +15616,9 @@
       if (word === other) return true;
       const long = word.length >= other.length ? word : other;
       const short = word.length >= other.length ? other : word;
-      return long.length - short.length <= 1 && long.length >= 4 && levenshtein(word, other) <= 1;
+      // Guarda de primera letra: "anana" y "banana" difieren solo en la "b" inicial
+      // (distancia 1) y se confundian. Exigir misma primera letra evita ese cruce.
+      return long.length - short.length <= 1 && long.length >= 4 && word[0] === other[0] && levenshtein(word, other) <= 1;
     });
   }
 
