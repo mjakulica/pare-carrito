@@ -1,5 +1,14 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.106 - Fix critico: id de producto colisionaba y se perdia (2026-08-10)
+
+### Productos / sincronizacion
+- BUG: nextProductId generaba el id como "PROD-" + (state.products.length + 1), chequeando colisiones SOLO contra los productos que ese dispositivo tenia cargados. Con estado local incompleto o con borrados previos (huecos), el producto nuevo podia recibir un id que ya pertenecia a otro producto. Al sincronizar, el merge por id se quedaba con uno solo y el otro desaparecia de Productos (aunque seguia referenciado en compras/Dividir por su productId y productName guardados, y el remito salia con el precio del producto que "gano" el id).
+- Fix: los ids de producto (y de proveedor) ahora son globalmente unicos (tiempo + aleatorio, estilo ITEM-xxxx), con verificacion de colision. Elimina el choque entre dispositivos.
+- Solo frontend (git pull). No corrige productos ya perdidos: hay que volver a crearlos (ahora reciben id unico).
+
+---
+
 ## v12.9.105 - Emision manual independiente de "pendiente" (2026-08-10)
 
 ### Facturacion - Emitir manual

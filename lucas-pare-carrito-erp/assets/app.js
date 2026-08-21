@@ -18066,22 +18066,22 @@
   }
 
   function nextProviderId() {
-    let index = state.providers.length + 1;
-    let id = "PROV-" + String(index).padStart(3, "0");
-    while (state.providers.some((provider) => provider.id === id)) {
-      index += 1;
-      id = "PROV-" + String(index).padStart(3, "0");
-    }
+    // Id globalmente unico (mismo motivo que nextProductId).
+    let id;
+    do {
+      id = "PROV-" + Date.now().toString(36).toUpperCase() + Math.random().toString(36).slice(2, 6).toUpperCase();
+    } while (state.providers.some((provider) => provider.id === id));
     return id;
   }
 
   function nextProductId() {
-    let index = state.products.length + 1;
-    let id = "PROD-" + String(index).padStart(3, "0");
-    while (state.products.some((product) => product.id === id)) {
-      index += 1;
-      id = "PROD-" + String(index).padStart(3, "0");
-    }
+    // Id globalmente unico (tiempo + aleatorio). Antes se usaba state.products.length + 1, que
+    // podia repetir un id de otro producto cuando el estado local estaba incompleto o habia
+    // borrados previos -> al sincronizar, el merge por id perdia uno de los dos productos.
+    let id;
+    do {
+      id = "PROD-" + Date.now().toString(36).toUpperCase() + Math.random().toString(36).slice(2, 6).toUpperCase();
+    } while (state.products.some((product) => product.id === id));
     return id;
   }
 
