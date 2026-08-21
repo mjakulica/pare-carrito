@@ -13580,7 +13580,7 @@
         </div>
         <div class="panel" style="box-shadow:none;margin-top:12px">
           <strong>Todos los alias cargados</strong>
-          <div class="mini-table">${renderAllAliasesSummary()}</div>
+          <div class="mini-table" id="all-aliases-summary">${renderAllAliasesSummary()}</div>
         </div>
         ${["manager", "admin"].includes(currentUser.role) ? `
         <div class="form-grid" style="margin-top:12px">
@@ -13593,6 +13593,25 @@
         </div>` : ""}
       `,
       () => {
+        const summaryBox = document.getElementById("all-aliases-summary");
+        if (summaryBox && currentUser && ["manager", "admin"].includes(currentUser.role)) {
+          summaryBox.addEventListener("click", (ev) => {
+            const btn = ev.target.closest("[data-del-alias]");
+            if (!btn) return;
+            const type = btn.dataset.delAlias;
+            const pid = btn.dataset.alPid || "";
+            const cid = btn.dataset.alCid || "";
+            const txt = btn.dataset.alTxt || "";
+            const norm = (x) => normalizeText(x);
+            if (type === "g") {
+              state.productAliases = state.productAliases.filter((a) => !(a.productId === pid && norm(a.alias) === norm(txt)));
+            } else if (type === "c") {
+              state.clientProductAliases = state.clientProductAliases.filter((a) => !(a.productId === pid && String(a.clientId) === String(cid) && norm(a.alias) === norm(txt)));
+            }
+            saveState();
+            summaryBox.innerHTML = renderAllAliasesSummary();
+          });
+        }
         const select = document.getElementById("alias-product-select");
         const update = () => {
           const productId = select.value;
@@ -14799,15 +14818,17 @@
   }
 
   function renderAllAliasesSummary() {
+    const canDel = currentUser && ["manager", "admin"].includes(currentUser.role);
+    const delBtn = (type, alias) => canDel ? `<button class="btn icon danger" type="button" data-del-alias="${type}" data-al-pid="${escapeAttr(alias.productId || "")}" data-al-cid="${escapeAttr(alias.clientId || "")}" data-al-txt="${escapeAttr(alias.alias || "")}" title="Eliminar alias">&times;</button>` : "";
     const rows = [];
     state.productAliases.forEach((alias) => {
       const product = getProduct(alias.productId);
-      rows.push(`<div><span>${escapeHtml(alias.alias)}</span><span>${escapeHtml(product ? product.name : alias.productId)} · General</span></div>`);
+      rows.push(`<div><span>${escapeHtml(alias.alias)}</span><span>${escapeHtml(product ? product.name : alias.productId)} · General ${delBtn("g", alias)}</span></div>`);
     });
     state.clientProductAliases.forEach((alias) => {
       const product = getProduct(alias.productId);
       const client = getClient(alias.clientId);
-      rows.push(`<div><span>${escapeHtml(alias.alias)}</span><span>${escapeHtml(product ? product.name : alias.productId)} · ${escapeHtml(client ? client.id : alias.clientId)}</span></div>`);
+      rows.push(`<div><span>${escapeHtml(alias.alias)}</span><span>${escapeHtml(product ? product.name : alias.productId)} · ${escapeHtml(client ? client.id : alias.clientId)} ${delBtn("c", alias)}</span></div>`);
     });
     state.quantityAliases.forEach((alias) => {
       rows.push(`<div><span>${escapeHtml(alias.alias)}</span><span>Cantidad ${formatNumber(alias.quantity)} - General</span></div>`);

@@ -1,5 +1,15 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.107 - Alias: poder borrarlos (banana -> anana) (2026-08-10)
+
+### Parser / Alias de productos
+- Diagnostico: "12 bananas" salia como "12 ananas" porque habia un ALIAS de producto (general o de cliente) que mapeaba "banana"/"bananas" a Anaá. Los alias se aplican ANTES del match por nombre, asi que ganan siempre. Probablemente quedo apuntando a Anaá por la colision de ids ya corregida (v12.9.106), o se cargo por error.
+- El modal "Ver alias" (Nuevo Pedido) solo permitia AGREGAR alias, no borrarlos. Se agrego un boton de borrado (gerente/admin) en el listado "Todos los alias cargados" para alias generales y de cliente.
+- Como usarlo: Nuevo Pedido -> Ver alias -> en "Todos los alias cargados" buscar el que dice "banana ... Anaá" y tocar la X.
+- Solo frontend (git pull).
+
+---
+
 ## v12.9.106 - Fix critico: id de producto colisionaba y se perdia (2026-08-10)
 
 ### Productos / sincronizacion
