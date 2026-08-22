@@ -4717,7 +4717,8 @@
         items,
         subtotalAmount,
         ivaAmount,
-        totalAmount: subtotalAmount + ivaAmount,
+        shippingFee: Math.max(0, Number(client.shippingFee || 0) || 0),
+        totalAmount: subtotalAmount + ivaAmount + Math.max(0, Number(client.shippingFee || 0) || 0),
         priceTier: client.priceTier,
         priceAdjustmentPct: Number(client.priceAdjustmentPct || 0),
         paymentReceived: 0,
@@ -9128,7 +9129,8 @@
     const client = getClient(remito.clientId || order.clientId);
     const subtotal = getOrderSubtotal(order);
     const iva = getOrderIva(order);
-    const total = subtotal + iva;
+    const shipping = getOrderShipping(order);
+    const total = subtotal + iva + shipping;
     const minRows = order.items.length > 4 ? order.items.length : 4;
     const blankRows = Math.max(0, minRows - order.items.length);
     return `
@@ -9169,6 +9171,7 @@
           <div class="remito-summary remito-total-style-${escapeAttr(getRemitoTotalStyle())}">
             <div><span>Subtotal</span><strong>${formatMoney(subtotal)}</strong></div>
             ${iva > 0 ? `<div><span>IVA</span><strong>${formatMoney(iva)}</strong></div>` : ""}
+            ${shipping > 0 ? `<div><span>Envío</span><strong>${formatMoney(shipping)}</strong></div>` : ""}
             <div class="remito-total"><span>Total</span><strong class="remito-total-line">${formatMoney(total)}</strong></div>
           </div>
         </footer>
@@ -13456,8 +13459,9 @@
         <div class="field span-2"><label>Correo facturacion</label><input id="client-billing-email" type="email" value="${escapeAttr(client ? client.billingEmail || "" : "")}" /></div>
         <div class="field"><label>Tipo pago</label><select id="client-payment">${["cuenta_corriente", "contado", "semanal", "contra_factura"].map((type) => `<option value="${type}" ${client && client.paymentType === type ? "selected" : ""}>${escapeHtml(paymentTypeLabel(type))}</option>`).join("")}</select></div>
         <div class="field" id="client-payment-day-wrap" style="${client && (client.paymentType === "semanal" || client.paymentType === "cuenta_corriente") ? "" : "display:none"}"><label>Día/plazo de pago</label><select id="client-payment-day">${["lunes","martes","miercoles","jueves","viernes","sabado","domingo","10 dias","15 dias","20 dias","mensual"].map((d) => `<option value="${d}" ${client && client.paymentDay === d ? "selected" : ""}>${d}</option>`).join("")}</select></div>
-        <div class="field"><label>Precio</label><select id="client-tier"><option value="general" ${client && client.priceTier === "general" ? "selected" : ""}>General</option><option value="preferencial" ${client && client.priceTier === "preferencial" ? "selected" : ""}>Preferencial</option><option value="con_factura" ${client && client.priceTier === "con_factura" ? "selected" : ""}>Con Factura</option></select></div>
+        <div class="field"><label>Precio</label><select id="client-tier"><option value="general" ${client && client.priceTier === "general" ? "selected" : ""}>General</option><option value="preferencial" ${client && client.priceTier === "preferencial" ? "selected" : ""}>Preferencial</option><option value="con_factura" ${client && client.priceTier === "con_factura" ? "selected" : ""}>Con Factura</option><option value="al_costo" ${client && client.priceTier === "al_costo" ? "selected" : ""}>Al Costo</option></select></div>
         <div class="field"><label>Ajuste precio %</label><input id="client-adjustment" inputmode="decimal" value="${formatAmountInput(client ? client.priceAdjustmentPct || 0 : 0)}" /></div>
+        <div class="field"><label>Envío ($)</label><input id="client-shipping" inputmode="decimal" value="${formatAmountInput(client ? client.shippingFee || 0 : 0)}" placeholder="0 = sin envío" /></div>
         <div class="field"><label>Vehículo</label><select id="client-vehicle">${activeVehicles().map((vehicle) => `<option value="${vehicle.id}" ${client && client.vehicleId === vehicle.id ? "selected" : ""}>${escapeHtml(vehicle.name)}</option>`).join("")}</select></div>
         <label class="field" style="display:flex;align-items:center;gap:8px;grid-template-columns:auto 1fr">
           <input type="checkbox" id="client-needs-invoice" style="width:auto;min-height:auto" ${client && client.needsInvoice ? "checked" : ""} />
@@ -13514,6 +13518,7 @@
             paymentDay: document.getElementById("client-payment-day") ? document.getElementById("client-payment-day").value : (client ? client.paymentDay || "" : ""),
             priceTier: priceTierValue,
             priceAdjustmentPct: parseAmount(document.getElementById("client-adjustment").value),
+            shippingFee: Math.max(0, parseAmount(document.getElementById("client-shipping").value) || 0),
             needsInvoice: needsInvoiceValue,
             cuit: document.getElementById("client-cuit").value.trim(),
             legalName: document.getElementById("client-legal-name").value.trim(),
@@ -16106,17 +16111,27 @@
     return !!client && (client.priceTier === "con_factura" || client.needsInvoice);
   }
 
+  function getProductCost(productId) {
+    const product = getProduct(productId);
+    const record = state.prices[productId];
+    const cost = record && Number(record.cost) > 0 ? Number(record.cost) : (product ? Number(product.baseCost || 0) : 0);
+    return Math.max(0, cost);
+  }
+
   function getAdjustedProductPrice(product, client) {
-    const listPrice = getProductPrice(product.id);
+    // "Al Costo": el precio base es el COSTO del producto (no el precio de venta),
+    // y luego se le aplica igual el "Ajuste precio %" del cliente.
+    const base = client && client.priceTier === "al_costo" ? getProductCost(product.id) : getProductPrice(product.id);
     const adjustment = client ? Number(client.priceAdjustmentPct || 0) : 0;
-    return Math.max(0, listPrice * (1 + adjustment / 100));
+    return Math.max(0, base * (1 + adjustment / 100));
   }
 
   function priceTierLabel(value) {
     return {
       general: "General",
       preferencial: "Preferencial",
-      con_factura: "Con Factura"
+      con_factura: "Con Factura",
+      al_costo: "Al Costo"
     }[value] || value || "General";
   }
 
@@ -16356,8 +16371,15 @@
     return (order.items || []).reduce((sum, item) => sum + getOrderItemIva(item, order), 0);
   }
 
+  function getOrderShipping(order) {
+    // El envío se sella en el pedido al crearlo (order.shippingFee). No se toma del cliente
+    // como fallback, para no aplicar el envío retroactivamente a remitos ya emitidos.
+    if (!order || order.shippingFee == null || order.shippingFee === "") return 0;
+    return Math.max(0, Number(order.shippingFee) || 0);
+  }
+
   function getOrderTotal(order) {
-    return getOrderSubtotal(order) + getOrderIva(order);
+    return getOrderSubtotal(order) + getOrderIva(order) + getOrderShipping(order);
   }
 
   function findProviderByInput(value) {
@@ -17022,8 +17044,9 @@
         const rec = state.prices[item.productId] || {};
         let margin = Number(rec.marginPct);
         if (!Number.isFinite(margin)) margin = calcMargin(rec.cost || product.baseCost, rec.price || product.salePrice);
+        const isAlCosto = client && client.priceTier === "al_costo";
         const listPrice = ceilMoney(cost * (1 + margin / 100));
-        const newUnit = Math.max(0, listPrice * (1 + adj / 100));
+        const newUnit = isAlCosto ? Math.max(0, cost * (1 + adj / 100)) : Math.max(0, listPrice * (1 + adj / 100));
         if (Math.abs(newUnit - Number(item.unitPrice || 0)) < 0.5) return;
         item.unitPrice = newUnit;
         item.subtotal = Number(item.quantity || 0) * newUnit;
@@ -17461,7 +17484,9 @@
   function recalcOrderTotals(order) {
     order.subtotalAmount = order.items.reduce((sum, item) => sum + Number(item.subtotal || 0), 0);
     order.ivaAmount = order.items.reduce((sum, item) => sum + Number(item.ivaAmount || 0), 0);
-    order.totalAmount = order.subtotalAmount + order.ivaAmount;
+    const shipping = getOrderShipping(order);
+    order.shippingFee = shipping;
+    order.totalAmount = order.subtotalAmount + order.ivaAmount + shipping;
     order.updatedAt = new Date().toISOString();
   }
 

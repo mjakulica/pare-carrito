@@ -1,5 +1,23 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.109 - Precio "Al Costo" + cargo de "Envío" por cliente (2026-08-22)
+
+### Precio Al Costo (edicion de cliente)
+- Nuevo tipo de precio "Al Costo" en el select "Precio" del cliente (junto a General/Preferencial/Con Factura).
+- Cuando el cliente es "Al Costo", cada producto se cobra al COSTO actual (el ultimo cargado por compras, `state.prices[id].cost`, con fallback a `baseCost`) en vez del precio de venta.
+- Se le sigue aplicando el "Ajuste precio %" del cliente sobre el costo (ej. +10% => costo x 1,10). Con ajuste 0% es el costo puro.
+- `getAdjustedProductPrice` elige la base (costo vs venta) segun el tier; nuevo helper `getProductCost`.
+- `recalcDayPricesFromPurchases` respeta "Al Costo": al recalcular precios del dia usa el costo (no el precio con margen).
+
+### Cargo de Envío (edicion de cliente)
+- Nuevo campo "Envío ($)" en la ficha del cliente, disponible para CUALQUIER cliente (0 = sin envío).
+- Es un monto fijo, SIN IVA, que se suma al total del remito y aparece como una linea "Envío" en el remito impreso.
+- El envío se SELLA en el pedido al crearlo (`order.shippingFee`); no se aplica retroactivamente a remitos ya emitidos. Se incluye en `getOrderTotal`, `recalcOrderTotals` y en el saldo del cliente (deuda) via el total del pedido.
+- Verificado con harness sobre backup real: General=precio venta; Al Costo(0%)=costo; Al Costo(+10%)=costo x1,10; envío 2000 sumado al total; pedidos viejos sin shippingFee no cobran envío.
+- Solo frontend (git pull).
+
+---
+
 ## v12.9.108 - Parser: "banana" ya no se confunde con "Anana" (2026-08-21)
 
 ### Diagnostico (con backup real)
