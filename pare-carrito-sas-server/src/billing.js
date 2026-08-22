@@ -220,6 +220,22 @@ function buildGroupedItems(orders) {
       prev.cantidad = prev.cantidad.plus(d(it.quantity || 0));
       items.set(key, prev);
     }
+    // Cargo de envío: se agrega como renglon de la factura. Para clientes con factura el envío
+    // lleva IVA 10,5% (tasa sellada en order.shippingIvaRate; por defecto 10,5 en facturacion).
+    const ship = round2(order.shippingFee || 0);
+    if (ship > 0) {
+      const shipRate = round2(order.shippingIvaRate != null ? order.shippingIvaRate : 10.5);
+      const key = `ENVIO|${ship}|${shipRate}`;
+      const prev = items.get(key) || {
+        descripcion: "Envío",
+        cantidad: d(0),
+        precio: d(ship),
+        alicuota: d(shipRate),
+        codigo: "ENVIO"
+      };
+      prev.cantidad = prev.cantidad.plus(d(1));
+      items.set(key, prev);
+    }
   }
   return Array.from(items.values()).map((it) => ({
     descripcion: it.descripcion,

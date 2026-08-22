@@ -1,5 +1,20 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.110 - Envío: IVA 10,5% si el cliente tiene factura + concepto en la factura AFIP (2026-08-22)
+
+### Frontend (remito)
+- Si el cliente tiene factura (needsInvoice o tier "con_factura"), el cargo de "Envío" ahora lleva IVA 10,5%. Si el cliente no factura, el envío sigue siendo un monto fijo sin IVA.
+- La tasa se sella en el pedido (order.shippingIvaRate) al crearlo; el IVA del envío se suma a la linea "IVA" del remito y al total. Nuevo helper `getOrderShippingIva`; incluido en `getOrderTotal` y `recalcOrderTotals`.
+
+### Backend (facturacion AFIP / TusFacturas)
+- `buildGroupedItems` agrega un renglon "Envío" a la factura cuando el pedido tiene envío (precio = monto del envío, alicuota 10,5% -> IVA). Asi el envío queda facturado como un concepto mas, sumando al neto/IVA/total del comprobante.
+- Verificado con harness: cliente con factura -> factura con lineas "Tomate" (neto 2000 / IVA 210) + "Envío" (neto 2000 / IVA 210) -> NETO 4000, IVA 420, TOTAL 4420. Cliente sin factura -> envío sin IVA.
+
+### Deploy
+- Cambia el BACKEND (billing.js): requiere ./deploy.sh en el VPS (reconstruye contenedores), no solo git pull.
+
+---
+
 ## v12.9.109 - Precio "Al Costo" + cargo de "Envío" por cliente (2026-08-22)
 
 ### Precio Al Costo (edicion de cliente)

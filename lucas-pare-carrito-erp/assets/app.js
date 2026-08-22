@@ -4716,9 +4716,12 @@
         status: "pendiente",
         items,
         subtotalAmount,
-        ivaAmount,
+        ivaAmount: ivaAmount + Math.max(0, Number(client.shippingFee || 0) || 0) * (shouldApplyInvoiceVat(client) ? 10.5 : 0) / 100,
         shippingFee: Math.max(0, Number(client.shippingFee || 0) || 0),
-        totalAmount: subtotalAmount + ivaAmount + Math.max(0, Number(client.shippingFee || 0) || 0),
+        shippingIvaRate: shouldApplyInvoiceVat(client) ? 10.5 : 0,
+        totalAmount: subtotalAmount + ivaAmount
+          + Math.max(0, Number(client.shippingFee || 0) || 0)
+          + Math.max(0, Number(client.shippingFee || 0) || 0) * (shouldApplyInvoiceVat(client) ? 10.5 : 0) / 100,
         priceTier: client.priceTier,
         priceAdjustmentPct: Number(client.priceAdjustmentPct || 0),
         paymentReceived: 0,
@@ -9128,7 +9131,7 @@
   function renderRemitoPrintSheetForOrder(order, remito) {
     const client = getClient(remito.clientId || order.clientId);
     const subtotal = getOrderSubtotal(order);
-    const iva = getOrderIva(order);
+    const iva = getOrderIva(order) + getOrderShippingIva(order);
     const shipping = getOrderShipping(order);
     const total = subtotal + iva + shipping;
     const minRows = order.items.length > 4 ? order.items.length : 4;
@@ -16378,8 +16381,18 @@
     return Math.max(0, Number(order.shippingFee) || 0);
   }
 
+  function getOrderShippingIva(order) {
+    // Envío con IVA (10,5%) SOLO si el cliente tiene factura. La tasa se sella en el pedido
+    // (order.shippingIvaRate); si falta, se resuelve segun la condicion de factura del cliente.
+    const ship = getOrderShipping(order);
+    if (!ship) return 0;
+    let rate = order && order.shippingIvaRate;
+    if (rate == null || rate === "") rate = shouldApplyInvoiceVat(getClient(order.clientId)) ? 10.5 : 0;
+    return ship * (Number(rate) || 0) / 100;
+  }
+
   function getOrderTotal(order) {
-    return getOrderSubtotal(order) + getOrderIva(order) + getOrderShipping(order);
+    return getOrderSubtotal(order) + getOrderIva(order) + getOrderShipping(order) + getOrderShippingIva(order);
   }
 
   function findProviderByInput(value) {
@@ -17483,9 +17496,11 @@
   // de otro dispositivo los revertia (item que reaparece / remito con precios viejos).
   function recalcOrderTotals(order) {
     order.subtotalAmount = order.items.reduce((sum, item) => sum + Number(item.subtotal || 0), 0);
-    order.ivaAmount = order.items.reduce((sum, item) => sum + Number(item.ivaAmount || 0), 0);
+    const itemsIva = order.items.reduce((sum, item) => sum + Number(item.ivaAmount || 0), 0);
     const shipping = getOrderShipping(order);
+    const shippingIva = getOrderShippingIva(order);
     order.shippingFee = shipping;
+    order.ivaAmount = itemsIva + shippingIva;
     order.totalAmount = order.subtotalAmount + order.ivaAmount + shipping;
     order.updatedAt = new Date().toISOString();
   }
