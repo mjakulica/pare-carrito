@@ -32,7 +32,7 @@ const OPENROUTER_VISION_MODEL = process.env.OPENROUTER_VISION_MODEL || "openai/g
 // API key (?key=). Endpoint: POST /v1/images:annotate. Devuelve fullTextAnnotation.text.
 const GOOGLE_VISION_API_KEY = process.env.GOOGLE_VISION_API_KEY || "";
 const GOOGLE_VISION_URL = (process.env.GOOGLE_VISION_URL || "https://vision.googleapis.com/v1/images:annotate").trim();
-const GOOGLE_VISION_LANG = (process.env.GOOGLE_VISION_LANG || "es").trim();
+const GOOGLE_VISION_LANG = (process.env.GOOGLE_VISION_LANG || "es-t-i0-handwrit").trim();
 
 if (!JWT_SECRET) {
   console.error("FALTA JWT_SECRET en las variables de entorno. Genere uno con: openssl rand -hex 32");

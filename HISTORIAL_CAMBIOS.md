@@ -1,5 +1,14 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.114 - OCR Vision: hint de caligrafia para manuscrito (2026-08-22)
+
+### Ajuste
+- Verificado el uso de Google Vision contra la doc oficial: endpoint `POST /v1/images:annotate`, body con `image.content` (base64) + feature `DOCUMENT_TEXT_DETECTION`, respuesta `fullTextAnnotation.text`. Todo correcto.
+- Mejora: el default de `GOOGLE_VISION_LANG` pasa de "es" a "es-t-i0-handwrit" (hint de caligrafia BCP-47 que Google recomienda para texto MANUSCRITO). Dejar la variable vacia = deteccion automatica (tambien valida para alfabeto latino). El codigo omite `languageHints` si la variable esta vacia.
+- Nota: no se hizo llamada real a la API (falta API key); el test end-to-end es subir una foto en el sistema desplegado.
+
+---
+
 ## v12.9.113 - OCR: Google Cloud Vision en vez de NVIDIA (2026-08-22)
 
 ### Cambio de proveedor de OCR
