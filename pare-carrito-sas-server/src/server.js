@@ -28,6 +28,12 @@ const MOONSHOT_VISION_MODEL = process.env.MOONSHOT_VISION_MODEL || "moonshot-v1-
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || "";
 const OPENROUTER_API_URL = (process.env.OPENROUTER_API_URL || "https://openrouter.ai/api/v1/chat/completions").trim();
 const OPENROUTER_VISION_MODEL = process.env.OPENROUTER_VISION_MODEL || "openai/gpt-4o-mini";
+// NVIDIA NIM - Nemotron OCR v2 (build.nvidia.com). API distinta al chat: POST /v1/ocr con
+// { input:[{type:image_url,url:dataURL}], merge_levels:[...] } y respuesta con text_detections.
+// La URL hosteada exacta se confirma en build.nvidia.com; se puede sobreescribir por env.
+const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY || "";
+const NVIDIA_OCR_URL = (process.env.NVIDIA_OCR_URL || "https://ai.api.nvidia.com/v1/cv/nvidia/nemotron-ocr-v2").trim();
+const NVIDIA_OCR_MERGE_LEVEL = (process.env.NVIDIA_OCR_MERGE_LEVEL || "paragraph").trim();
 
 if (!JWT_SECRET) {
   console.error("FALTA JWT_SECRET en las variables de entorno. Genere uno con: openssl rand -hex 32");
@@ -1013,6 +1019,52 @@ app.post("/transfers", authenticate, requireRole("customer", "example"), async (
   }
 });
 
+function nvidiaOcrDetTop(det) {
+  const p = det && det.bounding_box && det.bounding_box.points;
+  return Array.isArray(p) && p.length ? Math.min(...p.map((pt) => Number(pt.y) || 0)) : 0;
+}
+function nvidiaOcrDetLeft(det) {
+  const p = det && det.bounding_box && det.bounding_box.points;
+  return Array.isArray(p) && p.length ? Math.min(...p.map((pt) => Number(pt.x) || 0)) : 0;
+}
+function nvidiaOcrTextFromPayload(payload) {
+  // Reconstruye el texto en orden de lectura (arriba->abajo, izq->der) a partir de las
+  // detecciones que devuelve Nemotron OCR. Tolera respuestas ya mergeadas.
+  const data = payload && Array.isArray(payload.data) ? payload.data : [];
+  const lines = [];
+  data.forEach((img) => {
+    const dets = Array.isArray(img && img.text_detections) ? img.text_detections.slice() : [];
+    dets.sort((a, b) => {
+      const ay = nvidiaOcrDetTop(a), by = nvidiaOcrDetTop(b);
+      if (Math.abs(ay - by) > 0.02) return ay - by;
+      return nvidiaOcrDetLeft(a) - nvidiaOcrDetLeft(b);
+    });
+    dets.forEach((det) => {
+      const t = det && det.text_prediction && det.text_prediction.text;
+      if (t && String(t).trim()) lines.push(String(t).trim());
+    });
+  });
+  const text = lines.join("\n").trim();
+  if (!text) throw new Error("sin texto interpretable");
+  return text;
+}
+async function nvidiaOcrRequest(url, apiKey, image, mergeLevel) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json", authorization: "Bearer " + apiKey },
+    body: JSON.stringify({
+      input: [{ type: "image_url", url: image.dataUrl }],
+      merge_levels: [mergeLevel || "paragraph"]
+    })
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const detail = payload && (payload.message || (payload.error && (payload.error.message || payload.error)));
+    throw new Error(sanitizeExternalApiError(detail) || ("HTTP " + response.status));
+  }
+  return nvidiaOcrTextFromPayload(payload);
+}
+
 async function visionOcrRequest(url, apiKey, model, image, prompt, extraHeaders) {
   const response = await fetch(url, {
     method: "POST",
@@ -1045,8 +1097,8 @@ async function visionOcrRequest(url, apiKey, model, image, prompt, extraHeaders)
 }
 
 app.post("/ocr/order-image", authenticate, requireRole("manager", "admin", "employee"), async (req, res) => {
-  if (!OPENROUTER_API_KEY && !MOONSHOT_API_KEY) {
-    return res.status(503).json({ error: "OCR por IA no configurado (falta OPENROUTER_API_KEY o MOONSHOT_API_KEY)." });
+  if (!NVIDIA_API_KEY && !OPENROUTER_API_KEY && !MOONSHOT_API_KEY) {
+    return res.status(503).json({ error: "OCR por IA no configurado (falta NVIDIA_API_KEY, OPENROUTER_API_KEY o MOONSHOT_API_KEY)." });
   }
   const image = parseImageDataUrl(req.body && req.body.imageData);
   if (!image) return res.status(400).json({ error: "Envíe una imagen PNG, JPG o WEBP en base64." });
@@ -1055,6 +1107,14 @@ app.post("/ocr/order-image", authenticate, requireRole("manager", "admin", "empl
     ? req.body.prompt.trim()
     : "transcribe el texto de esta imagen, es un pedido de frutas y verduras";
   const errors = [];
+  if (NVIDIA_API_KEY && image.mimeType !== "image/webp") {
+    try {
+      const text = await nvidiaOcrRequest(NVIDIA_OCR_URL, NVIDIA_API_KEY, image, NVIDIA_OCR_MERGE_LEVEL);
+      return res.json({ text, provider: "nvidia" });
+    } catch (error) {
+      errors.push("NVIDIA: " + error.message);
+    }
+  }
   if (OPENROUTER_API_KEY) {
     try {
       const text = await visionOcrRequest(OPENROUTER_API_URL, OPENROUTER_API_KEY, OPENROUTER_VISION_MODEL, image, prompt, { "HTTP-Referer": "https://parecarrito.app", "X-Title": "Pare Carrito" });

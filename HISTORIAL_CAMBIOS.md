@@ -1,5 +1,19 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.112 - OCR con NVIDIA Nemotron OCR v2 (2026-08-22)
+
+### Nuevo proveedor de OCR (fotos de pedidos manuscritos)
+- Se agrego NVIDIA Nemotron OCR v2 (build.nvidia.com) como proveedor PRINCIPAL de OCR. Orden de intentos: NVIDIA -> OpenRouter (gpt-4o-mini) -> Moonshot/Kimi; el primero que responde gana.
+- API distinta al chat: POST a `/v1/ocr` con `{ input:[{type:image_url,url:dataURL}], merge_levels:[...] }`; la respuesta trae detecciones con texto + bounding box + confianza. El servidor reconstruye el texto en orden de lectura (arriba->abajo, izq->der) y lo pasa al mismo parser de pedidos.
+- Nemotron OCR no usa prompt (es OCR puro) y solo acepta png/jpeg: si la imagen es webp, se saltea NVIDIA y cae a los otros.
+- Config por env (ver .env.example): `NVIDIA_API_KEY` (nvapi-...), `NVIDIA_OCR_URL` (endpoint hosteado, confirmable en build.nvidia.com; para NIM propio `http://host:8000/v1/ocr`), `NVIDIA_OCR_MERGE_LEVEL` (word|sentence|paragraph).
+- Verificado: la reconstruccion ordena bien las lineas por posicion vertical.
+
+### Deploy
+- Cambia el BACKEND (server.js): requiere ./deploy.sh en el VPS.
+
+---
+
 ## v12.9.111 - Dividir Compras: elegir pedidos puntuales (2026-08-22)
 
 ### Nuevo
