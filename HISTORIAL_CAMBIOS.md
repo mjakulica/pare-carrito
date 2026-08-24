@@ -1,5 +1,19 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.113 - OCR: Google Cloud Vision en vez de NVIDIA (2026-08-22)
+
+### Cambio de proveedor de OCR
+- Se saco NVIDIA Nemotron OCR v2 (no rinde bien en texto MANUSCRITO, que es lo que se necesita) y se puso Google Cloud Vision como proveedor PRINCIPAL.
+- Usa `DOCUMENT_TEXT_DETECTION` (optimizado para manuscrito), autenticado con API key (`?key=`). Endpoint POST `/v1/images:annotate`; se toma `fullTextAnnotation.text` (fallback `textAnnotations[0].description`), que ya viene con saltos de linea -> entra directo al parser de pedidos.
+- Orden de intentos: Google Vision -> OpenRouter (gpt-4o-mini) -> Moonshot/Kimi.
+- Config por env (ver .env.example): `GOOGLE_VISION_API_KEY`, `GOOGLE_VISION_URL` (default `https://vision.googleapis.com/v1/images:annotate`), `GOOGLE_VISION_LANG` (default `es`).
+- Verificado: parseo de respuesta de Vision devuelve el texto en lineas.
+
+### Deploy
+- Cambia el BACKEND (server.js): requiere ./deploy.sh en el VPS.
+
+---
+
 ## v12.9.112 - OCR con NVIDIA Nemotron OCR v2 (2026-08-22)
 
 ### Nuevo proveedor de OCR (fotos de pedidos manuscritos)
