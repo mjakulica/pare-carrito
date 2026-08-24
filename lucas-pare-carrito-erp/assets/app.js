@@ -1197,7 +1197,7 @@
     "clients", "products", "providers", "vehicles", "users", "cashBoxes",
     "preferences", "productAliases", "clientProductAliases", "quantityAliases", "clientQuantityAliases",
     "costRelations", "productRelations", "billingLog", "stockMovements", "cashClosings", "marginSections", "priceAutoLog", "priceAutoSchedule",
-    "holidays"
+    "holidays", "ocrCorrections"
   ];
   const PATCH_OBJECT_KEYS = ["prices", "appSettings"];
   const HISTORY_STATE_KEYS = ["productListPriceHistory", "productSalesQuantityHistory", "productPurchaseHistory"];
@@ -12136,6 +12136,10 @@
           <div class="form-grid" style="margin-top:8px">
             <div class="field span-4"><label>Prompt</label><textarea id="ocr-prompt" rows="2">${escapeHtml(getOcrPrompt())}</textarea></div>
           </div>
+          <div style="margin-top:10px">
+            <button class="btn ghost" type="button" id="open-ocr-corrections">Correcciones de lectura (OCR)</button>
+            <p class="muted" style="margin:6px 0 0;font-size:12px">Reglas para corregir errores tipicos del OCR (ej. "nzna" -> "manzana"). Se aplican al texto de la foto antes de interpretarlo. ${getOcrCorrections().length ? getOcrCorrections().length + " regla(s) cargada(s)." : ""}</p>
+          </div>
         </div>` : ""}
         ${(currentUser.role === "manager" || currentUser.role === "admin") ? `<div class="panel">
           <h2 class="page-title" style="font-size:18px">Aviso de feriados (WhatsApp)</h2>
@@ -12453,6 +12457,8 @@
   function bindSettings() {
     const ocrPromptInput = document.getElementById("ocr-prompt");
     if (ocrPromptInput) ocrPromptInput.addEventListener("change", () => { state.appSettings.ocrPrompt = ocrPromptInput.value.trim(); saveState(); });
+    const ocrCorrBtn = document.getElementById("open-ocr-corrections");
+    if (ocrCorrBtn) ocrCorrBtn.addEventListener("click", openOcrCorrectionsModal);
     const holidayMessageInput = document.getElementById("holiday-message");
     if (holidayMessageInput) holidayMessageInput.addEventListener("change", () => { state.appSettings.holidayMessage = holidayMessageInput.value.trim(); saveState(); });
     const holidayTemplateInput = document.getElementById("holiday-template");
@@ -18678,7 +18684,81 @@
     return "";
   }
 
+  function getOcrCorrections() {
+    if (!Array.isArray(state.ocrCorrections)) state.ocrCorrections = [];
+    return state.ocrCorrections;
+  }
+
+  function nextOcrCorrectionId() {
+    let id; do { id = "OCR-" + Date.now().toString(36).toUpperCase() + Math.random().toString(36).slice(2, 5).toUpperCase(); } while (getOcrCorrections().some((c) => c.id === id));
+    return id;
+  }
+
+  function renderOcrCorrectionsList() {
+    const items = getOcrCorrections();
+    if (!items.length) return `<div class="muted" style="padding:6px 0">No hay correcciones cargadas.</div>`;
+    return items.map((c) => `<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border,#eee)">
+      <span style="flex:1"><strong>${escapeHtml(c.from || "")}</strong> &rarr; ${escapeHtml(c.to || "")}</span>
+      <button class="btn icon danger" type="button" data-del-ocr-corr="${escapeAttr(c.id || "")}" title="Eliminar">&times;</button>
+    </div>`).join("");
+  }
+
+  function openOcrCorrectionsModal() {
+    const body = `
+      <p class="muted" style="margin:0 0 10px;font-size:13px">Cuando el OCR lee mal algo de forma repetida, agregá una regla: escribí el texto <strong>como lo lee mal</strong> y a qué debe cambiarlo. Se aplica a la foto antes de interpretar el pedido. Sirve para nombres y tambien para cantidades (ej. "l k" &rarr; "1 kg").</p>
+      <div class="form-grid">
+        <div class="field span-2"><label>Lee mal (buscar)</label><input id="ocr-corr-from" placeholder="ej: nzna" /></div>
+        <div class="field span-2"><label>Debe decir (reemplazar)</label><input id="ocr-corr-to" placeholder="ej: manzana" /></div>
+        <div class="field span-4"><button class="btn primary" type="button" id="ocr-corr-add">Agregar regla</button></div>
+      </div>
+      <div class="mini-table" id="ocr-corrections-list" style="margin-top:8px">${renderOcrCorrectionsList()}</div>
+    `;
+    showModal("Correcciones de lectura (OCR)", body, () => {
+      const listBox = document.getElementById("ocr-corrections-list");
+      const refresh = () => { if (listBox) listBox.innerHTML = renderOcrCorrectionsList(); };
+      const addBtn = document.getElementById("ocr-corr-add");
+      if (addBtn) addBtn.addEventListener("click", () => {
+        const fromEl = document.getElementById("ocr-corr-from");
+        const toEl = document.getElementById("ocr-corr-to");
+        const from = (fromEl && fromEl.value || "").trim();
+        const to = (toEl && toEl.value || "").trim();
+        if (!from) return alert("Escriba el texto que se lee mal.");
+        getOcrCorrections().push({ id: nextOcrCorrectionId(), from, to, updatedAt: new Date().toISOString() });
+        saveState();
+        if (fromEl) fromEl.value = ""; if (toEl) toEl.value = "";
+        refresh();
+      });
+      if (listBox) listBox.addEventListener("click", (ev) => {
+        const btn = ev.target.closest("[data-del-ocr-corr]");
+        if (!btn) return;
+        const id = btn.dataset.delOcrCorr;
+        state.ocrCorrections = getOcrCorrections().filter((c) => c.id !== id);
+        saveState();
+        refresh();
+      });
+    }, { hideSave: true });
+  }
+
+  function applyOcrCorrections(text) {
+    // Diccionario editable de correcciones de lectura: reemplaza "de" por "a" respetando
+    // limites de palabra (incluye acentos/numeros via \p{L}\p{N}). Se aplica ANTES de la
+    // limpieza por vocabulario, para arreglar errores recurrentes del OCR.
+    let out = String(text || "");
+    getOcrCorrections().forEach((corr) => {
+      const from = String(corr && corr.from || "").trim();
+      if (!from) return;
+      const to = String(corr && corr.to != null ? corr.to : "");
+      try {
+        const esc = from.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const re = new RegExp("(^|[^\\p{L}\\p{N}])(" + esc + ")(?![\\p{L}\\p{N}])", "giu");
+        out = out.replace(re, (m, pre) => pre + to);
+      } catch (err) { /* regla invalida: ignorar */ }
+    });
+    return out;
+  }
+
   function cleanupOcrOrderText(rawText, clientId) {
+    rawText = applyOcrCorrections(rawText);
     const vocabulary = buildOcrVocabulary(clientId);
     const lines = String(rawText || "").split(/\r?\n/);
     const output = [];

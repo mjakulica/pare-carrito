@@ -1,5 +1,19 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.115 - OCR: diccionario de correcciones de lectura editable (2026-08-22)
+
+### Nuevo
+- "Ensenarle" al sistema a corregir errores tipicos del OCR sin depender solo del vocabulario. En Configuracion -> "Prompt de IA (lectura de imagen)" hay un boton "Correcciones de lectura (OCR)".
+- Cada regla es un reemplazo texto-mal-leido -> texto-correcto (ej. "nzna" -> "manzana", "mieldeabga" -> "miel de abeja"). Se aplican al texto de la foto ANTES de la limpieza por vocabulario y del parser, con limite de palabra (respeta acentos/numeros; no reemplaza dentro de otra palabra). Case-insensitive. Sirve para nombres y cantidades.
+- Estado en `state.ocrCorrections` (id/from/to), sincronizado (agregado a PATCH_ARRAY_KEYS / ARRAY_PATCH_KEYS). Alta/baja desde el modal (gerente/admin).
+- Nota: Google Vision no se puede reentrenar; esto es una capa de correccion propia, controlada por el usuario.
+- Verificado con harness: correcciones aplicadas bien y sin tocar substrings dentro de otras palabras.
+
+### Deploy
+- Toca frontend (app.js) y backend (server.js, clave de sync): requiere ./deploy.sh.
+
+---
+
 ## v12.9.114 - OCR Vision: hint de caligrafia para manuscrito (2026-08-22)
 
 ### Ajuste
