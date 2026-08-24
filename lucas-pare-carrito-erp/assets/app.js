@@ -329,6 +329,7 @@
     { id: "saldos", label: "Saldos", icon: "SA", roles: ["manager", "admin", "employee", "customer", "contador", "example"] },
     { id: "caja", label: "Caja", icon: "CJ", roles: ["manager", "admin", "contador"] },
     { id: "empleados", label: "Empleados", icon: "EM", roles: ["manager", "admin", "contador"] },
+    { id: "cumplimiento", label: "Cumplimiento", icon: "CU", roles: ["manager", "admin"] },
     { id: "horarios", label: "Horarios", icon: "HR", roles: ["employee"] },
     { id: "registrar-transferencia", label: "Registrar Transferencia", icon: "RT", roles: ["customer", "example"] },
     { id: "comprobar-transferencias", label: "Comprobar Transferencias", icon: "CT", roles: ["manager", "admin", "contador"] },
@@ -1197,7 +1198,7 @@
     "clients", "products", "providers", "vehicles", "users", "cashBoxes",
     "preferences", "productAliases", "clientProductAliases", "quantityAliases", "clientQuantityAliases",
     "costRelations", "productRelations", "billingLog", "stockMovements", "cashClosings", "marginSections", "priceAutoLog", "priceAutoSchedule",
-    "holidays", "ocrCorrections"
+    "holidays", "ocrCorrections", "checklistLog"
   ];
   const PATCH_OBJECT_KEYS = ["prices", "appSettings"];
   const HISTORY_STATE_KEYS = ["productListPriceHistory", "productSalesQuantityHistory", "productPurchaseHistory"];
@@ -2616,6 +2617,7 @@
       saldos: renderBalances,
       caja: renderCaja,
       empleados: renderEmployees,
+      cumplimiento: renderCompliance,
       horarios: renderAttendance,
       "registrar-transferencia": renderCustomerTransferRegistration,
       "comprobar-transferencias": renderTransferApprovals,
@@ -5035,6 +5037,11 @@
             ${["manager", "admin", "employee"].includes(currentUser.role) ? `<button class="btn small ghost" data-add-recambio-order="${order.id}" title="Pedir recambio de este pedido" aria-label="Pedir recambio">&#8635;</button>` : ""}
             ${order.handwrittenImage ? `<button class="btn small ghost" data-view-handwritten="${order.id}" title="Ver pedido manuscrito" aria-label="Pedido manuscrito">&#128196;</button>` : ""}
             ${order.whatsappText ? `<button class="btn small ghost" data-view-whatsapp="${order.id}" title="Ver texto interpretado" aria-label="Texto del pedido">&#128221;</button>` : ""}
+            ${!annulledView && order.status === "entregado" && ["manager", "admin", "employee"].includes(currentUser.role)
+              ? (orderIsSettled(order)
+                ? `<button class="btn small ghost" data-settle-order="${order.id}" title="Entrega rendida (ver)" aria-label="Rendicion">&#128247;</button>`
+                : `<button class="btn small yellow" data-settle-order="${order.id}" title="Rendir: pago o foto del remito">Rendir</button>`)
+              : ""}
             ${["manager", "admin"].includes(currentUser.role) ? (annulledView ? `<button class="btn small primary" data-restore-order="${order.id}">Restaurar</button>` : `<button class="btn small danger" data-annul-order="${order.id}" title="Anular pedido" aria-label="Anular">X</button>`) : ""}
             ${currentUser.role === "manager" ? `<button class="btn small danger" data-delete-order="${order.id}" title="Eliminar pedido" aria-label="Eliminar">&#128465;</button>` : ""}
             ${currentUser.role === "employee" ? `<button class="btn small ghost" data-route="vehiculos">Vehículo</button>` : ""}
@@ -5194,6 +5201,9 @@
           { cancelLabel: "Cerrar", hideSave: true, className: "wide" }
         );
       });
+    });
+    document.querySelectorAll("[data-settle-order]").forEach((button) => {
+      button.addEventListener("click", () => openDeliverySettleModal(button.dataset.settleOrder));
     });
     document.querySelectorAll("[data-view-whatsapp]").forEach((button) => {
       button.addEventListener("click", () => {
@@ -8349,12 +8359,53 @@
     return `${y}-${m}-${d}`;
   }
 
-  function getEmployeeChecklistStore() {
+  function employeeChecklistItems() {
+    return [
+      { key: "stock", label: "Stock" },
+      { key: "imprimibles", label: "Generar Imprimibles" },
+      { key: "miriam", label: "Miriam" },
+      { key: "mario", label: "Mario" },
+      { key: "chicho", label: "Chicho" },
+      { key: "compras", label: "Compras" },
+      { key: "unidades", label: "Unidades" },
+      { key: "vehiculos", label: "Vehiculos" },
+      { key: "imprimibles-veh", label: "Imprimibles Vehiculos y Remitos" },
+      { key: "pagos", label: "Pagos" },
+      { key: "horario", label: "Horario y cierre de caja" }
+    ];
+  }
+
+  function getChecklistLog() {
+    if (!Array.isArray(state.checklistLog)) state.checklistLog = [];
+    return state.checklistLog;
+  }
+
+  function checklistDoneMap(userId, dayKey) {
+    const done = {};
+    getChecklistLog().forEach((e) => {
+      if (e && e.dayKey === dayKey && String(e.userId) === String(userId)) done[e.key] = e;
+    });
+    return done;
+  }
+
+  function markChecklistStep(key) {
     const dayKey = employeeChecklistDayKey();
-    if (!ui.employeeChecklist || ui.employeeChecklist.dayKey !== dayKey || typeof ui.employeeChecklist.done !== "object") {
-      ui.employeeChecklist = { dayKey, done: {} };
+    if (!currentUser) return;
+    const id = dayKey + "|" + currentUser.id + "|" + key;
+    const log = getChecklistLog();
+    if (!log.some((e) => e.id === id)) {
+      log.push({ id, dayKey, userId: currentUser.id, userName: currentUser.name || "", key, at: new Date().toISOString() });
+      // Poda: conservar ~60 dias
+      const cutoff = addDaysISO(todayISO(), -60);
+      state.checklistLog = log.filter((e) => String(e.dayKey || "") >= cutoff);
+      saveState();
     }
-    return ui.employeeChecklist;
+  }
+
+  function getEmployeeChecklistStore() {
+    // Compatibilidad: "done" ahora se deriva del log persistido (por usuario/dia).
+    const dayKey = employeeChecklistDayKey();
+    return { dayKey, done: currentUser ? checklistDoneMap(currentUser.id, dayKey) : {} };
   }
 
   function assigneeValueByName(name) {
@@ -8408,8 +8459,7 @@
   }
 
   function runEmployeeChecklistAction(key) {
-    const store = getEmployeeChecklistStore();
-    store.done[key] = true;
+    markChecklistStep(key);
     const navMap = { stock: "stock", compras: "compras", unidades: "unidades", vehiculos: "vehiculos", pagos: "pagos", horario: "horarios" };
     if (navMap[key]) { navigate(navMap[key]); return; }
     if (key === "imprimibles") runChecklistImprimibles();
@@ -8421,19 +8471,7 @@
   }
 
   function renderEmployeeChecklistPanel() {
-    const items = [
-      { key: "stock", label: "Stock" },
-      { key: "imprimibles", label: "Generar Imprimibles" },
-      { key: "miriam", label: "Miriam" },
-      { key: "mario", label: "Mario" },
-      { key: "chicho", label: "Chicho" },
-      { key: "compras", label: "Compras" },
-      { key: "unidades", label: "Unidades" },
-      { key: "vehiculos", label: "Vehiculos" },
-      { key: "imprimibles-veh", label: "Imprimibles Vehiculos y Remitos" },
-      { key: "pagos", label: "Pagos" },
-      { key: "horario", label: "Horario y cierre de caja" }
-    ];
+    const items = employeeChecklistItems();
     const done = getEmployeeChecklistStore().done;
     return `
       <div class="panel checklist-panel">
@@ -8458,9 +8496,74 @@
     const resetBtn = document.querySelector("[data-checklist-reset]");
     if (resetBtn) resetBtn.addEventListener("click", (ev) => {
       ev.stopPropagation();
-      getEmployeeChecklistStore().done = {};
+      const dayKey = employeeChecklistDayKey();
+      if (currentUser) state.checklistLog = getChecklistLog().filter((e) => !(e.dayKey === dayKey && String(e.userId) === String(currentUser.id)));
+      saveState();
       render();
     });
+  }
+
+  function renderCompliance() {
+    const date = ui.complianceDate || employeeChecklistDayKey();
+    ui.complianceDate = date;
+    const items = employeeChecklistItems();
+    const employees = (state.users || []).filter((u) => u && u.role === "employee" && u.isActive !== false)
+      .sort((a, b) => normalizeText(a.name || "").localeCompare(normalizeText(b.name || "")));
+    const dot = (color) => `<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:${color};vertical-align:middle"></span>`;
+    const empRows = employees.map((u) => {
+      const done = checklistDoneMap(u.id, date);
+      const doneCount = items.filter((it) => done[it.key]).length;
+      const missing = items.filter((it) => !done[it.key]).map((it) => it.label);
+      const color = doneCount === items.length ? "#2e9b52" : (doneCount === 0 ? "#d23b3b" : "#e0a400");
+      return `<tr>
+        <td>${dot(color)} <strong>${escapeHtml(u.name || u.id)}</strong></td>
+        <td class="num">${doneCount}/${items.length}</td>
+        <td>${missing.length ? `<span class="muted">Falta: ${escapeHtml(missing.join(", "))}</span>` : `<span style="color:#2e9b52">Completo</span>`}</td>
+      </tr>`;
+    }).join("") || emptyRow(3, "No hay empleados activos.");
+
+    const delivered = (state.orders || []).filter((o) => o.date === date && o.status === "entregado");
+    const pending = delivered.filter((o) => !orderIsSettled(o));
+    const settled = delivered.length - pending.length;
+    const pendRows = pending.map((o) => {
+      const c = getClient(o.clientId);
+      const v = getVehicle(o.deliveryVehicleId);
+      return `<tr>
+        <td><strong>${escapeHtml(o.id)}</strong></td>
+        <td>${escapeHtml(c ? c.name : o.clientId)} <span class="muted">${escapeHtml(v ? v.name : "")}</span></td>
+        <td class="num">${formatMoney(getOrderTotal(o))}</td>
+        <td><button class="btn small yellow" data-settle-order="${o.id}">Rendir</button></td>
+      </tr>`;
+    }).join("") || emptyRow(4, "No hay entregas pendientes de rendir.");
+
+    afterRender.push(() => {
+      const dateInput = document.getElementById("compliance-date");
+      if (dateInput) dateInput.addEventListener("change", () => { ui.complianceDate = dateInput.value || employeeChecklistDayKey(); render(); });
+      document.querySelectorAll("[data-settle-order]").forEach((b) => b.addEventListener("click", () => openDeliverySettleModal(b.dataset.settleOrder)));
+    });
+
+    return pageShell(
+      "Cumplimiento",
+      "Checklist diario de cada empleado y entregas pendientes de rendir (pago o foto del remito).",
+      `<div class="form-grid"><div class="field"><label>Dia</label><input type="date" id="compliance-date" value="${escapeAttr(date)}" /></div></div>`,
+      `
+      <div class="panel" style="margin-bottom:14px">
+        <h2 class="page-title" style="font-size:18px">Checklist por empleado</h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Empleado</th><th>Pasos</th><th>Detalle</th></tr></thead>
+          <tbody>${empRows}</tbody>
+        </table></div>
+      </div>
+      <div class="panel">
+        <h2 class="page-title" style="font-size:18px">Entregas del dia — ${settled}/${delivered.length} rendidas</h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Pedido</th><th>Cliente</th><th class="num">Total</th><th>Accion</th></tr></thead>
+          <tbody>${pendRows}</tbody>
+        </table></div>
+      </div>
+      `,
+      "cumplimiento"
+    );
   }
 
   function buildDivideDocumentBody(assigneeValues) {
@@ -16447,6 +16550,63 @@
     // como fallback, para no aplicar el envío retroactivamente a remitos ya emitidos.
     if (!order || order.shippingFee == null || order.shippingFee === "") return 0;
     return Math.max(0, Number(order.shippingFee) || 0);
+  }
+
+  function orderIsSettled(order) {
+    if (!order) return false;
+    if (order.paymentStatus === "paid") return true;
+    if (Number(order.paymentReceived || 0) > 0) return true;
+    if (order.deliveryRemitoPhoto && order.deliveryRemitoPhoto.data) return true;
+    return false;
+  }
+
+  function orderNeedsSettlement(order) {
+    return !!order && order.status === "entregado" && !orderIsSettled(order);
+  }
+
+  function openDeliverySettleModal(orderId) {
+    const order = getOrder(orderId);
+    if (!order) return;
+    const client = getClient(order.clientId);
+    const hasPhoto = !!(order.deliveryRemitoPhoto && order.deliveryRemitoPhoto.data);
+    const body = `
+      <div style="margin-bottom:8px"><strong>${escapeHtml(order.id)}</strong> · ${escapeHtml(client ? client.name : order.clientId)}<br>
+        <span class="muted">Total ${formatMoney(getOrderTotal(order))} · Pagado ${formatMoney(order.paymentReceived || 0)} · ${escapeHtml(statusLabel(order.status))}</span></div>
+      <p class="muted" style="font-size:13px">Para cerrar la entrega: registrá el pago (si cobraste en efectivo) o subí una foto del remito firmado.</p>
+      <div class="page-actions" style="gap:8px;flex-wrap:wrap">
+        <button class="btn blue" type="button" id="settle-go-pago">Cargar pago</button>
+        <button class="btn ghost" type="button" id="settle-photo-btn">${hasPhoto ? "Reemplazar foto" : "Subir foto del remito"}</button>
+        <input type="file" id="settle-photo-file" accept="image/*" capture="environment" hidden />
+      </div>
+      <div id="settle-photo-preview" style="margin-top:10px">${hasPhoto ? `<img src="${escapeAttr(order.deliveryRemitoPhoto.data)}" alt="Remito" style="max-width:100%;border-radius:8px" /><div class="page-actions" style="margin-top:6px"><a class="btn small blue" href="${escapeAttr(order.deliveryRemitoPhoto.data)}" download="${escapeAttr((order.deliveryRemitoPhoto.name || "remito") + ".jpg")}">Descargar</a><button class="btn small danger" type="button" id="settle-photo-remove">Quitar foto</button></div>` : ""}</div>
+      <div class="muted" id="settle-status" style="margin-top:8px">${orderIsSettled(order) ? "Rendido &#10003;" : "Pendiente de rendir"}</div>
+    `;
+    showModal("Rendir entrega", body, () => {
+      const goPago = document.getElementById("settle-go-pago");
+      if (goPago) goPago.addEventListener("click", () => { closeModal(); navigate("pagos"); });
+      const btn = document.getElementById("settle-photo-btn");
+      const file = document.getElementById("settle-photo-file");
+      if (btn && file) {
+        btn.addEventListener("click", () => file.click());
+        file.addEventListener("change", async () => {
+          const fsel = file.files && file.files[0];
+          if (!fsel) return;
+          const status = document.getElementById("settle-status");
+          try {
+            if (status) status.textContent = "Comprimiendo foto...";
+            const data = await compressImageFile(fsel, 1100, 0.6);
+            order.deliveryRemitoPhoto = { name: fileDate(order.date) + " Remito " + (client ? client.name : order.clientId) + " " + order.id, data, at: new Date().toISOString(), by: currentUser ? currentUser.name : "" };
+            order.updatedAt = new Date().toISOString();
+            saveState();
+            closeModal();
+            render();
+          } catch (e) { if (status) status.textContent = "No se pudo cargar la foto: " + e.message; }
+          finally { file.value = ""; }
+        });
+      }
+      const rm = document.getElementById("settle-photo-remove");
+      if (rm) rm.addEventListener("click", () => { delete order.deliveryRemitoPhoto; order.updatedAt = new Date().toISOString(); saveState(); closeModal(); render(); });
+    }, { cancelLabel: "Cerrar", hideSave: true, className: "wide" });
   }
 
   function getOrderShippingIva(order) {

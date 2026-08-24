@@ -1,5 +1,22 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.116 - Cumplimiento de empleados + rendicion de entregas con foto de remito (2026-08-22)
+
+### Registro de cumplimiento (nueva pagina "Cumplimiento", gerente/admin)
+- Checklist del empleado ahora se PERSISTE y sincroniza (antes era local, sin historial): `state.checklistLog` con {id, dayKey, userId, userName, key, at}. El panel de Inicio y el "Reiniciar" leen/escriben en el log; se conservan ~60 dias.
+- Pagina "Cumplimiento": por dia elegido muestra, por empleado, cuantos pasos del checklist completo (X/11) y cuales faltan, con semaforo (verde=todo, amarillo=parcial, rojo=nada).
+
+### Rendicion de entregas (pago o foto del remito)
+- Todo pedido "entregado" debe quedar rendido: con pago cargado (efectivo/monto) O con foto del remito firmado. Helper `orderIsSettled`.
+- Nuevo modal "Rendir entrega" (boton en la fila de Pedidos para entregados; icono camara si ya esta rendido): permite ir a cargar el pago o subir/reemplazar/quitar la foto. La foto se guarda comprimida en `order.deliveryRemitoPhoto` (base64, ~1100px, calidad 0.6).
+- Sin bloqueo: el pedido se puede entregar igual; los pendientes de rendir aparecen listados en "Cumplimiento — Entregas del dia (X/Y rendidas)" con boton para rendir.
+- Verificado con harness: checklist log sin duplicados; orderIsSettled cubre paid / paymentReceived>0 / foto.
+
+### Deploy
+- Frontend (app.js) + backend (server.js: sync key `checklistLog`): requiere ./deploy.sh.
+
+---
+
 ## v12.9.115 - OCR: diccionario de correcciones de lectura editable (2026-08-22)
 
 ### Nuevo
