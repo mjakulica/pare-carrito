@@ -1,5 +1,17 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.111 - Dividir Compras: elegir pedidos puntuales (2026-08-22)
+
+### Nuevo
+- En Dividir Compras (gerente/admin/empleado) se puede elegir pedidos concretos y ver como se dividen SOLO esos. Pensado para un pedido pasado fuera de horario, sin mezclarlo con la ronda del dia.
+- Panel "Elegir pedidos puntuales (opcional)": lista los pedidos de una ventana (ayer a +3 dias) mas cualquiera ya seleccionado, con checkbox. Por defecto (sin selección) se sigue dividiendo TODO lo de hoy.
+- La seleccion afecta todo: "Agrupado por producto", "Agrupado por cliente", el texto de WhatsApp y el PDF (via `getDivideAssignables`). El titulo/fecha del PDF y del clipboard usan la fecha de los pedidos elegidos (`getDivideContextDate`).
+- Banner "Mostrando solo N pedido(s) seleccionado(s)" con boton "Ver todos los de hoy" para limpiar. Estado en `ui.divideSelectedOrders`.
+- Verificado con harness: seleccionar 2 pedidos -> exactamente sus items; sin seleccion -> los de hoy.
+- Solo frontend (git pull).
+
+---
+
 ## v12.9.110 - Envío: IVA 10,5% si el cliente tiene factura + concepto en la factura AFIP (2026-08-22)
 
 ### Frontend (remito)

@@ -8053,6 +8053,17 @@
       document.querySelectorAll("[data-log-item-expense]").forEach((button) => {
         button.addEventListener("click", () => openItemExpenseForm(button.dataset.logItemExpense));
       });
+      document.querySelectorAll("[data-divide-order]").forEach((checkbox) => {
+        checkbox.addEventListener("change", () => {
+          const id = checkbox.dataset.divideOrder;
+          const cur = getDivideSelectedOrderIds();
+          ui.divideSelectedOrders = checkbox.checked ? [...new Set([...cur, id])] : cur.filter((x) => x !== id);
+          render();
+        });
+      });
+      document.querySelectorAll("[data-divide-orders-clear]").forEach((button) => {
+        button.addEventListener("click", () => { ui.divideSelectedOrders = []; render(); });
+      });
       document.querySelectorAll("[data-copy-divide]").forEach((button) => {
         button.addEventListener("click", async () => {
           const values = button.dataset.copyDivide ? button.dataset.copyDivide.split(",") : selected;
@@ -8101,6 +8112,27 @@
           </div>
         </div>
       </div>`}
+      ${currentProviderId() ? "" : (() => {
+        const candidates = getDivideCandidateOrders();
+        const selOrders = getDivideSelectedOrderIds();
+        const rowsHtml = candidates.map((o) => {
+          const c = getClient(o.clientId);
+          const checked = selOrders.includes(o.id) ? "checked" : "";
+          return `<label class="divide-order-pick" style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px;cursor:pointer">
+            <input type="checkbox" data-divide-order="${escapeAttr(o.id)}" ${checked} style="width:auto;min-height:auto" />
+            <span><strong>${escapeHtml(o.id)}</strong> · ${escapeHtml(c ? c.name : o.clientId)} · ${formatDate(o.date)} · ${o.items.length} item(s)</span>
+          </label>`;
+        }).join("") || `<span class="muted">No hay pedidos en la ventana (ayer a +3 dias).</span>`;
+        const active = selOrders.length > 0;
+        return `<div class="panel" style="margin-bottom:14px">
+          ${active ? `<div class="alert" style="margin-bottom:10px">Mostrando solo <strong>${selOrders.length}</strong> pedido(s) seleccionado(s). <button type="button" class="btn small ghost" data-divide-orders-clear>Ver todos los de hoy</button></div>` : ""}
+          <details ${active ? "open" : ""}>
+            <summary style="cursor:pointer;font-weight:600">Elegir pedidos puntuales (opcional)</summary>
+            <p class="muted" style="margin:6px 0 8px;font-size:12px">Por defecto se dividen todos los pedidos de <strong>hoy</strong>. Tildá pedidos concretos (util para uno pasado fuera de horario) y la division, el WhatsApp y el PDF muestran solo esos.</p>
+            <div class="divide-order-pick-list" style="max-height:220px;overflow:auto">${rowsHtml}</div>
+          </details>
+        </div>`;
+      })()}
       <div class="grid two">
         <div class="panel">
           <h2 class="page-title" style="font-size:18px">Agrupado por producto</h2>
@@ -8124,10 +8156,40 @@
     );
   }
 
+  function getDivideSelectedOrderIds() {
+    const sel = Array.isArray(ui.divideSelectedOrders) ? ui.divideSelectedOrders.filter(Boolean) : [];
+    // Descartar ids que ya no existen (pedidos borrados/anulados)
+    const valid = new Set(state.orders.map((o) => o.id));
+    return sel.filter((id) => valid.has(id));
+  }
+
   function getDivideAssignables() {
+    const sel = getDivideSelectedOrderIds();
     return state.orders
-      .filter((order) => order.date === todayISO() && !["cancelado", "anulado"].includes(order.status))
+      .filter((order) => !["cancelado", "anulado"].includes(order.status)
+        && (sel.length ? sel.includes(order.id) : order.date === todayISO()))
       .flatMap((order) => order.items.map((item) => ({ order, item })));
+  }
+
+  function getDivideContextDate() {
+    const sel = getDivideSelectedOrderIds();
+    if (!sel.length) return todayISO();
+    const dates = state.orders.filter((o) => sel.includes(o.id)).map((o) => o.date).filter(Boolean).sort();
+    return dates[0] || todayISO();
+  }
+
+  function getDivideCandidateOrders() {
+    // Pedidos que se pueden elegir: los de una ventana [ayer .. +3 dias] mas cualquiera ya
+    // seleccionado, no anulados/cancelados. Pensado para el pedido "fuera de horario".
+    const sel = getDivideSelectedOrderIds();
+    const today = todayISO();
+    const from = addDaysISO(today, -1);
+    const to = addDaysISO(today, 3);
+    return state.orders
+      .filter((order) => !["cancelado", "anulado"].includes(order.status)
+        && ((order.date >= from && order.date <= to) || sel.includes(order.id)))
+      .slice()
+      .sort((a, b) => String(a.date).localeCompare(String(b.date)) || compareClientIdStrings(a.clientId, b.clientId) || String(a.id).localeCompare(String(b.id)));
   }
 
   function filterDivideAssignables(assignables, assigneeValues) {
@@ -8245,7 +8307,7 @@
       const entry = activeAssignees().find((a) => a.value === value);
       return entry ? entry.label : value;
     }).join(", "));
-    const title = "Dividir compras - " + labels + " - " + formatDate(todayISO());
+    const title = "Dividir compras - " + labels + " - " + formatDate(getDivideContextDate());
     const byProduct = {};
     const byClient = {};
     assignables.forEach(({ order, item }) => {
@@ -8418,7 +8480,7 @@
       <div class="print-compact">
         <h1 style="margin:0 0 2px;font-size:18px">${BUSINESS_NAME}</h1>
         <h2 style="margin:0 0 2px;font-size:14px">${escapeHtml(tplGet("dividir", "titulo", "Dividir compras"))} - ${escapeHtml(labels)}</h2>
-        <p style="margin:0 0 8px;font-size:11px">Fecha: ${formatDate(todayISO())}</p>
+        <p style="margin:0 0 8px;font-size:11px">Fecha: ${formatDate(getDivideContextDate())}</p>
         <h3 style="margin:6px 0 4px;font-size:12px">Agrupado por producto</h3>
         ${renderDivideProductList(assignables, isAll ? "all" : assigneeValues)}
         ${clientSection}
