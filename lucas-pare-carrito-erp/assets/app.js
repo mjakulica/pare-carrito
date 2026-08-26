@@ -8074,6 +8074,8 @@
       document.querySelectorAll("[data-divide-orders-clear]").forEach((button) => {
         button.addEventListener("click", () => { ui.divideSelectedOrders = []; render(); });
       });
+      const divCandDate = document.getElementById("divide-candidate-date");
+      if (divCandDate) divCandDate.addEventListener("change", () => { ui.divideCandidateDate = divCandDate.value || todayISO(); render(); });
       document.querySelectorAll("[data-copy-divide]").forEach((button) => {
         button.addEventListener("click", async () => {
           const values = button.dataset.copyDivide ? button.dataset.copyDivide.split(",") : selected;
@@ -8123,6 +8125,7 @@
         </div>
       </div>`}
       ${currentProviderId() ? "" : (() => {
+        if (!ui.divideCandidateDate) ui.divideCandidateDate = todayISO();
         const candidates = getDivideCandidateOrders();
         const selOrders = getDivideSelectedOrderIds();
         const rowsHtml = candidates.map((o) => {
@@ -8130,15 +8133,16 @@
           const checked = selOrders.includes(o.id) ? "checked" : "";
           return `<label class="divide-order-pick" style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px;cursor:pointer">
             <input type="checkbox" data-divide-order="${escapeAttr(o.id)}" ${checked} style="width:auto;min-height:auto" />
-            <span><strong>${escapeHtml(o.id)}</strong> · ${escapeHtml(c ? c.name : o.clientId)} · ${formatDate(o.date)} · ${o.items.length} item(s)</span>
+            <span><strong>${escapeHtml(o.id)}</strong> · <strong>${escapeHtml(String(o.clientId))}</strong> - ${escapeHtml(c ? c.name : o.clientId)} · ${formatDate(o.date)} · ${o.items.length} item(s)</span>
           </label>`;
-        }).join("") || `<span class="muted">No hay pedidos en la ventana (ayer a +3 dias).</span>`;
+        }).join("") || `<span class="muted">No hay pedidos para ese dia.</span>`;
         const active = selOrders.length > 0;
         return `<div class="panel" style="margin-bottom:14px">
           ${active ? `<div class="alert" style="margin-bottom:10px">Mostrando solo <strong>${selOrders.length}</strong> pedido(s) seleccionado(s). <button type="button" class="btn small ghost" data-divide-orders-clear>Ver todos los de hoy</button></div>` : ""}
           <details ${active ? "open" : ""}>
             <summary style="cursor:pointer;font-weight:600">Elegir pedidos puntuales (opcional)</summary>
-            <p class="muted" style="margin:6px 0 8px;font-size:12px">Por defecto se dividen todos los pedidos de <strong>hoy</strong>. Tildá pedidos concretos (util para uno pasado fuera de horario) y la division, el WhatsApp y el PDF muestran solo esos.</p>
+            <p class="muted" style="margin:6px 0 8px;font-size:12px">Por defecto se dividen todos los pedidos de <strong>hoy</strong>. Elegí el día y tildá pedidos concretos (util para uno pasado fuera de horario); la división, el WhatsApp y el PDF muestran solo esos.</p>
+            <div class="form-grid" style="margin-bottom:8px"><div class="field"><label>Día de los pedidos</label><input type="date" id="divide-candidate-date" value="${escapeAttr(ui.divideCandidateDate || todayISO())}" /></div></div>
             <div class="divide-order-pick-list" style="max-height:220px;overflow:auto">${rowsHtml}</div>
           </details>
         </div>`;
@@ -8189,15 +8193,13 @@
   }
 
   function getDivideCandidateOrders() {
-    // Pedidos que se pueden elegir: los de una ventana [ayer .. +3 dias] mas cualquiera ya
-    // seleccionado, no anulados/cancelados. Pensado para el pedido "fuera de horario".
+    // Pedidos elegibles: los del dia seleccionado (por defecto hoy) mas cualquiera ya
+    // seleccionado (aunque sea de otro dia). No anulados/cancelados.
     const sel = getDivideSelectedOrderIds();
-    const today = todayISO();
-    const from = addDaysISO(today, -1);
-    const to = addDaysISO(today, 3);
+    const day = ui.divideCandidateDate || todayISO();
     return state.orders
       .filter((order) => !["cancelado", "anulado"].includes(order.status)
-        && ((order.date >= from && order.date <= to) || sel.includes(order.id)))
+        && (order.date === day || sel.includes(order.id)))
       .slice()
       .sort((a, b) => String(a.date).localeCompare(String(b.date)) || compareClientIdStrings(a.clientId, b.clientId) || String(a.id).localeCompare(String(b.id)));
   }

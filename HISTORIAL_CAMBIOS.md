@@ -1,5 +1,14 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.117 - Dividir: numero de cliente + selector de dia en el picker (2026-08-22)
+
+### Ajustes al selector de pedidos puntuales (Dividir Compras)
+- Cada pedido del listado ahora muestra tambien el NUMERO de cliente (antes solo el nombre): "ORD-... · 035 - Nombre · fecha · N item(s)".
+- Se agrego un selector de "Día de los pedidos" dentro del picker, con HOY por defecto. Antes mostraba una ventana fija (ayer a +3 dias); ahora lista los pedidos del dia elegido (mas cualquiera ya tildado, aunque sea de otro dia). Estado en `ui.divideCandidateDate`.
+- Solo frontend (git pull).
+
+---
+
 ## v12.9.116 - Cumplimiento de empleados + rendicion de entregas con foto de remito (2026-08-22)
 
 ### Registro de cumplimiento (nueva pagina "Cumplimiento", gerente/admin)
