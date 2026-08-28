@@ -1,5 +1,13 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.121 - Alias no reconocido: boton "Agregar producto nuevo" (2026-08-22)
+
+### Nuevo
+- En el pop-up de "Vincular productos no reconocidos" (parse de WhatsApp) se agrego el boton "+ Agregar producto nuevo", que abre el formulario de alta de producto. Como el texto pegado ahora se conserva (v12.9.119), tras crear el producto se vuelve a apretar "Cargar" y ya lo reconoce o se puede vincular el alias.
+- Solo frontend (git pull).
+
+---
+
 ## v12.9.120 - Analisis de ganancia real por producto y por cliente (2026-08-22)
 
 ### Nueva pagina "Ganancias" (gerente/admin)

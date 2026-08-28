@@ -13976,8 +13976,12 @@
     }).join("");
     showModal(
       "Vincular productos no reconocidos",
-      `<p class="muted">Seleccione el producto correcto para guardar el alias y reconocerlo la proxima vez.</p><div class="grid">${rows}</div>`,
+      `<p class="muted">Seleccione el producto correcto para guardar el alias, o cree un producto nuevo. Se reconocera la proxima vez.</p>
+       <div class="page-actions" style="margin-bottom:8px"><button class="btn ghost" type="button" id="unmatched-new-product">+ Agregar producto nuevo</button></div>
+       <div class="grid">${rows}</div>`,
       () => {
+        const unmatchedNewProduct = document.getElementById("unmatched-new-product");
+        if (unmatchedNewProduct) unmatchedNewProduct.addEventListener("click", () => openProductForm());
         document.querySelectorAll("[data-remove-unmatched-alias]").forEach((button) => {
           button.addEventListener("click", () => {
             const row = button.closest("[data-unmatched-alias-row]");
