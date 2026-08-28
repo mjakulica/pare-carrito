@@ -319,6 +319,7 @@
     { id: "reposiciones", label: "Reposiciones", icon: "RP", roles: ["manager", "admin", "employee"] },
     { id: "historiales", label: "Historiales", icon: "HI", roles: ["manager", "admin"] },
     { id: "rendimiento", label: "Rendimiento", icon: "RE", roles: ["manager"] },
+    { id: "ganancias", label: "Ganancias", icon: "GA", roles: ["manager", "admin"] },
     { id: "compras", label: "Compras/Gastos", icon: "CO", roles: ["manager", "admin", "employee", "proveedor"] },
     { id: "dividir", label: "Dividir Compras", icon: "DV", roles: ["manager", "admin", "employee", "proveedor"] },
     { id: "stock", label: "Stock", icon: "ST", roles: ["manager", "admin", "employee"] },
@@ -2607,6 +2608,7 @@
       reposiciones: renderReplacementsPage,
       historiales: renderHistories,
       rendimiento: renderPerformance,
+      ganancias: renderProfit,
       compras: renderPurchases,
       dividir: renderDividePurchases,
       stock: renderStock,
@@ -6560,6 +6562,108 @@
     return Object.values(rows)
       .map((row) => ({ ...row, avgUnitPrice: row.quantity > 0 ? row.totalSales / row.quantity : 0 }))
       .sort((a, b) => String(a.category).localeCompare(String(b.category)) || String(a.productName).localeCompare(String(b.productName)));
+  }
+
+  function computeProfitAnalysis(from, to) {
+    const orders = (state.orders || []).filter((o) => o && o.date >= from && o.date <= to && !["cancelado", "anulado"].includes(o.status));
+    const dayCostCache = {};
+    const costFor = (date, productId) => {
+      if (!dayCostCache[date]) dayCostCache[date] = getDayPurchaseCosts(date) || {};
+      const c = dayCostCache[date][productId];
+      return c && c > 0 ? c : getProductCost(productId);
+    };
+    const byProduct = {};
+    const byClient = {};
+    let totRevenue = 0, totCost = 0;
+    orders.forEach((o) => {
+      (o.items || []).forEach((it) => {
+        const qty = Number(it.quantity || 0);
+        const revenue = Number(it.subtotal != null ? it.subtotal : qty * Number(it.unitPrice || 0));
+        const cost = qty * costFor(o.date, it.productId);
+        totRevenue += revenue; totCost += cost;
+        const p = byProduct[it.productId] || (byProduct[it.productId] = { productId: it.productId, name: it.productName || it.productId, qty: 0, revenue: 0, cost: 0 });
+        p.qty += qty; p.revenue += revenue; p.cost += cost;
+        const c = byClient[o.clientId] || (byClient[o.clientId] = { clientId: o.clientId, revenue: 0, cost: 0, orderIds: new Set() });
+        c.revenue += revenue; c.cost += cost; c.orderIds.add(o.id);
+      });
+    });
+    const finP = Object.values(byProduct).map((p) => ({ ...p, profit: p.revenue - p.cost, margin: p.revenue > 0 ? (p.revenue - p.cost) / p.revenue * 100 : 0 })).sort((a, b) => b.profit - a.profit);
+    const finC = Object.values(byClient).map((c) => ({ ...c, orders: c.orderIds.size, profit: c.revenue - c.cost, margin: c.revenue > 0 ? (c.revenue - c.cost) / c.revenue * 100 : 0 })).sort((a, b) => b.profit - a.profit);
+    return { byProduct: finP, byClient: finC, totRevenue, totCost, totProfit: totRevenue - totCost, orders: orders.length };
+  }
+
+  function renderProfit() {
+    const today = todayISO();
+    const from = ui.profitFrom || addDaysISO(today, -29);
+    const to = ui.profitTo || today;
+    ui.profitFrom = from; ui.profitTo = to;
+    const a = computeProfitAnalysis(from, to);
+    const marginPill = (m) => `<span class="pill ${m >= 15 ? "green" : (m >= 0 ? "amber" : "red")}">${formatNumber(m)}%</span>`;
+    const prodRows = a.byProduct.map((p) => `<tr>
+      <td>${escapeHtml(p.name)}</td>
+      <td class="num">${formatNumber(p.qty)}</td>
+      <td class="num">${formatMoney(p.revenue)}</td>
+      <td class="num">${formatMoney(p.cost)}</td>
+      <td class="num"><strong>${formatMoney(p.profit)}</strong></td>
+      <td class="num">${marginPill(p.margin)}</td>
+    </tr>`).join("") || emptyRow(6, "Sin ventas en el rango.");
+    const cliRows = a.byClient.map((c) => {
+      const cl = getClient(c.clientId);
+      return `<tr>
+        <td><strong>${escapeHtml(String(c.clientId))}</strong> - ${escapeHtml(cl ? cl.name : c.clientId)}</td>
+        <td class="num">${c.orders}</td>
+        <td class="num">${formatMoney(c.revenue)}</td>
+        <td class="num">${formatMoney(c.cost)}</td>
+        <td class="num"><strong>${formatMoney(c.profit)}</strong></td>
+        <td class="num">${marginPill(c.margin)}</td>
+      </tr>`;
+    }).join("") || emptyRow(6, "Sin ventas en el rango.");
+
+    afterRender.push(() => {
+      const fEl = document.getElementById("profit-from");
+      const tEl = document.getElementById("profit-to");
+      if (fEl) fEl.addEventListener("change", () => { ui.profitFrom = fEl.value || addDaysISO(todayISO(), -29); render(); });
+      if (tEl) tEl.addEventListener("change", () => { ui.profitTo = tEl.value || todayISO(); render(); });
+      document.querySelectorAll("[data-profit-range]").forEach((b) => b.addEventListener("click", () => {
+        const r = b.dataset.profitRange;
+        if (r === "this-month") { const d = new Date(); ui.profitFrom = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-01`; ui.profitTo = todayISO(); }
+        else if (r === "30") { ui.profitFrom = addDaysISO(todayISO(), -29); ui.profitTo = todayISO(); }
+        render();
+      }));
+    });
+
+    return pageShell(
+      "Ganancias",
+      "Ganancia real (ventas netas menos costo de la compra del dia) por producto y por cliente.",
+      `<div class="form-grid">
+        <div class="field"><label>Desde</label><input type="date" id="profit-from" value="${escapeAttr(from)}" /></div>
+        <div class="field"><label>Hasta</label><input type="date" id="profit-to" value="${escapeAttr(to)}" /></div>
+        <div class="field"><label>&nbsp;</label><button class="btn ghost full" type="button" data-profit-range="30">Ult. 30 dias</button></div>
+        <div class="field"><label>&nbsp;</label><button class="btn ghost full" type="button" data-profit-range="this-month">Este mes</button></div>
+      </div>`,
+      `
+      <div class="metrics-grid" style="margin-bottom:14px">
+        ${metricCard("Ventas (neto)", formatMoney(a.totRevenue), a.orders + " pedidos")}
+        ${metricCard("Costo", formatMoney(a.totCost), "Compras del dia / costo registrado")}
+        ${metricCard("Ganancia", formatMoney(a.totProfit), "Margen " + formatNumber(a.totRevenue > 0 ? a.totProfit / a.totRevenue * 100 : 0) + "%")}
+      </div>
+      <div class="panel" style="margin-bottom:14px">
+        <h2 class="page-title" style="font-size:18px">Ganancia por producto</h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Producto</th><th class="num">Cant.</th><th class="num">Ventas</th><th class="num">Costo</th><th class="num">Ganancia</th><th class="num">Margen</th></tr></thead>
+          <tbody>${prodRows}</tbody>
+        </table></div>
+      </div>
+      <div class="panel">
+        <h2 class="page-title" style="font-size:18px">Ganancia por cliente</h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Cliente</th><th class="num">Pedidos</th><th class="num">Ventas</th><th class="num">Costo</th><th class="num">Ganancia</th><th class="num">Margen</th></tr></thead>
+          <tbody>${cliRows}</tbody>
+        </table></div>
+      </div>
+      `,
+      "ganancias"
+    );
   }
 
   function renderPerformance() {

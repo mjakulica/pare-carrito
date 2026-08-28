@@ -1,5 +1,16 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.120 - Analisis de ganancia real por producto y por cliente (2026-08-22)
+
+### Nueva pagina "Ganancias" (gerente/admin)
+- Ganancia = ventas netas (sin IVA, usa item.subtotal) menos costo. El costo es el REAL de la compra de ESE dia (getDayPurchaseCosts por fecha del pedido); si ese dia no hubo compra del producto, usa el costo registrado (getProductCost).
+- Dos tablas: ganancia por producto y por cliente, con cantidad/pedidos, ventas, costo, ganancia y margen % (pill verde/ambar/rojo). Ordenadas por ganancia. Tarjetas de total (ventas, costo, ganancia, margen).
+- Selector de fechas (Desde/Hasta) con atajos "Ult. 30 dias" y "Este mes". Estado en ui.profitFrom/ui.profitTo.
+- Verificado con harness sobre backup real: totales coherentes (suma por producto = ganancia total) y ranking razonable.
+- Solo frontend (git pull).
+
+---
+
 ## v12.9.119 - Nuevo Pedido: el texto pegado de WhatsApp no se borra al cerrar el pop-up de alias (2026-08-22)
 
 ### Fix
