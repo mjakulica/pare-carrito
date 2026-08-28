@@ -4210,6 +4210,7 @@
                 <button class="btn ghost" id="parse-whatsapp-order" type="button">Cargar</button>
                 <button class="btn ghost" id="open-order-aliases" type="button">Ver alias</button>
                 <button class="btn ghost" id="order-image-ocr-button" type="button">Subir imagen</button>
+                <button class="btn ghost" id="new-product-btn" type="button">Nuevo producto</button>
               </div>
               <input type="file" id="order-image-ocr-file" accept="image/*" hidden />
               <span class="muted" id="order-image-ocr-status"></span>
@@ -4650,6 +4651,8 @@
     });
     const aliasButton = document.getElementById("open-order-aliases");
     if (aliasButton) aliasButton.addEventListener("click", () => openOrderAliasesModal(clientSelect.value));
+    const newProductButton = document.getElementById("new-product-btn");
+    if (newProductButton) newProductButton.addEventListener("click", () => openProductForm());
     const parseButton = document.getElementById("parse-whatsapp-order");
     if (parseButton) parseButton.addEventListener("click", () => {
       ui.pendingWhatsappText = String(pasteInput.value || "").trim();
@@ -8224,6 +8227,12 @@
     return (product && product.unitType) || (item ? item.unitType : "") || "";
   }
 
+  function divideNotesText(notesByClient, clientId) {
+    const arr = notesByClient && notesByClient[clientId];
+    if (!arr || !arr.length) return "";
+    return " (" + [...new Set(arr.map((n) => String(n || "").trim()).filter(Boolean))].join(", ") + ")";
+  }
+
   function renderDivideProductGroups(assignables, assigneeValues) {
     const filtered = filterDivideAssignables(assignables, assigneeValues);
     if (!filtered.length) return `<div class="empty compact">Sin productos asignados para esta vista.</div>`;
@@ -8233,15 +8242,16 @@
       const assigned = getAssigneeByValue(getEffectiveItemAssigneeValue(item));
       const key = normalizeText(item.productName) + "|" + (assigned ? assigned.value : "");
       if (!groups[key]) {
-        groups[key] = { productName: item.productName, unitType: divideItemUnit(item), assigneeName: assigned ? assigned.name : "Sin asignar", clients: {} };
+        groups[key] = { productName: item.productName, unitType: divideItemUnit(item), assigneeName: assigned ? assigned.name : "Sin asignar", clients: {}, notes: {} };
       }
       groups[key].clients[order.clientId] = (groups[key].clients[order.clientId] || 0) + Number(item.quantity || 0);
+      if (item.note) (groups[key].notes[order.clientId] = groups[key].notes[order.clientId] || []).push(item.note);
     });
     const sorted = sortDivideGroupsByAssignee(Object.values(groups));
     return sorted.map((group) => `
       <div class="assigned-group">
         <strong>${escapeHtml(group.productName)}${isAll ? " - " + escapeHtml(group.assigneeName) : ""}</strong>
-        <span>${Object.keys(group.clients).sort(compareClientIdStrings).map((clientId) => `${escapeHtml(formatClientIdShort(clientId))}) ${formatDivideQty(group.clients[clientId])}`).join(" / ")} = ${formatDivideQty(Object.values(group.clients).reduce((sum, q) => sum + Number(q || 0), 0))} ${escapeHtml(group.unitType)}</span>
+        <span>${Object.keys(group.clients).sort(compareClientIdStrings).map((clientId) => `${escapeHtml(formatClientIdShort(clientId))}) ${formatDivideQty(group.clients[clientId])}${escapeHtml(divideNotesText(group.notes, clientId))}`).join(" / ")} = ${formatDivideQty(Object.values(group.clients).reduce((sum, q) => sum + Number(q || 0), 0))} ${escapeHtml(group.unitType)}</span>
       </div>
     `).join("");
   }
@@ -8279,14 +8289,15 @@
       const assigned = getAssigneeByValue(getEffectiveItemAssigneeValue(item));
       const key = normalizeText(item.productName) + "|" + (assigned ? assigned.value : "");
       if (!groups[key]) {
-        groups[key] = { productName: item.productName, unitType: divideItemUnit(item), assigneeName: assigned ? assigned.name : "Sin asignar", clients: {} };
+        groups[key] = { productName: item.productName, unitType: divideItemUnit(item), assigneeName: assigned ? assigned.name : "Sin asignar", clients: {}, notes: {} };
       }
       groups[key].clients[order.clientId] = (groups[key].clients[order.clientId] || 0) + Number(item.quantity || 0);
+      if (item.note) (groups[key].notes[order.clientId] = groups[key].notes[order.clientId] || []).push(item.note);
     });
     const sorted = sortDivideGroupsByAssignee(Object.values(groups));
     return `<ul class="divide-print-list">${sorted.map((group) => {
       const clientIds = Object.keys(group.clients).sort(compareClientIdStrings);
-      const clients = clientIds.map((clientId) => `${escapeHtml(formatClientIdShort(clientId))}) ${formatDivideQty(group.clients[clientId])}`).join(" / ");
+      const clients = clientIds.map((clientId) => `${escapeHtml(formatClientIdShort(clientId))}) ${formatDivideQty(group.clients[clientId])}${escapeHtml(divideNotesText(group.notes, clientId))}`).join(" / ");
       const total = clientIds.reduce((sum, clientId) => sum + Number(group.clients[clientId] || 0), 0);
       return `<li><strong>${escapeHtml(group.productName)}${isAll ? " - " + escapeHtml(group.assigneeName) : ""}</strong>: ${clients} = ${formatDivideQty(total)} ${escapeHtml(group.unitType)}</li>`;
     }).join("")}</ul>`;
@@ -8325,15 +8336,16 @@
     assignables.forEach(({ order, item }) => {
       const assigned = getAssigneeByValue(getEffectiveItemAssigneeValue(item));
       const productKey = normalizeText(item.productName) + "|" + (assigned ? assigned.name : "Sin asignar");
-      if (!byProduct[productKey]) byProduct[productKey] = { name: item.productName, unitType: divideItemUnit(item), assigneeName: assigned ? assigned.name : "Sin asignar", clients: {} };
+      if (!byProduct[productKey]) byProduct[productKey] = { name: item.productName, unitType: divideItemUnit(item), assigneeName: assigned ? assigned.name : "Sin asignar", clients: {}, notes: {} };
       byProduct[productKey].clients[order.clientId] = (byProduct[productKey].clients[order.clientId] || 0) + Number(item.quantity || 0);
+      if (item.note) (byProduct[productKey].notes[order.clientId] = byProduct[productKey].notes[order.clientId] || []).push(item.note);
       if (!byClient[order.clientId]) byClient[order.clientId] = [];
       byClient[order.clientId].push(`${formatDivideQty(item.quantity)} ${divideItemUnit(item)} ${item.productName}${isAll ? " - " + (assigned ? assigned.name : "Sin asignar") : ""}`);
     });
     const productGroups = Object.values(byProduct);
     sortDivideGroupsByAssignee(productGroups);
     const productText = productGroups.map((group) => {
-      const clients = Object.keys(group.clients).sort(compareClientIdStrings).map((clientId) => `${formatClientIdShort(clientId)}) ${formatDivideQty(group.clients[clientId])}`).join(" / ");
+      const clients = Object.keys(group.clients).sort(compareClientIdStrings).map((clientId) => `${formatClientIdShort(clientId)}) ${formatDivideQty(group.clients[clientId])}${divideNotesText(group.notes, clientId)}`).join(" / ");
       const total = Object.values(group.clients).reduce((sum, q) => sum + Number(q || 0), 0);
       return `${group.name}${isAll ? " - " + group.assigneeName : ""}: ${clients} = ${formatDivideQty(total)} ${group.unitType}`;
     }).join("\n");

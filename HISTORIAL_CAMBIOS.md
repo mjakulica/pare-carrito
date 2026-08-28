@@ -1,5 +1,17 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.118 - Notas en Dividir "por producto" + boton Nuevo producto en Nuevo Pedido (2026-08-22)
+
+### Notas de productos en los listados
+- Las notas por item ahora tambien salen en Dividir "Agrupado por producto" (pantalla, PDF y texto de WhatsApp), junto a la cantidad del cliente y entre parentesis, sin la palabra "nota" (ej. "35) 2 (maduro)").
+- Recordatorio: en Dividir "Agrupado por cliente" y en los PDF de Vehiculos las notas ya se mostraban; este cambio cubre la vista por producto que faltaba.
+
+### Boton "Nuevo producto" en Nuevo Pedido
+- En Nuevo Pedido (gerente/admin/empleado) se agrego el boton "Nuevo producto" junto a "Ver alias"/"Subir imagen", que abre el mismo pop-up de alta de producto (openProductForm). Al guardar, el producto queda disponible en el pedido sin salir de la pagina.
+- Solo frontend (git pull).
+
+---
+
 ## v12.9.117 - Dividir: numero de cliente + selector de dia en el picker (2026-08-22)
 
 ### Ajustes al selector de pedidos puntuales (Dividir Compras)
