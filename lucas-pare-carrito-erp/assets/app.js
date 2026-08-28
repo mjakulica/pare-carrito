@@ -4205,7 +4205,7 @@
           ${isCustomerOrder ? "" : `<div class="panel order-whatsapp-panel">
             <div class="field order-whatsapp-field">
               <label>Pegar pedido de WhatsApp</label>
-              <textarea id="order-whatsapp-paste" placeholder="Banana 1/2 doc&#10;Cebolla morada 1kg&#10;Uva 500gr"></textarea>
+              <textarea id="order-whatsapp-paste" placeholder="Banana 1/2 doc&#10;Cebolla morada 1kg&#10;Uva 500gr">${escapeHtml(ui.orderWhatsappDraft || "")}</textarea>
               <div class="order-whatsapp-actions">
                 <button class="btn ghost" id="parse-whatsapp-order" type="button">Cargar</button>
                 <button class="btn ghost" id="open-order-aliases" type="button">Ver alias</button>
@@ -4653,6 +4653,7 @@
     if (aliasButton) aliasButton.addEventListener("click", () => openOrderAliasesModal(clientSelect.value));
     const newProductButton = document.getElementById("new-product-btn");
     if (newProductButton) newProductButton.addEventListener("click", () => openProductForm());
+    if (pasteInput) pasteInput.addEventListener("input", () => { ui.orderWhatsappDraft = pasteInput.value; });
     const parseButton = document.getElementById("parse-whatsapp-order");
     if (parseButton) parseButton.addEventListener("click", () => {
       ui.pendingWhatsappText = String(pasteInput.value || "").trim();
@@ -4684,6 +4685,7 @@
           const text = await recognizeOrderImage(file, ocrStatus);
           const cleaned = cleanupOcrOrderText(text, clientSelect ? clientSelect.value : "");
           pasteInput.value = cleaned || text.trim();
+          ui.orderWhatsappDraft = pasteInput.value;
           if (ocrStatus) ocrStatus.textContent = (cleaned || text.trim()) ? "Texto reconocido y corregido. Revise y presione Cargar." : "No se detecto texto claro.";
         } catch (error) {
           if (ocrStatus) ocrStatus.textContent = "";
@@ -4750,6 +4752,7 @@
         saveState();
         ui.selectedClientId = "";
         ui.orderProductFilter = "";
+        ui.orderWhatsappDraft = "";
         ui.orderDraft = {};
         ui.orderRenderedLimit = getOrderProductBatchLimit();
         ui.selectedDate = defaultNewOrderDate();
@@ -4793,6 +4796,7 @@
       }
       ui.selectedClientId = "";
       ui.orderProductFilter = "";
+      ui.orderWhatsappDraft = "";
       ui.orderDraft = {};
       ui.orderRenderedLimit = getOrderProductBatchLimit();
       ui.selectedDate = defaultNewOrderDate();

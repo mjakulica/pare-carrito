@@ -1,5 +1,15 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.119 - Nuevo Pedido: el texto pegado de WhatsApp no se borra al cerrar el pop-up de alias (2026-08-22)
+
+### Fix
+- Al vincular/eliminar filas en el pop-up de productos no reconocidos (o al abrir "Ver alias"), el `render()` vaciaba el textarea "Pegar pedido de WhatsApp". Ahora el texto se conserva.
+- El texto se persiste en `ui.orderWhatsappDraft` (se actualiza en cada tecla y al leer una imagen por OCR) y el textarea se renderiza con ese valor, asi sobrevive a cualquier re-render. Se limpia solo al crear el pedido.
+- Beneficio: despues de cargar un alias nuevo, se puede volver a apretar "Cargar" sobre el mismo texto sin tener que pegarlo de nuevo.
+- Solo frontend (git pull).
+
+---
+
 ## v12.9.118 - Notas en Dividir "por producto" + boton Nuevo producto en Nuevo Pedido (2026-08-22)
 
 ### Notas de productos en los listados
