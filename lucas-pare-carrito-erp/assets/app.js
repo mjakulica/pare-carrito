@@ -9979,11 +9979,15 @@
     });
     const rows = balances.map((item) => {
       const client = getClient(item.clientId);
+      const parentOf = getChildClientIds(item.clientId);
+      const parentTag = parentOf.length ? `<br><span class="pill gray">Grupo: ${parentOf.length} cuenta(s)</span>` : "";
+      const childTag = client && client.parentClientId ? `<br><span class="muted">Hijo de ${escapeHtml(String(client.parentClientId))}</span>` : "";
+      const groupLine = parentOf.length ? `<br><span class="muted">Consolidado: ${formatMoney(getClientGroupBalance(item.clientId))}</span>` : "";
       return `
         <tr>
           <td>${escapeHtml(client ? client.id : item.clientId)}</td>
-          <td>${escapeHtml(client ? client.name : item.clientId)}</td>
-          <td class="num">${formatMoney(item.balance)}</td>
+          <td>${escapeHtml(client ? client.name : item.clientId)}${parentTag}${childTag}</td>
+          <td class="num">${formatMoney(item.balance)}${groupLine}</td>
           <td class="num">${client && shouldApplyInvoiceVat(client) ? formatMoney(getClientAccumulatedIva(item.clientId)) : "-"}</td>
           <td>${escapeHtml(client ? paymentTypeLabel(client.paymentType) : "")}</td>
           <td><button class="btn small ghost" data-show-balance="${item.clientId}">Ver movimientos</button></td>
@@ -10174,7 +10178,7 @@
         <div class="table-wrap" style="margin-top:10px">
           <table>
             <thead><tr><th>ID</th><th>Cliente</th><th>Saldo</th><th>Tipo</th></tr></thead>
-            <tbody>${balanceRows || emptyRow(4, "No hay saldos para mostrar.")}</tbody>
+            <tbody>${balanceRows || emptyRow(4, "No hay saldos para mostrar.")}${clientIds.length > 1 ? `<tr><td></td><td><strong>Total consolidado</strong></td><td class="num"><strong>${formatMoney(isExample ? 0 : clientIds.reduce((sm, id) => sm + getClientBalance(id), 0))}</strong></td><td></td></tr>` : ""}</tbody>
           </table>
         </div>
       </div>
@@ -13758,6 +13762,7 @@
         <div class="field"><label>Precio</label><select id="client-tier"><option value="general" ${client && client.priceTier === "general" ? "selected" : ""}>General</option><option value="preferencial" ${client && client.priceTier === "preferencial" ? "selected" : ""}>Preferencial</option><option value="con_factura" ${client && client.priceTier === "con_factura" ? "selected" : ""}>Con Factura</option><option value="al_costo" ${client && client.priceTier === "al_costo" ? "selected" : ""}>Al Costo</option></select></div>
         <div class="field"><label>Ajuste precio %</label><input id="client-adjustment" inputmode="decimal" value="${formatAmountInput(client ? client.priceAdjustmentPct || 0 : 0)}" /></div>
         <div class="field"><label>Envío ($)</label><input id="client-shipping" inputmode="decimal" value="${formatAmountInput(client ? client.shippingFee || 0 : 0)}" placeholder="0 = sin envío" /></div>
+        <div class="field span-2"><label>Cliente padre (consolida saldos)</label><select id="client-parent"><option value="">— Ninguno —</option>${activeClients().filter((cl) => !client || cl.id !== client.id).map((cl) => `<option value="${escapeAttr(cl.id)}" ${client && client.parentClientId === cl.id ? "selected" : ""}>${escapeHtml(cl.id)} - ${escapeHtml(cl.name)}</option>`).join("")}</select></div>
         <div class="field"><label>Vehículo</label><select id="client-vehicle">${activeVehicles().map((vehicle) => `<option value="${vehicle.id}" ${client && client.vehicleId === vehicle.id ? "selected" : ""}>${escapeHtml(vehicle.name)}</option>`).join("")}</select></div>
         <label class="field" style="display:flex;align-items:center;gap:8px;grid-template-columns:auto 1fr">
           <input type="checkbox" id="client-needs-invoice" style="width:auto;min-height:auto" ${client && client.needsInvoice ? "checked" : ""} />
@@ -13815,6 +13820,7 @@
             priceTier: priceTierValue,
             priceAdjustmentPct: parseAmount(document.getElementById("client-adjustment").value),
             shippingFee: Math.max(0, parseAmount(document.getElementById("client-shipping").value) || 0),
+            parentClientId: (document.getElementById("client-parent") ? document.getElementById("client-parent").value : (client ? client.parentClientId || "" : "")),
             needsInvoice: needsInvoiceValue,
             cuit: document.getElementById("client-cuit").value.trim(),
             legalName: document.getElementById("client-legal-name").value.trim(),
@@ -15331,10 +15337,31 @@
     return getCajaBalance("cash-banco");
   }
 
+  function getChildClientIds(parentId) {
+    if (!parentId) return [];
+    return (state.clients || []).filter((c) => c && c.parentClientId === parentId && c.isActive !== false).map((c) => c.id);
+  }
+
+  function getClientGroupIds(clientId) {
+    return Array.from(new Set([clientId, ...getChildClientIds(clientId)].filter(Boolean)));
+  }
+
+  function getClientGroupBalance(clientId) {
+    return getClientGroupIds(clientId).reduce((sum, id) => sum + getClientBalance(id), 0);
+  }
+
+  function isParentClient(clientId) {
+    return getChildClientIds(clientId).length > 0;
+  }
+
   function getCustomerVisibleClientIds(user) {
     const account = user || currentUser;
     if (!account || !isClientLikeRole(account.role)) return [];
-    return Array.from(new Set([account.clientId, ...(account.linkedClientIds || [])].filter(Boolean)));
+    // El super usuario (cuenta vinculada a un cliente padre) tambien opera/ve las cuentas hijas.
+    const base = [account.clientId, ...(account.linkedClientIds || [])].filter(Boolean);
+    const all = [];
+    base.forEach((id) => { all.push(id); getChildClientIds(id).forEach((cid) => all.push(cid)); });
+    return Array.from(new Set(all));
   }
 
   function getCustomerOrdersForIds(ids) {

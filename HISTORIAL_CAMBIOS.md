@@ -1,5 +1,21 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.122 - Super usuario: cliente padre con saldos consolidados (2026-08-22)
+
+### Nuevo
+- Cliente "padre" que agrupa hijos: nuevo campo "Cliente padre (consolida saldos)" en la ficha del cliente (client.parentClientId). Un cliente hijo apunta a su padre (1 nivel).
+- El super usuario (usuario cliente vinculado al padre) ahora VE y OPERA todas las cuentas del grupo (padre + hijos) en toda la app. Se logro expandiendo `getCustomerVisibleClientIds` para incluir los hijos de cada cuenta accesible; esa funcion la usan Nuevo Pedido, Saldos, Remitos, Mis pedidos, Mi facturacion, transferencias, etc.
+- Saldos consolidados: en la vista de Saldos del cliente/super usuario se agrega una fila "Total consolidado" = suma de los saldos de todas sus cuentas. En la tabla de Saldos del gerente, los clientes padre muestran un tag "Grupo: N cuenta(s)" y su saldo "Consolidado", y los hijos muestran "Hijo de <id>".
+- Helpers: getChildClientIds, getClientGroupIds, getClientGroupBalance, isParentClient.
+- Verificado con harness: hijos, grupo, consolidado (suma) y expansion de cuentas visibles del super usuario.
+- Solo frontend (git pull). parentClientId viaja en el objeto cliente (ya sincronizado).
+
+### Como configurarlo
+- En cada cliente hijo: setear "Cliente padre" = el cliente padre.
+- Crear/usar un usuario cliente cuyo clientId (o cuenta vinculada) sea el padre: ese es el super usuario; automaticamente vera/operara los hijos y su saldo consolidado.
+
+---
+
 ## v12.9.121 - Alias no reconocido: boton "Agregar producto nuevo" (2026-08-22)
 
 ### Nuevo
