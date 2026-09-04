@@ -21,6 +21,11 @@
 - Nuevo boton **"Cargar productos"** al lado del selector de proveedor: carga una fila por cada producto asignado a ese proveedor (o empleado), con el ultimo costo conocido y la cantidad que falta comprar hoy. Sirve para editar el costo unitario y la cantidad de todos los productos de un proveedor de una sola vez, sin ir agregandolos de a uno.
 - Primero aparecen los productos que faltan comprar hoy; no duplica los que ya estan cargados en el detalle.
 
+### Dividir Compras: los productos por unidad ya no dicen "kg"
+- Caso reportado: "Palta Madura Unidad - 71) 3 = 3 kg". Esos productos son "por unidad, cobrados por peso" (`allowUnitWeight`): su unidad es kg porque asi se cobran en el remito, pero en Dividir la cantidad son UNIDADES, y ver "kg" confundia al que arma el pedido.
+- Ahora en Dividir (pantalla, PDF y texto de WhatsApp) esos productos no muestran unidad: queda "71) 3 = 3" y "3 Palta Madura Unidad". El resto sigue mostrando su unidad ("2 kg Banana", "1 maple Huevo").
+- En los REMITOS no cambia nada: ahi el kg se sigue mostrando siempre.
+
 ### Dividir Compras: numeros enteros sin ",0"
 - La tabla de Dividir mostraba siempre un decimal (1,0 / 2,0) porque usaba `formatNumber`. Ahora usa el mismo formato que el resto de la pagina: los enteros salen "1" y la coma aparece solo si el numero la necesita ("1,5").
 

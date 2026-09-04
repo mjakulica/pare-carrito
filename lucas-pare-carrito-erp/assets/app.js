@@ -8294,7 +8294,7 @@
           <tr>
             <td>${escapeHtml(order.id)}<br><span class="muted">${escapeHtml(client ? client.name : order.clientId)}</span></td>
             <td>${escapeHtml(item.productName)}<br>${item.note ? `<span class="note-text">${escapeHtml(item.note)}</span>` : `<span class="muted">Sin nota</span>`}</td>
-            <td class="num">${formatDivideQty(item.quantity)} ${escapeHtml(item.unitType)}</td>
+            <td class="num">${escapeHtml(divideQtyLabel(item.quantity, divideItemUnit(item)))}</td>
           <td>${assignee ? `<span class="pill green">Asignado a ${escapeHtml(assignee.name)}</span>` : `<span class="pill amber">Sin asignar</span>`}</td>
           <td>
             <select data-assign-product="${item.productId}" ${currentProviderId() ? "disabled" : ""}>
@@ -8489,9 +8489,21 @@
     });
   }
 
+  // Unidad que se muestra en Dividir Compras. Los productos "por unidad cobrados por peso"
+  // (allowUnitWeight, ej. "Palta Madura Unidad") tienen unitType "kg" porque asi se cobran en el
+  // remito, pero en Dividir la cantidad son UNIDADES: mostrar "3 kg" confundia al que arma el
+  // pedido. En esos casos no se muestra unidad (el nombre del producto ya dice que es por unidad).
+  // Los remitos no usan esta funcion: ahi el kg se sigue mostrando siempre.
   function divideItemUnit(item) {
     const product = item && item.productId ? getProduct(item.productId) : null;
+    if (product && product.allowUnitWeight) return "";
     return (product && product.unitType) || (item ? item.unitType : "") || "";
+  }
+
+  // "3 kg" o, si el producto no lleva unidad en Dividir, solo "3" (sin espacio de mas).
+  function divideQtyLabel(quantity, unitType) {
+    const unit = String(unitType || "").trim();
+    return formatDivideQty(quantity) + (unit ? " " + unit : "");
   }
 
   function divideNotesText(notesByClient, clientId) {
@@ -8518,7 +8530,7 @@
     return sorted.map((group) => `
       <div class="assigned-group">
         <strong>${escapeHtml(group.productName)}${isAll ? " - " + escapeHtml(group.assigneeName) : ""}</strong>
-        <span>${Object.keys(group.clients).sort(compareClientIdStrings).map((clientId) => `${escapeHtml(formatClientIdShort(clientId))}) ${formatDivideQty(group.clients[clientId])}${escapeHtml(divideNotesText(group.notes, clientId))}`).join(" / ")} = ${formatDivideQty(Object.values(group.clients).reduce((sum, q) => sum + Number(q || 0), 0))} ${escapeHtml(group.unitType)}</span>
+        <span>${Object.keys(group.clients).sort(compareClientIdStrings).map((clientId) => `${escapeHtml(formatClientIdShort(clientId))}) ${formatDivideQty(group.clients[clientId])}${escapeHtml(divideNotesText(group.notes, clientId))}`).join(" / ")} = ${escapeHtml(divideQtyLabel(Object.values(group.clients).reduce((sum, q) => sum + Number(q || 0), 0), group.unitType))}</span>
       </div>
     `).join("");
   }
@@ -8540,7 +8552,7 @@
         <div class="assigned-group">
           <strong>Pedido del cliente ${escapeHtml(formatClientIdShort(clientId))})</strong>
           ${currentProviderId() ? "" : `<span>${escapeHtml(group.clientName)}</span>`}
-          <div>${group.items.map((item) => `${formatDivideQty(item.quantity)} ${escapeHtml(divideItemUnit(item))} ${escapeHtml(item.productName)}${isAll ? " - " + escapeHtml(item.assigneeName) : ""}${item.note ? " (" + escapeHtml(item.note) + ")" : ""}`).join("<br>")}</div>
+          <div>${group.items.map((item) => `${escapeHtml(divideQtyLabel(item.quantity, divideItemUnit(item)))} ${escapeHtml(item.productName)}${isAll ? " - " + escapeHtml(item.assigneeName) : ""}${item.note ? " (" + escapeHtml(item.note) + ")" : ""}`).join("<br>")}</div>
           <div class="divide-client-spacer" aria-hidden="true">&nbsp;</div>
         </div>
       `;
@@ -8566,7 +8578,7 @@
       const clientIds = Object.keys(group.clients).sort(compareClientIdStrings);
       const clients = clientIds.map((clientId) => `${escapeHtml(formatClientIdShort(clientId))}) ${formatDivideQty(group.clients[clientId])}${escapeHtml(divideNotesText(group.notes, clientId))}`).join(" / ");
       const total = clientIds.reduce((sum, clientId) => sum + Number(group.clients[clientId] || 0), 0);
-      return `<li><strong>${escapeHtml(group.productName)}${isAll ? " - " + escapeHtml(group.assigneeName) : ""}</strong>: ${clients} = ${formatDivideQty(total)} ${escapeHtml(group.unitType)}</li>`;
+      return `<li><strong>${escapeHtml(group.productName)}${isAll ? " - " + escapeHtml(group.assigneeName) : ""}</strong>: ${clients} = ${escapeHtml(divideQtyLabel(total, group.unitType))}</li>`;
     }).join("")}</ul>`;
   }
 
@@ -8585,7 +8597,7 @@
     });
     return `<ul class="divide-print-list divide-print-cols">${Object.keys(groups).sort(compareClientIdStrings).map((clientId) => {
       const group = groups[clientId];
-      const itemsHtml = group.items.map((item) => `<li>${formatDivideQty(item.quantity)} ${escapeHtml(divideItemUnit(item))} ${escapeHtml(item.productName)}${isAll ? " - " + escapeHtml(item.assigneeName) : ""}${item.note ? " (" + escapeHtml(item.note) + ")" : ""}</li>`).join("");
+      const itemsHtml = group.items.map((item) => `<li>${escapeHtml(divideQtyLabel(item.quantity, divideItemUnit(item)))} ${escapeHtml(item.productName)}${isAll ? " - " + escapeHtml(item.assigneeName) : ""}${item.note ? " (" + escapeHtml(item.note) + ")" : ""}</li>`).join("");
       return `<li><strong>${escapeHtml(formatClientIdShort(clientId))})</strong><ul>${itemsHtml}</ul></li>`;
     }).join("")}</ul>`;
   }
@@ -8607,14 +8619,14 @@
       byProduct[productKey].clients[order.clientId] = (byProduct[productKey].clients[order.clientId] || 0) + Number(item.quantity || 0);
       if (item.note) (byProduct[productKey].notes[order.clientId] = byProduct[productKey].notes[order.clientId] || []).push(item.note);
       if (!byClient[order.clientId]) byClient[order.clientId] = [];
-      byClient[order.clientId].push(`${formatDivideQty(item.quantity)} ${divideItemUnit(item)} ${item.productName}${isAll ? " - " + (assigned ? assigned.name : "Sin asignar") : ""}`);
+      byClient[order.clientId].push(`${divideQtyLabel(item.quantity, divideItemUnit(item))} ${item.productName}${isAll ? " - " + (assigned ? assigned.name : "Sin asignar") : ""}`);
     });
     const productGroups = Object.values(byProduct);
     sortDivideGroupsByAssignee(productGroups);
     const productText = productGroups.map((group) => {
       const clients = Object.keys(group.clients).sort(compareClientIdStrings).map((clientId) => `${formatClientIdShort(clientId)}) ${formatDivideQty(group.clients[clientId])}${divideNotesText(group.notes, clientId)}`).join(" / ");
       const total = Object.values(group.clients).reduce((sum, q) => sum + Number(q || 0), 0);
-      return `${group.name}${isAll ? " - " + group.assigneeName : ""}: ${clients} = ${formatDivideQty(total)} ${group.unitType}`;
+      return `${group.name}${isAll ? " - " + group.assigneeName : ""}: ${clients} = ${divideQtyLabel(total, group.unitType)}`;
     }).join("\n");
     let includeClients;
     if (typeof includeClientsOverride === "boolean") {

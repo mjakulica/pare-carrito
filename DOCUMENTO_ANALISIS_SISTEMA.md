@@ -624,6 +624,10 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 
 **Compras y Gastos - "Cargar productos".** Con un proveedor (o empleado) elegido, carga una fila por cada producto asignado (`productsSupplied` / `assignedTo*`) con el ultimo costo (`getStoredProductCost`) y la cantidad que falta comprar hoy; primero los pendientes, sin duplicar los ya cargados (`purchaseProductsForAssignee`, `loadPurchaseLinesForAssignee`).
 
+### 12.49 Dividir Compras: unidades y formato de cantidad (v12.9.120)
+- `divideItemUnit()` devuelve "" para los productos `allowUnitWeight` (por unidad, cobrados por peso): en Dividir la cantidad son unidades y mostrar su `unitType` ("kg") confundia. Los remitos no usan esta funcion, asi que ahi el kg se sigue mostrando siempre.
+- `divideQtyLabel(cantidad, unidad)` arma la etiqueta sin espacios sobrantes y con el formato de `formatDivideQty`: enteros sin decimal ("1", no "1,0") y coma solo cuando hace falta ("1,5"). Se usa en la tabla de asignacion, en las vistas por producto y por cliente, en el PDF y en el texto de WhatsApp.
+
 ### 12.48 Peso del estado y arranque (v12.9.120)
 - **Causa de la lentitud:** el estado viaja y se guarda como UN solo JSON, y adentro lleva imagenes en base64 (`products[].imageData`, `orders[].deliveryRemitoPhoto.data`, comprobantes de egresos, pagos y transferencias). El texto (pedidos, saldos, caja) comprime bien con el gzip de Caddy; el base64 no. Por eso el peso lo dominan las imagenes, no el historico.
 - `saveState()` hacia `JSON.stringify` de TODO el estado en cada mutacion. Ahora el snapshot local se agenda (`scheduleLocalStateSnapshot`, 1,5 s) y se fuerza con `flushLocalStateSnapshot()` antes de leerlo, al ocultar la pestania (`visibilitychange`) y al cerrar (`beforeunload` / `pagehide`).
@@ -644,7 +648,7 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 - Proveedores: el saldo ya no queda por debajo del real (anulacion de pagos + compras en cuenta corriente sin movimiento en el ledger).
 - Nuevo tipo de egreso "Devolución a proveedor", que descuenta deuda o devuelve plata a la caja y resta en todas las metricas y en el stock.
 - Compras y Gastos: boton "Cargar productos" para traer todos los productos de un proveedor y editar costo y cantidad de una vez.
-- Dividir Compras: los enteros se muestran sin ",0".
+- Dividir Compras: los enteros se muestran sin ",0" y los productos por unidad ya no dicen "kg".
 - Arranque y respuesta: snapshot local diferido, panel de peso de datos y herramientas para bajar el peso de las imagenes.
 - Solo frontend: `git pull`.
 
