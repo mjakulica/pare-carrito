@@ -860,6 +860,15 @@ function mergeWindowedState(stored, incoming) {
   return next;
 }
 
+// Solo la fecha del ultimo cambio (unos pocos bytes). El sondeo automatico pregunta por aca y
+// baja el estado unicamente si hay algo nuevo; antes se descargaba el estado ENTERO cada 25
+// segundos y recien despues se comparaba la fecha, aunque no hubiera cambiado nada.
+app.get("/state/version", authenticate, requireRole(...STATE_READ_ROLES), async (req, res) => {
+  const { rows } = await pool.query("SELECT updated_at FROM app_state WHERE id = 'main'");
+  if (!rows.length) return res.status(404).json({ error: "Sin datos guardados todavía." });
+  res.json({ updatedAt: rows[0].updated_at.toISOString() });
+});
+
 app.get("/state", authenticate, requireRole(...STATE_READ_ROLES), async (req, res) => {
   const { rows } = await pool.query("SELECT data, updated_at FROM app_state WHERE id = 'main'");
   if (!rows.length) return res.status(404).json({ error: "Sin datos guardados todavía." });

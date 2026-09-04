@@ -237,7 +237,8 @@ Tablas adicionales:
 | POST | `/auth/register` | Público | Registro de cliente pendiente |
 | POST | `/auth/recover` | Público | Recuperación de contraseña |
 | POST | `/auth/reset` | Público | Restablecer contraseña |
-| GET | `/state` | manager, admin, employee, contador | Estado completo JSON |
+| GET | `/state` | manager, admin, employee, contador | Estado por ventana de fechas (`?window=full` para el historial completo) |
+| GET | `/state/version` | manager, admin, employee, contador | **(v12.9.127)** Solo `{updatedAt}` (~60 bytes): lo usa el sondeo automatico para no descargar el estado si no cambio nada |
 | PUT | `/state` | manager, admin, employee, contador | Guardar estado completo |
 | POST | `/transfers` | customer, example | Registrar transferencia cliente |
 | POST | `/proofs` | Cualquier logueado | Subir comprobante |
@@ -683,6 +684,11 @@ Completa 12.50: ningun archivo subido queda ya en base64 adentro del JSON de est
 - Helpers: `getChildClientIds(padre)`, `getClientGroupIds(clienteId)`, `getClientGroupBalance(clienteId)` e `isParentClient(clienteId)`.
 - El usuario del cliente padre ve los saldos consolidados del grupo y puede operar por cada cuenta hija: `getCustomerVisibleClientIds` se expande con el grupo.
 
+### 12.57 Sondeo automatico sin descargar el estado (v12.9.127)
+- `startCloudAutoSync` sondea cada 25 s. `cloudPull` descargaba el estado COMPLETO y recien despues comparaba `updatedAt` para descartarlo: sin ningun cambio, el dispositivo bajaba todo el estado cada 25 segundos.
+- Nuevo `GET /state/version` (solo `{updatedAt}`, ~60 bytes). En el sondeo automatico (no manual, no login, con `lastSync` ya definido) `cloudPull` pregunta ahi primero y corta si la fecha no avanzo. Si el chequeo falla, sigue por el camino normal.
+- Consumo con la app abierta una hora (12 cambios reales/hora): 222,1 MB -> 1,5 MB, 144x menos.
+
 ### 12.56 Vista rapida: estado por ventana de fechas (v12.9.126)
 
 El cuello de botella despues de sacar las imagenes era el TEXTO historico: pedidos 61% del estado (la mitad del total son `items[]`), compras 13%, saldos 12%, caja 10%.
@@ -700,7 +706,7 @@ El cuello de botella despues de sacar las imagenes era el TEXTO historico: pedid
 
 ## 13. Ultimo Cambio y Version
 
-**Version operativa:** 12.9.126
+**Version operativa:** 12.9.127
 **Fecha:** 2026-09-04
 **Rama:** `master` (repositorio `mjakulica/pare-carrito`)
 **Entorno:** VPS productivo `/opt/pare-carrito` con frontend estatico servido por Caddy y API Docker Compose. Frontend `sistema.parecarrito.com.ar`, API en `/api`, lista de precios publica en `/precios`.
@@ -709,7 +715,11 @@ El cuello de botella despues de sacar las imagenes era el TEXTO historico: pedid
 
 Ver secciones 12.53 a 12.55: pagina "Ganancias" (ganancia real por producto y cliente), boton "Agregar producto nuevo" en el pop-up de alias, y super usuario (cliente padre con saldos consolidados). Se numeraron 120-122 en paralelo a los cambios de esta rama, que quedaron renumerados 123-125.
 
-### Detalle del ultimo cambio (v12.9.126)
+### Detalle del ultimo cambio (v12.9.127)
+
+- El sondeo automatico (cada 25 s) ya no descarga el estado completo para despues descartarlo: pregunta `GET /state/version` (60 bytes) y baja solo si hay cambios. Con la app abierta una hora: 222,1 MB -> 1,5 MB. **Requiere `./deploy.sh`.**
+
+### Cambios de v12.9.126
 
 - Vista rapida: el servidor manda una ventana de dias en vez del historial completo (32,45 MB -> 2,29 MB; 1580 KB -> 131 KB por la red), con filas de apertura para que los saldos sigan siendo exactos. El historial completo queda en el servidor y se pide con un boton. **Requiere `./deploy.sh`.**
 

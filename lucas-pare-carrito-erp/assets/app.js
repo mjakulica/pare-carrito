@@ -1957,6 +1957,21 @@
       return;
     }
     try {
+      // Sondeo automatico: primero se pregunta la fecha del ultimo cambio (unos bytes) y solo se
+      // descarga el estado si hay algo nuevo. Antes se bajaba el estado completo cada 25 segundos
+      // y se descartaba despues de compararlo: en el celular era el mayor consumo de datos.
+      if (!manual && !isLogin && config.lastSync) {
+        try {
+          const versionResponse = await cloudRequest(config, "/state/version", { method: "GET" });
+          if (versionResponse.ok) {
+            const versionPayload = await versionResponse.json();
+            const remoteVersion = String((versionPayload && versionPayload.updatedAt) || "");
+            if (remoteVersion && remoteVersion <= config.lastSync) return;
+          }
+        } catch (error) {
+          // Si el chequeo liviano falla se sigue por el camino normal.
+        }
+      }
       // Por defecto se descarga solo la ventana de dias que manda el servidor (el historial viejo
       // queda en el servidor y se pide aparte). ui.fullHistory lo trae completo.
       const response = await cloudRequest(config, "/state" + (ui.fullHistory ? "?window=full" : ""), { method: "GET" });

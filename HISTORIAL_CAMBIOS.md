@@ -1,5 +1,28 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.127 - El sondeo automatico deja de bajar el estado entero cada 25 segundos (2026-09-04)
+
+### El problema (el que mas pesaba en el celular)
+La app sondea el servidor cada 25 segundos para traer lo que cambio en otro dispositivo. Bajaba el estado COMPLETO y recien despues comparaba la fecha del ultimo cambio para descartarlo. O sea: aunque no hubiera cambiado nada, cada 25 segundos se descargaba todo el estado.
+
+### Como quedo
+Nuevo endpoint `GET /state/version` que devuelve solo la fecha del ultimo cambio (60 bytes). El sondeo pregunta por ahi y descarga el estado unicamente si hay algo nuevo.
+
+Consumo con la app abierta una hora (sondeo cada 25 s, 12 cambios reales por hora):
+
+| | Por hora |
+|---|---|
+| Antes (bajaba todo cada 25 s) | 222,1 MB |
+| Solo con la ventana de v12.9.126 | 18,4 MB |
+| **Ahora (pregunta y baja si hay cambios)** | **1,5 MB** |
+
+Son **144 veces menos datos** que antes. En un celular con datos moviles es la diferencia entre gastar el paquete en una tarde y no notarlo.
+
+### Deploy
+- **REQUIERE `./deploy.sh`** (server.js) + `git pull` del frontend.
+
+---
+
 ## v12.9.126 - Vista rapida: el sistema descarga 2 MB en vez de 32 (2026-09-04)
 
 ### El problema
