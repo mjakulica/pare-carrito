@@ -725,7 +725,7 @@ const WINDOW_COLLECTIONS = [
 const STATE_WINDOW_PRESETS = {
   liviano: {
     itemsOrders: 8, itemsPurchases: 5,
-    days: { orders: 15, saldos: 15, caja: 15, purchases: 15, payments: 15, remitos: 7, providerLedger: 10,
+    days: { orders: 15, saldos: 7, caja: 7, purchases: 15, payments: 7, remitos: 7, providerLedger: 10,
       providerPayments: 10, clientTransfers: 15, vendorLedger: 7, attendance: 30, employeePayments: 30,
       employeeReimbursements: 30, performanceAdjustments: 30, stockMovements: 7, cashClosings: 15,
       priceAutoLog: 7, replacements: 7, billingLog: 45, checklistLog: 7, deletedOrders: 3 }

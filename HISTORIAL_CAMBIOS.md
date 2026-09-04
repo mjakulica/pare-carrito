@@ -1,5 +1,33 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.133 - Saldos, caja y pagos a 7 dias (2026-09-04)
+
+### Que se midio antes de tocar nada
+Despues del compactado de pedidos (v12.9.132) probe tres ideas mas sobre los items, saldos y caja, y ninguna paga:
+
+| Idea | JSON | Por la red |
+|---|---|---|
+| Sacar los importes en cero de caja | -1% | **0%** |
+| Claves cortas (id -> i, amountIngreso -> ai, etc.) | -21% | **-4%** |
+| + sacar el saldo acumulado de cada fila | -23% | **-4%** |
+
+El gzip ya comprime el texto repetido, asi que acortar los nombres de los campos casi no cambia lo que viaja. Agregar una capa de traduccion en los dos lados —con el riesgo de error que trae— por un 4% no se justifica. **En los campos no queda lugar: lo que pesa es la CANTIDAD de filas, no su forma.**
+
+### Lo que si se cambio
+`saldos`, `caja` y `payments` bajan de 15 a **7 dias**. Son las colecciones que crecen 2 y 3 filas por cada pedido, asi que son las que se disparan con el volumen. El saldo de cada cliente y de cada caja **sigue siendo exacto** (viene la fila de apertura con todo lo anterior), y la semana completa se sigue viendo; para mas atras estan los botones de 100 dias y de historial completo.
+
+| Escala | JSON | Por la red | Carga en 4G lento |
+|---|---|---|---|
+| 60 pedidos/dia (hoy) | 1,51 MB | 103 KB | **0,8 s** |
+| 200 pedidos/dia | 4,02 MB | 287 KB | **2,3 s** |
+
+Antes del compactado, 200 pedidos/dia daban 7,61 MB y 3,0 s.
+
+### Deploy
+- **REQUIERE `./deploy.sh`** (server.js). El frontend no cambio en esta version.
+
+---
+
 ## v12.9.132 - Cada pedido pesa la mitad: se saca del envio lo que ya esta en el catalogo (2026-09-04)
 
 ### El problema que se venia
