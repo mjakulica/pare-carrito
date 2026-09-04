@@ -684,6 +684,11 @@ Completa 12.50: ningun archivo subido queda ya en base64 adentro del JSON de est
 - Helpers: `getChildClientIds(padre)`, `getClientGroupIds(clienteId)`, `getClientGroupBalance(clienteId)` e `isParentClient(clienteId)`.
 - El usuario del cliente padre ve los saldos consolidados del grupo y puede operar por cada cuenta hija: `getCustomerVisibleClientIds` se expande con el grupo.
 
+### 12.61 La foto del manuscrito y la migracion del lado del servidor (v12.9.131)
+- **Hallazgo:** con la vista rapida el estado quedo en 3,3 MB, pero 139 pedidos ocupaban 2,2 MB de cabeceras (16.959 bytes por pedido, contra ~400 normales) mientras el detalle de productos pesaba 172 KB. La causa era `order.handwrittenImage.data`: la foto del pedido manuscrito guardada en base64 dentro del pedido (~150 KB cada una), un campo que quedo afuera de 12.50/12.52.
+- Ahora se sube con `uploadPrivateFile` al crear el pedido (`handwrittenImage.key`), el visor usa `openProofViewer`, entra en `pendingAttachments()` y el panel de peso la lista aparte.
+- **`migrateStateAttachments()`** corre en `bootstrap()`: la migracion del cliente solo alcanza lo que el dispositivo tiene cargado, y con la vista rapida los registros viejos ya no viajan, asi que el base64 en registros viejos era inalcanzable desde la app. Recorre `purchases.proofFile`, `payments.transferProofFile`, `clientTransfers.proofFile`, `orders.deliveryRemitoPhoto.data`, `orders.handwrittenImage.data`, `replacements.items[].photo` y `products.imageData`; `storeAttachment()` escribe en `UPLOAD_DIR`, registra en `proofs` (`public_read` solo para fotos de producto) y deja la clave. Todo en una transaccion; sin nada que mover hace ROLLBACK y no toca `updated_at`. Idempotente (solo valores que empiezan con `data:`).
+
 ### 12.60 Ventana de pedidos a 15 dias, sin distincion por estado (v12.9.130)
 - `days.orders` del preset `liviano` vuelve a 15 (v12.9.128 lo habia subido a 30).
 - Se quitaron `isClosedOrder()` y `closedOrdersDays` de los tres presets: los estados entregado/cancelado/cobrado no se usan en la operacion real, asi que la regla no aportaba y complicaba el modelo. Todos los pedidos usan la misma ventana.
@@ -725,7 +730,7 @@ El cuello de botella despues de sacar las imagenes era el TEXTO historico: pedid
 
 ## 13. Ultimo Cambio y Version
 
-**Version operativa:** 12.9.130
+**Version operativa:** 12.9.131
 **Fecha:** 2026-09-04
 **Rama:** `master` (repositorio `mjakulica/pare-carrito`)
 **Entorno:** VPS productivo `/opt/pare-carrito` con frontend estatico servido por Caddy y API Docker Compose. Frontend `sistema.parecarrito.com.ar`, API en `/api`, lista de precios publica en `/precios`.
@@ -734,7 +739,11 @@ El cuello de botella despues de sacar las imagenes era el TEXTO historico: pedid
 
 Ver secciones 12.53 a 12.55: pagina "Ganancias" (ganancia real por producto y cliente), boton "Agregar producto nuevo" en el pop-up de alias, y super usuario (cliente padre con saldos consolidados). Se numeraron 120-122 en paralelo a los cambios de esta rama, que quedaron renumerados 123-125.
 
-### Detalle del ultimo cambio (v12.9.130)
+### Detalle del ultimo cambio (v12.9.131)
+
+- La foto del pedido manuscrito sale del estado (era el 85% del peso: 16.959 bytes por cabecera) y el servidor migra solo, en cada arranque, todo lo que haya quedado en base64. **Requiere `./deploy.sh`.**
+
+### Cambios de v12.9.130
 
 - Cabeceras de pedidos a 15 dias y sin distincion por estado de pedido. **Requiere `./deploy.sh`.**
 

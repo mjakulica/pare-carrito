@@ -4846,6 +4846,13 @@
       };
       if (ui.pendingHandwritten) {
         order.handwrittenImage = { name: fileDate(date) + " Pedido " + client.name + " " + order.id, data: ui.pendingHandwritten };
+        // La foto del pedido manuscrito se guarda en el servidor: adentro del pedido son ~150 KB
+        // que se descargaban con el estado en cada carga. Si falla, queda en el pedido y se migra
+        // despues (el servidor lo hace solo al arrancar).
+        try {
+          const key = await uploadPrivateFile(ui.pendingHandwritten, "manuscrito-" + order.id);
+          if (key) { order.handwrittenImage.key = key; order.handwrittenImage.data = ""; }
+        } catch (error) { console.warn("No se pudo subir la foto del pedido manuscrito:", error.message); }
         ui.pendingHandwritten = "";
       }
       if (ui.pendingWhatsappText) {
@@ -5310,6 +5317,9 @@
       button.addEventListener("click", () => {
         const order = getOrder(button.dataset.viewHandwritten);
         if (!order || !order.handwrittenImage) return;
+        if (order.handwrittenImage.key && !order.handwrittenImage.data) {
+          return openProofViewer(order.handwrittenImage.key, "", order.handwrittenImage.name || "Pedido manuscrito");
+        }
         showModal(
           order.handwrittenImage.name || "Pedido manuscrito",
           `<img src="${escapeAttr(order.handwrittenImage.data)}" alt="Pedido manuscrito" style="max-width:100%;border-radius:8px" />
@@ -13662,6 +13672,7 @@
     const imageBuckets = [
       { label: "Fotos de producto (products.imageData)", bytes: (state.products || []).reduce((sum, p) => sum + String((p && p.imageData) || "").length, 0) },
       { label: "Fotos de remito entregado (orders.deliveryRemitoPhoto)", bytes: (state.orders || []).reduce((sum, o) => sum + String((o && o.deliveryRemitoPhoto && o.deliveryRemitoPhoto.data) || "").length, 0) },
+      { label: "Fotos de pedidos manuscritos (orders.handwrittenImage)", bytes: (state.orders || []).reduce((sum, o) => sum + String((o && o.handwrittenImage && o.handwrittenImage.data) || "").length, 0) },
       { label: "Comprobantes de egresos (purchases.proofFile)", bytes: (state.purchases || []).reduce((sum, p) => sum + String((p && p.proofFile) || "").length, 0) },
       { label: "Comprobantes de pagos (payments.proofFile)", bytes: (state.payments || []).reduce((sum, p) => sum + String((p && (p.proofFile || p.proof)) || "").length, 0) },
       { label: "Comprobantes de transferencias (clientTransfers)", bytes: (state.clientTransfers || []).reduce((sum, t) => sum + String((t && (t.proofFile || t.proof)) || "").length, 0) },
@@ -13733,6 +13744,16 @@
           fileName: "remito-" + order.id,
           data: order.deliveryRemitoPhoto.data,
           apply: (key) => { order.deliveryRemitoPhoto.key = key; order.deliveryRemitoPhoto.data = ""; order.updatedAt = new Date().toISOString(); }
+        });
+      }
+    });
+    (state.orders || []).forEach((order) => {
+      if (order && order.handwrittenImage && order.handwrittenImage.data) {
+        list.push({
+          label: "Foto del pedido manuscrito " + order.id,
+          fileName: "manuscrito-" + order.id,
+          data: order.handwrittenImage.data,
+          apply: (key) => { order.handwrittenImage.key = key; order.handwrittenImage.data = ""; order.updatedAt = new Date().toISOString(); }
         });
       }
     });
@@ -13848,7 +13869,7 @@
           <button class="btn ghost" type="button" id="optimize-product-images" ${productsInState ? "" : "disabled"}>Solo fotos de producto (${productsInState})</button>
           <button class="btn ghost" type="button" id="purge-remito-photos">Borrar fotos de remito viejas</button>
         </div>
-        <p class="muted" style="font-size:12px;margin-top:6px">"Mover todos los archivos" sube al servidor los comprobantes de egresos, pagos y transferencias, las fotos de remito y de recambio y las fotos de producto, dejando en el sistema solo la referencia: se siguen viendo igual pero dejan de descargarse en cada carga. Todo lo que se suba de ahora en mas ya va derecho al servidor. Los comprobantes siguen siendo privados (se piden con login); solo las fotos de producto son publicas, como ya lo eran en /precios. "Borrar fotos de remito viejas" quita las fotos de rendicion de mas de 60 dias (el pedido y su rendicion quedan igual).</p>
+        <p class="muted" style="font-size:12px;margin-top:6px">"Mover todos los archivos" sube al servidor los comprobantes de egresos, pagos y transferencias, las fotos de remito y de recambio y las fotos de producto que tenga CARGADOS ESTE DISPOSITIVO. Los registros mas viejos (fuera de la vista rapida) los migra el servidor solo, en cada deploy. Todo lo que se suba de ahora en mas ya va derecho al servidor. Los comprobantes siguen siendo privados (se piden con login); solo las fotos de producto son publicas, como ya lo eran en /precios. "Borrar fotos de remito viejas" quita las fotos de rendicion de mas de 60 dias (el pedido y su rendicion quedan igual).</p>
       </div>
     `;
   }

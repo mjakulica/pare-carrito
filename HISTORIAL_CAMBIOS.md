@@ -1,5 +1,33 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.131 - La foto del pedido manuscrito sale del estado (era el 85% del peso) (2026-09-04)
+
+### El hallazgo
+Con la vista rapida el estado quedo en 3,3 MB, pero el panel mostraba algo raro: **139 pedidos ocupando 2,2 MB de cabeceras, o sea 16.959 bytes por pedido** (una cabecera normal pesa ~400 bytes). El detalle de productos, en cambio, pesaba apenas 172 KB.
+
+La causa: cada pedido cargado por foto guardaba la imagen del manuscrito **adentro del pedido** (`order.handwrittenImage.data`, base64, ~150 KB cada una). Se me habia pasado ese campo cuando saque los demas adjuntos del estado.
+
+### Como quedo
+- Al crear un pedido con foto, la imagen se sube al servidor y en el pedido queda solo la referencia. Si falla, queda como antes y se migra despues.
+- El boton "Ver pedido manuscrito" la descarga del servidor (sigue pidiendo login).
+- Entra en la migracion del dispositivo y en la del servidor.
+- El panel de peso la lista aparte: "Fotos de pedidos manuscritos".
+
+### El servidor migra solo lo que quedo en base64
+El boton "Mover todos los archivos al servidor" solo puede mover lo que el dispositivo tiene cargado. Desde la vista rapida (v12.9.126) los registros viejos ya no viajan, asi que **lo que quedo en base64 en un registro viejo era imposible de migrar desde la app**.
+
+Ahora, en cada arranque del servidor (o sea, en cada `./deploy.sh`) se revisa el estado y se mueven a disco los adjuntos que sigan en base64: comprobantes de egresos, pagos y transferencias, fotos de remito, **fotos de pedidos manuscritos**, fotos de recambio y fotos de producto. Deja la referencia, escribe el archivo en el volumen `uploads` y lo registra. Si no hay nada que mover, no toca nada; se puede correr las veces que haga falta.
+
+En el log del deploy aparece: `Migracion de adjuntos: N archivos movidos del estado a disco (X KB liberados).`
+
+### Que esperar
+Con 2,2 MB de fotos de manuscritos saliendo del estado, el JSON deberia quedar en el orden de **1 MB o menos**.
+
+### Deploy
+- **REQUIERE `./deploy.sh`** (server.js) + `git pull` del frontend. La migracion corre sola al arrancar.
+
+---
+
 ## v12.9.130 - Cabeceras de pedidos a 15 dias, sin distinguir por estado (2026-09-04)
 
 - **Pedidos solo con cabecera: 30 -> 15 dias.** Vuelve al valor que tenia antes de v12.9.128.

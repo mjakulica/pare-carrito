@@ -2490,6 +2490,104 @@ function startDunningScheduler() {
 app.use((req, res) => res.status(404).json({ error: "Ruta no encontrada." }));
 
 // ---------- Arranque: esquema + usuario administrador inicial ----------
+// ---------- Migracion de adjuntos que quedaron en base64 adentro del estado ----------
+// El boton de la app solo puede mover lo que el dispositivo tiene cargado, y desde que existe la
+// vista rapida los registros viejos ya no viajan: quedarian en base64 para siempre, pesando en
+// cada descarga. Esta migracion corre en el servidor, que si tiene todo.
+const ATTACHMENT_FIELDS = [
+  { collection: "purchases", name: "comprobante-egreso", read: (r) => r.proofFile,
+    write: (r, key) => { r.proofKey = key; r.proofFile = ""; } },
+  { collection: "payments", name: "comprobante-pago", read: (r) => r.transferProofFile,
+    write: (r, key) => { r.transferProofKey = key; r.transferProofFile = ""; } },
+  { collection: "clientTransfers", name: "comprobante-transferencia", read: (r) => r.proofFile,
+    write: (r, key) => { r.proofKey = key; r.proofFile = ""; } },
+  { collection: "orders", name: "remito", read: (r) => r.deliveryRemitoPhoto && r.deliveryRemitoPhoto.data,
+    write: (r, key) => { r.deliveryRemitoPhoto.key = key; r.deliveryRemitoPhoto.data = ""; } },
+  { collection: "orders", name: "manuscrito", read: (r) => r.handwrittenImage && r.handwrittenImage.data,
+    write: (r, key) => { r.handwrittenImage.key = key; r.handwrittenImage.data = ""; } }
+];
+
+function parseDataUrl(value) {
+  const match = /^data:([^;,]+);base64,(.*)$/i.exec(String(value || ""));
+  if (!match) return null;
+  return { contentType: match[1], buffer: Buffer.from(match[2], "base64") };
+}
+
+function extensionForType(contentType) {
+  return { "image/jpeg": "jpg", "image/jpg": "jpg", "image/png": "png", "image/webp": "webp",
+    "application/pdf": "pdf" }[String(contentType || "").toLowerCase()] || "bin";
+}
+
+async function storeAttachment(clientDb, dataUrl, label, publicRead) {
+  const parsed = parseDataUrl(dataUrl);
+  if (!parsed || !parsed.buffer.length) return "";
+  const prefix = publicRead ? "prod-" : "mig-";
+  const key = prefix + Date.now() + "-" + crypto.randomBytes(4).toString("hex") + "-" + label + "." + extensionForType(parsed.contentType);
+  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+  fs.writeFileSync(path.join(UPLOAD_DIR, key), parsed.buffer);
+  await clientDb.query(
+    "INSERT INTO proofs (key, content_type, uploaded_by, public_read) VALUES ($1,$2,$3,$4)",
+    [key, parsed.contentType, "migracion", !!publicRead]
+  );
+  return key;
+}
+
+async function migrateStateAttachments() {
+  const clientDb = await pool.connect();
+  try {
+    await clientDb.query("BEGIN");
+    const row = await clientDb.query("SELECT data FROM app_state WHERE id = 'main' FOR UPDATE");
+    if (!row.rows.length) { await clientDb.query("ROLLBACK"); return; }
+    const data = row.rows[0].data || {};
+    let moved = 0;
+    let bytes = 0;
+
+    for (const field of ATTACHMENT_FIELDS) {
+      const rows = Array.isArray(data[field.collection]) ? data[field.collection] : [];
+      for (const record of rows) {
+        const value = record && field.read(record);
+        if (!value || !String(value).startsWith("data:")) continue;
+        const key = await storeAttachment(clientDb, value, field.name, false);
+        if (!key) continue;
+        bytes += String(value).length;
+        field.write(record, key);
+        moved++;
+      }
+    }
+    // Fotos de recambio (anidadas en items) y fotos de producto (publicas).
+    for (const replacement of (Array.isArray(data.replacements) ? data.replacements : [])) {
+      for (const item of (Array.isArray(replacement && replacement.items) ? replacement.items : [])) {
+        if (!item || !String(item.photo || "").startsWith("data:")) continue;
+        const key = await storeAttachment(clientDb, item.photo, "recambio", false);
+        if (!key) continue;
+        bytes += String(item.photo).length;
+        item.photoKey = key;
+        item.photo = "";
+        moved++;
+      }
+    }
+    for (const product of (Array.isArray(data.products) ? data.products : [])) {
+      if (!product || !String(product.imageData || "").startsWith("data:")) continue;
+      const key = await storeAttachment(clientDb, product.imageData, "producto", true);
+      if (!key) continue;
+      bytes += String(product.imageData).length;
+      product.imageKey = key;
+      product.imageData = "";
+      moved++;
+    }
+
+    if (!moved) { await clientDb.query("ROLLBACK"); return; }
+    await clientDb.query("UPDATE app_state SET data = $1, updated_at = now(), updated_by = 'migracion' WHERE id = 'main'", [data]);
+    await clientDb.query("COMMIT");
+    console.log("Migracion de adjuntos: " + moved + " archivos movidos del estado a disco (" + Math.round(bytes / 1024) + " KB liberados).");
+  } catch (error) {
+    await clientDb.query("ROLLBACK").catch(() => {});
+    console.warn("Migracion de adjuntos: no se pudo completar:", error.message);
+  } finally {
+    clientDb.release();
+  }
+}
+
 async function bootstrap() {
   const schema = fs.readFileSync(path.join(__dirname, "..", "schema.sql"), "utf8");
   await pool.query(schema);
@@ -2499,6 +2597,7 @@ async function bootstrap() {
   } catch (error) {
     console.warn("No se pudo actualizar la restriccion de roles:", error.message);
   }
+  await migrateStateAttachments();
   const { rows } = await pool.query("SELECT COUNT(*)::int AS count FROM users");
   if (!rows[0].count) {
     const hash = await bcrypt.hash(ADMIN_PASSWORD, 10);
