@@ -96,6 +96,7 @@ Permisos personalizados: `state.appSettings.rolePermissions` permite sobreescrib
 | `#/saldos` | `renderBalances` | Todos | Saldos por cliente, movimientos históricos, IVA acumulado. | `state.saldos`, `state.clients` | Fechas Desde/Hasta en fila; botones de rango en fila de 4. |
 | `#/caja` | `renderCaja` | manager, admin, contador | Libro de caja por caja seleccionada; ingresos/egresos; administración de cajas. | `state.caja`, `state.cashBoxes` | Filtros y tablas compactas. |
 | `#/empleados` | `renderEmployees` | manager, admin, contador | Listado de empleados, caja asignada, horas, deuda, pagos. | `state.users`, `state.attendance`, `state.employeePayments` | Tablas con scroll. |
+| `#/cumplimiento` | `renderCompliance` | manager, admin | **(v12.9.116)** Control diario de cumplimiento: checklist completado por cada empleado (X/11, semaforo y pasos faltantes) y entregas del dia pendientes de rendir (pago o foto del remito). | `state.checklistLog`, `state.users`, `state.orders` | Tarjetas apiladas; selector de dia arriba. |
 | `#/horarios` | `renderAttendance` | employee | Registro de asistencia, reintegros y recibo de sueldo del empleado logueado. | `state.attendance`, `state.employeeReimbursements` | Formulario simple. |
 | `#/registrar-transferencia` | `renderCustomerTransferRegistration` | customer, example | Clientes registran transferencias con comprobante y pedidos asociados. | `state.clientTransfers`, `state.orders` | Formulario de una columna. |
 | `#/comprobar-transferencias` | `renderTransferApprovals` | manager, admin, contador | Aprobación/rechazo de transferencias; impacta pagos, saldos y caja banco. | `state.clientTransfers`, `state.payments`, `state.saldos`, `state.caja` | Tabla con scroll. |
@@ -127,11 +128,11 @@ El ERP guarda el estado operativo en un único JSONB. Los arrays/colecciones pri
 | Colección | Descripción | Campos Clave |
 |-----------|-------------|--------------|
 | `users` | Usuarios del ERP | `id`, `username`, `password`, `name`, `role`, `email`, `phone`, `clientId`, `linkedClientIds`, `hourlyRate`, `isActive` |
-| `clients` | Clientes | `id`, `name`, `address`, `phone`, `email`, `paymentType`, `priceTier`, `priceAdjustmentPct`, `needsInvoice`, `cuit`, `legalName`, `invoiceType`, `invoiceFrequency`, `vehicleId`, `zone`, `isActive` |
+| `clients` | Clientes | `id`, `name`, `address`, `phone`, `email`, `paymentType`, `priceTier` (`general` / `preferencial` / `con_factura` / `al_costo`), `priceAdjustmentPct`, `shippingFee`, `needsInvoice`, `cuit`, `legalName`, `invoiceType`, `invoiceFrequency`, `vehicleId`, `zone`, `isActive` |
 | `products` | Productos | `id`, `name`, `category`, `unitType`, `baseCost`, `salePrice`, `ivaType`, `assignedToType`, `assignedToId`, `isActive` |
 | `vehicles` | Vehículos de reparto | `id`, `name`, `type`, `driverName`, `capacity`, `isActive` |
 | `providers` | Proveedores | `id`, `name`, `contactName`, `paymentTerms`, `defaultMargin`, `productsSupplied`, `isActive` |
-| `orders` | Pedidos | `id`, `date`, `clientId`, `deliveryVehicleId`, `status`, `subtotalAmount`, `ivaAmount`, `totalAmount`, `paymentReceived`, `items[]`, `userId`, `createdAt` |
+| `orders` | Pedidos | `id`, `date`, `clientId`, `deliveryVehicleId`, `status`, `subtotalAmount`, `ivaAmount`, `totalAmount`, `paymentReceived`, `shippingFee`, `shippingIvaRate`, `deliveryRemitoPhoto`, `items[]` (con `notes` por item), `userId`, `createdAt` |
 | `purchases` | Compras y gastos | `id`, `date`, `expenseType`, `providerId`, `providerName`, `totalCost`, `paymentStatus`, `recordedBy`, `items[]` |
 | `payments` | Pagos recibidos | `id`, `date`, `clientId`, `amount`, `method`, `receivedByUserId`, `orderIds` |
 | `saldos` | Cuenta corriente cliente | `id`, `date`, `clientId`, `type`, `description`, `amount`, `balance`, `relatedEntityId`, `relatedEntityType` |
@@ -152,6 +153,8 @@ El ERP guarda el estado operativo en un único JSONB. Los arrays/colecciones pri
 | `remitos` | Remitos emitidos | `id`, `orderId`, `date`, `items[]`, `total` |
 | `vendorLedger` | Compras por vendedor | movimientos |
 | `performanceAdjustments` | Ajustes manuales de rendimiento | `id`, `date`, `concept`, `amount` |
+| `checklistLog` | **(v12.9.116)** Checklist diario del empleado, persistido y sincronizado (se conservan ~60 dias) | `id`, `dayKey`, `userId`, `userName`, `key`, `at` |
+| `ocrCorrections` | **(v12.9.115)** Diccionario editable de correcciones del OCR, aplicado al texto antes del parser | `id`, `from`, `to` |
 
 ### 5.2 Espejo Relacional (PostgreSQL)
 
@@ -238,6 +241,7 @@ Tablas adicionales:
 | PUT | `/state` | manager, admin, employee, contador | Guardar estado completo |
 | POST | `/transfers` | customer, example | Registrar transferencia cliente |
 | POST | `/proofs` | Cualquier logueado | Subir comprobante |
+| POST | `/ocr/order-image` | manager, admin, employee | OCR de la foto de un pedido manuscrito. Cadena de proveedores (v12.9.112-114): **Google Cloud Vision** (`DOCUMENT_TEXT_DETECTION`, `languageHints` = `GOOGLE_VISION_LANG`, por defecto `es-t-i0-handwrit`) -> OpenRouter -> Moonshot/Kimi; devuelve `{text, provider}` |
 | GET | `/proofs/:key` | Cualquier logueado | Descargar comprobante |
 | GET | `/reports/sales` | manager, admin | Ventas vs gastos por día |
 | GET | `/reports/top-products` | manager, admin | Top productos |
@@ -567,39 +571,82 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 ### 12.40 Reversion de impresion (v12.9.94)
 - Ver 12.34: las funciones de impresion volvieron al estado de v12.9.82. `deploy.sh` y `deploy-vps.sh` quedaron marcados como ejecutables (100755) para evitar "Permission denied" tras `git pull`.
 
+### 12.41 Ids globalmente unicos, alias borrables y parser "banana" (v12.9.106 a v12.9.108)
+- **Fix critico de ids (v12.9.106):** `nextProductId` generaba `"PROD-" + (products.length + 1)` y solo verificaba colisiones contra los productos cargados en ESE dispositivo. Con estado local incompleto o con huecos por borrados, dos dispositivos podian crear productos distintos con el mismo id y el merge por id se quedaba con uno solo (el otro "desaparecia" de Productos, aunque seguia referenciado en compras/Dividir por `productId`/`productName`). Ahora los ids de **producto y proveedor** son globalmente unicos (`PROD-`/`PROV-` + tiempo en base36 + aleatorio) con verificacion de colision. No recupera productos ya perdidos: hay que volver a crearlos.
+- **Borrar alias (v12.9.107):** el modal "Ver alias" (Nuevo Pedido) solo permitia agregar. Se agrego boton de borrado (gerente/admin) en "Todos los alias cargados", para alias generales (`productAliases`) y por cliente (`clientProductAliases`). Origen del caso "banana -> Anana": un alias corrupto, probablemente heredado de la colision de ids.
+- **Parser (v12.9.108):** guarda de primera letra en `parsedBaseEquivalent`, de modo que "banana" ya no matchea el producto activo "Anana" por equivalencia de nombre-base. Complementa el fix de v12.9.95 (levenshtein con misma primera letra).
+
+### 12.42 Precio "Al Costo" y cargo de "Envio" por cliente (v12.9.109, v12.9.110)
+- **Tier `al_costo`:** nuevo valor de `client.priceTier` (junto a `general` / `preferencial` / `con_factura`). El precio base del item pasa a ser el **costo** del producto (`state.prices[id].cost`, con fallback a `product.baseCost`) en lugar del precio de lista, y sobre el se aplica el `priceAdjustmentPct` del cliente.
+- **Cargo de envio:** campo `client.shippingFee` ($ fijo; 0 = sin envio). Al crear el pedido el importe se **sella** en `order.shippingFee` (no se toma del cliente al re-renderizar) y aparece como renglon "Envio" en el remito.
+- **IVA del envio (v12.9.110):** si el cliente factura (`priceTier === "con_factura"` o `needsInvoice`), el envio lleva **IVA 10,5%**; la tasa aplicada se sella en `order.shippingIvaRate` (0 si el cliente no factura). El total del pedido pasa a ser `subtotal + IVA de items + IVA del envio + envio`.
+- **Backend (`billing.js`):** `buildGroupedItems` agrega el renglon "Envio" (codigo `ENVIO`, cantidad 1, alicuota `order.shippingIvaRate` con default 10,5) a la factura AFIP/TusFacturas.
+
+### 12.43 OCR de fotos de pedidos: proveedores y diccionario de correcciones (v12.9.112 a v12.9.115)
+- `POST /ocr/order-image` (gerente/admin/empleado) transcribe la foto de un pedido manuscrito. La cadena de proveedores se prueba en orden y gana el primero que responde:
+  1. **Google Cloud Vision** (v12.9.113, proveedor principal): `POST /v1/images:annotate` con `DOCUMENT_TEXT_DETECTION`, autenticado por API key (`GOOGLE_VISION_API_KEY`), leyendo `fullTextAnnotation.text`. Elegido por su mejor desempeno con **manuscrito**.
+  2. OpenRouter (`OPENROUTER_VISION_MODEL`, por defecto `openai/gpt-4o-mini`).
+  3. Moonshot/Kimi (`MOONSHOT_VISION_MODEL`).
+  La respuesta incluye `provider` para saber cual respondio. El endpoint devuelve 503 solo si no hay ninguna de las tres claves.
+- **Hint de caligrafia (v12.9.114):** `GOOGLE_VISION_LANG` por defecto `es-t-i0-handwrit` (`languageHints`); vacio = deteccion automatica.
+- **Historial del proveedor:** v12.9.112 habia puesto NVIDIA Nemotron OCR v2 como principal; se **reemplazo** por Google Vision en v12.9.113.
+- **Diccionario de correcciones (v12.9.115):** `state.ocrCorrections` (`{id, from, to}`), editable desde Configuracion -> "Prompt de IA (lectura de imagen)" -> "Correcciones de lectura (OCR)" (gerente/admin). Los reemplazos se aplican al texto de la foto **antes** de la limpieza por vocabulario y del parser, con limite de palabra (no reemplaza dentro de otra palabra) y sin distinguir mayusculas. Clave sincronizada (`ARRAY_PATCH_KEYS` / `PATCH_ARRAY_KEYS`).
+- Variables nuevas en `.env.example`: `GOOGLE_VISION_API_KEY`, `GOOGLE_VISION_URL`, `GOOGLE_VISION_LANG`, `OPENROUTER_API_KEY`, `OPENROUTER_VISION_MODEL`, `MOONSHOT_API_KEY`, `MOONSHOT_VISION_MODEL`.
+
+### 12.44 Cumplimiento de empleados y rendicion de entregas (v12.9.116)
+- **Checklist persistido:** el checklist diario del empleado (11 pasos, ver 12.35) dejo de ser local (`ui.employeeChecklist`) y pasa a `state.checklistLog` (`{id, dayKey, userId, userName, key, at}`), sincronizado y con retencion de ~60 dias. El panel de Inicio y el boton "Reiniciar" leen/escriben en el log.
+- **Pagina "Cumplimiento"** (`#/cumplimiento`, gerente/admin): para el dia elegido (`ui.complianceDate`) muestra por empleado activo cuantos pasos completo (X/11), cuales faltan y un semaforo (verde = todo, amarillo = parcial, rojo = nada).
+- **Rendicion de entregas:** todo pedido "entregado" debe quedar rendido, con pago cargado O con foto del remito firmado (`orderIsSettled`: `paid` / `paymentReceived > 0` / foto). Modal "Rendir entrega" desde la fila de Pedidos: lleva a cargar el pago o permite subir/reemplazar/quitar la foto, guardada comprimida en `order.deliveryRemitoPhoto` (base64, ~1100px, calidad 0,6). No bloquea la entrega; los pendientes se listan en "Cumplimiento — Entregas del dia (X/Y rendidas)".
+- Backend: `checklistLog` agregado a las claves de sincronizacion por patch.
+
+### 12.45 Dividir Compras: pedidos puntuales, dia y notas (v12.9.111, v12.9.117, v12.9.118)
+- **Seleccion de pedidos puntuales (v12.9.111):** ademas del dia completo, se pueden tildar pedidos concretos (`ui.divideSelectedOrders`, helper `getDivideSelectedOrderIds`) para ver su division fuera del horario habitual. Alcanza a pantalla, PDF y texto de WhatsApp; la fecha del titulo sale de `getDivideContextDate()` (la de los pedidos elegidos) y no de "hoy".
+- **Picker (v12.9.117):** cada fila muestra "ORD-... · numero - nombre de cliente · fecha · N item(s)" y se agrego un selector "Dia de los pedidos" (`ui.divideCandidateDate`, HOY por defecto), en lugar de la ventana fija ayer/+3 dias. Los ya tildados se conservan aunque sean de otro dia.
+- **Notas por item (v12.9.118):** las notas del item ahora tambien salen en la vista "Agrupado por producto" (`divideNotesText`), entre parentesis y sin la palabra "nota" (ej. `35) 2 (maduro)`), en pantalla, PDF y WhatsApp. En "Agrupado por cliente" y en los PDF de Vehiculos ya se mostraban.
+
+### 12.46 Nuevo Pedido: borrador de WhatsApp y alta de producto (v12.9.118, v12.9.119)
+- **Boton "Nuevo producto" (v12.9.118):** junto a "Ver alias" / "Subir imagen"; abre `openProductForm` y al guardar deja el producto disponible sin salir de la pagina.
+- **Borrador persistente (v12.9.119):** el texto pegado en "Pegar pedido de WhatsApp" se guarda en `ui.orderWhatsappDraft` (en cada tecla y al leer una imagen por OCR) y el textarea se renderiza con ese valor, de modo que sobrevive a cualquier `render()` — antes se vaciaba al vincular alias o abrir "Ver alias". Se limpia solo al crear el pedido.
+
 ---
 
 ## 13. Ultimo Cambio y Version
 
 **Version operativa:** 12.9.119
-**Fecha:** 2026-08-10
-**Commit GitHub del cambio funcional:** `8aecda8`
+**Fecha:** 2026-08-27
+**Commit GitHub del cambio funcional:** `762bcb6`
+**Rama:** `master` (repositorio `mjakulica/pare-carrito`)
 **Entorno:** VPS productivo `/opt/pare-carrito` con frontend estatico servido por Caddy y API Docker Compose. Frontend `sistema.parecarrito.com.ar`, API en `/api`, lista de precios publica en `/precios`.
 
-### Detalle del ultimo cambio (v12.9.105)
+### Detalle del ultimo cambio (v12.9.119)
 
-- Emision manual de facturas independiente de "pendiente": arma la factura del cliente para el periodo elegido con `buildPeriod`, sin depender del calendario ni de si ya se facturo (antes daba "No habia comprobante pendiente"). Permite re-emitir y emitir montos/periodos puntuales; el confirm del modal es el resguardo contra duplicados AFIP.
-- Requiere `./deploy.sh` (backend billing.js/server.js) + `git pull` (frontend).
+- Nuevo Pedido: el texto pegado de WhatsApp ya no se pierde al cerrar el pop-up de alias. Se persiste en `ui.orderWhatsappDraft` y se limpia recien al crear el pedido, asi se puede volver a apretar "Cargar" sobre el mismo texto despues de dar de alta un alias.
+- Solo frontend: `git pull` en el VPS.
 
-### Rango de cambios recientes documentados (v12.9.52 a v12.9.105)
+### Rango de cambios recientes documentados (v12.9.106 a v12.9.119)
 
-Ver secciones 12.28 a 12.40. Resumen por tema (ademas de v12.9.52-93):
+Ver secciones 12.41 a 12.46. Resumen por tema:
+- **Datos / sincronizacion (v12.9.106):** ids de producto y proveedor globalmente unicos; corrige la desaparicion de productos en el merge entre dispositivos.
+- **Alias y parser (v12.9.107, v12.9.108):** alias borrables desde "Ver alias"; guarda de primera letra en el match por nombre-base ("banana" ya no cae en "Anana").
+- **Clientes y facturacion (v12.9.109, v12.9.110):** tier de precio "Al Costo"; cargo de "Envio" sellado en el pedido, con IVA 10,5% si el cliente factura y renglon "Envio" en la factura AFIP.
+- **OCR (v12.9.112 a v12.9.115):** Google Cloud Vision como proveedor principal (con hint de caligrafia) y respaldos OpenRouter/Moonshot; diccionario editable de correcciones de lectura (`state.ocrCorrections`).
+- **Operacion diaria (v12.9.116):** checklist del empleado persistido y sincronizado (`state.checklistLog`), nueva pagina "Cumplimiento" y rendicion de entregas con foto de remito comprimida.
+- **Dividir Compras (v12.9.111, v12.9.117, v12.9.118):** eleccion de pedidos puntuales con selector de dia y numero de cliente; notas por item en la vista por producto.
+- **Nuevo Pedido (v12.9.118, v12.9.119):** boton "Nuevo producto" y borrador de WhatsApp que sobrevive al re-render.
+
+### Rango anterior (v12.9.52 a v12.9.105)
+
+Ver secciones 12.28 a 12.40. Resumen:
 - Impresion: los cambios de v12.9.86-88 se REVIRTIERON a v12.9.82 en v12.9.94.
 - Parser: "banana unidad" ya no matchea "Anana" (v12.9.95).
 - Facturacion (v12.9.96-105): fix de external_reference al dividir en tandas; emision manual con fecha/periodo/vencimiento/concepto/monto editables, punto de venta y usertoken por PDV, e independiente de "due"; selector 30/60/120/Todas en el historial.
 - Backup (v12.9.99): `pg_dump` excluye `state_history`/`state_operations` + `gzip -1`; retencion 200->30.
 - Ops: `deploy.sh` marcado ejecutable (100755).
-
-Resumen v12.9.52 a v12.9.93 (secciones 12.28 a 12.38):
-- Sincronizacion robusta: sello de `updatedAt` en toda mutacion, merge "mas nuevo gana" (config y precios), guard del servidor, `keepalive`, empuje de pendientes, cache `no-cache` en Caddy, seed que no pisa reales, claves de patch faltantes agregadas al backend.
-- Stock: control al finalizar el dia (conteo = apertura de manana), registro de conteos, cobertura por demanda completa en Unidades.
-- Precios: desvinculada la planilla -> sistema (Sheets solo control), recalculo de precios de un dia en Remitos, fecha de actualizacion real.
-- Impresion: iframe robusto, columnas "estilo diario", pestaña que se cierra sola, imprimibles combinados.
-- Nuevas funciones: checklist del empleado en Inicio, editar gastos, lista de precios publica `/precios` con formato cliente (mayor/menor, grilla/lista, categorias, imagenes, Sin/Con IVA con 2% de gastos bancarios).
-- Parser: multiples correcciones (maple/mapple, fracciones a Kg, decimales con punto, "1doc.", cortesias en notas) y fixes de nuevo pedido (cambio de cliente no borra; sin autoseleccion espurea).
+- Sincronizacion robusta, stock, precios (fuente de verdad y fecha real), checklist del empleado, editar gastos y lista de precios publica `/precios`: ver 12.28 a 12.38.
 
 ### Deploy
 
 - Frontend (`assets/app.js`, `styles.css`, `index.html`, `precios.html`): `git pull` en el VPS (Caddy sirve estatico; con `Cache-Control: no-cache` el cambio se aplica al recargar). Conviene Ctrl+F5 la primera vez.
 - Backend (`pare-carrito-sas-server/`, incluido `Caddyfile`, `server.js`, `billing.js`): `./deploy.sh` (rebuild de contenedores).
+- Cambios recientes que **requieren `./deploy.sh`**: v12.9.110 (renglon "Envio" en `billing.js`), v12.9.112-115 (OCR: `server.js` + nuevas variables de entorno) y v12.9.116 (clave de sync `checklistLog`). El resto del rango es solo frontend.
 - No se registran credenciales en este documento ni en el historial.

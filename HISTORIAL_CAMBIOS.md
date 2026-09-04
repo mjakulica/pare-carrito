@@ -1,16 +1,17 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
-## v12.9.119 - Nuevo Pedido: el texto pegado de WhatsApp no se borra al cerrar el pop-up de alias (2026-08-22)
+## v12.9.119 - Nuevo Pedido: el texto pegado de WhatsApp no se borra al cerrar el pop-up de alias (2026-08-27)
 
 ### Fix
 - Al vincular/eliminar filas en el pop-up de productos no reconocidos (o al abrir "Ver alias"), el `render()` vaciaba el textarea "Pegar pedido de WhatsApp". Ahora el texto se conserva.
 - El texto se persiste en `ui.orderWhatsappDraft` (se actualiza en cada tecla y al leer una imagen por OCR) y el textarea se renderiza con ese valor, asi sobrevive a cualquier re-render. Se limpia solo al crear el pedido.
 - Beneficio: despues de cargar un alias nuevo, se puede volver a apretar "Cargar" sobre el mismo texto sin tener que pegarlo de nuevo.
 - Solo frontend (git pull).
+- Commit: `762bcb6`
 
 ---
 
-## v12.9.118 - Notas en Dividir "por producto" + boton Nuevo producto en Nuevo Pedido (2026-08-22)
+## v12.9.118 - Notas en Dividir "por producto" + boton Nuevo producto en Nuevo Pedido (2026-08-27)
 
 ### Notas de productos en los listados
 - Las notas por item ahora tambien salen en Dividir "Agrupado por producto" (pantalla, PDF y texto de WhatsApp), junto a la cantidad del cliente y entre parentesis, sin la palabra "nota" (ej. "35) 2 (maduro)").
@@ -19,19 +20,21 @@
 ### Boton "Nuevo producto" en Nuevo Pedido
 - En Nuevo Pedido (gerente/admin/empleado) se agrego el boton "Nuevo producto" junto a "Ver alias"/"Subir imagen", que abre el mismo pop-up de alta de producto (openProductForm). Al guardar, el producto queda disponible en el pedido sin salir de la pagina.
 - Solo frontend (git pull).
+- Commit: `4c43866`
 
 ---
 
-## v12.9.117 - Dividir: numero de cliente + selector de dia en el picker (2026-08-22)
+## v12.9.117 - Dividir: numero de cliente + selector de dia en el picker (2026-08-26)
 
 ### Ajustes al selector de pedidos puntuales (Dividir Compras)
 - Cada pedido del listado ahora muestra tambien el NUMERO de cliente (antes solo el nombre): "ORD-... · 035 - Nombre · fecha · N item(s)".
 - Se agrego un selector de "Día de los pedidos" dentro del picker, con HOY por defecto. Antes mostraba una ventana fija (ayer a +3 dias); ahora lista los pedidos del dia elegido (mas cualquiera ya tildado, aunque sea de otro dia). Estado en `ui.divideCandidateDate`.
 - Solo frontend (git pull).
+- Commit: `9a02918`
 
 ---
 
-## v12.9.116 - Cumplimiento de empleados + rendicion de entregas con foto de remito (2026-08-22)
+## v12.9.116 - Cumplimiento de empleados + rendicion de entregas con foto de remito (2026-08-24)
 
 ### Registro de cumplimiento (nueva pagina "Cumplimiento", gerente/admin)
 - Checklist del empleado ahora se PERSISTE y sincroniza (antes era local, sin historial): `state.checklistLog` con {id, dayKey, userId, userName, key, at}. El panel de Inicio y el "Reiniciar" leen/escriben en el log; se conservan ~60 dias.
@@ -45,10 +48,11 @@
 
 ### Deploy
 - Frontend (app.js) + backend (server.js: sync key `checklistLog`): requiere ./deploy.sh.
+- Commit: `0b96bca`
 
 ---
 
-## v12.9.115 - OCR: diccionario de correcciones de lectura editable (2026-08-22)
+## v12.9.115 - OCR: diccionario de correcciones de lectura editable (2026-08-24)
 
 ### Nuevo
 - "Ensenarle" al sistema a corregir errores tipicos del OCR sin depender solo del vocabulario. En Configuracion -> "Prompt de IA (lectura de imagen)" hay un boton "Correcciones de lectura (OCR)".
@@ -59,19 +63,21 @@
 
 ### Deploy
 - Toca frontend (app.js) y backend (server.js, clave de sync): requiere ./deploy.sh.
+- Commit: `60c2c2b`
 
 ---
 
-## v12.9.114 - OCR Vision: hint de caligrafia para manuscrito (2026-08-22)
+## v12.9.114 - OCR Vision: hint de caligrafia para manuscrito (2026-08-24)
 
 ### Ajuste
 - Verificado el uso de Google Vision contra la doc oficial: endpoint `POST /v1/images:annotate`, body con `image.content` (base64) + feature `DOCUMENT_TEXT_DETECTION`, respuesta `fullTextAnnotation.text`. Todo correcto.
 - Mejora: el default de `GOOGLE_VISION_LANG` pasa de "es" a "es-t-i0-handwrit" (hint de caligrafia BCP-47 que Google recomienda para texto MANUSCRITO). Dejar la variable vacia = deteccion automatica (tambien valida para alfabeto latino). El codigo omite `languageHints` si la variable esta vacia.
 - Nota: no se hizo llamada real a la API (falta API key); el test end-to-end es subir una foto en el sistema desplegado.
+- Commit: `3976042`
 
 ---
 
-## v12.9.113 - OCR: Google Cloud Vision en vez de NVIDIA (2026-08-22)
+## v12.9.113 - OCR: Google Cloud Vision en vez de NVIDIA (2026-08-24)
 
 ### Cambio de proveedor de OCR
 - Se saco NVIDIA Nemotron OCR v2 (no rinde bien en texto MANUSCRITO, que es lo que se necesita) y se puso Google Cloud Vision como proveedor PRINCIPAL.
@@ -82,10 +88,11 @@
 
 ### Deploy
 - Cambia el BACKEND (server.js): requiere ./deploy.sh en el VPS.
+- Commit: `f635f0f`
 
 ---
 
-## v12.9.112 - OCR con NVIDIA Nemotron OCR v2 (2026-08-22)
+## v12.9.112 - OCR con NVIDIA Nemotron OCR v2 (2026-08-24)
 
 ### Nuevo proveedor de OCR (fotos de pedidos manuscritos)
 - Se agrego NVIDIA Nemotron OCR v2 (build.nvidia.com) como proveedor PRINCIPAL de OCR. Orden de intentos: NVIDIA -> OpenRouter (gpt-4o-mini) -> Moonshot/Kimi; el primero que responde gana.
@@ -96,10 +103,11 @@
 
 ### Deploy
 - Cambia el BACKEND (server.js): requiere ./deploy.sh en el VPS.
+- Commit: `ad82e8f`
 
 ---
 
-## v12.9.111 - Dividir Compras: elegir pedidos puntuales (2026-08-22)
+## v12.9.111 - Dividir Compras: elegir pedidos puntuales (2026-08-24)
 
 ### Nuevo
 - En Dividir Compras (gerente/admin/empleado) se puede elegir pedidos concretos y ver como se dividen SOLO esos. Pensado para un pedido pasado fuera de horario, sin mezclarlo con la ronda del dia.
@@ -108,6 +116,7 @@
 - Banner "Mostrando solo N pedido(s) seleccionado(s)" con boton "Ver todos los de hoy" para limpiar. Estado en `ui.divideSelectedOrders`.
 - Verificado con harness: seleccionar 2 pedidos -> exactamente sus items; sin seleccion -> los de hoy.
 - Solo frontend (git pull).
+- Commit: `fc4a534`
 
 ---
 
@@ -123,6 +132,7 @@
 
 ### Deploy
 - Cambia el BACKEND (billing.js): requiere ./deploy.sh en el VPS (reconstruye contenedores), no solo git pull.
+- Commit: `38647aa`
 
 ---
 
@@ -141,6 +151,7 @@
 - El envío se SELLA en el pedido al crearlo (`order.shippingFee`); no se aplica retroactivamente a remitos ya emitidos. Se incluye en `getOrderTotal`, `recalcOrderTotals` y en el saldo del cliente (deuda) via el total del pedido.
 - Verificado con harness sobre backup real: General=precio venta; Al Costo(0%)=costo; Al Costo(+10%)=costo x1,10; envío 2000 sumado al total; pedidos viejos sin shippingFee no cobran envío.
 - Solo frontend (git pull).
+- Commit: `8806e88`
 
 ---
 
@@ -159,25 +170,28 @@
 
 ### Recomendacion de datos (opcional)
 - Convendria renombrar el producto activo "Anana" (PROD-185) a "Ananá" con tilde para unificar, y dejar/eliminar el inactivo PROD-093. No es necesario para el fix.
+- Commit: `2e50430`
 
 ---
 
-## v12.9.107 - Alias: poder borrarlos (banana -> anana) (2026-08-10)
+## v12.9.107 - Alias: poder borrarlos (banana -> anana) (2026-08-21)
 
 ### Parser / Alias de productos
 - Diagnostico: "12 bananas" salia como "12 ananas" porque habia un ALIAS de producto (general o de cliente) que mapeaba "banana"/"bananas" a Anaá. Los alias se aplican ANTES del match por nombre, asi que ganan siempre. Probablemente quedo apuntando a Anaá por la colision de ids ya corregida (v12.9.106), o se cargo por error.
 - El modal "Ver alias" (Nuevo Pedido) solo permitia AGREGAR alias, no borrarlos. Se agrego un boton de borrado (gerente/admin) en el listado "Todos los alias cargados" para alias generales y de cliente.
 - Como usarlo: Nuevo Pedido -> Ver alias -> en "Todos los alias cargados" buscar el que dice "banana ... Anaá" y tocar la X.
 - Solo frontend (git pull).
+- Commit: `efb6209`
 
 ---
 
-## v12.9.106 - Fix critico: id de producto colisionaba y se perdia (2026-08-10)
+## v12.9.106 - Fix critico: id de producto colisionaba y se perdia (2026-08-21)
 
 ### Productos / sincronizacion
 - BUG: nextProductId generaba el id como "PROD-" + (state.products.length + 1), chequeando colisiones SOLO contra los productos que ese dispositivo tenia cargados. Con estado local incompleto o con borrados previos (huecos), el producto nuevo podia recibir un id que ya pertenecia a otro producto. Al sincronizar, el merge por id se quedaba con uno solo y el otro desaparecia de Productos (aunque seguia referenciado en compras/Dividir por su productId y productName guardados, y el remito salia con el precio del producto que "gano" el id).
 - Fix: los ids de producto (y de proveedor) ahora son globalmente unicos (tiempo + aleatorio, estilo ITEM-xxxx), con verificacion de colision. Elimina el choque entre dispositivos.
 - Solo frontend (git pull). No corrige productos ya perdidos: hay que volver a crearlos (ahora reciben id unico).
+- Commit: `78102fd`
 
 ---
 
