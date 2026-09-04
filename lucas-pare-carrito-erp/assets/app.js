@@ -1974,7 +1974,12 @@
       }
       // Por defecto se descarga solo la ventana de dias que manda el servidor (el historial viejo
       // queda en el servidor y se pide aparte). ui.fullHistory lo trae completo.
-      const response = await cloudRequest(config, "/state" + (ui.fullHistory ? "?window=full" : ""), { method: "GET" });
+      const modo = historyMode();
+      // Mientras se mira historial cargado a mano, el sondeo automatico no lo vuelve a descargar:
+      // serian varios MB cada vez que alguien cambia algo. Se refresca al volver a la vista rapida.
+      if (!manual && modo !== "rapida") return;
+      const query = modo === "full" ? "?window=full" : modo === "parcial" ? "?days=" + PARTIAL_HISTORY_DAYS : "";
+      const response = await cloudRequest(config, "/state" + query, { method: "GET" });
       if (response.status === 404) {
         if (manual) alert("Todavia no hay datos en la nube. Use Subir datos ahora desde el dispositivo principal.");
         return;
@@ -2152,7 +2157,7 @@
     app.innerHTML = `
       <div id="offline-banner" class="offline-banner" style="display:${typeof navigator !== "undefined" && navigator.onLine === false ? "block" : "none"}">Sin conexión a internet: los cambios se guardan en este dispositivo y se sincronizarán al volver la conexión.</div>
       ${(() => { const n = pendingSyncCount(); return n ? `<div class="offline-banner" style="display:block;background:#b45309;color:#fff">\u26A0 ${n} cambio(s) sin enviar al sistema. Se enviarán al reconectar; no cierres el sistema con internet apagado.</div>` : ""; })()}
-      ${isWindowedState() ? `<div class="offline-banner" style="display:block;background:#1d4ed8;color:#fff">Vista rapida: este dispositivo tiene los movimientos desde el ${escapeHtml(formatDate(windowCutoff()))}. Los saldos son los reales; los listados y reportes de fechas anteriores necesitan el historial completo. <button class="btn small" type="button" data-load-full-history ${ui.loadingFullHistory ? "disabled" : ""} style="margin-left:8px">${ui.loadingFullHistory ? "Descargando..." : "Cargar historial completo"}</button></div>` : ""}
+      ${isWindowedState() && historyMode() === "rapida" ? `<div class="offline-banner" style="display:block;background:#1d4ed8;color:#fff">Vista rapida: este dispositivo tiene los movimientos desde el ${escapeHtml(formatDate(windowCutoff()))}. Los saldos son los reales. En cada pagina de historial hay botones para traer 100 dias o todo.</div>` : ""}
       <div class="app-shell">
         ${renderSidebar(route.base)}
         <div class="sidebar-overlay" aria-hidden="true"></div>
@@ -2164,7 +2169,7 @@
       ${renderModal()}
     `;
     bindCommon();
-    document.querySelectorAll("[data-load-full-history]").forEach((button) => button.addEventListener("click", () => loadFullHistory()));
+    document.querySelectorAll("[data-load-history]").forEach((button) => button.addEventListener("click", () => loadHistory(button.dataset.loadHistory)));
     afterRender.forEach((fn) => fn());
     bindProofImages();
     maybeForcePasswordChange();
@@ -2727,6 +2732,7 @@
       <section class="page${pageClass}">
         ${toolbar}
         ${renderSyncBanners()}
+        ${renderHistoryLoadBar(routeName)}
         <div class="page-header">
           <div>
             <h1 class="page-title">${escapeHtml(title)}</h1>
@@ -13830,23 +13836,68 @@
     return !!(stateWindow && !stateWindow.full && windowCutoff());
   }
 
-  // Trae el historial completo desde el servidor (para reportes viejos). Queda hasta recargar.
-  async function loadFullHistory() {
+  // Paginas donde se mira historial: ahi se ofrece traer mas datos.
+  const HISTORY_ROUTES = new Set([
+    "pedidos", "saldos", "caja", "compras", "pagos", "remitos", "historiales", "rendimiento",
+    "ganancias", "proveedores", "facturacion", "empleados", "unidades", "vehiculos", "mis-pedidos",
+    "cumplimiento", "backup"
+  ]);
+  const PARTIAL_HISTORY_DAYS = 100;
+
+  // Cuanto historial tiene cargado el dispositivo: "rapida" (la ventana que manda el servidor),
+  // "parcial" (100 dias, con el detalle de productos) o "full" (todo). Se pierde al recargar.
+  function historyMode() {
+    return ui.historyMode || "rapida";
+  }
+
+  async function loadHistory(mode) {
     const config = getCloudSyncConfig();
     if (!cloudSyncReady(config)) return alert("No hay servidor configurado.");
-    ui.fullHistory = true;
-    ui.loadingFullHistory = true;
+    if (mode !== "rapida") {
+      const detalle = mode === "full"
+        ? "TODO el historial. Es la descarga mas pesada"
+        : "los ultimos " + PARTIAL_HISTORY_DAYS + " dias con el detalle de productos";
+      if (!confirm("Se va a descargar " + detalle + ".\n\nMientras tanto la actualizacion automatica queda en pausa (para no volver a bajarlo en cada cambio). Volves a la vista rapida con el boton de la misma barra. Continuar?")) return;
+    }
+    const previous = historyMode();
+    ui.historyMode = mode;
+    ui.loadingHistory = mode;
     render();
     try {
       await cloudPull(true, true);
-      alert("Historial completo descargado. Vuelve a la vista liviana al recargar la pagina.");
+      if (mode !== "rapida") {
+        alert(mode === "full"
+          ? "Historial completo descargado."
+          : "Historial de los ultimos " + PARTIAL_HISTORY_DAYS + " dias descargado.");
+      }
     } catch (error) {
-      ui.fullHistory = false;
-      alert("No se pudo descargar el historial completo: " + error.message);
+      ui.historyMode = previous;
+      alert("No se pudo descargar el historial: " + error.message);
     } finally {
-      ui.loadingFullHistory = false;
+      ui.loadingHistory = "";
       render();
     }
+  }
+
+  // Barra que aparece arriba de cada pagina con historial.
+  function renderHistoryLoadBar(routeName) {
+    if (!HISTORY_ROUTES.has(routeName)) return "";
+    const mode = historyMode();
+    const cargando = ui.loadingHistory;
+    if (mode === "rapida" && !isWindowedState()) return "";
+    const texto = mode === "full"
+      ? "Historial COMPLETO cargado. La actualizacion automatica esta en pausa."
+      : mode === "parcial"
+        ? "Mostrando los ultimos " + PARTIAL_HISTORY_DAYS + " dias con detalle. La actualizacion automatica esta en pausa."
+        : "Esta pagina muestra los movimientos " + (windowCutoff() ? "desde el " + formatDate(windowCutoff()) : "de los ultimos dias") + ". Los saldos son los reales; para ver fechas anteriores trae mas historial.";
+    return `
+      <div class="panel history-load-bar" style="margin-bottom:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;border-left:4px solid ${mode === "rapida" ? "#1d4ed8" : "#b45309"}">
+        <span class="muted" style="flex:1;min-width:220px">${escapeHtml(texto)}</span>
+        ${mode !== "parcial" && mode !== "full" ? `<button class="btn small blue" type="button" data-load-history="parcial" ${cargando ? "disabled" : ""}>${cargando === "parcial" ? "Descargando..." : "Cargar 100 dias"}</button>` : ""}
+        ${mode !== "full" ? `<button class="btn small ghost" type="button" data-load-history="full" ${cargando ? "disabled" : ""}>${cargando === "full" ? "Descargando..." : "Cargar historial completo"}</button>` : ""}
+        ${mode !== "rapida" ? `<button class="btn small primary" type="button" data-load-history="rapida" ${cargando ? "disabled" : ""}>Volver a la vista rapida</button>` : ""}
+      </div>
+    `;
   }
 
   function dataUrlToBytes(dataUrl) {
@@ -14169,7 +14220,7 @@
     const purgeBtn = document.getElementById("purge-remito-photos");
     if (purgeBtn) purgeBtn.addEventListener("click", () => purgeOldRemitoPhotos());
     document.getElementById("export-backup").addEventListener("click", () => {
-      if (isWindowedState() && !confirm("Este dispositivo tiene la vista rapida (movimientos desde el " + formatDate(windowCutoff()) + "), asi que el backup NO incluiria el historial completo.\n\nPara un backup completo, primero toca \"Cargar historial completo\" arriba. Descargar igual?")) return;
+      if (historyMode() !== "full" && isWindowedState() && !confirm("Este dispositivo no tiene todo el historial cargado, asi que el backup NO seria completo.\n\nPara un backup completo, primero toca \"Cargar historial completo\" arriba. Descargar igual?")) return;
       const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");

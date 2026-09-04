@@ -724,11 +724,11 @@ const WINDOW_COLLECTIONS = [
 
 const STATE_WINDOW_PRESETS = {
   liviano: {
-    itemsOrders: 5, itemsPurchases: 5,
-    days: { orders: 15, saldos: 15, caja: 15, purchases: 15, payments: 15, remitos: 7, providerLedger: 30,
-      providerPayments: 30, clientTransfers: 15, vendorLedger: 7, attendance: 30, employeePayments: 30,
+    itemsOrders: 8, itemsPurchases: 5,
+    days: { orders: 30, saldos: 15, caja: 15, purchases: 15, payments: 15, remitos: 7, providerLedger: 10,
+      providerPayments: 10, clientTransfers: 15, vendorLedger: 7, attendance: 30, employeePayments: 30,
       employeeReimbursements: 30, performanceAdjustments: 30, stockMovements: 7, cashClosings: 15,
-      priceAutoLog: 7, replacements: 7, billingLog: 60, checklistLog: 7, deletedOrders: 3 }
+      priceAutoLog: 7, replacements: 7, billingLog: 45, checklistLog: 7, deletedOrders: 3 }
   },
   equilibrado: {
     itemsOrders: 7, itemsPurchases: 7,
@@ -769,8 +769,17 @@ function stripOpeningRows(data) {
   return clean;
 }
 
-function buildWindowedState(data, presetName) {
-  const preset = STATE_WINDOW_PRESETS[presetName];
+// Ventana pareja de N dias para todas las colecciones, con los items incluidos: es la que pide
+// "Cargar historial parcial" desde la app.
+function windowPresetForDays(days) {
+  const n = Math.max(1, Math.min(3650, Math.round(Number(days) || 0)));
+  const uniform = {};
+  WINDOW_COLLECTIONS.forEach((key) => { uniform[key] = n; });
+  return { itemsOrders: n, itemsPurchases: n, days: uniform, custom: n };
+}
+
+function buildWindowedState(data, presetName, customDays) {
+  const preset = customDays ? windowPresetForDays(customDays) : STATE_WINDOW_PRESETS[presetName];
   if (!preset) return { data, window: { preset: "full", full: true } };
   const source = data || {};
   const out = {};
@@ -829,7 +838,13 @@ function buildWindowedState(data, presetName) {
 
   return {
     data: out,
-    window: { preset: presetName, full: false, cutoffs, itemsFrom: cutoffDate(preset.itemsOrders) }
+    window: {
+      preset: preset.custom ? "dias-" + preset.custom : presetName,
+      days: preset.custom || null,
+      full: false,
+      cutoffs,
+      itemsFrom: cutoffDate(preset.itemsOrders)
+    }
   };
 }
 
@@ -874,8 +889,9 @@ app.get("/state", authenticate, requireRole(...STATE_READ_ROLES), async (req, re
   if (!rows.length) return res.status(404).json({ error: "Sin datos guardados todavía." });
   const clean = stripHistoryFromState(rows[0].data);
   const requested = String(req.query.window || "").trim().toLowerCase();
+  const customDays = Number(req.query.days || 0) > 0 ? Number(req.query.days) : 0;
   const presetName = requested === "full" ? "" : (requested || STATE_WINDOW_DEFAULT);
-  const built = buildWindowedState(clean, presetName);
+  const built = buildWindowedState(clean, presetName, customDays);
   res.json({ data: built.data, window: built.window, updatedAt: rows[0].updated_at.toISOString() });
 });
 

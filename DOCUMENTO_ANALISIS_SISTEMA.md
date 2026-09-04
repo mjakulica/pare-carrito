@@ -237,7 +237,7 @@ Tablas adicionales:
 | POST | `/auth/register` | Público | Registro de cliente pendiente |
 | POST | `/auth/recover` | Público | Recuperación de contraseña |
 | POST | `/auth/reset` | Público | Restablecer contraseña |
-| GET | `/state` | manager, admin, employee, contador | Estado por ventana de fechas (`?window=full` para el historial completo) |
+| GET | `/state` | manager, admin, employee, contador | Estado por ventana de fechas. `?window=full` trae todo; `?days=N` una ventana pareja de N dias con items (la usa "Cargar 100 dias") |
 | GET | `/state/version` | manager, admin, employee, contador | **(v12.9.127)** Solo `{updatedAt}` (~60 bytes): lo usa el sondeo automatico para no descargar el estado si no cambio nada |
 | PUT | `/state` | manager, admin, employee, contador | Guardar estado completo |
 | POST | `/transfers` | customer, example | Registrar transferencia cliente |
@@ -684,6 +684,12 @@ Completa 12.50: ningun archivo subido queda ya en base64 adentro del JSON de est
 - Helpers: `getChildClientIds(padre)`, `getClientGroupIds(clienteId)`, `getClientGroupBalance(clienteId)` e `isParentClient(clienteId)`.
 - El usuario del cliente padre ve los saldos consolidados del grupo y puede operar por cada cuenta hija: `getCustomerVisibleClientIds` se expande con el grupo.
 
+### 12.58 Ventanas ajustadas y carga de historial por pagina (v12.9.128)
+- Preset `liviano` ajustado a pedido: `itemsOrders` 5 -> 8, `orders` 15 -> 30, `providerLedger` y `providerPayments` 30 -> 10, `billingLog` 60 -> 45. El resto sin cambios. Resultado: 3,00 MB de JSON / 167 KB por la red (antes 2,29 MB / 131 KB), con saldos exactos.
+- `windowPresetForDays(n)` arma una ventana pareja de N dias CON items para todas las colecciones; `GET /state?days=100` la usa. Es lo que pide "Cargar 100 dias" (21,90 MB / 1073 KB en el estado de prueba).
+- `HISTORY_ROUTES` (17 rutas) + `renderHistoryLoadBar(routeName)` insertada en `pageShell`: un solo punto cubre todas las paginas con historial. Tres estados: vista rapida (ofrece 100 dias y completo), parcial y completo (ofrecen volver a la vista rapida).
+- `historyMode()` (`rapida` / `parcial` / `full`) define la query del pull. Con historial cargado a mano, `cloudPull` corta el sondeo automatico: bajarlo de nuevo en cada cambio serian varios MB. Se retoma al volver a la vista rapida.
+
 ### 12.57 Sondeo automatico sin descargar el estado (v12.9.127)
 - `startCloudAutoSync` sondea cada 25 s. `cloudPull` descargaba el estado COMPLETO y recien despues comparaba `updatedAt` para descartarlo: sin ningun cambio, el dispositivo bajaba todo el estado cada 25 segundos.
 - Nuevo `GET /state/version` (solo `{updatedAt}`, ~60 bytes). En el sondeo automatico (no manual, no login, con `lastSync` ya definido) `cloudPull` pregunta ahi primero y corta si la fecha no avanzo. Si el chequeo falla, sigue por el camino normal.
@@ -706,7 +712,7 @@ El cuello de botella despues de sacar las imagenes era el TEXTO historico: pedid
 
 ## 13. Ultimo Cambio y Version
 
-**Version operativa:** 12.9.127
+**Version operativa:** 12.9.128
 **Fecha:** 2026-09-04
 **Rama:** `master` (repositorio `mjakulica/pare-carrito`)
 **Entorno:** VPS productivo `/opt/pare-carrito` con frontend estatico servido por Caddy y API Docker Compose. Frontend `sistema.parecarrito.com.ar`, API en `/api`, lista de precios publica en `/precios`.
@@ -715,7 +721,11 @@ El cuello de botella despues de sacar las imagenes era el TEXTO historico: pedid
 
 Ver secciones 12.53 a 12.55: pagina "Ganancias" (ganancia real por producto y cliente), boton "Agregar producto nuevo" en el pop-up de alias, y super usuario (cliente padre con saldos consolidados). Se numeraron 120-122 en paralelo a los cambios de esta rama, que quedaron renumerados 123-125.
 
-### Detalle del ultimo cambio (v12.9.127)
+### Detalle del ultimo cambio (v12.9.128)
+
+- Ventanas ajustadas (items de pedidos 8 dias, cabeceras 30, proveedores 10, facturacion 45) y botones "Cargar 100 dias" / "Cargar historial completo" / "Volver a la vista rapida" en las 17 paginas con historial. **Requiere `./deploy.sh`.**
+
+### Cambios de v12.9.127
 
 - El sondeo automatico (cada 25 s) ya no descarga el estado completo para despues descartarlo: pregunta `GET /state/version` (60 bytes) y baja solo si hay cambios. Con la app abierta una hora: 222,1 MB -> 1,5 MB. **Requiere `./deploy.sh`.**
 

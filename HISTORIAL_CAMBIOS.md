@@ -1,5 +1,40 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.128 - Ventanas ajustadas y carga de historial en cada pagina (2026-09-04)
+
+### Ventanas de la vista rapida
+| Dato | Antes | Ahora |
+|---|---|---|
+| Pedidos con el detalle de productos | 5 dias | **8 dias** |
+| Pedidos solo con cabecera | 15 dias | **30 dias** |
+| Cuenta corriente de proveedores | 30 dias | **10 dias** |
+| Facturacion | 60 dias | **45 dias** |
+
+El resto queda igual (saldos, caja, compras y pagos 15 dias; remitos, stock, recambios y checklist 7). La vista rapida pasa de 2,29 MB a **3,00 MB** (167 KB por la red) y los saldos siguen siendo exactos.
+
+### Botones de historial en cada pagina
+- La barra aparece arriba de las **17 paginas con historial** (Pedidos, Saldos, Caja, Compras, Pagos, Remitos, Historiales, Rendimiento, Ganancias, Proveedores, Facturacion, Empleados, Unidades, Vehiculos, Mis pedidos, Cumplimiento y Backup). No aparece en las que no tienen historial (Nuevo Pedido, Clientes, Productos...).
+- **"Cargar 100 dias"** (nuevo): trae todas las colecciones de los ultimos 100 dias CON el detalle de productos, para reportes de hasta poco mas de 3 meses. Endpoint `GET /state?days=100`.
+- **"Cargar historial completo"**: trae todo, como antes.
+- **"Volver a la vista rapida"**: vuelve al estado liviano.
+
+Pesos de cada opcion (medidos sobre el estado de prueba de 32,45 MB):
+
+| Opcion | JSON | Por la red |
+|---|---|---|
+| Vista rapida | 3,00 MB | 167 KB |
+| 100 dias | 21,90 MB | 1073 KB |
+| Completo | 32,45 MB | 1580 KB |
+
+### Mientras se mira historial, la actualizacion automatica se pausa
+Con historial cargado a mano, el sondeo de cada 25 segundos NO lo vuelve a descargar: serian megas cada vez que alguien toca algo. La barra lo dice ("la actualizacion automatica esta en pausa") y se retoma al volver a la vista rapida. Antes de descargar, avisa lo que va a traer.
+
+### Deploy
+- **REQUIERE `./deploy.sh`** (server.js) + `git pull` del frontend.
+- El tamanio de la vista rapida se sigue cambiando sin tocar codigo con `STATE_WINDOW_PRESET` (`liviano` / `equilibrado` / `conservador`).
+
+---
+
 ## v12.9.127 - El sondeo automatico deja de bajar el estado entero cada 25 segundos (2026-09-04)
 
 ### El problema (el que mas pesaba en el celular)
