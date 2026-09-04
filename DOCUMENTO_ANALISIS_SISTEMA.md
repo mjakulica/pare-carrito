@@ -133,7 +133,7 @@ El ERP guarda el estado operativo en un único JSONB. Los arrays/colecciones pri
 | `vehicles` | Vehículos de reparto | `id`, `name`, `type`, `driverName`, `capacity`, `isActive` |
 | `providers` | Proveedores | `id`, `name`, `contactName`, `paymentTerms`, `defaultMargin`, `productsSupplied`, `isActive` |
 | `orders` | Pedidos | `id`, `date`, `clientId`, `deliveryVehicleId`, `status`, `subtotalAmount`, `ivaAmount`, `totalAmount`, `paymentReceived`, `shippingFee`, `shippingIvaRate`, `deliveryRemitoPhoto`, `items[]` (con `notes` por item), `userId`, `createdAt` |
-| `purchases` | Compras y gastos | `id`, `date`, `expenseType`, `providerId`, `providerName`, `totalCost`, `paymentStatus`, `recordedBy`, `items[]` |
+| `purchases` | Compras y gastos (incluye devoluciones a proveedor, con `totalCost` e `items[].quantity` en NEGATIVO) | `id`, `date`, `expenseType` (`purchase` / `provider_return` / `provider_payment` / `product_expense` / `other_expense` / `freight` / `prepared` / `market_price` / `cash_movement`), `providerId`, `providerName`, `totalCost`, `paymentStatus`, `returnOfPurchaseId`, `recordedBy`, `items[]` |
 | `payments` | Pagos recibidos | `id`, `date`, `clientId`, `amount`, `method`, `receivedByUserId`, `orderIds` |
 | `saldos` | Cuenta corriente cliente | `id`, `date`, `clientId`, `type`, `description`, `amount`, `balance`, `relatedEntityId`, `relatedEntityType` |
 | `caja` | Movimientos de caja | `id`, `date`, `type`, `concept`, `amountIngreso`, `amountEgreso`, `cashBoxId`, `relatedEntityId`, `relatedEntityType` |
@@ -608,24 +608,51 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 - **Boton "Nuevo producto" (v12.9.118):** junto a "Ver alias" / "Subir imagen"; abre `openProductForm` y al guardar deja el producto disponible sin salir de la pagina.
 - **Borrador persistente (v12.9.119):** el texto pegado en "Pegar pedido de WhatsApp" se guarda en `ui.orderWhatsappDraft` (en cada tecla y al leer una imagen por OCR) y el textarea se renderiza con ese valor, de modo que sobrevive a cualquier `render()` — antes se vaciaba al vincular alias o abrir "Ver alias". Se limpia solo al crear el pedido.
 
+### 12.47 Proveedores: saldo real, devoluciones y carga por proveedor (v12.9.120)
+
+**Saldo de proveedor (fix de un saldo mas BAJO que el real).** Dos causas, las dos corregidas:
+- Al anular un "Pago a Proveedor", `annulPurchase` revertia la caja pero no el movimiento negativo que el pago habia dejado en `providerLedger`: la deuda quedaba descontada por un pago inexistente. Ahora la anulacion compensa ese movimiento (`provider_payment_annul`) y marca el pago como `anulado`.
+- El saldo salia solo de `providerLedger`, mientras que el resumen de cuenta (`getProviderMovements`) tambien lista compras en cuenta corriente sin movimiento asociado (importaciones, API externa / bot). `getProviderDebtMap()` calcula ahora, en UNA pasada para todos los proveedores, `providerLedger` + esas compras en cuenta corriente huerfanas (excluyendo las anuladas); `getProviderBalance(id, mapa)` y `getProviderBalances()` lo consumen.
+- En el resumen de cuenta los movimientos que vienen de una compra muestran "-" en la columna Saldo (no tienen snapshot), en vez de "$0".
+
+**Devolucion a proveedor (`expenseType: "provider_return"`, ids `DEV-...`).** Nuevo tipo de egreso en Compras y Gastos:
+- Se elige proveedor y, opcionalmente, la compra original (`returnOfPurchaseId`); al elegirla se cargan sus productos con el costo al que se compraron (`loadPurchaseLinesFromSource`).
+- "Como se compensa" reutiliza `paymentStatus`: `account_current` baja la deuda (movimiento `devolucion` negativo en `providerLedger`) y `paid` genera un INGRESO en la caja elegida.
+- Se guarda como egreso NEGATIVO (`totalCost` y `items[].quantity` en negativo), de modo que toda metrica que ya suma compras la resta sin cambios adicionales: gastos por dia del dashboard, `getPerformanceSummary` / `getPerformanceExpenseRows`, historial de compras por producto y `getPurchasedQuantities`.
+- Stock: `recordStockPurchaseMovements` acepta cantidades negativas para este tipo y registra el movimiento como `compra` en negativo (`stockComprasBetween` lo neutraliza), incluida la relacion mayorista -> minorista.
+- Anulacion: devuelve la deuda o saca de la caja la plata que habia entrado. La edicion basica de importe esta bloqueada para devoluciones (como para los pagos a proveedor), para no invertir el signo del movimiento.
+
+**Compras y Gastos - "Cargar productos".** Con un proveedor (o empleado) elegido, carga una fila por cada producto asignado (`productsSupplied` / `assignedTo*`) con el ultimo costo (`getStoredProductCost`) y la cantidad que falta comprar hoy; primero los pendientes, sin duplicar los ya cargados (`purchaseProductsForAssignee`, `loadPurchaseLinesForAssignee`).
+
+### 12.48 Peso del estado y arranque (v12.9.120)
+- **Causa de la lentitud:** el estado viaja y se guarda como UN solo JSON, y adentro lleva imagenes en base64 (`products[].imageData`, `orders[].deliveryRemitoPhoto.data`, comprobantes de egresos, pagos y transferencias). El texto (pedidos, saldos, caja) comprime bien con el gzip de Caddy; el base64 no. Por eso el peso lo dominan las imagenes, no el historico.
+- `saveState()` hacia `JSON.stringify` de TODO el estado en cada mutacion. Ahora el snapshot local se agenda (`scheduleLocalStateSnapshot`, 1,5 s) y se fuerza con `flushLocalStateSnapshot()` antes de leerlo, al ocultar la pestania (`visibilitychange`) y al cerrar (`beforeunload` / `pagehide`).
+- Backup: panel "Peso de los datos" (`measureStateWeight`) con el peso por seccion y el detalle de cuanto son imagenes; boton "Optimizar fotos de producto" (`recompressDataUrl` a 400px) y "Borrar fotos de remito viejas" (mas de 60 dias). Las fotos nuevas de producto se comprimen a 400px (antes 700px).
+- Pendiente (fix de fondo, requiere backend y migracion): sacar las imagenes del JSON de estado y guardarlas por referencia con el endpoint `/proofs` que ya existe, para que el arranque no las descargue.
+
 ---
 
 ## 13. Ultimo Cambio y Version
 
-**Version operativa:** 12.9.119
-**Fecha:** 2026-08-27
-**Commit GitHub del cambio funcional:** `762bcb6`
+**Version operativa:** 12.9.120
+**Fecha:** 2026-09-04
 **Rama:** `master` (repositorio `mjakulica/pare-carrito`)
 **Entorno:** VPS productivo `/opt/pare-carrito` con frontend estatico servido por Caddy y API Docker Compose. Frontend `sistema.parecarrito.com.ar`, API en `/api`, lista de precios publica en `/precios`.
 
-### Detalle del ultimo cambio (v12.9.119)
+### Detalle del ultimo cambio (v12.9.120)
 
-- Nuevo Pedido: el texto pegado de WhatsApp ya no se pierde al cerrar el pop-up de alias. Se persiste en `ui.orderWhatsappDraft` y se limpia recien al crear el pedido, asi se puede volver a apretar "Cargar" sobre el mismo texto despues de dar de alta un alias.
-- Solo frontend: `git pull` en el VPS.
+- Proveedores: el saldo ya no queda por debajo del real (anulacion de pagos + compras en cuenta corriente sin movimiento en el ledger).
+- Nuevo tipo de egreso "Devolución a proveedor", que descuenta deuda o devuelve plata a la caja y resta en todas las metricas y en el stock.
+- Compras y Gastos: boton "Cargar productos" para traer todos los productos de un proveedor y editar costo y cantidad de una vez.
+- Dividir Compras: los enteros se muestran sin ",0".
+- Arranque y respuesta: snapshot local diferido, panel de peso de datos y herramientas para bajar el peso de las imagenes.
+- Solo frontend: `git pull`.
 
-### Rango de cambios recientes documentados (v12.9.106 a v12.9.119)
+### Rango de cambios recientes documentados (v12.9.106 a v12.9.120)
 
-Ver secciones 12.41 a 12.46. Resumen por tema:
+Ver tambien 12.47 y 12.48 (v12.9.120: saldo de proveedores, devoluciones, carga por proveedor, peso del estado).
+
+Resumen por tema del rango v12.9.106-119 (secciones 12.41 a 12.46):
 - **Datos / sincronizacion (v12.9.106):** ids de producto y proveedor globalmente unicos; corrige la desaparicion de productos en el merge entre dispositivos.
 - **Alias y parser (v12.9.107, v12.9.108):** alias borrables desde "Ver alias"; guarda de primera letra en el match por nombre-base ("banana" ya no cae en "Anana").
 - **Clientes y facturacion (v12.9.109, v12.9.110):** tier de precio "Al Costo"; cargo de "Envio" sellado en el pedido, con IVA 10,5% si el cliente factura y renglon "Envio" en la factura AFIP.

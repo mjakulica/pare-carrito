@@ -2985,10 +2985,14 @@
     const tracked = getStockTrackedProductIds();
     const relations = state.productRelations || [];
     const stamp = new Date().toISOString();
+    // Las devoluciones entran con cantidad NEGATIVA: el mismo tipo "compra" resta del stock.
+    const isReturn = (purchase.expenseType || "") === "provider_return";
     const add = (productId, qty) => {
-      if (!(Number(qty) > 0)) return;
+      const value = Number(qty);
+      if (!value) return;
+      if (!isReturn && !(value > 0)) return;
       state.stockMovements = state.stockMovements || [];
-      state.stockMovements.push({ id: nextDatedId("STK", state.stockMovements) + "-p", date: purchase.date || todayISO(), productId, type: "compra", qty: Number(qty), note: "Compra " + (purchase.id || ""), userId: currentUser.id, createdAt: stamp });
+      state.stockMovements.push({ id: nextDatedId("STK", state.stockMovements) + "-p", date: purchase.date || todayISO(), productId, type: "compra", qty: value, note: (isReturn ? "Devolucion " : "Compra ") + (purchase.id || ""), userId: currentUser.id, createdAt: stamp });
     };
     items.forEach((item) => {
       if (!item.productId) return;
@@ -6983,6 +6987,7 @@
               <label>Tipo</label>
               <select id="purchase-kind">
                 ${canPurchaseProviders ? `<option value="purchase">Compra a proveedor</option>` : ""}
+                ${canPurchaseProviders ? `<option value="provider_return">Devolución a proveedor</option>` : ""}
                 ${canPayProviders ? `<option value="provider_payment">Pago a Proveedor</option>` : ""}
                 <option value="product_expense">Gasto de producto</option>
                 <option value="prepared">Preparado</option>
@@ -7045,6 +7050,11 @@
               <div class="input-with-button"><input id="purchase-vendor" list="vendor-options" placeholder="Nombre del vendedor" /><button class="btn small ghost" type="button" data-register-vendor>Registrar</button></div>
               <datalist id="vendor-options">${getKnownVendors().map((name) => `<option value="${escapeAttr(name)}"></option>`).join("")}</datalist>
             </div>`}
+            <div class="field span-3" id="purchase-return-wrap" style="display:none">
+              <label>Devolución de la compra (opcional)</label>
+              <select id="purchase-return-source"><option value="">Sin vincular a una compra</option></select>
+              <span class="muted" style="font-size:12px">Al elegir una compra se cargan sus productos con el costo al que se compraron, para devolver todo o parte.</span>
+            </div>
             <div class="field span-3" id="purchase-description-wrap">
               <label>Descripcion de otro gasto</label>
               <input id="purchase-description" placeholder="Combustible, peaje, bolsa, estacionamiento, etc." />
@@ -7268,6 +7278,7 @@
       const isPrepared = kind.value === "prepared";
       const isMarketPrice = kind.value === "market_price";
       const isCashMovement = kind.value === "cash_movement";
+      const isProviderReturn = kind.value === "provider_return";
       itemsWrap.style.display = isOther || isProviderPayment || isCashMovement ? "none" : "grid";
       const productsPanel = document.getElementById("purchase-products-panel");
       if (productsPanel) productsPanel.style.display = (isOther || isProviderPayment || isCashMovement) ? "none" : "block";
@@ -7284,15 +7295,26 @@
         if (currentUser.role === "employee" || isCashMovement) cashBoxSelect.value = getDefaultOutgoingCashBoxId();
         cashBoxSelect.disabled = currentUser.role === "employee" || isCashMovement;
       }
-      if (providerWrap) providerWrap.style.display = isPurchase || isProviderPayment ? "grid" : "none";
-      if (statusWrap) statusWrap.style.display = isPurchase ? "grid" : "none";
+      if (providerWrap) providerWrap.style.display = isPurchase || isProviderPayment || isProviderReturn ? "grid" : "none";
+      if (statusWrap) statusWrap.style.display = isPurchase || isProviderReturn ? "grid" : "none";
       if (favoritesWrap) favoritesWrap.style.display = isPurchase ? "block" : "none";
+      const returnWrap = document.getElementById("purchase-return-wrap");
+      if (returnWrap) returnWrap.style.display = isProviderReturn ? "grid" : "none";
+      if (isProviderReturn) refreshReturnSourceOptions();
+      const statusLabelEl = statusWrap ? statusWrap.querySelector("label") : null;
+      if (statusLabelEl) statusLabelEl.textContent = isProviderReturn ? "Como se compensa" : "Estado";
+      const statusSelectEl = document.getElementById("purchase-payment-status");
+      if (statusSelectEl) {
+        Array.from(statusSelectEl.options).forEach((option) => {
+          if (option.value === "account_current") option.textContent = isProviderReturn ? "Descontar de la cuenta corriente" : "Cuenta Corriente";
+          if (option.value === "paid") option.textContent = isProviderReturn ? "Devuelve la plata (entra a caja)" : "Pagado";
+        });
+      }
       if (vendorWrap) vendorWrap.style.display = isCashMovement ? "none" : "grid";
       if (vendorFavoritesWrap) vendorFavoritesWrap.style.display = (currentUser.role === "employee" || isCashMovement) ? "none" : "block";
       if (providerPaymentModeWrap) providerPaymentModeWrap.style.display = isProviderPayment ? "grid" : "none";
       if (providerPaymentAmountWrap) providerPaymentAmountWrap.style.display = isProviderPayment ? "grid" : "none";
       if (providerPaymentMethodWrap) providerPaymentMethodWrap.style.display = isProviderPayment ? "grid" : "none";
-      if (providerWrap) providerWrap.style.display = isPurchase || isProviderPayment ? "grid" : "none";
       refreshRequiredGrid();
       recalc();
     };
@@ -7467,6 +7489,16 @@
         if (!added) alert("Los " + total + " productos de esta seleccion ya estan cargados en el detalle.");
       });
     }
+    const returnSourceSelect = document.getElementById("purchase-return-source");
+    if (returnSourceSelect) {
+      returnSourceSelect.addEventListener("change", () => {
+        if (!returnSourceSelect.value) return;
+        const added = loadPurchaseLinesFromSource(returnSourceSelect.value);
+        recalc();
+        if (!added) alert("Esa compra no tiene productos con cantidad para devolver.");
+      });
+    }
+    if (providerInput) providerInput.addEventListener("change", () => { if (kind.value === "provider_return") refreshReturnSourceOptions(); });
     kind.addEventListener("change", updateKind);
     updateKind();
     if (currentUser.role === "proveedor") {
@@ -7561,6 +7593,25 @@
           cashBoxId: cashBoxSelect.value
         });
         if (!providerPayment) return;
+        saveState();
+        render();
+        return;
+      }
+      if (expenseType === "provider_return") {
+        if (!provider) return alert("Seleccione el proveedor al que le devuelve la mercaderia.");
+        const returnItems = readPurchaseItems(false);
+        const returnSourceEl = document.getElementById("purchase-return-source");
+        const created = registerProviderReturn({
+          provider,
+          items: returnItems,
+          date: document.getElementById("purchase-date").value || todayISO(),
+          paymentStatus,
+          cashBoxId: cashBoxSelect ? cashBoxSelect.value : "",
+          notes: document.getElementById("purchase-notes").value.trim(),
+          sourcePurchaseId: returnSourceEl ? returnSourceEl.value : "",
+          assignedEmployeeId: currentUser.role === "employee" ? currentUser.id : (document.getElementById("purchase-assigned-employee") || { value: "" }).value
+        });
+        if (!created) return;
         saveState();
         render();
         return;
@@ -7944,6 +7995,129 @@
       if (qtyInput && !qtyInput.value && pendingQty > 0) qtyInput.value = formatAmountInput(pendingQty);
     });
     return added;
+  }
+
+  // Compras del proveedor elegido que todavia se pueden devolver (no anuladas, con productos).
+  function returnablePurchasesFor(providerId) {
+    if (!providerId) return [];
+    return (state.purchases || [])
+      .filter((purchase) => purchase
+        && purchase.status !== "anulado"
+        && ["purchase", "product_expense"].includes(purchase.expenseType || "purchase")
+        && getPurchaseProviderId(purchase) === providerId
+        && Number(purchase.totalCost || 0) > 0)
+      .sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.createdAt || "").localeCompare(String(a.createdAt || "")))
+      .slice(0, 40);
+  }
+
+  function refreshReturnSourceOptions() {
+    const select = document.getElementById("purchase-return-source");
+    const providerInput = document.getElementById("purchase-provider");
+    if (!select) return;
+    const parsed = providerInput ? parsePurchaseProviderValue(providerInput.value) : { type: "all" };
+    const providerId = parsed.type === "provider" ? parsed.id : "";
+    const previous = select.value;
+    const purchases = returnablePurchasesFor(providerId);
+    select.innerHTML = `<option value="">Sin vincular a una compra</option>` + purchases.map((purchase) => {
+      const detail = (purchase.items || []).map((item) => item.productName).filter(Boolean).slice(0, 3).join(", ");
+      return `<option value="${escapeAttr(purchase.id)}">${escapeHtml(formatDate(purchase.date))} - ${escapeHtml(formatMoney(purchase.totalCost))}${detail ? " - " + escapeHtml(detail) : ""}</option>`;
+    }).join("");
+    if (previous && purchases.some((purchase) => purchase.id === previous)) select.value = previous;
+  }
+
+  // Carga en el detalle los productos de la compra que se esta devolviendo, con el costo original.
+  function loadPurchaseLinesFromSource(purchaseId) {
+    const container = document.getElementById("purchase-items");
+    const purchase = (state.purchases || []).find((p) => p && p.id === purchaseId);
+    if (!container || !purchase) return 0;
+    const items = flattenPurchaseItems(purchase).filter((item) => item.productId && Number(item.quantity || 0) > 0);
+    let added = 0;
+    items.forEach((item) => {
+      addProductLineFromFavorite(item.productId);
+      const row = Array.from(container.querySelectorAll("[data-purchase-item-row]"))
+        .find((entry) => entry.querySelector("[data-product-select]").value === item.productId);
+      if (!row) return;
+      added++;
+      syncPurchaseRow(row);
+      const qtyInput = row.querySelector("[data-item-qty]");
+      const costInput = row.querySelector("[data-item-cost]");
+      if (qtyInput) qtyInput.value = formatAmountInput(Number(item.quantity || 0));
+      if (costInput) costInput.value = formatAmountInput(Number(item.unitCost || 0));
+    });
+    return added;
+  }
+
+  // Registra la devolucion de productos a un proveedor. Se guarda como un egreso NEGATIVO
+  // (expenseType "provider_return"), asi todas las metricas que ya suman compras (rendimiento,
+  // gastos del dia, historial por producto, cantidades compradas) la restan sin tocar nada mas.
+  function registerProviderReturn(options) {
+    const provider = options.provider;
+    const items = (options.items || []).filter((item) => item.productId && Number(item.quantity) > 0 && Number(item.unitCost) >= 0);
+    if (!provider) return alert("Seleccione el proveedor al que le devuelve la mercaderia.");
+    if (!items.length) return alert("Cargue al menos un producto con cantidad y costo para devolver.");
+    const total = Math.round(items.reduce((sum, item) => sum + Number(item.quantity) * Number(item.unitCost), 0) * 100) / 100;
+    if (!(total > 0)) return alert("El total de la devolucion tiene que ser mayor a cero.");
+    const date = options.date || todayISO();
+    const negativeItems = items.map((item) => ({
+      productId: item.productId,
+      productName: item.productName,
+      quantity: -Math.abs(Number(item.quantity)),
+      unitCost: Number(item.unitCost),
+      totalCost: -Math.abs(Number(item.quantity) * Number(item.unitCost))
+    }));
+    const purchase = {
+      id: nextDatedId("DEV", state.purchases),
+      createdAt: new Date().toISOString(),
+      date,
+      expenseType: "provider_return",
+      providerId: provider.id,
+      providerName: provider.name,
+      productId: "",
+      productName: "",
+      description: "Devolucion a " + provider.name,
+      quantity: -negativeItems.reduce((sum, item) => sum + Math.abs(item.quantity), 0),
+      unitCost: 0,
+      items: negativeItems,
+      paymentStatus: options.paymentStatus === "account_current" ? "account_current" : "paid",
+      totalCost: -total,
+      returnOfPurchaseId: options.sourcePurchaseId || "",
+      cashBoxId: options.cashBoxId || getDefaultOutgoingCashBoxId(),
+      notes: options.notes || "",
+      assignedEmployeeId: options.assignedEmployeeId || "",
+      vendorName: "",
+      recordedBy: currentUser.name,
+      userRole: currentUser.role
+    };
+    state.purchases.push(purchase);
+    // Stock: sale del deposito lo que se devuelve (movimiento de compra en negativo).
+    recordStockPurchaseMovements(purchase);
+    if (purchase.paymentStatus === "account_current") {
+      // Baja la deuda con el proveedor.
+      addProviderLedgerEntry({
+        providerId: provider.id,
+        date,
+        type: "devolucion",
+        description: "Devolucion - " + purchase.id + (purchase.returnOfPurchaseId ? " (de " + purchase.returnOfPurchaseId + ")" : ""),
+        amount: -total,
+        relatedEntityId: purchase.id,
+        relatedEntityType: "purchase",
+        notes: purchase.notes
+      });
+    } else {
+      // El proveedor devuelve la plata: entra a la caja.
+      addCajaEntry({
+        date,
+        type: "provider_return",
+        concept: "Devolucion a proveedor - " + provider.name,
+        relatedEntityId: purchase.id,
+        relatedEntityType: "purchase",
+        amountIngreso: total,
+        amountEgreso: 0,
+        cashBoxId: purchase.cashBoxId,
+        notes: purchase.notes
+      });
+    }
+    return purchase;
   }
 
   function addProductLineFromFavorite(productId) {
@@ -16605,6 +16779,7 @@
   function expenseTypeLabel(type) {
     return {
       purchase: "Compra",
+      provider_return: "Devolución a proveedor",
       product_expense: "Gasto producto",
       other_expense: "Otro gasto",
       freight: "Flete",
@@ -17024,6 +17199,7 @@
         const resolvedProviderId = getPurchaseProviderId(purchase);
         const provider = getProvider(resolvedProviderId);
         const isPayment = purchase.expenseType === "provider_payment";
+        const isReturn = purchase.expenseType === "provider_return";
         const amount = Number(purchase.totalCost || purchase.amount || 0);
         return {
           id: purchase.id,
@@ -17031,9 +17207,9 @@
           timestamp: purchase.timestamp || "",
           providerId: resolvedProviderId,
           providerName: provider ? provider.name : (purchase.providerName || resolvedProviderId),
-          type: isPayment ? "pago" : "compra",
-          description: purchase.description || (isPayment ? "Pago proveedor" : "Compra") + " - " + (purchase.productName || purchase.providerName || ""),
-          amount: isPayment ? -Math.abs(amount) : amount,
+          type: isPayment ? "pago" : isReturn ? "devolucion" : "compra",
+          description: purchase.description || (isPayment ? "Pago proveedor" : isReturn ? "Devolucion" : "Compra") + " - " + (purchase.productName || purchase.providerName || ""),
+          amount: isPayment ? -Math.abs(amount) : isReturn ? -Math.abs(amount) : amount,
           balance: null,
           notes: purchase.notes || "",
           relatedEntityId: purchase.id,
@@ -18049,7 +18225,7 @@
 
   function canBasicEditPurchase(purchase) {
     if (!purchase || purchase.status === "anulado") return false;
-    if ((purchase.expenseType || "") === "provider_payment") return false;
+    if (["provider_payment", "provider_return"].includes(purchase.expenseType || "")) return false;
     if (!currentUser) return false;
     if (["manager", "admin"].includes(currentUser.role)) return true;
     if (currentUser.role === "employee") return purchase.userRole === "employee" || purchase.recordedBy === currentUser.name;
@@ -18139,6 +18315,37 @@
     purchase.status = "anulado";
     purchase.annulledAt = new Date().toISOString();
     purchase.annulledBy = currentUser ? currentUser.name : "";
+
+    // Anular una DEVOLUCION: vuelve a subir la deuda (o sale de caja la plata que habia entrado).
+    // El egreso quedo guardado en negativo, asi que el importe se maneja en valor absoluto.
+    if (expenseType === "provider_return") {
+      const returned = Math.abs(amount);
+      if (purchase.paymentStatus === "account_current" && purchase.providerId) {
+        addProviderLedgerEntry({
+          providerId: purchase.providerId,
+          date: purchase.date,
+          type: "anulacion",
+          description: "Anulacion devolucion " + purchase.id,
+          amount: returned,
+          relatedEntityId: purchase.id,
+          relatedEntityType: "purchase_annul",
+          notes: "Devolucion anulada: la deuda con el proveedor vuelve a su valor anterior."
+        });
+      } else {
+        addCajaEntry({
+          date: purchase.date,
+          type: "purchase_annul",
+          concept: "Anulacion devolucion " + purchase.id,
+          relatedEntityId: purchase.id,
+          relatedEntityType: "purchase_annul",
+          amountIngreso: 0,
+          amountEgreso: returned,
+          cashBoxId: getPurchaseCashBoxId(purchase),
+          notes: "Devolucion anulada: sale de la caja la plata que habia entrado."
+        });
+      }
+      return;
+    }
 
     // Revertir deuda con proveedor para compras en cuenta corriente
     if (purchase.paymentStatus === "account_current" && purchase.providerId) {

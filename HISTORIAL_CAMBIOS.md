@@ -1,5 +1,39 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.120 - Devolucion a proveedores, saldo de proveedor corregido, Compras por proveedor y arranque mas liviano (2026-09-04)
+
+### Saldos de proveedores: aparecia MENOS de lo que hay que pagar (fix)
+- Causa principal: al ANULAR un "Pago a Proveedor" se devolvia la plata a la caja pero NO se devolvia la deuda. El movimiento negativo del pago quedaba en `providerLedger` para siempre, asi que el saldo del proveedor quedaba descontado por un pago que ya no existia. Ahora la anulacion compensa ese movimiento y marca el pago como anulado.
+- Segunda causa: el saldo se calculaba SOLO con `providerLedger`, pero el resumen de cuenta tambien lista compras en cuenta corriente que nunca generaron movimiento (importaciones masivas, carga por la API externa / bot). Esas compras ahora se cuentan en el saldo (`getProviderDebtMap`, una sola pasada para todos los proveedores).
+- En el resumen de cuenta, los movimientos que vienen de una compra ya no muestran "Saldo $0" (no tienen snapshot de saldo): muestran "-".
+- Verificado con harness sobre el codigo real: pago parcial, anulacion del pago, doble anulacion, compra en cuenta corriente sin movimiento, esa misma compra anulada, compra al contado y anulacion de compra en cuenta corriente.
+
+### Devolucion de productos a proveedores (nuevo)
+- Nuevo tipo de egreso en Compras y Gastos: **"Devolución a proveedor"** (gerente/admin/empleado).
+- Se elige el proveedor y, opcionalmente, la compra original: al elegirla se cargan sus productos con el costo al que se compraron, para devolver todo o una parte.
+- "Como se compensa": *Descontar de la cuenta corriente* (baja la deuda con el proveedor) o *Devuelve la plata* (entra a la caja elegida).
+- La devolucion se guarda como un egreso NEGATIVO (`expenseType: "provider_return"`, id `DEV-...`), asi todas las metricas que ya suman compras la restan sin tocar nada mas: gastos del dia, rendimiento (gasto pagado / en cuenta corriente), historial de compras por producto y cantidades compradas del dia.
+- Stock: descuenta lo devuelto (movimiento de compra en negativo), incluida la relacion mayorista -> minorista.
+- Se puede anular: vuelve a subir la deuda o sale de la caja la plata que habia entrado. No se puede "editar" el monto (como los pagos a proveedor), justamente para no romper el signo del movimiento.
+- Verificado con harness: devolucion parcial en cuenta corriente, devolucion con plata de vuelta, anulacion de las dos, stock neto, gasto neto del periodo y validaciones.
+
+### Compras y Gastos: cargar los productos del proveedor
+- Nuevo boton **"Cargar productos"** al lado del selector de proveedor: carga una fila por cada producto asignado a ese proveedor (o empleado), con el ultimo costo conocido y la cantidad que falta comprar hoy. Sirve para editar el costo unitario y la cantidad de todos los productos de un proveedor de una sola vez, sin ir agregandolos de a uno.
+- Primero aparecen los productos que faltan comprar hoy; no duplica los que ya estan cargados en el detalle.
+
+### Dividir Compras: numeros enteros sin ",0"
+- La tabla de Dividir mostraba siempre un decimal (1,0 / 2,0) porque usaba `formatNumber`. Ahora usa el mismo formato que el resto de la pagina: los enteros salen "1" y la coma aparece solo si el numero la necesita ("1,5").
+
+### Rendimiento: arranque y demora al actualizar
+- El guardado local hacia `JSON.stringify` de TODO el estado en CADA `saveState()` (decenas de MB con las imagenes adentro). Eso congelaba la pantalla en cada tecla o boton, y era la causa de que Unidades tardara en reflejar un cambio. Ahora el snapshot se agenda (1,5 s) y se escribe una sola vez por rafaga; se fuerza antes de leerlo, al ocultar la pestania y al cerrar, asi no se pierde nada.
+- Backup: nuevo panel **"Peso de los datos"** que muestra cuanto pesa cada seccion del estado y cuanto de eso son imagenes en base64 guardadas dentro del mismo JSON (fotos de producto, fotos de remito, comprobantes).
+- Backup: boton **"Optimizar fotos de producto"** (recomprime a 400px las fotos ya cargadas, sin volver a subirlas) y **"Borrar fotos de remito viejas"** (rendiciones de mas de 60 dias). Las fotos nuevas de producto se guardan a 400px en vez de 700px.
+
+### Deploy
+- Solo frontend (`assets/app.js`): `git pull` en el VPS.
+
+---
+
 ## v12.9.119 - Nuevo Pedido: el texto pegado de WhatsApp no se borra al cerrar el pop-up de alias (2026-08-27)
 
 ### Fix
