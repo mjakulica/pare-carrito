@@ -683,11 +683,24 @@ Completa 12.50: ningun archivo subido queda ya en base64 adentro del JSON de est
 - Helpers: `getChildClientIds(padre)`, `getClientGroupIds(clienteId)`, `getClientGroupBalance(clienteId)` e `isParentClient(clienteId)`.
 - El usuario del cliente padre ve los saldos consolidados del grupo y puede operar por cada cuenta hija: `getCustomerVisibleClientIds` se expande con el grupo.
 
+### 12.56 Vista rapida: estado por ventana de fechas (v12.9.126)
+
+El cuello de botella despues de sacar las imagenes era el TEXTO historico: pedidos 61% del estado (la mitad del total son `items[]`), compras 13%, saldos 12%, caja 10%.
+
+- **`buildWindowedState(data, preset)`** recorta por fecha las 21 colecciones transaccionales (`WINDOW_COLLECTIONS`) segun el preset, y agrega filas de **apertura** (`__opening: true`) con el acumulado anterior al corte: una por cliente en `saldos`, una por caja en `caja` y una por proveedor en `providerLedger`. Como el codigo del cliente calcula esos saldos sumando el array, **el resultado es identico** sin cambiar una sola funcion de calculo. Los pedidos y compras anteriores a `itemsOrders`/`itemsPurchases` dias viajan con `items: []` + `itemsCount` + `__itemsStripped`.
+- **Presets** (`STATE_WINDOW_PRESETS`, env `STATE_WINDOW_PRESET`, por defecto `liviano`): liviano 2,29 MB / equilibrado 3,82 MB / conservador 6,76 MB, sobre un estado de prueba de 32,45 MB. `GET /state?window=full` devuelve todo.
+- **`mergeWindowedState(stored, incoming)`** protege el historial en `PUT /state`: conserva las filas que quedaron afuera de la ventana del cliente y recupera de lo guardado los `items[]` que no viajaron. Tambien quita las filas de apertura (`stripOpeningRows`), que son un resumen y nunca datos reales.
+- **`applyArrayPatch`** ignora los borrados de filas anteriores a `MAX_WINDOW_DAYS` (150 dias) en las colecciones con ventana: ningun dispositivo con vista rapida las tiene cargadas, asi que un borrado ahi solo puede venir de un desfasaje. El upsert de filas viejas sigue permitido.
+- **Cliente:** `stateWindow` guarda lo que informa el servidor; `isWindowedState()` / `windowCutoff()` alimentan el aviso azul y `loadFullHistory()` baja todo (`?window=full`). La guarda `localStateIsNewerOrRicher` se saltea con payload de ventana (compara cantidad de filas y bloquearia la sincronizacion para siempre). El backup avisa antes de exportar una vista recortada.
+- **Medicion:** 32,45 MB -> 2,29 MB de JSON; 1580 KB -> 131 KB por la red (gzip); carga estimada en 4G lento 12,6 s -> 0,8 s.
+
+---
+
 ---
 
 ## 13. Ultimo Cambio y Version
 
-**Version operativa:** 12.9.125
+**Version operativa:** 12.9.126
 **Fecha:** 2026-09-04
 **Rama:** `master` (repositorio `mjakulica/pare-carrito`)
 **Entorno:** VPS productivo `/opt/pare-carrito` con frontend estatico servido por Caddy y API Docker Compose. Frontend `sistema.parecarrito.com.ar`, API en `/api`, lista de precios publica en `/precios`.
@@ -696,7 +709,11 @@ Completa 12.50: ningun archivo subido queda ya en base64 adentro del JSON de est
 
 Ver secciones 12.53 a 12.55: pagina "Ganancias" (ganancia real por producto y cliente), boton "Agregar producto nuevo" en el pop-up de alias, y super usuario (cliente padre con saldos consolidados). Se numeraron 120-122 en paralelo a los cambios de esta rama, que quedaron renumerados 123-125.
 
-### Detalle del ultimo cambio (v12.9.125)
+### Detalle del ultimo cambio (v12.9.126)
+
+- Vista rapida: el servidor manda una ventana de dias en vez del historial completo (32,45 MB -> 2,29 MB; 1580 KB -> 131 KB por la red), con filas de apertura para que los saldos sigan siendo exactos. El historial completo queda en el servidor y se pide con un boton. **Requiere `./deploy.sh`.**
+
+### Cambios de v12.9.125
 
 - Todo lo que se sube (comprobantes de egresos, pagos y transferencias, fotos de remito y de recambio) sale del JSON de estado y se guarda como archivo en el servidor, igual que las fotos de producto en v12.9.124. Lo nuevo se sube solo; lo viejo se migra con un boton en Backup. Solo frontend (`git pull`).
 

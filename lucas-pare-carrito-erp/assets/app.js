@@ -1957,7 +1957,9 @@
       return;
     }
     try {
-      const response = await cloudRequest(config, "/state", { method: "GET" });
+      // Por defecto se descarga solo la ventana de dias que manda el servidor (el historial viejo
+      // queda en el servidor y se pide aparte). ui.fullHistory lo trae completo.
+      const response = await cloudRequest(config, "/state" + (ui.fullHistory ? "?window=full" : ""), { method: "GET" });
       if (response.status === 404) {
         if (manual) alert("Todavia no hay datos en la nube. Use Subir datos ahora desde el dispositivo principal.");
         return;
@@ -1965,6 +1967,7 @@
       if (!response.ok) throw new Error("HTTP " + response.status + (await readCloudErrorDetail(response)));
       const payload = await response.json();
       if (!payload || typeof payload.data !== "object") throw new Error("respuesta inválida");
+      stateWindow = payload.window || null;
       const remoteUpdated = String(payload.updatedAt || "");
       if (!manual && !isLogin) {
         if (config.lastSync && remoteUpdated && remoteUpdated <= config.lastSync) return;
@@ -1983,12 +1986,13 @@
         schedulePatchFlush(1200);
         return;
       }
-      if (!manual && looksLikeSeedState(payload.data) && localStateIsRicherThanRemote(state, payload.data)) {
+      const windowedPayload = !!(payload.window && !payload.window.full);
+      if (!windowedPayload && !manual && looksLikeSeedState(payload.data) && localStateIsRicherThanRemote(state, payload.data)) {
         console.warn("Sincronización: el servidor tiene datos de ejemplo/vacío; se conservan los datos locales.");
         return;
       }
       // Safety check: prevent silent overwrite when local state has more operational data
-      if (!localUnsyncedChanges && localStateIsNewerOrRicher(state, payload.data)) {
+      if (!windowedPayload && !localUnsyncedChanges && localStateIsNewerOrRicher(state, payload.data)) {
         const local = stateOperationalCounts(state);
         const remote = stateOperationalCounts(payload.data);
         const details = Object.keys(local)
@@ -2133,6 +2137,7 @@
     app.innerHTML = `
       <div id="offline-banner" class="offline-banner" style="display:${typeof navigator !== "undefined" && navigator.onLine === false ? "block" : "none"}">Sin conexión a internet: los cambios se guardan en este dispositivo y se sincronizarán al volver la conexión.</div>
       ${(() => { const n = pendingSyncCount(); return n ? `<div class="offline-banner" style="display:block;background:#b45309;color:#fff">\u26A0 ${n} cambio(s) sin enviar al sistema. Se enviarán al reconectar; no cierres el sistema con internet apagado.</div>` : ""; })()}
+      ${isWindowedState() ? `<div class="offline-banner" style="display:block;background:#1d4ed8;color:#fff">Vista rapida: este dispositivo tiene los movimientos desde el ${escapeHtml(formatDate(windowCutoff()))}. Los saldos son los reales; los listados y reportes de fechas anteriores necesitan el historial completo. <button class="btn small" type="button" data-load-full-history ${ui.loadingFullHistory ? "disabled" : ""} style="margin-left:8px">${ui.loadingFullHistory ? "Descargando..." : "Cargar historial completo"}</button></div>` : ""}
       <div class="app-shell">
         ${renderSidebar(route.base)}
         <div class="sidebar-overlay" aria-hidden="true"></div>
@@ -2144,6 +2149,7 @@
       ${renderModal()}
     `;
     bindCommon();
+    document.querySelectorAll("[data-load-full-history]").forEach((button) => button.addEventListener("click", () => loadFullHistory()));
     afterRender.forEach((fn) => fn());
     bindProofImages();
     maybeForcePasswordChange();
@@ -13795,6 +13801,39 @@
   // (GET /proofs/:key) y se muestran a traves de una URL temporal del navegador.
   const proofUrlCache = new Map();
 
+  // Ventana de datos vigente (la manda el servidor en cada descarga). Cuando esta activa, el
+  // dispositivo tiene solo los ultimos dias: los saldos son exactos igual (vienen con una fila de
+  // apertura por cliente/caja/proveedor), pero los listados historicos estan recortados.
+  let stateWindow = null;
+
+  function windowCutoff() {
+    if (!stateWindow || stateWindow.full || !stateWindow.cutoffs) return "";
+    return String(stateWindow.cutoffs.orders || stateWindow.cutoffs.saldos || "");
+  }
+
+  function isWindowedState() {
+    return !!(stateWindow && !stateWindow.full && windowCutoff());
+  }
+
+  // Trae el historial completo desde el servidor (para reportes viejos). Queda hasta recargar.
+  async function loadFullHistory() {
+    const config = getCloudSyncConfig();
+    if (!cloudSyncReady(config)) return alert("No hay servidor configurado.");
+    ui.fullHistory = true;
+    ui.loadingFullHistory = true;
+    render();
+    try {
+      await cloudPull(true, true);
+      alert("Historial completo descargado. Vuelve a la vista liviana al recargar la pagina.");
+    } catch (error) {
+      ui.fullHistory = false;
+      alert("No se pudo descargar el historial completo: " + error.message);
+    } finally {
+      ui.loadingFullHistory = false;
+      render();
+    }
+  }
+
   function dataUrlToBytes(dataUrl) {
     const match = /^data:([^;,]+);base64,(.*)$/i.exec(String(dataUrl || ""));
     if (!match) return null;
@@ -14115,6 +14154,7 @@
     const purgeBtn = document.getElementById("purge-remito-photos");
     if (purgeBtn) purgeBtn.addEventListener("click", () => purgeOldRemitoPhotos());
     document.getElementById("export-backup").addEventListener("click", () => {
+      if (isWindowedState() && !confirm("Este dispositivo tiene la vista rapida (movimientos desde el " + formatDate(windowCutoff()) + "), asi que el backup NO incluiria el historial completo.\n\nPara un backup completo, primero toca \"Cargar historial completo\" arriba. Descargar igual?")) return;
       const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");

@@ -653,7 +653,16 @@ function applyArrayPatch(target, key, changes) {
     const id = patchKeyForItem(key, item);
     if (id) map.set(id, item);
   });
-  (Array.isArray(changes && changes.delete) ? changes.delete : []).forEach((id) => map.delete(String(id)));
+  // Con la vista rapida el dispositivo NO tiene el historial viejo. Un borrado de una fila
+  // anterior a la ventana solo puede venir de un desfasaje (el dispositivo cree que no existe),
+  // nunca de un borrado real hecho por alguien: se ignora. Asi ninguna vista recortada puede
+  // borrar historial que no llego a bajar.
+  const deleteFloor = WINDOW_COLLECTIONS.includes(key) ? cutoffDate(MAX_WINDOW_DAYS) : "";
+  (Array.isArray(changes && changes.delete) ? changes.delete : []).forEach((id) => {
+    const existing = map.get(String(id));
+    if (deleteFloor && existing && recordDate(existing) && recordDate(existing) < deleteFloor) return;
+    map.delete(String(id));
+  });
   (Array.isArray(changes && changes.upsert) ? changes.upsert : []).forEach((item) => {
     const id = patchKeyForItem(key, item);
     if (!id) return;
@@ -699,10 +708,166 @@ function canApplyStaleEmployeePatch(patch) {
   });
 }
 
+// ---------- Estado por ventana de fechas ----------
+// El estado completo son decenas de MB y se descargaba entero en cada carga, en cada dispositivo.
+// El grueso es historico (pedidos con sus items, saldos, caja, compras) que en el celular no se
+// usa para operar. Se manda una VENTANA de dias por coleccion y, para todo lo que se calcula
+// sumando (saldo de cliente, caja, cuenta del proveedor), una fila de APERTURA con el acumulado
+// anterior al corte: asi los saldos dan exactamente igual que con el estado completo.
+// El historial viejo sigue entero en la base y se pide cuando hace falta (?window=full).
+const WINDOW_COLLECTIONS = [
+  "orders", "saldos", "caja", "purchases", "payments", "remitos", "providerLedger", "providerPayments",
+  "clientTransfers", "vendorLedger", "attendance", "employeePayments", "employeeReimbursements",
+  "performanceAdjustments", "stockMovements", "cashClosings", "priceAutoLog", "replacements",
+  "billingLog", "checklistLog", "deletedOrders"
+];
+
+const STATE_WINDOW_PRESETS = {
+  liviano: {
+    itemsOrders: 5, itemsPurchases: 5,
+    days: { orders: 15, saldos: 15, caja: 15, purchases: 15, payments: 15, remitos: 7, providerLedger: 30,
+      providerPayments: 30, clientTransfers: 15, vendorLedger: 7, attendance: 30, employeePayments: 30,
+      employeeReimbursements: 30, performanceAdjustments: 30, stockMovements: 7, cashClosings: 15,
+      priceAutoLog: 7, replacements: 7, billingLog: 60, checklistLog: 7, deletedOrders: 3 }
+  },
+  equilibrado: {
+    itemsOrders: 7, itemsPurchases: 7,
+    days: { orders: 30, saldos: 30, caja: 30, purchases: 30, payments: 30, remitos: 15, providerLedger: 45,
+      providerPayments: 45, clientTransfers: 30, vendorLedger: 15, attendance: 45, employeePayments: 45,
+      employeeReimbursements: 45, performanceAdjustments: 45, stockMovements: 15, cashClosings: 30,
+      priceAutoLog: 15, replacements: 15, billingLog: 90, checklistLog: 15, deletedOrders: 7 }
+  },
+  conservador: {
+    itemsOrders: 10, itemsPurchases: 10,
+    days: { orders: 60, saldos: 60, caja: 60, purchases: 60, payments: 60, remitos: 30, providerLedger: 60,
+      providerPayments: 60, clientTransfers: 60, vendorLedger: 30, attendance: 60, employeePayments: 60,
+      employeeReimbursements: 60, performanceAdjustments: 60, stockMovements: 30, cashClosings: 60,
+      priceAutoLog: 30, replacements: 30, billingLog: 120, checklistLog: 30, deletedOrders: 15 }
+  }
+};
+const STATE_WINDOW_DEFAULT = String(process.env.STATE_WINDOW_PRESET || "liviano").trim().toLowerCase();
+// Piso de borrado: ninguna fila mas vieja que esto se puede borrar por un patch, porque ningun
+// dispositivo con vista rapida la tiene cargada.
+const MAX_WINDOW_DAYS = Math.max(...Object.values(STATE_WINDOW_PRESETS)
+  .flatMap((preset) => Object.values(preset.days))) + 30;
+
+function recordDate(row) {
+  if (!row) return "";
+  return String(row.date || row.dayKey || String(row.createdAt || row.timestamp || "").slice(0, 10) || "");
+}
+
+function cutoffDate(days) {
+  return new Date(Date.now() - Number(days || 0) * 86400000).toISOString().slice(0, 10);
+}
+
+// Quita las filas de apertura: son un resumen que arma el servidor, nunca datos reales.
+function stripOpeningRows(data) {
+  const clean = { ...(data || {}) };
+  WINDOW_COLLECTIONS.forEach((key) => {
+    if (Array.isArray(clean[key])) clean[key] = clean[key].filter((row) => !(row && row.__opening));
+  });
+  return clean;
+}
+
+function buildWindowedState(data, presetName) {
+  const preset = STATE_WINDOW_PRESETS[presetName];
+  if (!preset) return { data, window: { preset: "full", full: true } };
+  const source = data || {};
+  const out = {};
+  const cutoffs = {};
+  Object.keys(source).forEach((key) => {
+    const days = preset.days[key];
+    if (days == null || !Array.isArray(source[key])) { out[key] = source[key]; return; }
+    cutoffs[key] = cutoffDate(days);
+    out[key] = source[key].filter((row) => recordDate(row) >= cutoffs[key]);
+  });
+  const before = (key) => (source[key] || []).filter((row) => recordDate(row) < cutoffs[key]);
+
+  // Saldo de cada cliente anterior al corte, en una sola fila.
+  const byClient = {};
+  before("saldos").forEach((row) => { byClient[row.clientId] = (byClient[row.clientId] || 0) + Number(row.amount || 0); });
+  out.saldos = Object.keys(byClient)
+    .filter((clientId) => Math.abs(byClient[clientId]) > 0.001)
+    .map((clientId) => ({
+      id: "SAL-APERTURA-" + clientId, date: cutoffs.saldos, clientId, type: "apertura",
+      description: "Saldo anterior al " + cutoffs.saldos, amount: byClient[clientId], balance: byClient[clientId],
+      relatedEntityType: "apertura", __opening: true
+    })).concat(out.saldos || []);
+
+  const byBox = {};
+  before("caja").forEach((row) => {
+    const boxId = row.cashBoxId || "";
+    byBox[boxId] = byBox[boxId] || { in: 0, out: 0 };
+    byBox[boxId].in += Number(row.amountIngreso || 0);
+    byBox[boxId].out += Number(row.amountEgreso || 0);
+  });
+  out.caja = Object.keys(byBox).map((boxId) => ({
+    id: "CAJ-APERTURA-" + (boxId || "sin-caja"), date: cutoffs.caja, type: "apertura",
+    concept: "Saldo de caja anterior al " + cutoffs.caja, amountIngreso: byBox[boxId].in,
+    amountEgreso: byBox[boxId].out, cashBoxId: boxId, relatedEntityType: "apertura", __opening: true
+  })).concat(out.caja || []);
+
+  const byProvider = {};
+  before("providerLedger").forEach((row) => { byProvider[row.providerId] = (byProvider[row.providerId] || 0) + Number(row.amount || 0); });
+  out.providerLedger = Object.keys(byProvider)
+    .filter((providerId) => Math.abs(byProvider[providerId]) > 0.001)
+    .map((providerId) => ({
+      id: "PLED-APERTURA-" + providerId, date: cutoffs.providerLedger, providerId, type: "apertura",
+      description: "Saldo anterior al " + cutoffs.providerLedger, amount: byProvider[providerId],
+      balance: byProvider[providerId], relatedEntityType: "apertura", __opening: true
+    })).concat(out.providerLedger || []);
+
+  // Los pedidos y compras mas viejos viajan sin el detalle de items (los totales ya estan en la
+  // cabecera). Se piden aparte si se necesita el detalle.
+  const stripItems = (rows, days) => (rows || []).map((row) => (
+    recordDate(row) < cutoffDate(days) && Array.isArray(row.items) && row.items.length
+      ? { ...row, items: [], itemsCount: row.items.length, __itemsStripped: true }
+      : row
+  ));
+  out.orders = stripItems(out.orders, preset.itemsOrders);
+  out.purchases = stripItems(out.purchases, preset.itemsPurchases);
+
+  return {
+    data: out,
+    window: { preset: presetName, full: false, cutoffs, itemsFrom: cutoffDate(preset.itemsOrders) }
+  };
+}
+
+// Une lo que manda un cliente con ventana contra lo guardado: NUNCA borra lo que quedo afuera de
+// su ventana ni pierde los items que no viajaron. Sin esto, un PUT completo desde un celular
+// borraria todo el historial.
+function mergeWindowedState(stored, incoming) {
+  const base = stored || {};
+  const next = stripOpeningRows(incoming || {});
+  WINDOW_COLLECTIONS.forEach((key) => {
+    const incomingRows = Array.isArray(next[key]) ? next[key] : null;
+    const storedRows = Array.isArray(base[key]) ? base[key] : [];
+    if (!incomingRows) { if (storedRows.length) next[key] = storedRows; return; }
+    const incomingIds = new Set(incomingRows.map((row) => row && row.id).filter(Boolean));
+    const storedById = new Map(storedRows.map((row) => [row && row.id, row]));
+    // Los items que el cliente no recibio se recuperan de lo guardado.
+    const restored = incomingRows.map((row) => {
+      if (!row || !row.__itemsStripped) return row;
+      const previous = storedById.get(row.id);
+      const merged = { ...row, items: previous && Array.isArray(previous.items) ? previous.items : [] };
+      delete merged.__itemsStripped;
+      delete merged.itemsCount;
+      return merged;
+    });
+    const kept = storedRows.filter((row) => row && row.id && !incomingIds.has(row.id));
+    next[key] = kept.concat(restored);
+  });
+  return next;
+}
+
 app.get("/state", authenticate, requireRole(...STATE_READ_ROLES), async (req, res) => {
   const { rows } = await pool.query("SELECT data, updated_at FROM app_state WHERE id = 'main'");
   if (!rows.length) return res.status(404).json({ error: "Sin datos guardados todavía." });
-  res.json({ data: stripHistoryFromState(rows[0].data), updatedAt: rows[0].updated_at.toISOString() });
+  const clean = stripHistoryFromState(rows[0].data);
+  const requested = String(req.query.window || "").trim().toLowerCase();
+  const presetName = requested === "full" ? "" : (requested || STATE_WINDOW_DEFAULT);
+  const built = buildWindowedState(clean, presetName);
+  res.json({ data: built.data, window: built.window, updatedAt: rows[0].updated_at.toISOString() });
 });
 
 app.get("/product-history", authenticate, requireRole("manager", "admin"), async (req, res) => {
@@ -765,7 +930,8 @@ app.put("/state", authenticate, requireRole(...SYNC_ROLES), async (req, res) => 
       }
     }
     await upsertProductHistoryState(clientDb, body.data, req.user.username);
-    const cleanData = stripHistoryFromState(body.data);
+    // El cliente pudo haber descargado solo una ventana: se preserva el historial que no tiene.
+    const cleanData = stripHistoryFromState(mergeWindowedState(beforeData, body.data));
     const saved = await clientDb.query(
       `INSERT INTO app_state (id, data, updated_at, updated_by) VALUES ('main', $1, now(), $2)
        ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, updated_at = EXCLUDED.updated_at, updated_by = EXCLUDED.updated_by

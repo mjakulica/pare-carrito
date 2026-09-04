@@ -1,5 +1,39 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.126 - Vista rapida: el sistema descarga 2 MB en vez de 32 (2026-09-04)
+
+### El problema
+Sacar las imagenes del estado (v12.9.124 y 125) no alcanzo: el JSON seguia pesando 32 MB, ahora de TEXTO. La medicion mostro donde estan los bytes: **pedidos 61%** (la mitad del total son los `items[]`), compras 13%, saldos 12%, caja 10%. Es historico que en el celular no se usa para operar, pero se descargaba entero en cada carga.
+
+### Como quedo
+El servidor manda una **ventana de dias por coleccion** en vez del historial completo, y para todo lo que se calcula sumando (saldo de cliente, caja, cuenta del proveedor) agrega una fila de **apertura** con el acumulado anterior al corte. Por eso **los saldos siguen dando exactamente igual**, con una fraccion de los datos. Los pedidos y compras mas viejos viajan sin el detalle de items (los totales estan en la cabecera).
+
+Medido sobre un estado de prueba de 32,45 MB con la forma real del sistema:
+
+| | JSON | Por la red (gzip) | Carga en 4G lento | Carga en 3G |
+|---|---|---|---|---|
+| Antes | 32,45 MB | 1580 KB | ~12,6 s | ~21,2 s |
+| Ahora (preset liviano) | **2,29 MB** | **131 KB** | **~0,8 s** | **~1,5 s** |
+
+Presets (env `STATE_WINDOW_PRESET`): `liviano` (por defecto, 2,29 MB), `equilibrado` (3,82 MB, 30 dias) y `conservador` (6,76 MB, 60 dias). `GET /state?window=full` sigue trayendo todo.
+
+### El historial no se toca ni se pierde
+- **En el servidor esta TODO**: la ventana es solo lo que se manda al dispositivo.
+- Al guardar desde un dispositivo con vista rapida, el servidor **preserva** lo que quedo afuera de su ventana y **recupera los items** que no viajaron (`mergeWindowedState`). Un PUT completo desde un celular ya no puede borrar historial.
+- Un patch **no puede borrar** filas mas viejas que el piso de ventana (150 dias): un borrado asi solo puede venir de un desfasaje, nunca de alguien borrando de verdad. Corregir una fila vieja si se puede.
+- Las filas de apertura son un resumen del servidor y nunca se guardan como datos reales.
+
+### En la app
+- Aviso azul arriba: "Vista rapida: este dispositivo tiene los movimientos desde el DD/MM. Los saldos son los reales", con boton **"Cargar historial completo"** para los reportes de fechas viejas (vuelve a la vista liviana al recargar).
+- El backup avisa si se exporta con la vista recortada y ofrece cargar todo primero.
+- La guarda de "los datos locales tienen mas informacion" se saltea cuando la descarga es una ventana: si no, bloquearia la sincronizacion para siempre (el servidor manda menos filas a proposito).
+
+### Deploy
+- **REQUIERE `./deploy.sh`** (server.js) + `git pull` del frontend.
+- Para empezar mas conservador: `STATE_WINDOW_PRESET=equilibrado` (o `conservador`) en el `.env` del servidor.
+
+---
+
 ## v12.9.125 - TODO lo que se sube sale del JSON: comprobantes, fotos de remito y de recambio (2026-09-04)
 
 ### Que se movio
