@@ -13,6 +13,29 @@
   </head>
   <body>
     <div id="app"></div>
+    <script>
+      // Red de seguridad: si app.js falla al CARGAR (un error de sintaxis, una variable usada
+      // antes de declararse, etc.), no llega a correr nada y la pantalla queda vacia sin ninguna
+      // explicacion. Este script se registra ANTES y muestra el motivo en pantalla.
+      (function () {
+        var yaMostrado = false;
+        window.addEventListener("error", function (evento) {
+          if (yaMostrado) return;
+          var app = document.getElementById("app");
+          if (!app || app.children.length || (app.innerHTML || "").trim().length > 40) return;
+          yaMostrado = true;
+          var detalle = (evento && (evento.message || (evento.error && evento.error.message))) || "error desconocido";
+          app.innerHTML = '<div style="padding:24px;font-family:system-ui,sans-serif;max-width:640px;margin:40px auto;text-align:left">'
+            + '<h2 style="margin:0 0 8px">El sistema no pudo iniciar</h2>'
+            + '<p style="color:#475569">Probá recargar la página. Si sigue igual, mostrale este mensaje al soporte.</p>'
+            + '<pre style="white-space:pre-wrap;background:#f1f5f9;padding:12px;border-radius:8px;font-size:12px">'
+            + String(detalle).replace(/[<>&]/g, "") + '</pre>'
+            + '<button onclick="location.reload()" style="padding:8px 14px;border-radius:8px;border:0;background:#1d4ed8;color:#fff;cursor:pointer;margin-right:8px">Recargar</button>'
+            + '<button onclick="try{localStorage.clear()}catch(e){};location.reload()" style="padding:8px 14px;border-radius:8px;border:1px solid #cbd5e1;background:#fff;cursor:pointer">Borrar datos de este dispositivo y reintentar</button>'
+            + '</div>';
+        });
+      })();
+    </script>
     <script src="./assets/app.js?v=20260723-sync"></script>
   </body>
 </html>

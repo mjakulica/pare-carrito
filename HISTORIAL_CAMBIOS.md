@@ -1,5 +1,41 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.134 - Fix de la pantalla en blanco en desktop (2026-09-04)
+
+### La causa real
+Era una regresion del guardado diferido (v12.9.123). Las variables `localSnapshotTimer` y `localSnapshotPending` quedaron declaradas **mas abajo** en el archivo que el punto donde se carga el estado (`let state = loadState()`). Cargar el estado puede disparar un guardado (migraciones, purgas), ese guardado tocaba las variables **antes de que existieran** y JavaScript cortaba con:
+
+```
+Uncaught ReferenceError: Cannot access 'localSnapshotPending' before initialization
+```
+
+Como el error pasa al CARGAR el archivo, no llegaba a correr nada: ni el dibujado, ni la guarda de errores que habia agregado en v12.9.129. De ahi la pantalla completamente vacia.
+
+Por que el desktop si y el celular no: el error solo salta si el estado guardado tiene algo que migrar, y **solo los usuarios gerente/admin guardan el estado completo en el dispositivo**. Los celulares de los empleados arrancan sin estado guardado y no lo disparaban.
+
+### Reproducido y verificado en un navegador real
+Se levanto el sistema en un Chromium y se probaron 8 escenarios. Con la version desplegada, el caso del desktop reproduce el error; con el arreglo, entra completo:
+
+| Escenario | Resultado |
+|---|---|
+| Carga limpia | entra |
+| Estado local enorme (12.000 pedidos) | entra |
+| Estado local corrupto | entra |
+| Login y panel | entra |
+| Login con el servidor colgado | entra |
+| **Ruta no permitida para el rol (el caso del desktop)** | **entra** |
+| Ningun permiso habilitado | muestra que pedir permisos, con boton de cerrar sesion |
+| app.js roto a proposito | muestra el motivo y ofrece borrar los datos del dispositivo |
+
+### Dos arreglos mas, para que no vuelva a pasar
+- **Red de seguridad en `index.html`:** un script que corre ANTES de `app.js` y, si el archivo falla al cargar, muestra el motivo en pantalla con botones de "Recargar" y "Borrar datos de este dispositivo y reintentar". Antes, cualquier error de carga daba pantalla vacia sin ninguna pista.
+- **Ruta no permitida:** si el rol no puede abrir la pagina guardada, el sistema dibuja la primera pagina que si puede abrir. Antes hacia `location.replace()` al mismo hash y, como el navegador no dispara ningun evento cuando el hash no cambia, se quedaba sin dibujar. Si el rol no tiene NINGUNA pagina habilitada, ahora lo dice y ofrece cerrar sesion.
+
+### Deploy
+- **Solo frontend** (`assets/app.js` e `index.html`): `git pull`. Conviene Ctrl+F5 la primera vez.
+
+---
+
 ## v12.9.133 - Saldos, caja y pagos a 7 dias (2026-09-04)
 
 ### Que se midio antes de tocar nada

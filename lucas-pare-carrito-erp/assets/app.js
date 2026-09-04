@@ -301,6 +301,14 @@
   };
 
   let afterRender = [];
+  // OJO: estas tres tienen que declararse ANTES de loadState(), porque cargar el estado puede
+  // disparar un guardado (migraciones, purgas) que llama a scheduleLocalStateSnapshot(). Si
+  // quedan declaradas mas abajo, ese guardado las toca antes de que existan, el modulo entero
+  // falla al cargar y la pantalla queda VACIA (paso en desktop, donde el estado local si tiene
+  // datos que migrar; en los celulares sin estado guardado no se disparaba).
+  const LOCAL_SNAPSHOT_DELAY_MS = 1500;
+  let localSnapshotTimer = null;
+  let localSnapshotPending = false;
   let state = loadState();
   let currentUser = loadCurrentUser();
   let lastSyncedState = null;
@@ -1187,9 +1195,6 @@
   // en cada saveState() congelaba la pantalla en cada tecla/boton (se notaba sobre todo en
   // Unidades y Compras). Ahora se agenda y se escribe una sola vez por rafaga; ademas se fuerza
   // antes de leerlo, al ocultar la pestania y al cerrar, asi nunca se pierde.
-  const LOCAL_SNAPSHOT_DELAY_MS = 1500;
-  let localSnapshotTimer = null;
-  let localSnapshotPending = false;
   function scheduleLocalStateSnapshot() {
     localSnapshotPending = true;
     if (localSnapshotTimer) return;
@@ -2221,10 +2226,25 @@
       return;
     }
 
-    const route = getRoute();
+    let route = getRoute();
     if (!canAccess(route.base)) {
-      navigate(roleHome(), true);
-      return;
+      // Antes esto hacia navigate(...) + return, confiando en que el cambio de hash redibujara.
+      // Cuando el destino era la MISMA ruta (roleHome siempre devuelve "dashboard"), el evento no
+      // se disparaba y la pantalla quedaba vacia para siempre. Ahora se dibuja aca mismo.
+      const destino = firstAccessibleRoute();
+      if (!destino) {
+        app.innerHTML = `<div style="padding:24px;font-family:system-ui,sans-serif;max-width:640px;margin:0 auto">
+          <h2 style="margin:0 0 8px">Tu usuario no tiene ninguna pagina habilitada</h2>
+          <p style="color:#475569">Pedile a un gerente que revise los permisos del rol <strong>${escapeHtml(String(currentUser.role || ""))}</strong> en Configuracion.</p>
+          <button id="salir-sin-acceso" style="padding:8px 14px;border-radius:8px;border:0;background:#1d4ed8;color:#fff;cursor:pointer">Cerrar sesion</button>
+        </div>`;
+        const salir = document.getElementById("salir-sin-acceso");
+        if (salir) salir.addEventListener("click", () => { setCurrentUser(null); render(); });
+        return;
+      }
+      const hash = "#/" + destino;
+      if (location.hash !== hash) { try { location.replace(hash); } catch (error) { /* se dibuja igual */ } }
+      route = { base: destino, id: "" };
     }
 
     const page = renderRoute(route);
@@ -15773,8 +15793,19 @@
 
   function navigate(route, replace) {
     const hash = "#/" + route.replace(/^#?\//, "");
+    // Si el hash resultante es el MISMO, el navegador no dispara "hashchange" y nadie redibuja:
+    // hay que hacerlo a mano o la pantalla se queda como esta (o vacia).
+    const mismoHash = location.hash === hash;
     if (replace) location.replace(hash);
     else location.hash = hash;
+    if (mismoHash) render();
+  }
+
+  // Primera pagina que el rol SI puede abrir. Se usa cuando la ruta guardada no esta permitida.
+  function firstAccessibleRoute() {
+    if (canAccess("dashboard")) return "dashboard";
+    const item = (menu || []).find((entry) => entry && entry.id && canAccess(entry.id));
+    return item ? item.id : "";
   }
 
   function getRoute() {

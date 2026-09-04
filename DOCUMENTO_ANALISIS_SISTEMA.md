@@ -684,6 +684,12 @@ Completa 12.50: ningun archivo subido queda ya en base64 adentro del JSON de est
 - Helpers: `getChildClientIds(padre)`, `getClientGroupIds(clienteId)`, `getClientGroupBalance(clienteId)` e `isParentClient(clienteId)`.
 - El usuario del cliente padre ve los saldos consolidados del grupo y puede operar por cada cuenta hija: `getCustomerVisibleClientIds` se expande con el grupo.
 
+### 12.64 Pantalla en blanco en desktop: causa y defensas (v12.9.134)
+- **Causa:** regresion de v12.9.123. `LOCAL_SNAPSHOT_DELAY_MS`, `localSnapshotTimer` y `localSnapshotPending` quedaron declaradas despues de `let state = loadState()`. `loadState()` puede disparar un `saveState()` (migraciones/purgas) que llama a `scheduleLocalStateSnapshot()`, tocando esas `let` en su zona muerta temporal: `ReferenceError: Cannot access 'localSnapshotPending' before initialization` al EVALUAR el modulo. Nada corre despues, ni siquiera la guarda de `render()` de 12.59, de ahi la pantalla vacia. Solo afecta a gerente/admin, que son los unicos que persisten el estado completo en el dispositivo (`localPersistRole`). Las tres declaraciones se movieron arriba de `loadState()`.
+- **Ruta no permitida:** `renderInner` hacia `navigate(roleHome(), true)` + `return`. Como `roleHome()` devuelve siempre `"dashboard"`, si la ruta actual ya era esa, `location.replace()` no cambiaba el hash, el navegador no disparaba `hashchange` y nadie redibujaba. Ahora `firstAccessibleRoute()` elige la primera pagina accesible y se dibuja en el momento; sin ninguna accesible, se muestra un aviso con "Cerrar sesion". `navigate()` ademas llama a `render()` cuando el hash no cambia.
+- **Red de seguridad en `index.html`:** script inline previo a `app.js` que escucha `error` y, si `#app` quedo vacio, muestra el motivo con botones de recargar y de borrar el almacenamiento local. Cubre cualquier fallo de CARGA futuro, que por definicion ocurre antes de que `app.js` pueda defenderse.
+- **Verificacion:** 8 escenarios en Chromium real (carga limpia, estado local enorme, estado corrupto, login, servidor colgado, ruta no permitida, sin permisos, `app.js` roto). El caso de la ruta no permitida reproduce el error con el `app.js` de master y entra con el arreglado.
+
 ### 12.63 Limite del compactado y ventana de saldos/caja (v12.9.133)
 - Se midieron tres optimizaciones mas sobre items, saldos y caja: sacar los importes en cero de `caja` (-1% JSON, 0% red), claves cortas en las colecciones pesadas (-21% JSON, **-4% red**) y sacar `balance` de cada fila de `saldos` (-23% JSON, -4% red). **Ninguna se implemento**: el gzip ya comprime el texto repetido, asi que el ahorro real por la red es marginal y no compensa el riesgo de una capa de traduccion en los dos lados. El limite no esta en la forma de las filas sino en su cantidad.
 - `saldos`, `caja` y `payments` pasan de 15 a 7 dias en el preset `liviano`: son las colecciones que crecen 2-3 filas por pedido y por eso escalan con el volumen. Los saldos siguen exactos por las filas de apertura.
@@ -743,7 +749,7 @@ El cuello de botella despues de sacar las imagenes era el TEXTO historico: pedid
 
 ## 13. Ultimo Cambio y Version
 
-**Version operativa:** 12.9.133
+**Version operativa:** 12.9.134
 **Fecha:** 2026-09-04
 **Rama:** `master` (repositorio `mjakulica/pare-carrito`)
 **Entorno:** VPS productivo `/opt/pare-carrito` con frontend estatico servido por Caddy y API Docker Compose. Frontend `sistema.parecarrito.com.ar`, API en `/api`, lista de precios publica en `/precios`.
@@ -752,7 +758,11 @@ El cuello de botella despues de sacar las imagenes era el TEXTO historico: pedid
 
 Ver secciones 12.53 a 12.55: pagina "Ganancias" (ganancia real por producto y cliente), boton "Agregar producto nuevo" en el pop-up de alias, y super usuario (cliente padre con saldos consolidados). Se numeraron 120-122 en paralelo a los cambios de esta rama, que quedaron renumerados 123-125.
 
-### Detalle del ultimo cambio (v12.9.133)
+### Detalle del ultimo cambio (v12.9.134)
+
+- Fix de la pantalla en blanco en desktop: tres variables del guardado diferido quedaban declaradas despues de su primer uso y el modulo entero fallaba al cargar. Mas red de seguridad en `index.html` y arreglo de la ruta no permitida. Verificado en Chromium real. **Solo frontend (`git pull`).**
+
+### Cambios de v12.9.133
 
 - `saldos`, `caja` y `payments` a 7 dias (son las colecciones que escalan con el volumen de pedidos). Se documenta por que no se avanzo con claves cortas ni con sacar ceros: el gzip las vuelve marginales. **Requiere `./deploy.sh`.**
 
