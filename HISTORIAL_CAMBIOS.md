@@ -1,5 +1,35 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.121 - Las fotos de producto salen del estado y se guardan en el servidor (2026-09-04)
+
+### El problema
+- El sistema descarga y guarda TODO en un solo JSON, y adentro viajaban las fotos de producto en base64 (`imageData`). Con ~200 fotos son varios MB que se bajaban ENTERA cada vez que se abria el sistema, en cada dispositivo y todos los dias. El texto (pedidos, saldos, caja) comprime bien; el base64 no.
+
+### Como quedo
+- Las fotos de producto ahora se guardan como ARCHIVO en el servidor y en el estado queda solo la referencia (`product.imageKey`). El navegador las cachea (el nombre del archivo es unico por subida), asi que se bajan una sola vez y no vuelven a viajar.
+- **Fotos nuevas:** al guardar un producto con foto, se sube sola al servidor. Si no hay conexion o el servidor la rechaza, la foto queda guardada como antes (en base64) y se puede subir despues; nunca se pierde.
+- **Fotos que ya estaban:** en Backup -> "Peso de los datos" esta el boton **"Mover fotos de producto al servidor"**, que las recomprime a 400px, las sube y las saca del estado. Muestra cuantas se movieron y cuantas quedaron pendientes.
+- El panel de Backup ahora dice cuantas fotos estan en el servidor y cuantas siguen adentro del estado.
+- La lista de precios publica (`/precios`) tambien pasa a usar la referencia: antes mandaba el base64 de cada producto en la respuesta del endpoint.
+
+### Backend
+- `POST /product-images` (gerente/admin/empleado): recibe la imagen (JPG/PNG/WEBP, hasta 8 MB), la guarda en el volumen `uploads` y devuelve su clave. Rechaza cualquier otro formato y las imagenes vacias.
+- `GET /public/product-image/:key`: sirve la foto SIN login (las fotos de producto ya eran publicas en `/precios`) con cache de un ano. Solo sirve archivos marcados como publicos: los comprobantes de pagos y transferencias siguen pidiendo login.
+- `schema.sql`: nueva columna `proofs.public_read` (por defecto FALSE, se activa solo en las fotos de producto).
+- `GET /public/price-list` devuelve `"/api/public/product-image/<clave>"` cuando el producto tiene foto en el servidor.
+- Verificado con harness sobre el codigo real (subida valida, rechazo de PDF y de imagen vacia, content-type con parametros, cache, 404 de un comprobante privado, saneo de la clave) y sobre el frontend (prioridad de la foto, subida en bytes, fallback sin servidor y aviso si el servidor rechaza).
+
+### Ademas
+- `docker-compose.yml` no le pasaba al contenedor de la API las variables `GOOGLE_VISION_API_KEY` / `GOOGLE_VISION_URL` / `GOOGLE_VISION_LANG`, que el server.js lee desde v12.9.113. Estaban en el `.env.example` pero no llegaban al contenedor: el OCR con Google Vision no podia activarse en produccion. Ya se pasan.
+
+### Deploy
+- **REQUIERE `./deploy.sh`** (server.js, schema.sql y docker-compose.yml) + `git pull` para el frontend.
+- La columna nueva se crea sola al arrancar (el schema se aplica en cada arranque).
+- Despues del deploy, entrar a Backup -> "Peso de los datos" y tocar "Mover fotos de producto al servidor" una vez.
+- Las fotos viven en el volumen Docker `uploads` (el mismo de los comprobantes), que sobrevive a los rebuilds. Conviene incluirlo en el backup del VPS.
+
+---
+
 ## v12.9.120 - Devolucion a proveedores, saldo de proveedor corregido, Compras por proveedor y arranque mas liviano (2026-09-04)
 
 ### Saldos de proveedores: aparecia MENOS de lo que hay que pagar (fix)

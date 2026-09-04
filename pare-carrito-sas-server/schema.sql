@@ -142,6 +142,10 @@ CREATE TABLE IF NOT EXISTS proofs (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Marca los archivos que se pueden servir SIN login. Solo se usa para las fotos de producto
+-- (que ya son publicas en /precios). Los comprobantes de pagos y transferencias quedan en FALSE.
+ALTER TABLE proofs ADD COLUMN IF NOT EXISTS public_read BOOLEAN NOT NULL DEFAULT FALSE;
+
 CREATE TABLE IF NOT EXISTS password_resets (
   token TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,

@@ -13461,7 +13461,8 @@
   function renderStateWeightPanel() {
     const weight = measureStateWeight();
     const pct = (bytes) => weight.total ? Math.round((bytes / weight.total) * 100) : 0;
-    const productsWithImage = (state.products || []).filter((p) => p && p.imageData).length;
+    const productsInState = (state.products || []).filter((p) => p && p.imageData).length;
+    const productsOnServer = (state.products || []).filter((p) => p && p.imageKey).length;
     return `
       <div class="panel" style="margin-top:14px">
         <h2 class="page-title" style="font-size:18px">Peso de los datos (por que tarda en cargar)</h2>
@@ -13478,11 +13479,12 @@
             <tbody>${weight.imageBuckets.map((bucket) => `<tr><td>${escapeHtml(bucket.label)}</td><td class="num">${formatBytes(bucket.bytes)}</td><td class="num">${pct(bucket.bytes)}%</td></tr>`).join("")}</tbody>
           </table>
         </div>` : ""}
+        <p class="muted" style="font-size:12px;margin-top:4px">Fotos de producto: <strong>${productsOnServer}</strong> en el servidor (no pesan en la carga) y <strong>${productsInState}</strong> todavia adentro del estado.</p>
         <div class="page-actions" style="margin-top:12px;gap:8px;flex-wrap:wrap">
-          <button class="btn blue" type="button" id="optimize-product-images">Optimizar fotos de producto (${productsWithImage})</button>
+          <button class="btn blue" type="button" id="optimize-product-images" ${productsInState ? "" : "disabled"}>Mover fotos de producto al servidor (${productsInState})</button>
           <button class="btn ghost" type="button" id="purge-remito-photos">Borrar fotos de remito viejas</button>
         </div>
-        <p class="muted" style="font-size:12px;margin-top:6px">"Optimizar fotos" recomprime las fotos de producto ya cargadas al mismo tamano que usa el sistema hoy (400px) sin volver a subirlas: suele bajar varios MB del arranque. "Borrar fotos de remito viejas" quita las fotos de rendicion de mas de 60 dias (el pedido y su rendicion quedan igual).</p>
+        <p class="muted" style="font-size:12px;margin-top:6px">"Mover fotos al servidor" recomprime cada foto (400px) y la sube al servidor, dejando en el sistema solo la referencia: las fotos se siguen viendo igual pero dejan de descargarse en cada carga (el navegador las cachea). Las fotos nuevas ya se suben solas al guardar el producto. "Borrar fotos de remito viejas" quita las fotos de rendicion de mas de 60 dias (el pedido y su rendicion quedan igual).</p>
       </div>
     `;
   }
@@ -13511,25 +13513,70 @@
     });
   }
 
+  // Sube una imagen (data URL) al servidor y devuelve su clave. Si no hay servidor configurado o
+  // falla, devuelve "" y el que llama se queda con la imagen en base64 (no se pierde nada).
+  async function uploadProductImage(dataUrl) {
+    const config = getCloudSyncConfig();
+    if (!dataUrl || !cloudSyncReady(config)) return "";
+    const match = /^data:(image\/[a-z+]+);base64,(.*)$/i.exec(String(dataUrl));
+    if (!match) return "";
+    const binary = atob(match[2]);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    const response = await cloudRequest(config, "/product-images", {
+      method: "POST",
+      headers: { "content-type": match[1] },
+      body: bytes
+    });
+    if (!response.ok) throw new Error("El servidor rechazo la imagen (HTTP " + response.status + ").");
+    const payload = await response.json().catch(() => ({}));
+    return payload && payload.key ? String(payload.key) : "";
+  }
+
+  // Saca las fotos de producto del JSON de estado: las recomprime y las sube al servidor, dejando
+  // en el estado solo la referencia (imageKey). Si el servidor no esta disponible, al menos las
+  // recomprime y avisa cuantas quedaron pendientes de subir.
   async function optimizeProductImages() {
     const products = (state.products || []).filter((p) => p && p.imageData);
-    if (!products.length) return alert("No hay fotos de producto guardadas en el sistema.");
+    if (!products.length) return alert("No hay fotos de producto guardadas adentro del sistema. Ya estan todas en el servidor.");
     const before = products.reduce((sum, p) => sum + String(p.imageData || "").length, 0);
-    if (!confirm("Se van a recomprimir " + products.length + " fotos de producto (" + formatBytes(before) + "). Las fotos siguen viendose, solo pesan menos. Continuar?")) return;
+    const config = getCloudSyncConfig();
+    const canUpload = cloudSyncReady(config);
+    const message = canUpload
+      ? "Se van a recomprimir y SUBIR AL SERVIDOR " + products.length + " fotos de producto (" + formatBytes(before) + ").\n\nLas fotos se siguen viendo igual, pero dejan de viajar en cada carga del sistema. Continuar?"
+      : "No hay servidor configurado, asi que las fotos no se pueden subir: solo se van a recomprimir (" + formatBytes(before) + "). Continuar?";
+    if (!confirm(message)) return;
+    let uploaded = 0;
     let optimized = 0;
+    let failed = 0;
     for (const product of products) {
       const small = await recompressDataUrl(product.imageData, 400, 0.65);
-      if (small && small.length < String(product.imageData).length) {
-        product.imageData = small;
-        product.updatedAt = new Date().toISOString();
-        optimized++;
+      const best = small && small.length < String(product.imageData).length ? small : product.imageData;
+      if (best !== product.imageData) { product.imageData = best; optimized++; }
+      if (canUpload) {
+        try {
+          const key = await uploadProductImage(best);
+          if (key) {
+            product.imageKey = key;
+            product.imageData = "";
+            uploaded++;
+          } else {
+            failed++;
+          }
+        } catch (error) {
+          failed++;
+          console.warn("No se pudo subir la foto de " + product.name + ":", error.message);
+        }
       }
+      product.updatedAt = new Date().toISOString();
     }
     const after = (state.products || []).reduce((sum, p) => sum + String((p && p.imageData) || "").length, 0);
     saveState();
     flushLocalStateSnapshot();
     render();
-    alert("Listo: " + optimized + " fotos optimizadas. Antes " + formatBytes(before) + ", ahora " + formatBytes(after) + ".");
+    alert("Listo.\n" + (canUpload ? uploaded + " fotos movidas al servidor.\n" : "") + optimized + " fotos recomprimidas."
+      + (failed ? "\n" + failed + " no se pudieron subir (quedan guardadas en el sistema, se puede reintentar)." : "")
+      + "\n\nPeso de las fotos adentro del estado: antes " + formatBytes(before) + ", ahora " + formatBytes(after) + ".");
   }
 
   function purgeOldRemitoPhotos() {
@@ -14353,9 +14400,19 @@
           if (!name) return alert("Complete nombre.");
           const productId = product ? product.id : nextProductId();
           let imageData = product ? product.imageData || "" : "";
+          let imageKey = product ? product.imageKey || "" : "";
           const fileInput = document.getElementById("product-image-file");
           if (fileInput && fileInput.files && fileInput.files[0]) {
             imageData = await compressImageFile(fileInput.files[0], 400, 0.65);
+            imageKey = "";
+            // La foto se guarda en el servidor y en el estado queda solo la referencia. Si no hay
+            // conexion, queda en base64 y se puede subir despues desde Backup.
+            try {
+              const uploadedKey = await uploadProductImage(imageData);
+              if (uploadedKey) { imageKey = uploadedKey; imageData = ""; }
+            } catch (error) {
+              console.warn("No se pudo subir la foto al servidor, queda guardada en el sistema:", error.message);
+            }
           }
           const payload = {
             id: productId,
@@ -14369,6 +14426,7 @@
             salePrice: Math.ceil(parseAmount(document.getElementById("product-price").value)),
             imageUrl: document.getElementById("product-image-url").value.trim(),
             imageData,
+            imageKey,
             isActive: product ? product.isActive : true,
             sortOrder: product ? product.sortOrder : 0,
             notes: document.getElementById("product-notes").value.trim()
@@ -16756,7 +16814,18 @@
     return PRODUCT_IMAGE_FILES.find((file) => normalizeImageName(file.replace(/\.[^.]+$/, "")) === target) || "";
   }
 
+  // Foto guardada en el servidor (no viaja adentro del estado). El navegador la cachea porque el
+  // nombre del archivo es unico por subida.
+  function productImageUrl(imageKey) {
+    const key = String(imageKey || "").trim();
+    if (!key) return "";
+    const base = cloudBaseUrl(getCloudSyncConfig());
+    return base ? base + "/public/product-image/" + encodeURIComponent(key) : "";
+  }
+
   function productThumb(product) {
+    const remote = product ? productImageUrl(product.imageKey) : "";
+    if (remote) return remote;
     if (product && product.imageData) return product.imageData;
     if (product && product.imageUrl) return product.imageUrl;
     const file = findProductImageFile(product && product.name);

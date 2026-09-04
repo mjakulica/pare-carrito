@@ -52,6 +52,9 @@ services:
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       OPENROUTER_API_URL: ${OPENROUTER_API_URL:-https://openrouter.ai/api/v1/chat/completions}
       OPENROUTER_VISION_MODEL: ${OPENROUTER_VISION_MODEL:-openai/gpt-4o-mini}
+      GOOGLE_VISION_API_KEY: ${GOOGLE_VISION_API_KEY:-}
+      GOOGLE_VISION_URL: ${GOOGLE_VISION_URL:-https://vision.googleapis.com/v1/images:annotate}
+      GOOGLE_VISION_LANG: ${GOOGLE_VISION_LANG:-es-t-i0-handwrit}
     volumes:
       - uploads:/data/uploads
 

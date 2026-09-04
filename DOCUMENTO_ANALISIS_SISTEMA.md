@@ -129,7 +129,7 @@ El ERP guarda el estado operativo en un único JSONB. Los arrays/colecciones pri
 |-----------|-------------|--------------|
 | `users` | Usuarios del ERP | `id`, `username`, `password`, `name`, `role`, `email`, `phone`, `clientId`, `linkedClientIds`, `hourlyRate`, `isActive` |
 | `clients` | Clientes | `id`, `name`, `address`, `phone`, `email`, `paymentType`, `priceTier` (`general` / `preferencial` / `con_factura` / `al_costo`), `priceAdjustmentPct`, `shippingFee`, `needsInvoice`, `cuit`, `legalName`, `invoiceType`, `invoiceFrequency`, `vehicleId`, `zone`, `isActive` |
-| `products` | Productos | `id`, `name`, `category`, `unitType`, `baseCost`, `salePrice`, `ivaType`, `assignedToType`, `assignedToId`, `isActive` |
+| `products` | Productos | `id`, `name`, `category`, `unitType`, `baseCost`, `salePrice`, `ivaType`, `assignedToType`, `assignedToId`, `allowUnitWeight`, `imageKey` (foto en el servidor), `imageData` (base64, legado), `imageUrl`, `isActive` |
 | `vehicles` | Vehículos de reparto | `id`, `name`, `type`, `driverName`, `capacity`, `isActive` |
 | `providers` | Proveedores | `id`, `name`, `contactName`, `paymentTerms`, `defaultMargin`, `productsSupplied`, `isActive` |
 | `orders` | Pedidos | `id`, `date`, `clientId`, `deliveryVehicleId`, `status`, `subtotalAmount`, `ivaAmount`, `totalAmount`, `paymentReceived`, `shippingFee`, `shippingIvaRate`, `deliveryRemitoPhoto`, `items[]` (con `notes` por item), `userId`, `createdAt` |
@@ -241,6 +241,8 @@ Tablas adicionales:
 | PUT | `/state` | manager, admin, employee, contador | Guardar estado completo |
 | POST | `/transfers` | customer, example | Registrar transferencia cliente |
 | POST | `/proofs` | Cualquier logueado | Subir comprobante |
+| POST | `/product-images` | manager, admin, employee | **(v12.9.121)** Sube una foto de producto (JPG/PNG/WEBP, hasta 8 MB) al volumen `uploads` y devuelve su `key`. Queda marcada `public_read = TRUE` |
+| GET | `/public/product-image/:key` | **Público (sin auth)** | **(v12.9.121)** Sirve la foto de producto con `Cache-Control: public, max-age=31536000, immutable`. Solo archivos con `public_read = TRUE`: los comprobantes siguen pidiendo login |
 | POST | `/ocr/order-image` | manager, admin, employee | OCR de la foto de un pedido manuscrito. Cadena de proveedores (v12.9.112-114): **Google Cloud Vision** (`DOCUMENT_TEXT_DETECTION`, `languageHints` = `GOOGLE_VISION_LANG`, por defecto `es-t-i0-handwrit`) -> OpenRouter -> Moonshot/Kimi; devuelve `{text, provider}` |
 | GET | `/proofs/:key` | Cualquier logueado | Descargar comprobante |
 | GET | `/reports/sales` | manager, admin | Ventas vs gastos por día |
@@ -632,18 +634,39 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 - **Causa de la lentitud:** el estado viaja y se guarda como UN solo JSON, y adentro lleva imagenes en base64 (`products[].imageData`, `orders[].deliveryRemitoPhoto.data`, comprobantes de egresos, pagos y transferencias). El texto (pedidos, saldos, caja) comprime bien con el gzip de Caddy; el base64 no. Por eso el peso lo dominan las imagenes, no el historico.
 - `saveState()` hacia `JSON.stringify` de TODO el estado en cada mutacion. Ahora el snapshot local se agenda (`scheduleLocalStateSnapshot`, 1,5 s) y se fuerza con `flushLocalStateSnapshot()` antes de leerlo, al ocultar la pestania (`visibilitychange`) y al cerrar (`beforeunload` / `pagehide`).
 - Backup: panel "Peso de los datos" (`measureStateWeight`) con el peso por seccion y el detalle de cuanto son imagenes; boton "Optimizar fotos de producto" (`recompressDataUrl` a 400px) y "Borrar fotos de remito viejas" (mas de 60 dias). Las fotos nuevas de producto se comprimen a 400px (antes 700px).
-- Pendiente (fix de fondo, requiere backend y migracion): sacar las imagenes del JSON de estado y guardarlas por referencia con el endpoint `/proofs` que ya existe, para que el arranque no las descargue.
+- Fix de fondo (HECHO en v12.9.121, ver 12.50): las fotos de producto salieron del JSON de estado y se guardan como archivo en el servidor. Quedan adentro del estado las fotos de remito entregado y los comprobantes de egresos, pagos y transferencias, que se pueden mover igual mas adelante.
+
+### 12.50 Fotos de producto fuera del estado (v12.9.121)
+
+Es el fix de fondo que quedaba pendiente en 12.48: el arranque bajaba las fotos en base64 dentro del JSON de estado, en cada dispositivo y cada vez.
+
+- **Modelo:** `product.imageKey` guarda la referencia al archivo en el servidor. `imageData` (base64) queda como legado y sigue funcionando; `productThumb()` resuelve en este orden: `imageKey` -> `imageData` -> `imageUrl` -> placeholder SVG.
+- **Backend:** `POST /product-images` guarda el archivo en `UPLOAD_DIR` (volumen Docker `uploads`, el mismo de los comprobantes) e inserta la fila en `proofs` con la columna nueva `public_read = TRUE`. `GET /public/product-image/:key` la sirve sin login y con cache inmutable, solo para filas publicas; los comprobantes de pagos y transferencias siguen con `GET /proofs/:key` autenticado.
+- **Frontend:** `uploadProductImage(dataUrl)` sube los bytes (no base64) con el content-type real. Al guardar un producto con foto se sube sola; si falla o no hay servidor, la foto queda en `imageData` y no se pierde nada.
+- **Migracion:** Backup -> "Peso de los datos" -> "Mover fotos de producto al servidor" recomprime a 400px, sube y limpia `imageData` de cada producto, informando cuantas quedaron pendientes. El panel muestra cuantas fotos estan en el servidor y cuantas siguen en el estado.
+- **Lista publica:** `/public/price-list` devuelve `/api/public/product-image/<clave>` cuando el producto tiene `imageKey` (antes mandaba el base64 completo en la respuesta).
+- **Nota operativa:** al reemplazar la foto de un producto, el archivo anterior queda en el volumen (no se borra, para no romper dispositivos que todavia no sincronizaron). El volumen `uploads` deberia entrar en el backup del VPS.
+- **Deploy:** requiere `./deploy.sh` (server.js, schema.sql y docker-compose.yml). La columna `public_read` se crea sola al arrancar.
+
+### 12.51 Correccion de despliegue: variables de Google Vision (v12.9.121)
+- `docker-compose.yml` no le pasaba a la API las variables `GOOGLE_VISION_API_KEY` / `GOOGLE_VISION_URL` / `GOOGLE_VISION_LANG` que `server.js` lee desde v12.9.113: estaban documentadas en `.env.example` pero no llegaban al contenedor, asi que el OCR con Google Vision no podia activarse en produccion. Ya se pasan.
 
 ---
 
 ## 13. Ultimo Cambio y Version
 
-**Version operativa:** 12.9.120
+**Version operativa:** 12.9.121
 **Fecha:** 2026-09-04
 **Rama:** `master` (repositorio `mjakulica/pare-carrito`)
 **Entorno:** VPS productivo `/opt/pare-carrito` con frontend estatico servido por Caddy y API Docker Compose. Frontend `sistema.parecarrito.com.ar`, API en `/api`, lista de precios publica en `/precios`.
 
-### Detalle del ultimo cambio (v12.9.120)
+### Detalle del ultimo cambio (v12.9.121)
+
+- Las fotos de producto salen del JSON de estado: se guardan como archivo en el servidor (`product.imageKey`) y se sirven publicas y cacheadas. Las nuevas se suben solas; las que ya estaban se migran desde Backup con un boton.
+- `docker-compose.yml` ahora le pasa a la API las variables de Google Vision.
+- **Requiere `./deploy.sh`** + `git pull`.
+
+### Cambios de v12.9.120
 
 - Proveedores: el saldo ya no queda por debajo del real (anulacion de pagos + compras en cuenta corriente sin movimiento en el ledger).
 - Nuevo tipo de egreso "Devolución a proveedor", que descuenta deuda o devuelve plata a la caja y resta en todas las metricas y en el stock.

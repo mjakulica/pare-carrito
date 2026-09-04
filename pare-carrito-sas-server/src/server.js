@@ -1219,6 +1219,39 @@ app.post("/proofs", authenticate, express.raw({ type: "*/*", limit: "25mb" }), a
   res.status(201).json({ ok: true, key });
 });
 
+// Fotos de producto: se guardan como archivo (no como base64 adentro del estado) y se sirven SIN
+// login, igual que ya se veian en la lista de precios publica. El navegador las cachea, asi que
+// dejan de viajar en cada carga del sistema.
+const PRODUCT_IMAGE_TYPES = { "image/jpeg": "jpg", "image/jpg": "jpg", "image/png": "png", "image/webp": "webp" };
+
+app.post("/product-images", authenticate, requireRole("manager", "admin", "employee"), express.raw({ type: "*/*", limit: "8mb" }), async (req, res) => {
+  const contentType = String(req.headers["content-type"] || "").split(";")[0].trim().toLowerCase();
+  const ext = PRODUCT_IMAGE_TYPES[contentType];
+  if (!ext) return res.status(400).json({ error: "Formato no soportado. Use JPG, PNG o WEBP." });
+  if (!req.body || !req.body.length) return res.status(400).json({ error: "Imagen vacia." });
+  const key = "prod-" + Date.now() + "-" + crypto.randomBytes(4).toString("hex") + "." + ext;
+  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+  fs.writeFileSync(path.join(UPLOAD_DIR, key), req.body);
+  await pool.query(
+    "INSERT INTO proofs (key, content_type, uploaded_by, public_read) VALUES ($1,$2,$3,TRUE)",
+    [key, contentType, req.user.username]
+  );
+  res.status(201).json({ ok: true, key, url: "/api/public/product-image/" + key, bytes: req.body.length });
+});
+
+app.get("/public/product-image/:key", async (req, res) => {
+  const key = String(req.params.key).replace(/[^a-zA-Z0-9._-]/g, "_");
+  // El saneado ya saca las barras; ademas se descartan "." y ".." para no salir del directorio.
+  if (!key || key === "." || key === "..") return res.status(404).json({ error: "Imagen no encontrada." });
+  const { rows } = await pool.query("SELECT content_type FROM proofs WHERE key = $1 AND public_read = TRUE", [key]);
+  const file = path.join(UPLOAD_DIR, key);
+  if (!rows.length || !fs.existsSync(file)) return res.status(404).json({ error: "Imagen no encontrada." });
+  res.set("content-type", rows[0].content_type || "image/jpeg");
+  // El nombre del archivo es unico por subida: se puede cachear para siempre.
+  res.set("cache-control", "public, max-age=31536000, immutable");
+  fs.createReadStream(file).pipe(res);
+});
+
 app.get("/proofs/:key", authenticate, async (req, res) => {
   const key = String(req.params.key).replace(/[^a-zA-Z0-9._-]/g, "_");
   const { rows } = await pool.query("SELECT content_type FROM proofs WHERE key = $1", [key]);
@@ -1433,7 +1466,8 @@ app.get("/public/price-list", async (req, res) => {
       // Imagen: misma que en el sistema. imageUrl "./assets/..." -> "/assets/..." (ruta absoluta
       // servida por Caddy). Si el producto tiene imagen propia (imageData), se manda esa.
       let image = null;
-      if (p.imageUrl) image = String(p.imageUrl).replace(/^\.\//, "/");
+      if (p.imageKey) image = "/api/public/product-image/" + String(p.imageKey).replace(/[^a-zA-Z0-9._-]/g, "_");
+      else if (p.imageUrl) image = String(p.imageUrl).replace(/^\.\//, "/");
       else if (p.imageData) image = p.imageData;
       return {
         name: p.name,
