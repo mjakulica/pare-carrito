@@ -1,5 +1,32 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.122 - TODO lo que se sube sale del JSON: comprobantes, fotos de remito y de recambio (2026-09-04)
+
+### Que se movio
+Completa lo que empezo v12.9.121 (fotos de producto). Ahora NADA de lo que se sube queda guardado en base64 adentro del estado:
+
+| Archivo | Antes (en el estado) | Ahora |
+|---|---|---|
+| Comprobante de egreso | `purchases[].proofFile` | `purchases[].proofKey` |
+| Comprobante de pago | `payments[].transferProofFile` | `payments[].transferProofKey` |
+| Comprobante de transferencia | `clientTransfers[].proofFile` | `clientTransfers[].proofKey` |
+| Foto del remito rendido | `orders[].deliveryRemitoPhoto.data` | `orders[].deliveryRemitoPhoto.key` |
+| Foto de recambio | `replacements[].items[].photo` | `replacements[].items[].photoKey` |
+| Foto de producto | `products[].imageData` | `products[].imageKey` (v12.9.121) |
+
+### Como funciona
+- **Lo que se sube de ahora en mas** va derecho al servidor al guardar (egreso, pago, transferencia, rendicion de entrega y recambio). Si no hay conexion o el servidor rechaza el archivo, queda guardado como antes y se puede mover despues: NUNCA se pierde.
+- **Lo que ya estaba**: en Backup -> "Peso de los datos" esta el boton **"Mover todos los archivos al servidor"**, que los sube todos de una y deja solo la referencia. Avisa cuantos movio y cuantos quedaron para reintentar. Se puede correr las veces que haga falta.
+- **Privacidad**: los comprobantes y las fotos de remito/recambio son PRIVADOS: se guardan con `POST /proofs` y se piden con login (`GET /proofs/:key`); la app los muestra a traves de una URL temporal del navegador. Solo las fotos de producto son publicas, como ya lo eran en `/precios`.
+- Las vistas siguen igual: "Ver comprobante" en egresos y transferencias, la foto en la rendicion de entregas y las miniaturas de recambio ahora resuelven solo el archivo despues de dibujar la pantalla.
+
+### Deploy
+- **Solo frontend** (`assets/app.js`): `git pull`. Usa el `POST /proofs` que ya existia desde antes; no hay cambios de backend en esta version (si el de v12.9.121, que si necesita `./deploy.sh`).
+- Los archivos viven en el volumen Docker `uploads`, que sobrevive a los rebuilds. **Conviene sumarlo al backup del VPS**: antes estos archivos entraban en el `pg_dump` porque vivian adentro del estado.
+- Nota conocida (de antes, no la introduce este cambio): `GET /proofs/:key` deja ver el archivo a cualquier usuario logueado que conozca la clave. Las claves no son adivinables (fecha + 8 caracteres al azar) y hace falta estar logueado, pero si se quiere restringir por rol hay que hacerlo en el endpoint.
+
+---
+
 ## v12.9.121 - Las fotos de producto salen del estado y se guardan en el servidor (2026-09-04)
 
 ### El problema

@@ -132,13 +132,13 @@ El ERP guarda el estado operativo en un único JSONB. Los arrays/colecciones pri
 | `products` | Productos | `id`, `name`, `category`, `unitType`, `baseCost`, `salePrice`, `ivaType`, `assignedToType`, `assignedToId`, `allowUnitWeight`, `imageKey` (foto en el servidor), `imageData` (base64, legado), `imageUrl`, `isActive` |
 | `vehicles` | Vehículos de reparto | `id`, `name`, `type`, `driverName`, `capacity`, `isActive` |
 | `providers` | Proveedores | `id`, `name`, `contactName`, `paymentTerms`, `defaultMargin`, `productsSupplied`, `isActive` |
-| `orders` | Pedidos | `id`, `date`, `clientId`, `deliveryVehicleId`, `status`, `subtotalAmount`, `ivaAmount`, `totalAmount`, `paymentReceived`, `shippingFee`, `shippingIvaRate`, `deliveryRemitoPhoto`, `items[]` (con `notes` por item), `userId`, `createdAt` |
+| `orders` | Pedidos (la foto de rendicion es `deliveryRemitoPhoto.key`, referencia al archivo en el servidor) | `id`, `date`, `clientId`, `deliveryVehicleId`, `status`, `subtotalAmount`, `ivaAmount`, `totalAmount`, `paymentReceived`, `shippingFee`, `shippingIvaRate`, `deliveryRemitoPhoto`, `items[]` (con `notes` por item), `userId`, `createdAt` |
 | `purchases` | Compras y gastos (incluye devoluciones a proveedor, con `totalCost` e `items[].quantity` en NEGATIVO) | `id`, `date`, `expenseType` (`purchase` / `provider_return` / `provider_payment` / `product_expense` / `other_expense` / `freight` / `prepared` / `market_price` / `cash_movement`), `providerId`, `providerName`, `totalCost`, `paymentStatus`, `returnOfPurchaseId`, `recordedBy`, `items[]` |
-| `payments` | Pagos recibidos | `id`, `date`, `clientId`, `amount`, `method`, `receivedByUserId`, `orderIds` |
+| `payments` | Pagos recibidos | `id`, `date`, `clientId`, `amount`, `method`, `receivedByUserId`, `orderIds`, `transferProofKey` |
 | `saldos` | Cuenta corriente cliente | `id`, `date`, `clientId`, `type`, `description`, `amount`, `balance`, `relatedEntityId`, `relatedEntityType` |
 | `caja` | Movimientos de caja | `id`, `date`, `type`, `concept`, `amountIngreso`, `amountEgreso`, `cashBoxId`, `relatedEntityId`, `relatedEntityType` |
 | `providerLedger` | Cuenta corriente proveedor | movimientos de deuda/pago con proveedores |
-| `clientTransfers` | Transferencias de clientes | `id`, `clientId`, `amount`, `status`, `createdByUserId`, `timestamp`, `reviewedBy` |
+| `clientTransfers` | Transferencias de clientes | `id`, `clientId`, `amount`, `status`, `createdByUserId`, `timestamp`, `reviewedBy`, `proofKey` |
 | `billingLog` | Facturación | `id`, `clientId`, `clientName`, `invoiceType`, `freq`, `from`, `to`, `total`, `iva`, `neto`, `orders`, `cae`, `numero`, `pdf`, `externalReference`, `partials`, `status`, `detail`, `emittedAt` |
 | `attendance` | Asistencia | `id`, `userId`, `date`, `checkIn`, `checkOut`, `hours` |
 | `employeePayments` | Pagos a empleados | `id`, `userId`, `date`, `amount`, `concept` |
@@ -651,16 +651,39 @@ Es el fix de fondo que quedaba pendiente en 12.48: el arranque bajaba las fotos 
 ### 12.51 Correccion de despliegue: variables de Google Vision (v12.9.121)
 - `docker-compose.yml` no le pasaba a la API las variables `GOOGLE_VISION_API_KEY` / `GOOGLE_VISION_URL` / `GOOGLE_VISION_LANG` que `server.js` lee desde v12.9.113: estaban documentadas en `.env.example` pero no llegaban al contenedor, asi que el OCR con Google Vision no podia activarse en produccion. Ya se pasan.
 
+### 12.52 Todos los adjuntos fuera del estado (v12.9.122)
+
+Completa 12.50: ningun archivo subido queda ya en base64 adentro del JSON de estado.
+
+| Coleccion | Campo viejo (base64, legado) | Campo nuevo (referencia) | Ruta |
+|---|---|---|---|
+| `purchases` | `proofFile` | `proofKey` | `/proofs` (privado) |
+| `payments` | `transferProofFile` | `transferProofKey` | `/proofs` (privado) |
+| `clientTransfers` | `proofFile` | `proofKey` | `/proofs` (privado) |
+| `orders` | `deliveryRemitoPhoto.data` | `deliveryRemitoPhoto.key` | `/proofs` (privado) |
+| `replacements` | `items[].photo` | `items[].photoKey` | `/proofs` (privado) |
+| `products` | `imageData` | `imageKey` | `/public/product-image` (publico) |
+
+- **Helpers:** `uploadPrivateFile(dataUrl, nombre)` sube los bytes a `POST /proofs` y devuelve la clave; `proofObjectUrl(key)` descarga con login y cachea una URL temporal (`Map` por clave); `proofImageTag(key, dataUrl, attrs)` dibuja el `<img>` (con `data-proof-key` cuando hay que resolverlo) y `bindProofImages()` los resuelve al final de cada `render()`; `openProofViewer(key, dataUrl, titulo)` abre el visor (imagen o PDF) con descarga.
+- **Compatibilidad:** todos los campos viejos en base64 se siguen leyendo y mostrando. La migracion es opcional y reintentable.
+- **Migracion:** `pendingAttachments()` arma el inventario de lo que sigue adentro del estado (con como leerlo, como escribir la clave y como limpiarlo) y `migrateAttachmentsToServer()` lo sube todo. Boton "Mover todos los archivos al servidor" en Backup -> "Peso de los datos". Lo que falla queda intacto para reintentar.
+- **Sin cambios de backend:** usa el `POST /proofs` / `GET /proofs/:key` que ya existian.
+- **Operacion:** el volumen Docker `uploads` pasa a ser critico para el backup del VPS (estos archivos ya no viajan en el `pg_dump` del estado). Limitacion preexistente: `GET /proofs/:key` sirve el archivo a cualquier usuario logueado que conozca la clave; las claves no son adivinables, pero si se quiere control por rol hay que agregarlo en el endpoint.
+
 ---
 
 ## 13. Ultimo Cambio y Version
 
-**Version operativa:** 12.9.121
+**Version operativa:** 12.9.122
 **Fecha:** 2026-09-04
 **Rama:** `master` (repositorio `mjakulica/pare-carrito`)
 **Entorno:** VPS productivo `/opt/pare-carrito` con frontend estatico servido por Caddy y API Docker Compose. Frontend `sistema.parecarrito.com.ar`, API en `/api`, lista de precios publica en `/precios`.
 
-### Detalle del ultimo cambio (v12.9.121)
+### Detalle del ultimo cambio (v12.9.122)
+
+- Todo lo que se sube (comprobantes de egresos, pagos y transferencias, fotos de remito y de recambio) sale del JSON de estado y se guarda como archivo en el servidor, igual que las fotos de producto en v12.9.121. Lo nuevo se sube solo; lo viejo se migra con un boton en Backup. Solo frontend (`git pull`).
+
+### Cambios de v12.9.121
 
 - Las fotos de producto salen del JSON de estado: se guardan como archivo en el servidor (`product.imageKey`) y se sirven publicas y cacheadas. Las nuevas se suben solas; las que ya estaban se migran desde Backup con un boton.
 - `docker-compose.yml` ahora le pasa a la API las variables de Google Vision.

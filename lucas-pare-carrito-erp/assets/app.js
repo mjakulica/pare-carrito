@@ -2144,6 +2144,7 @@
     `;
     bindCommon();
     afterRender.forEach((fn) => fn());
+    bindProofImages();
     maybeForcePasswordChange();
   }
 
@@ -2763,7 +2764,7 @@
     const balances = getClientBalances();
     const totalReceivable = balances.reduce((sum, item) => sum + Math.max(0, item.balance), 0);
     const providerDebtTotal = getProviderBalances().reduce((sum, item) => sum + Math.max(0, item.balance), 0);
-    const pendingTransfers = state.payments.filter((payment) => payment.method === "transferencia" && !payment.transferProofFile).length;
+    const pendingTransfers = state.payments.filter((payment) => payment.method === "transferencia" && !payment.transferProofFile && !payment.transferProofKey).length;
     const vehicleRows = activeVehicles().map((vehicle) => {
       const totals = getVehicleTotals(vehicle.id, todayISO());
       return `
@@ -3915,7 +3916,7 @@
     if (orderSel) orderSel.addEventListener("change", renderProducts);
     if (orderSel && (preselectOrderId || orderSel.value)) { if (preselectOrderId) orderSel.value = preselectOrderId; renderProducts(); }
     const saveBtn = document.getElementById("modal-save");
-    if (saveBtn) saveBtn.addEventListener("click", () => {
+    if (saveBtn) saveBtn.addEventListener("click", async () => {
       const order = getOrder(orderSel.value);
       if (!order) return alert("Elegi un pedido.");
       const keys = Object.keys(selected);
@@ -3923,7 +3924,15 @@
       for (const k of keys) { if (!selected[k].photo) return alert("Falta la foto de: " + selected[k].productName); if (selected[k].qty <= 0) return alert("Cantidad invalida en: " + selected[k].productName); if (selected[k].qty > Number(selected[k].originalQty || 0)) return alert("La cantidad a recambiar no puede superar la pedida en: " + selected[k].productName); }
       const when = document.getElementById("recambio-when").value === "manana" ? "manana" : "proximo_pedido";
       state.replacements = state.replacements || [];
-      state.replacements.push({ id: nextDatedId("REC", state.replacements), clientId: order.clientId, sourceOrderId: order.id, when, status: "pendiente", createdAt: new Date().toISOString(), createdDate: todayISO(), items: keys.map((k) => ({ productId: selected[k].productId, productName: selected[k].productName, unitType: selected[k].unitType, originalQty: selected[k].originalQty, qty: selected[k].qty, photo: selected[k].photo })) });
+      // Las fotos del recambio van al servidor; en el estado queda solo la clave (photoKey). Si falla
+      // la subida, la foto queda adentro del estado y se puede mover despues desde Backup.
+      for (const k of keys) {
+        try {
+          const key = await uploadPrivateFile(selected[k].photo, "recambio-" + order.id);
+          if (key) { selected[k].photoKey = key; selected[k].photo = ""; }
+        } catch (error) { console.warn("No se pudo subir la foto del recambio, queda guardada en el sistema:", error.message); }
+      }
+      state.replacements.push({ id: nextDatedId("REC", state.replacements), clientId: order.clientId, sourceOrderId: order.id, when, status: "pendiente", createdAt: new Date().toISOString(), createdDate: todayISO(), items: keys.map((k) => ({ productId: selected[k].productId, productName: selected[k].productName, unitType: selected[k].unitType, originalQty: selected[k].originalQty, qty: selected[k].qty, photo: selected[k].photo || "", photoKey: selected[k].photoKey || "" })) });
       saveState();
       generatePendingReplacements();
       closeModal();
@@ -3991,7 +4000,7 @@
     if (!rowsData.length) return "";
     const rows = rowsData.map(({ r, items }) => {
       const c = getClient(r.clientId);
-      const parts = items.map((it) => `${escapeHtml(it.productName)} x${formatNumber(it.qty)}${it.photo ? ` <img src="${it.photo}" data-recambio-photo-view="${escapeAttr(it.photo)}" style="height:26px;vertical-align:middle;border-radius:3px;cursor:pointer" title="Ver foto del recambio" />` : ` <span class="pill amber">sin foto</span>`}`).join(", ");
+      const parts = items.map((it) => `${escapeHtml(it.productName)} x${formatNumber(it.qty)}${it.photo || it.photoKey ? " " + proofImageTag(it.photoKey, it.photo, `data-recambio-photo-view="${escapeAttr(it.photoKey || it.photo)}" style="height:26px;vertical-align:middle;border-radius:3px;cursor:pointer" title="Ver foto del recambio"`) : ` <span class="pill amber">sin foto</span>`}`).join(", ");
       return `<div style="padding:3px 0;border-bottom:1px solid #eee"><strong>${escapeHtml(c ? c.name : r.clientId)}</strong> <span class="muted">(${r.when === "manana" ? "mañana" : "próximo pedido"})</span>: ${parts}</div>`;
     }).join("");
     return `<div class="panel highlight-panel" style="margin-bottom:14px"><h2 class="page-title" style="font-size:16px">Productos de reposición pendientes (${rowsData.length})</h2>${rows}</div>`;
@@ -4002,7 +4011,7 @@
     const list = (state.replacements || []).slice().sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
     const rows = list.map((r) => {
       const c = getClient(r.clientId);
-      const prods = (r.items || []).map((it) => `${escapeHtml(it.productName)} <strong>${formatNumber(it.qty)}</strong>${it.originalQty != null ? `<span class="muted">/${formatNumber(it.originalQty)} ${escapeHtml(it.unitType || "")}</span>` : ""}${it.photo ? ` <img src="${it.photo}" data-recambio-photo-view="${escapeAttr(it.photo)}" style="height:26px;vertical-align:middle;border-radius:3px;cursor:pointer" title="Ver foto" />` : ` <span class="pill amber">sin foto</span>`}`).join("<br>");
+      const prods = (r.items || []).map((it) => `${escapeHtml(it.productName)} <strong>${formatNumber(it.qty)}</strong>${it.originalQty != null ? `<span class="muted">/${formatNumber(it.originalQty)} ${escapeHtml(it.unitType || "")}</span>` : ""}${it.photo || it.photoKey ? " " + proofImageTag(it.photoKey, it.photo, `data-recambio-photo-view="${escapeAttr(it.photoKey || it.photo)}" style="height:26px;vertical-align:middle;border-radius:3px;cursor:pointer" title="Ver foto"`) : ` <span class="pill amber">sin foto</span>`}`).join("<br>");
       const cuando = r.when === "manana" ? ("Mañana" + (r.scheduledDate || r.createdDate ? " (" + formatDate(addDaysISO(r.createdDate || todayISO(), 1)) + ")" : "")) : "Próximo pedido";
       const estado = r.status === "pendiente" ? `<span class="pill amber">Pendiente</span>` : `<span class="pill green">Aplicado</span>`;
       return `<tr>
@@ -4015,7 +4024,11 @@
       </tr>`;
     }).join("");
     afterRender.push(() => {
-      document.querySelectorAll("[data-recambio-photo-view]").forEach((img) => img.addEventListener("click", () => showModal("Foto de recambio", `<img src="${img.dataset.recambioPhotoView}" style="max-width:100%;height:auto;display:block;margin:0 auto" />`, null, { className: "wide" })));
+      document.querySelectorAll("[data-recambio-photo-view]").forEach((img) => img.addEventListener("click", () => {
+        // El atributo trae la clave del archivo en el servidor o, en los recambios viejos, el base64.
+        const ref = img.dataset.recambioPhotoView || "";
+        openProofViewer(/^data:/i.test(ref) ? "" : ref, /^data:/i.test(ref) ? ref : "", "Foto de recambio");
+      }));
       document.querySelectorAll("[data-del-replacement]").forEach((b) => b.addEventListener("click", () => {
         if (!confirm("Eliminar esta reposición pendiente?")) return;
         state.replacements = (state.replacements || []).filter((x) => x.id !== b.dataset.delReplacement);
@@ -5095,7 +5108,11 @@
     afterRender.push(() => {
       document.querySelectorAll("[data-open-recambio]").forEach((b) => b.addEventListener("click", openRecambioModal));
       document.querySelectorAll("[data-add-recambio-order]").forEach((b) => b.addEventListener("click", () => openRecambioModal(b.dataset.addRecambioOrder)));
-      document.querySelectorAll("[data-recambio-photo-view]").forEach((img) => img.addEventListener("click", () => showModal("Foto de recambio", `<img src="${img.dataset.recambioPhotoView}" style="max-width:100%;height:auto;display:block;margin:0 auto" />`, null, { className: "wide" })));
+      document.querySelectorAll("[data-recambio-photo-view]").forEach((img) => img.addEventListener("click", () => {
+        // El atributo trae la clave del archivo en el servidor o, en los recambios viejos, el base64.
+        const ref = img.dataset.recambioPhotoView || "";
+        openProofViewer(/^data:/i.test(ref) ? "" : ref, /^data:/i.test(ref) ? ref : "", "Foto de recambio");
+      }));
     });
     return pageShell(
       "Pedidos",
@@ -5479,7 +5496,11 @@
     });
     afterRender.push(() => {
       document.querySelectorAll("[data-open-recambio]").forEach((b) => b.addEventListener("click", openRecambioModal));
-      document.querySelectorAll("[data-recambio-photo-view]").forEach((img) => img.addEventListener("click", () => showModal("Foto de recambio", `<img src="${img.dataset.recambioPhotoView}" style="max-width:100%;height:auto;display:block;margin:0 auto" />`, null, { className: "wide" })));
+      document.querySelectorAll("[data-recambio-photo-view]").forEach((img) => img.addEventListener("click", () => {
+        // El atributo trae la clave del archivo en el servidor o, en los recambios viejos, el base64.
+        const ref = img.dataset.recambioPhotoView || "";
+        openProofViewer(/^data:/i.test(ref) ? "" : ref, /^data:/i.test(ref) ? ref : "", "Foto de recambio");
+      }));
     });
     return pageShell(
       "Mis Pedidos",
@@ -6785,7 +6806,7 @@
           <td>${formatDate(purchase.date)}<br><span class="muted">${escapeHtml(purchase.createdByName || purchase.recordedBy || "")}${purchase.createdAt ? " \u00b7 " + formatClockHM(purchase.createdAt) : ""}</span></td>
           <td>${escapeHtml(expenseTypeLabel(purchase.expenseType || "purchase"))}</td>
           <td>${escapeHtml(origin)}</td>
-          <td>${itemText}${(purchase.expenseType === "other_expense" || purchase.expenseType === "freight") && purchase.proofFile ? ` <button class="btn small ghost" type="button" data-view-proof="${escapeAttr(purchase.id)}">Ver comprobante</button>` : ""}</td>
+          <td>${itemText}${(purchase.expenseType === "other_expense" || purchase.expenseType === "freight") && (purchase.proofFile || purchase.proofKey) ? ` <button class="btn small ghost" type="button" data-view-proof="${escapeAttr(purchase.id)}">Ver comprobante</button>` : ""}</td>
           <td>${escapeHtml(purchaseStatusLabel(purchase.paymentStatus || "paid"))}</td>
           <td>${escapeHtml(getCashBoxName(getPurchaseCashBoxId(purchase)))}</td>
           <td class="num">${formatMoney(purchase.totalCost)}</td>
@@ -6811,7 +6832,7 @@
       else bindPurchases();
       document.querySelectorAll("[data-view-proof]").forEach((b) => b.addEventListener("click", () => {
         const p = state.purchases.find((x) => x.id === b.dataset.viewProof);
-        if (p && p.proofFile) showModal("Comprobante", `<img src="${p.proofFile}" style="max-width:100%;height:auto;display:block;margin:0 auto" />`, null, { className: "wide" });
+        if (p && (p.proofFile || p.proofKey)) openProofViewer(p.proofKey, p.proofFile, "Comprobante " + p.id);
       }));
     });
     return pageShell(
@@ -7630,9 +7651,16 @@
       if (!isOtherExp && !items.length) return alert("Agregue al menos un producto valido.");
       if (!["prepared", "market_price"].includes(expenseType) && totalCost <= 0) return alert("Complete el monto/costo.");
       let proofFile = "";
+      let proofKey = "";
       const proofInput = document.getElementById("purchase-proof");
       if (isOtherExp && proofInput && proofInput.files && proofInput.files[0]) {
         try { proofFile = await compressImageFile(proofInput.files[0], 1200, 0.7); } catch (e) { console.warn("No se pudo comprimir el comprobante:", e.message); }
+        // El comprobante va al servidor; en el estado queda solo la clave. Sin conexion queda el
+        // base64 y se puede mover despues desde Backup.
+        try {
+          const key = await uploadPrivateFile(proofFile, "comprobante-egreso");
+          if (key) { proofKey = key; proofFile = ""; }
+        } catch (error) { console.warn("No se pudo subir el comprobante, queda guardado en el sistema:", error.message); }
       }
       const purchase = {
         id: nextDatedId("CMP", state.purchases),
@@ -7655,7 +7683,8 @@
         vendorName: (document.getElementById("purchase-vendor") || { value: "" }).value.trim(),
         recordedBy: currentUser.name,
         userRole: currentUser.role,
-        proofFile
+        proofFile,
+        proofKey
       };
       // Anti-duplicado: si ya se registro un egreso identico (mismo tipo, proveedor, total, items
       // y usuario) en el ultimo minuto, no volver a cargarlo (evita doble tap / doble envio).
@@ -9910,7 +9939,7 @@
           <td>${escapeHtml(PAYMENT_METHODS[payment.method] || payment.method)}</td>
           <td>${escapeHtml(getCashBoxName(payment.cashBoxId || getPaymentCashBoxId(payment, getUser(payment.receivedByUserId))))}</td>
           <td class="num">${formatMoney(payment.amount)}</td>
-          <td>${payment.transferProofFile ? `<span class="pill green">Con comprobante</span>` : payment.method === "transferencia" ? `<span class="pill amber">Sin comprobante</span>` : `<span class="pill gray">No aplica</span>`}</td>
+          <td>${payment.transferProofFile || payment.transferProofKey ? `<span class="pill green">Con comprobante</span>` : payment.method === "transferencia" ? `<span class="pill amber">Sin comprobante</span>` : `<span class="pill gray">No aplica</span>`}</td>
           <td>${Number(payment.pendingDifference || 0) > 0 ? `<span class="pill amber">Pendiente ${formatMoney(payment.pendingDifference)}</span><br>` : ""}${escapeHtml(payment.notes || "")}</td>
           <td>${annulButton}${annulledLabel}</td>
         </tr>
@@ -10112,11 +10141,16 @@
       const amount = parseAmount(document.getElementById("payment-amount").value);
       if (amount <= 0) return alert("Ingrese un monto mayor a cero.");
       let transferProofFile = "";
+      let transferProofKey = "";
       const fileInput = document.getElementById("payment-proof");
       if (fileInput && fileInput.files && fileInput.files[0]) {
         const file = fileInput.files[0];
         if (file.size > 2 * 1024 * 1024) return alert("Use un comprobante menor a 2 MB para esta version localStorage.");
         transferProofFile = await compressImageFile(file, 1200, 0.75);
+        try {
+          const key = await uploadPrivateFile(transferProofFile, "comprobante-pago");
+          if (key) { transferProofKey = key; transferProofFile = ""; }
+        } catch (error) { console.warn("No se pudo subir el comprobante, queda guardado en el sistema:", error.message); }
       }
       recordPayment({
         clientId: document.getElementById("payment-client").value,
@@ -10125,7 +10159,8 @@
         method: method.value,
         receivedByUserId: currentUser.role === "employee" ? currentUser.id : document.getElementById("payment-receiver").value,
         notes: document.getElementById("payment-notes").value.trim(),
-        transferProofFile
+        transferProofFile,
+        transferProofKey
       });
       saveState();
       alert("Pago registrado.");
@@ -10515,12 +10550,19 @@
         amount,
         method: "transferencia",
         proofFile: await compressImageFile(file, 1200, 0.75),
+        proofKey: "",
         proofName: file.name,
         notes: document.getElementById("transfer-notes").value.trim(),
         status: "pending",
         createdByUserId: currentUser.id,
         createdByName: currentUser.name
       };
+      // El comprobante va al servidor; en la transferencia queda solo la clave. Si falla (o el
+      // cliente esta sin conexion) queda el base64 y se sincroniza igual.
+      try {
+        const key = await uploadPrivateFile(newTransfer.proofFile, "comprobante-transferencia");
+        if (key) { newTransfer.proofKey = key; newTransfer.proofFile = ""; }
+      } catch (error) { console.warn("No se pudo subir el comprobante, queda guardado en el sistema:", error.message); }
       state.clientTransfers.push(newTransfer);
       saveState();
       if (isClientLikeRole(currentUser.role)) {
@@ -10548,7 +10590,7 @@
           <td>${(transfer.orderIds || []).map(escapeHtml).join("<br>") || "<span class=\"muted\">A cuenta</span>"}</td>
           <td class="num">${formatMoney(transfer.amount)}</td>
           <td>${transferStatusPill(transfer.status)}</td>
-          <td>${transfer.proofFile ? `<button class="btn small ghost" type="button" data-download-proof="${escapeAttr(transfer.id)}">Ver comprobante</button>` : `<span class="muted">Sin archivo</span>`}</td>
+          <td>${transfer.proofFile || transfer.proofKey ? `<button class="btn small ghost" type="button" data-download-proof="${escapeAttr(transfer.id)}">Ver comprobante</button>` : `<span class="muted">Sin archivo</span>`}</td>
           <td class="page-actions">
             ${transfer.status === "pending" ? `<button class="btn small primary" data-accept-transfer="${transfer.id}">Aceptar</button><button class="btn small danger" data-reject-transfer="${transfer.id}">Rechazar</button>` : `<span class="muted">${escapeHtml(transfer.reviewedBy || "")}</span>`}
           </td>
@@ -10591,7 +10633,8 @@
         method: "transferencia",
         receivedByUserId: currentUser.id,
         notes: "Transferencia cliente aprobada - " + transfer.id + (transfer.notes ? " - " + transfer.notes : ""),
-        transferProofFile: transfer.proofFile || ""
+        transferProofFile: transfer.proofFile || "",
+        transferProofKey: transfer.proofKey || ""
       });
       if (paymentRecord) paymentIds.push(paymentRecord.id);
     } else {
@@ -10608,7 +10651,8 @@
           method: "transferencia",
           receivedByUserId: currentUser.id,
           notes: "Transferencia cliente aprobada - " + transfer.id + (transfer.notes ? " - " + transfer.notes : ""),
-          transferProofFile: transfer.proofFile || ""
+          transferProofFile: transfer.proofFile || "",
+          transferProofKey: transfer.proofKey || ""
         });
         if (paymentRecord) paymentIds.push(paymentRecord.id);
         remaining -= amount;
@@ -10633,11 +10677,20 @@
     render();
   }
 
-  function downloadTransferProof(id) {
+  async function downloadTransferProof(id) {
     const transfer = (state.clientTransfers || []).find((item) => item.id === id);
-    if (!transfer || !transfer.proofFile) return alert("La transferencia no tiene archivo adjunto.");
+    if (!transfer || (!transfer.proofFile && !transfer.proofKey)) return alert("La transferencia no tiene archivo adjunto.");
     const name = buildTransferProofName(transfer);
-    fetch(transfer.proofFile)
+    let source = transfer.proofFile;
+    if (!source) {
+      try {
+        source = await proofObjectUrl(transfer.proofKey);
+      } catch (error) {
+        return alert("No se pudo descargar el comprobante: " + error.message);
+      }
+      if (!source) return alert("No se pudo descargar el comprobante (sin conexion con el servidor).");
+    }
+    fetch(source)
       .then((response) => response.blob())
       .then((blob) => {
         const url = URL.createObjectURL(blob);
@@ -10652,7 +10705,7 @@
         }, 1000);
       })
       .catch(() => {
-        window.open(transfer.proofFile, "_blank");
+        window.open(source, "_blank");
       });
   }
 
@@ -10660,7 +10713,8 @@
     const client = getClient(transfer.clientId || (transfer.clientIds || [])[0]);
     const clientName = client ? client.name : transfer.clientId || "Cliente";
     const extMatch = String(transfer.proofName || "").match(/\.[a-z0-9]{2,5}$/i);
-    const ext = extMatch ? extMatch[0] : guessDataUrlExtension(transfer.proofFile);
+    const extFromKey = String(transfer.proofKey || "").match(/\.[a-z0-9]{2,5}$/i);
+    const ext = extMatch ? extMatch[0] : (extFromKey ? extFromKey[0] : guessDataUrlExtension(transfer.proofFile));
     return `${fileDate(transfer.date)} ${clientName} ${formatMoney(transfer.amount)}${ext}`.replace(/[\\/:*?"<>|]/g, "-");
   }
 
@@ -13441,7 +13495,8 @@
       { label: "Fotos de remito entregado (orders.deliveryRemitoPhoto)", bytes: (state.orders || []).reduce((sum, o) => sum + String((o && o.deliveryRemitoPhoto && o.deliveryRemitoPhoto.data) || "").length, 0) },
       { label: "Comprobantes de egresos (purchases.proofFile)", bytes: (state.purchases || []).reduce((sum, p) => sum + String((p && p.proofFile) || "").length, 0) },
       { label: "Comprobantes de pagos (payments.proofFile)", bytes: (state.payments || []).reduce((sum, p) => sum + String((p && (p.proofFile || p.proof)) || "").length, 0) },
-      { label: "Comprobantes de transferencias (clientTransfers)", bytes: (state.clientTransfers || []).reduce((sum, t) => sum + String((t && (t.proofFile || t.proof)) || "").length, 0) }
+      { label: "Comprobantes de transferencias (clientTransfers)", bytes: (state.clientTransfers || []).reduce((sum, t) => sum + String((t && (t.proofFile || t.proof)) || "").length, 0) },
+      { label: "Fotos de recambio (replacements)", bytes: (state.replacements || []).reduce((sum, r) => sum + (Array.isArray(r && r.items) ? r.items.reduce((s2, it) => s2 + String((it && it.photo) || "").length, 0) : 0), 0) }
     ].filter((bucket) => bucket.bytes > 0).sort((a, b) => b.bytes - a.bytes);
     return {
       total,
@@ -13449,6 +13504,114 @@
       imageBuckets,
       imageTotal: imageBuckets.reduce((sum, bucket) => sum + bucket.bytes, 0)
     };
+  }
+
+  // Todo lo que se sube y todavia esta guardado en base64 adentro del estado, con la forma de
+  // moverlo al servidor. Cada entrada sabe leer su base64, escribir la clave y limpiarlo.
+  function pendingAttachments() {
+    const list = [];
+    (state.purchases || []).forEach((purchase) => {
+      if (purchase && purchase.proofFile) {
+        list.push({
+          label: "Comprobante de egreso " + purchase.id,
+          fileName: "comprobante-egreso",
+          data: purchase.proofFile,
+          apply: (key) => { purchase.proofKey = key; purchase.proofFile = ""; purchase.updatedAt = new Date().toISOString(); }
+        });
+      }
+    });
+    (state.payments || []).forEach((payment) => {
+      if (payment && payment.transferProofFile) {
+        list.push({
+          label: "Comprobante de pago " + payment.id,
+          fileName: "comprobante-pago",
+          data: payment.transferProofFile,
+          apply: (key) => { payment.transferProofKey = key; payment.transferProofFile = ""; payment.updatedAt = new Date().toISOString(); }
+        });
+      }
+    });
+    (state.clientTransfers || []).forEach((transfer) => {
+      if (transfer && transfer.proofFile) {
+        list.push({
+          label: "Comprobante de transferencia " + transfer.id,
+          fileName: "comprobante-transferencia",
+          data: transfer.proofFile,
+          apply: (key) => { transfer.proofKey = key; transfer.proofFile = ""; transfer.updatedAt = new Date().toISOString(); }
+        });
+      }
+    });
+    (state.orders || []).forEach((order) => {
+      if (order && order.deliveryRemitoPhoto && order.deliveryRemitoPhoto.data) {
+        list.push({
+          label: "Foto de remito " + order.id,
+          fileName: "remito-" + order.id,
+          data: order.deliveryRemitoPhoto.data,
+          apply: (key) => { order.deliveryRemitoPhoto.key = key; order.deliveryRemitoPhoto.data = ""; order.updatedAt = new Date().toISOString(); }
+        });
+      }
+    });
+    (state.replacements || []).forEach((replacement) => {
+      (replacement && Array.isArray(replacement.items) ? replacement.items : []).forEach((item) => {
+        if (item && item.photo) {
+          list.push({
+            label: "Foto de recambio " + replacement.id,
+            fileName: "recambio-" + replacement.id,
+            data: item.photo,
+            apply: (key) => { item.photoKey = key; item.photo = ""; replacement.updatedAt = new Date().toISOString(); }
+          });
+        }
+      });
+    });
+    (state.products || []).forEach((product) => {
+      if (product && product.imageData) {
+        list.push({
+          label: "Foto de producto " + product.name,
+          fileName: "producto",
+          data: product.imageData,
+          product: true,
+          apply: (key) => { product.imageKey = key; product.imageData = ""; product.updatedAt = new Date().toISOString(); }
+        });
+      }
+    });
+    return list;
+  }
+
+  // Mueve al servidor TODO lo que este guardado en base64 adentro del estado. Las fotos de
+  // producto van por la ruta publica (se ven sin login en /precios) y el resto por /proofs, que
+  // pide login. Lo que no se pueda subir queda como esta y se puede reintentar.
+  async function migrateAttachmentsToServer() {
+    const pending = pendingAttachments();
+    if (!pending.length) return alert("No queda nada guardado adentro del sistema: todos los archivos ya estan en el servidor.");
+    const config = getCloudSyncConfig();
+    if (!cloudSyncReady(config)) return alert("No hay servidor configurado, asi que los archivos no se pueden mover. Configure la sincronizacion en esta misma pagina.");
+    const before = pending.reduce((sum, entry) => sum + String(entry.data || "").length, 0);
+    if (!confirm("Se van a mover al servidor " + pending.length + " archivos (" + formatBytes(before) + ").\n\nSe siguen viendo igual, pero dejan de descargarse en cada carga del sistema. Puede tardar unos minutos. Continuar?")) return;
+    let moved = 0;
+    let failed = 0;
+    for (const entry of pending) {
+      try {
+        let data = entry.data;
+        let key = "";
+        if (entry.product) {
+          const small = await recompressDataUrl(data, 400, 0.65);
+          if (small && small.length < String(data).length) data = small;
+          key = await uploadProductImage(data);
+        } else {
+          key = await uploadPrivateFile(data, entry.fileName);
+        }
+        if (key) { entry.apply(key); moved++; } else { failed++; }
+      } catch (error) {
+        failed++;
+        console.warn("No se pudo mover " + entry.label + ":", error.message);
+      }
+    }
+    saveState();
+    flushLocalStateSnapshot();
+    render();
+    const after = pendingAttachments().reduce((sum, entry) => sum + String(entry.data || "").length, 0);
+    alert("Listo.\n" + moved + " archivos movidos al servidor."
+      + (failed ? "\n" + failed + " no se pudieron mover (quedan guardados en el sistema, se puede reintentar)." : "")
+      + "\n\nPeso de los archivos adentro del estado: antes " + formatBytes(before) + ", ahora " + formatBytes(after) + ".");
   }
 
   function formatBytes(bytes) {
@@ -13463,6 +13626,8 @@
     const pct = (bytes) => weight.total ? Math.round((bytes / weight.total) * 100) : 0;
     const productsInState = (state.products || []).filter((p) => p && p.imageData).length;
     const productsOnServer = (state.products || []).filter((p) => p && p.imageKey).length;
+    const pending = pendingAttachments();
+    const pendingBytes = pending.reduce((sum, entry) => sum + String(entry.data || "").length, 0);
     return `
       <div class="panel" style="margin-top:14px">
         <h2 class="page-title" style="font-size:18px">Peso de los datos (por que tarda en cargar)</h2>
@@ -13479,12 +13644,13 @@
             <tbody>${weight.imageBuckets.map((bucket) => `<tr><td>${escapeHtml(bucket.label)}</td><td class="num">${formatBytes(bucket.bytes)}</td><td class="num">${pct(bucket.bytes)}%</td></tr>`).join("")}</tbody>
           </table>
         </div>` : ""}
-        <p class="muted" style="font-size:12px;margin-top:4px">Fotos de producto: <strong>${productsOnServer}</strong> en el servidor (no pesan en la carga) y <strong>${productsInState}</strong> todavia adentro del estado.</p>
+        <p class="muted" style="font-size:12px;margin-top:4px">Archivos todavia guardados adentro del estado: <strong>${pending.length}</strong> (${formatBytes(pendingBytes)}). Fotos de producto ya en el servidor: <strong>${productsOnServer}</strong>.</p>
         <div class="page-actions" style="margin-top:12px;gap:8px;flex-wrap:wrap">
-          <button class="btn blue" type="button" id="optimize-product-images" ${productsInState ? "" : "disabled"}>Mover fotos de producto al servidor (${productsInState})</button>
+          <button class="btn blue" type="button" id="migrate-attachments" ${pending.length ? "" : "disabled"}>Mover todos los archivos al servidor (${pending.length})</button>
+          <button class="btn ghost" type="button" id="optimize-product-images" ${productsInState ? "" : "disabled"}>Solo fotos de producto (${productsInState})</button>
           <button class="btn ghost" type="button" id="purge-remito-photos">Borrar fotos de remito viejas</button>
         </div>
-        <p class="muted" style="font-size:12px;margin-top:6px">"Mover fotos al servidor" recomprime cada foto (400px) y la sube al servidor, dejando en el sistema solo la referencia: las fotos se siguen viendo igual pero dejan de descargarse en cada carga (el navegador las cachea). Las fotos nuevas ya se suben solas al guardar el producto. "Borrar fotos de remito viejas" quita las fotos de rendicion de mas de 60 dias (el pedido y su rendicion quedan igual).</p>
+        <p class="muted" style="font-size:12px;margin-top:6px">"Mover todos los archivos" sube al servidor los comprobantes de egresos, pagos y transferencias, las fotos de remito y de recambio y las fotos de producto, dejando en el sistema solo la referencia: se siguen viendo igual pero dejan de descargarse en cada carga. Todo lo que se suba de ahora en mas ya va derecho al servidor. Los comprobantes siguen siendo privados (se piden con login); solo las fotos de producto son publicas, como ya lo eran en /precios. "Borrar fotos de remito viejas" quita las fotos de rendicion de mas de 60 dias (el pedido y su rendicion quedan igual).</p>
       </div>
     `;
   }
@@ -13511,6 +13677,98 @@
         image.src = dataUrl;
       } catch (e) { resolve(""); }
     });
+  }
+
+  // ---------- Adjuntos (comprobantes y fotos) guardados en el servidor ----------
+  // Todo lo que se sube (comprobantes de egresos, pagos y transferencias, fotos de remito y de
+  // recambio) se guarda como ARCHIVO en el servidor y en el estado queda solo la clave. Antes
+  // viajaba en base64 adentro del JSON, que se descarga entero en cada carga del sistema.
+  // A diferencia de las fotos de producto, estos archivos son PRIVADOS: se piden con login
+  // (GET /proofs/:key) y se muestran a traves de una URL temporal del navegador.
+  const proofUrlCache = new Map();
+
+  function dataUrlToBytes(dataUrl) {
+    const match = /^data:([^;,]+);base64,(.*)$/i.exec(String(dataUrl || ""));
+    if (!match) return null;
+    const binary = atob(match[2]);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return { contentType: match[1], bytes };
+  }
+
+  // Devuelve la clave del archivo subido, o "" si no hay servidor configurado (en ese caso el que
+  // llama se queda con el base64 y no se pierde nada).
+  async function uploadPrivateFile(dataUrl, fileName) {
+    const config = getCloudSyncConfig();
+    if (!dataUrl || !cloudSyncReady(config)) return "";
+    const parsed = dataUrlToBytes(dataUrl);
+    if (!parsed) return "";
+    const response = await cloudRequest(config, "/proofs", {
+      method: "POST",
+      headers: {
+        "content-type": parsed.contentType,
+        "x-file-name": String(fileName || "adjunto").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 60)
+      },
+      body: parsed.bytes
+    });
+    if (!response.ok) throw new Error("El servidor rechazo el archivo (HTTP " + response.status + ").");
+    const payload = await response.json().catch(() => ({}));
+    return payload && payload.key ? String(payload.key) : "";
+  }
+
+  // URL temporal (blob) para mostrar o descargar un adjunto privado. Se cachea por clave.
+  async function proofObjectUrl(key) {
+    const clean = String(key || "").trim();
+    if (!clean) return "";
+    if (proofUrlCache.has(clean)) return proofUrlCache.get(clean);
+    const config = getCloudSyncConfig();
+    if (!cloudSyncReady(config)) return "";
+    const response = await cloudRequest(config, "/proofs/" + encodeURIComponent(clean), { method: "GET" });
+    if (!response.ok) throw new Error("No se pudo descargar el archivo (HTTP " + response.status + ").");
+    const url = URL.createObjectURL(await response.blob());
+    proofUrlCache.set(clean, url);
+    return url;
+  }
+
+  // <img> de un adjunto: si ya esta en el servidor se resuelve solo despues del render.
+  function proofImageTag(key, dataUrl, attrs) {
+    const extra = attrs || "";
+    if (dataUrl) return `<img src="${escapeAttr(dataUrl)}" ${extra} />`;
+    if (key) return `<img data-proof-key="${escapeAttr(key)}" alt="Cargando archivo..." ${extra} />`;
+    return "";
+  }
+
+  async function bindProofImages() {
+    const targets = Array.from(document.querySelectorAll("[data-proof-key]:not([data-proof-loaded])"));
+    for (const element of targets) {
+      element.dataset.proofLoaded = "1";
+      try {
+        const url = await proofObjectUrl(element.dataset.proofKey);
+        if (url) element.src = url;
+        else element.alt = "Archivo en el servidor (sin conexion para verlo)";
+      } catch (error) {
+        element.alt = "No se pudo cargar el archivo";
+      }
+    }
+  }
+
+  // Abre un adjunto (clave del servidor o base64 viejo) en un modal.
+  async function openProofViewer(key, dataUrl, title) {
+    if (!key && !dataUrl) return alert("No hay archivo adjunto.");
+    let src = dataUrl;
+    if (!src) {
+      try {
+        src = await proofObjectUrl(key);
+      } catch (error) {
+        return alert("No se pudo descargar el archivo: " + error.message);
+      }
+    }
+    if (!src) return alert("No se pudo descargar el archivo (sin conexion con el servidor).");
+    const isPdf = /^data:application\/pdf/i.test(src) || /\.pdf$/i.test(String(key || ""));
+    const body = isPdf
+      ? `<iframe src="${escapeAttr(src)}" style="width:100%;height:70vh;border:0"></iframe>`
+      : `<img src="${escapeAttr(src)}" style="max-width:100%;height:auto;display:block;margin:0 auto" />`;
+    showModal(title || "Comprobante", body + `<div class="page-actions" style="margin-top:10px;justify-content:flex-end"><a class="btn small blue" href="${escapeAttr(src)}" download="${escapeAttr(String(key || "comprobante"))}" target="_blank" rel="noopener">Descargar</a></div>`, null, { className: "wide" });
   }
 
   // Sube una imagen (data URL) al servidor y devuelve su clave. Si no hay servidor configurado o
@@ -13737,6 +13995,14 @@
       optimizeBtn.disabled = true;
       optimizeProductImages().catch((error) => alert("No se pudieron optimizar las fotos: " + error.message))
         .finally(() => { optimizeBtn.disabled = false; });
+    });
+    const migrateBtn = document.getElementById("migrate-attachments");
+    if (migrateBtn) migrateBtn.addEventListener("click", () => {
+      migrateBtn.disabled = true;
+      migrateBtn.textContent = "Moviendo archivos...";
+      migrateAttachmentsToServer()
+        .catch((error) => alert("No se pudieron mover los archivos: " + error.message))
+        .finally(() => { migrateBtn.disabled = false; });
     });
     const purgeBtn = document.getElementById("purge-remito-photos");
     if (purgeBtn) purgeBtn.addEventListener("click", () => purgeOldRemitoPhotos());
@@ -17051,7 +17317,7 @@
     if (!order) return false;
     if (order.paymentStatus === "paid") return true;
     if (Number(order.paymentReceived || 0) > 0) return true;
-    if (order.deliveryRemitoPhoto && order.deliveryRemitoPhoto.data) return true;
+    if (order.deliveryRemitoPhoto && (order.deliveryRemitoPhoto.data || order.deliveryRemitoPhoto.key)) return true;
     return false;
   }
 
@@ -17063,7 +17329,7 @@
     const order = getOrder(orderId);
     if (!order) return;
     const client = getClient(order.clientId);
-    const hasPhoto = !!(order.deliveryRemitoPhoto && order.deliveryRemitoPhoto.data);
+    const hasPhoto = !!(order.deliveryRemitoPhoto && (order.deliveryRemitoPhoto.data || order.deliveryRemitoPhoto.key));
     const body = `
       <div style="margin-bottom:8px"><strong>${escapeHtml(order.id)}</strong> · ${escapeHtml(client ? client.name : order.clientId)}<br>
         <span class="muted">Total ${formatMoney(getOrderTotal(order))} · Pagado ${formatMoney(order.paymentReceived || 0)} · ${escapeHtml(statusLabel(order.status))}</span></div>
@@ -17073,7 +17339,7 @@
         <button class="btn ghost" type="button" id="settle-photo-btn">${hasPhoto ? "Reemplazar foto" : "Subir foto del remito"}</button>
         <input type="file" id="settle-photo-file" accept="image/*" capture="environment" hidden />
       </div>
-      <div id="settle-photo-preview" style="margin-top:10px">${hasPhoto ? `<img src="${escapeAttr(order.deliveryRemitoPhoto.data)}" alt="Remito" style="max-width:100%;border-radius:8px" /><div class="page-actions" style="margin-top:6px"><a class="btn small blue" href="${escapeAttr(order.deliveryRemitoPhoto.data)}" download="${escapeAttr((order.deliveryRemitoPhoto.name || "remito") + ".jpg")}">Descargar</a><button class="btn small danger" type="button" id="settle-photo-remove">Quitar foto</button></div>` : ""}</div>
+      <div id="settle-photo-preview" style="margin-top:10px">${hasPhoto ? proofImageTag(order.deliveryRemitoPhoto.key, order.deliveryRemitoPhoto.data, `alt="Remito" style="max-width:100%;border-radius:8px"`) + `<div class="page-actions" style="margin-top:6px"><button class="btn small blue" type="button" id="settle-photo-open">Ver / descargar</button><button class="btn small danger" type="button" id="settle-photo-remove">Quitar foto</button></div>` : ""}</div>
       <div class="muted" id="settle-status" style="margin-top:8px">${orderIsSettled(order) ? "Rendido &#10003;" : "Pendiente de rendir"}</div>
     `;
     showModal("Rendir entrega", body, () => {
@@ -17090,7 +17356,15 @@
           try {
             if (status) status.textContent = "Comprimiendo foto...";
             const data = await compressImageFile(fsel, 1100, 0.6);
-            order.deliveryRemitoPhoto = { name: fileDate(order.date) + " Remito " + (client ? client.name : order.clientId) + " " + order.id, data, at: new Date().toISOString(), by: currentUser ? currentUser.name : "" };
+            const photo = { name: fileDate(order.date) + " Remito " + (client ? client.name : order.clientId) + " " + order.id, data, at: new Date().toISOString(), by: currentUser ? currentUser.name : "" };
+            // La foto se guarda en el servidor: en el pedido queda solo la clave. Sin conexion
+            // queda la foto adentro del pedido y se puede mover despues desde Backup.
+            try {
+              if (status) status.textContent = "Subiendo foto al servidor...";
+              const key = await uploadPrivateFile(data, "remito-" + order.id);
+              if (key) { photo.key = key; photo.data = ""; }
+            } catch (error) { console.warn("No se pudo subir la foto del remito, queda guardada en el sistema:", error.message); }
+            order.deliveryRemitoPhoto = photo;
             order.updatedAt = new Date().toISOString();
             saveState();
             closeModal();
@@ -17101,6 +17375,12 @@
       }
       const rm = document.getElementById("settle-photo-remove");
       if (rm) rm.addEventListener("click", () => { delete order.deliveryRemitoPhoto; order.updatedAt = new Date().toISOString(); saveState(); closeModal(); render(); });
+      const openPhoto = document.getElementById("settle-photo-open");
+      if (openPhoto) openPhoto.addEventListener("click", () => openProofViewer(
+        order.deliveryRemitoPhoto && order.deliveryRemitoPhoto.key,
+        order.deliveryRemitoPhoto && order.deliveryRemitoPhoto.data,
+        "Remito " + order.id
+      ));
     }, { cancelLabel: "Cerrar", hideSave: true, className: "wide" });
   }
 
@@ -18820,6 +19100,7 @@
       recordedBy: currentUser ? currentUser.name : "Sistema",
       userRole: currentUser ? currentUser.role : "admin",
       transferProofFile: entry.transferProofFile || "",
+      transferProofKey: entry.transferProofKey || "",
       notes: entry.notes || ""
     });
   }
@@ -18844,6 +19125,7 @@
       method: payment.method,
       notes: payment.notes || "",
       transferProofFile: payment.transferProofFile || "",
+      transferProofKey: payment.transferProofKey || "",
       cashBoxId,
       receivedByUserId: receiver ? receiver.id : "",
       receivedByName: receiver ? receiver.name : "",
@@ -18888,6 +19170,7 @@
       paymentMethod: payment.method,
       cashBoxId,
       transferProofFile: payment.transferProofFile || "",
+      transferProofKey: payment.transferProofKey || "",
       notes: payment.notes || ""
     });
     allocations.forEach((allocation) => {
