@@ -463,7 +463,9 @@
     try { runScheduledRepricing(); } catch (e) { console.warn("runScheduledRepricing:", e.message); }
     try { if (currentUser && ["manager", "admin", "employee"].includes(currentUser.role)) generatePendingReplacements(); } catch (e) { console.warn("generatePendingReplacements:", e.message); }
   });
-  window.addEventListener("beforeunload", (e) => { try { if (pendingSyncCount() > 0) { e.preventDefault(); e.returnValue = ""; return ""; } } catch (err) { /* ignore */ } });
+  window.addEventListener("beforeunload", (e) => { try { flushLocalStateSnapshot(); } catch (err) { /* ignore */ } try { if (pendingSyncCount() > 0) { e.preventDefault(); e.returnValue = ""; return ""; } } catch (err) { /* ignore */ } });
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") { try { flushLocalStateSnapshot(); } catch (err) { /* ignore */ } } });
+  window.addEventListener("pagehide", () => { try { flushLocalStateSnapshot(); } catch (err) { /* ignore */ } });
   window.addEventListener("online", () => {
     const banner = document.getElementById("offline-banner");
     if (banner) banner.style.display = "none";
@@ -1137,8 +1139,31 @@
   function localPersistRole() {
     return !!(currentUser && ["manager", "admin"].includes(currentUser.role));
   }
+
+  // El snapshot local es un JSON.stringify de TODO el estado (decenas de MB con imagenes). Hacerlo
+  // en cada saveState() congelaba la pantalla en cada tecla/boton (se notaba sobre todo en
+  // Unidades y Compras). Ahora se agenda y se escribe una sola vez por rafaga; ademas se fuerza
+  // antes de leerlo, al ocultar la pestania y al cerrar, asi nunca se pierde.
+  const LOCAL_SNAPSHOT_DELAY_MS = 1500;
+  let localSnapshotTimer = null;
+  let localSnapshotPending = false;
+  function scheduleLocalStateSnapshot() {
+    localSnapshotPending = true;
+    if (localSnapshotTimer) return;
+    localSnapshotTimer = setTimeout(() => {
+      localSnapshotTimer = null;
+      flushLocalStateSnapshot();
+    }, LOCAL_SNAPSHOT_DELAY_MS);
+  }
+  function flushLocalStateSnapshot() {
+    if (localSnapshotTimer) { clearTimeout(localSnapshotTimer); localSnapshotTimer = null; }
+    if (!localSnapshotPending) return;
+    localSnapshotPending = false;
+    writeLocalStateSnapshot(state, "No se pudo guardar el estado completo en localStorage; se intentara sincronizar con el servidor.");
+  }
+
   function saveState() {
-    if (localPersistRole()) writeLocalStateSnapshot(state, "No se pudo guardar el estado completo en localStorage; se intentara sincronizar con el servidor.");
+    if (localPersistRole()) scheduleLocalStateSnapshot();
     const config = getCloudSyncConfig();
     if (canWritePatchCloudSync() && cloudSyncReady(config) && config.auto !== false) {
       if (!queueCurrentStatePatch()) scheduleCloudPush();
@@ -1148,6 +1173,7 @@
 
   function backupLocalState(label) {
     try {
+      flushLocalStateSnapshot();
       const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return;
       const backups = JSON.parse(localStorage.getItem("lpc_erp_local_backups_v1") || "[]");
@@ -6977,7 +7003,9 @@
                   ${activeEmployees().map((employee) => `<option value="employee:${employee.id}">${escapeHtml(employee.name)}</option>`).join("")}
                 </select>
                 <button class="btn small ghost" type="button" data-add-provider>Agregar</button>
+                <button class="btn small yellow" type="button" data-load-provider-products title="Carga una fila por cada producto de este proveedor con su ultimo costo">Cargar productos</button>
               </div>
+              <span class="muted" style="font-size:12px">"Cargar productos" trae todos los productos del proveedor para editar costo unitario y cantidad de una sola vez.</span>
             </div>
             <div class="field" id="purchase-payment-status-wrap">
               <label>Estado</label>
@@ -7423,6 +7451,22 @@
         recalc();
       });
     }
+    const loadProviderProductsBtn = document.querySelector("[data-load-provider-products]");
+    if (loadProviderProductsBtn && providerInput) {
+      loadProviderProductsBtn.addEventListener("click", () => {
+        const parsed = parsePurchaseProviderValue(providerInput.value);
+        if (parsed.type === "all") return alert("Elegi primero un proveedor (o empleado) para cargar sus productos.");
+        const total = purchaseProductsForAssignee(parsed).length;
+        if (!total) {
+          return alert(parsed.type === "provider"
+            ? "Este proveedor no tiene productos cargados. Asignaselos en Proveedores -> \"Productos que vende\"."
+            : "Este empleado no tiene productos asignados.");
+        }
+        const added = loadPurchaseLinesForAssignee(parsed);
+        recalc();
+        if (!added) alert("Los " + total + " productos de esta seleccion ya estan cargados en el detalle.");
+      });
+    }
     kind.addEventListener("change", updateKind);
     updateKind();
     if (currentUser.role === "proveedor") {
@@ -7857,6 +7901,51 @@
       : `<span class="muted">Todavia no hay favoritos para este vendedor.</span>`;
   }
 
+  // Productos asignados a un proveedor (productsSupplied) o a un empleado (assignedTo*), en el
+  // orden en que conviene cargarlos: primero los que faltan comprar hoy, despues el resto.
+  function purchaseProductsForAssignee(parsed) {
+    if (!parsed || parsed.type === "all") return [];
+    let products = [];
+    if (parsed.type === "provider") {
+      const supplied = new Set(parsed.provider && Array.isArray(parsed.provider.productsSupplied) ? parsed.provider.productsSupplied : []);
+      products = activeProducts().filter((product) => supplied.has(product.id));
+    } else if (parsed.type === "employee") {
+      products = activeProducts().filter((product) => getProductAssigneeValue(product.id) === parsed.assigneeValue);
+    }
+    const shortages = getProductPurchaseShortages(todayISO());
+    const pending = new Map(shortages.map((entry) => [entry.productId, Number(entry.shortageQuantity || entry.quantity || 0)]));
+    return products
+      .map((product) => ({ product, pendingQty: Number(pending.get(product.id) || 0) }))
+      .sort((a, b) => (Number(b.pendingQty > 0) - Number(a.pendingQty > 0)) || normalizeText(a.product.name).localeCompare(normalizeText(b.product.name)));
+  }
+
+  // Carga una fila de compra por cada producto del proveedor/empleado elegido, con el ultimo
+  // costo conocido y la cantidad que falta comprar hoy (si la hay), para editar todo junto.
+  function loadPurchaseLinesForAssignee(parsed) {
+    const container = document.getElementById("purchase-items");
+    if (!container) return 0;
+    const entries = purchaseProductsForAssignee(parsed);
+    if (!entries.length) return 0;
+    const existing = new Set(Array.from(container.querySelectorAll("[data-product-select]")).map((select) => select.value).filter(Boolean));
+    let added = 0;
+    entries.forEach(({ product, pendingQty }) => {
+      if (existing.has(product.id)) return;
+      addProductLineFromFavorite(product.id);
+      existing.add(product.id);
+      added++;
+      const row = Array.from(container.querySelectorAll("[data-purchase-item-row]"))
+        .find((entry) => entry.querySelector("[data-product-select]").value === product.id);
+      if (!row) return;
+      syncPurchaseRow(row);
+      const cost = getStoredProductCost(product.id);
+      const costInput = row.querySelector("[data-item-cost]");
+      if (costInput && !costInput.value && cost > 0) costInput.value = formatAmountInput(cost);
+      const qtyInput = row.querySelector("[data-item-qty]");
+      if (qtyInput && !qtyInput.value && pendingQty > 0) qtyInput.value = formatAmountInput(pendingQty);
+    });
+    return added;
+  }
+
   function addProductLineFromFavorite(productId) {
     const container = document.getElementById("purchase-items");
     const product = getProduct(productId) || findProductByInput(productId);
@@ -8031,7 +8120,7 @@
           <tr>
             <td>${escapeHtml(order.id)}<br><span class="muted">${escapeHtml(client ? client.name : order.clientId)}</span></td>
             <td>${escapeHtml(item.productName)}<br>${item.note ? `<span class="note-text">${escapeHtml(item.note)}</span>` : `<span class="muted">Sin nota</span>`}</td>
-            <td class="num">${formatNumber(item.quantity)} ${escapeHtml(item.unitType)}</td>
+            <td class="num">${formatDivideQty(item.quantity)} ${escapeHtml(item.unitType)}</td>
           <td>${assignee ? `<span class="pill green">Asignado a ${escapeHtml(assignee.name)}</span>` : `<span class="pill amber">Sin asignar</span>`}</td>
           <td>
             <select data-assign-product="${item.productId}" ${currentProviderId() ? "disabled" : ""}>
@@ -10642,9 +10731,10 @@
     if (!ui.providerSelectedId || (ui.providerSelectedId !== "all" && !providers.some((provider) => provider.id === ui.providerSelectedId))) ui.providerSelectedId = "all";
     const isAllProviders = ui.providerSelectedId === "all";
     const selectedProvider = isAllProviders ? null : getProvider(ui.providerSelectedId);
+    const providerDebtMap = getProviderDebtMap();
     const providerBalanceValue = isAllProviders
-      ? providers.reduce((sum, provider) => sum + Math.max(0, getProviderBalance(provider.id)), 0)
-      : selectedProvider ? getProviderBalance(selectedProvider.id) : 0;
+      ? providers.reduce((sum, provider) => sum + Math.max(0, getProviderBalance(provider.id, providerDebtMap)), 0)
+      : selectedProvider ? getProviderBalance(selectedProvider.id, providerDebtMap) : 0;
     const providerMovements = getProviderMovements(isAllProviders ? providers.map((provider) => provider.id) : ui.providerSelectedId, ui.providerFrom, ui.providerTo);
     const isManager = currentUser.role === "manager";
     if (ui.providerProductId && !getProduct(ui.providerProductId)) ui.providerProductId = "";
@@ -10753,7 +10843,7 @@
               const annulledLabel = isAnnulled ? `<span class="pill gray">Anulado</span>` : "";
               const relP = entry.relatedEntityId ? (state.purchases || []).find((p) => p.id === entry.relatedEntityId) : null;
               const movDesc = relP && Array.isArray(relP.items) && relP.items.length ? `<details><summary>${escapeHtml(entry.description)}</summary><div class="mini-table">${relP.items.map((it) => `<div><span>${escapeHtml(it.productName)}</span><span>${formatNumber(it.quantity)} ${escapeHtml(it.unitType || "")} x ${formatMoney(it.unitCost)} = ${formatMoney(it.totalCost)}</span></div>`).join("")}</div></details>` : escapeHtml(entry.description);
-              return `<tr style="${isAnnulled ? "text-decoration:line-through;opacity:0.6" : ""}"><td>${formatDate(entry.date)}</td><td>${escapeHtml(entry.providerName || "")}</td><td>${escapeHtml(entry.type)}</td><td>${movDesc}</td><td class="num">${formatMoney(entry.amount)}</td><td class="num">${formatMoney(entry.balance || 0)}</td><td>${escapeHtml(entry.notes || "")}</td><td>${annulButton}${annulledLabel}</td></tr>`;
+              return `<tr style="${isAnnulled ? "text-decoration:line-through;opacity:0.6" : ""}"><td>${formatDate(entry.date)}</td><td>${escapeHtml(entry.providerName || "")}</td><td>${escapeHtml(entry.type)}</td><td>${movDesc}</td><td class="num">${formatMoney(entry.amount)}</td><td class="num">${entry.balance == null ? "-" : formatMoney(entry.balance)}</td><td>${escapeHtml(entry.notes || "")}</td><td>${annulButton}${annulledLabel}</td></tr>`;
             }).join("") || emptyRow(8, "Sin movimientos para este rango.")}</tbody>
           </table>
         </div>
@@ -13151,6 +13241,128 @@
     `;
   }
 
+  // Peso real del estado por seccion. Sirve para ver por que la app tarda en cargar: casi siempre
+  // el peso NO son los pedidos historicos (texto, comprime muy bien) sino las imagenes en base64
+  // guardadas dentro del mismo JSON (fotos de producto, comprobantes, fotos de remito).
+  function measureStateWeight() {
+    const sizeOf = (value) => {
+      try { return value == null ? 0 : JSON.stringify(value).length; } catch (e) { return 0; }
+    };
+    const rows = Object.keys(state || {}).map((key) => ({ key, bytes: sizeOf(state[key]) }));
+    const total = rows.reduce((sum, row) => sum + row.bytes, 0);
+    const imageBuckets = [
+      { label: "Fotos de producto (products.imageData)", bytes: (state.products || []).reduce((sum, p) => sum + String((p && p.imageData) || "").length, 0) },
+      { label: "Fotos de remito entregado (orders.deliveryRemitoPhoto)", bytes: (state.orders || []).reduce((sum, o) => sum + String((o && o.deliveryRemitoPhoto && o.deliveryRemitoPhoto.data) || "").length, 0) },
+      { label: "Comprobantes de egresos (purchases.proofFile)", bytes: (state.purchases || []).reduce((sum, p) => sum + String((p && p.proofFile) || "").length, 0) },
+      { label: "Comprobantes de pagos (payments.proofFile)", bytes: (state.payments || []).reduce((sum, p) => sum + String((p && (p.proofFile || p.proof)) || "").length, 0) },
+      { label: "Comprobantes de transferencias (clientTransfers)", bytes: (state.clientTransfers || []).reduce((sum, t) => sum + String((t && (t.proofFile || t.proof)) || "").length, 0) }
+    ].filter((bucket) => bucket.bytes > 0).sort((a, b) => b.bytes - a.bytes);
+    return {
+      total,
+      rows: rows.sort((a, b) => b.bytes - a.bytes).slice(0, 12),
+      imageBuckets,
+      imageTotal: imageBuckets.reduce((sum, bucket) => sum + bucket.bytes, 0)
+    };
+  }
+
+  function formatBytes(bytes) {
+    const value = Number(bytes || 0);
+    if (value < 1024) return value + " B";
+    if (value < 1024 * 1024) return (value / 1024).toFixed(1).replace(".", ",") + " KB";
+    return (value / (1024 * 1024)).toFixed(1).replace(".", ",") + " MB";
+  }
+
+  function renderStateWeightPanel() {
+    const weight = measureStateWeight();
+    const pct = (bytes) => weight.total ? Math.round((bytes / weight.total) * 100) : 0;
+    const productsWithImage = (state.products || []).filter((p) => p && p.imageData).length;
+    return `
+      <div class="panel" style="margin-top:14px">
+        <h2 class="page-title" style="font-size:18px">Peso de los datos (por que tarda en cargar)</h2>
+        <p class="muted">El sistema descarga y guarda TODO el estado en un solo JSON. Total actual: <strong>${formatBytes(weight.total)}</strong>${weight.imageTotal ? `, de los cuales <strong>${formatBytes(weight.imageTotal)}</strong> (${pct(weight.imageTotal)}%) son imagenes guardadas en base64 adentro del mismo JSON.` : "."}</p>
+        <div class="table-wrap" style="margin-top:8px">
+          <table>
+            <thead><tr><th>Seccion</th><th>Peso</th><th>%</th></tr></thead>
+            <tbody>${weight.rows.map((row) => `<tr><td>${escapeHtml(row.key)}</td><td class="num">${formatBytes(row.bytes)}</td><td class="num">${pct(row.bytes)}%</td></tr>`).join("")}</tbody>
+          </table>
+        </div>
+        ${weight.imageBuckets.length ? `<div class="table-wrap" style="margin-top:10px">
+          <table>
+            <thead><tr><th>Imagenes en base64</th><th>Peso</th><th>%</th></tr></thead>
+            <tbody>${weight.imageBuckets.map((bucket) => `<tr><td>${escapeHtml(bucket.label)}</td><td class="num">${formatBytes(bucket.bytes)}</td><td class="num">${pct(bucket.bytes)}%</td></tr>`).join("")}</tbody>
+          </table>
+        </div>` : ""}
+        <div class="page-actions" style="margin-top:12px;gap:8px;flex-wrap:wrap">
+          <button class="btn blue" type="button" id="optimize-product-images">Optimizar fotos de producto (${productsWithImage})</button>
+          <button class="btn ghost" type="button" id="purge-remito-photos">Borrar fotos de remito viejas</button>
+        </div>
+        <p class="muted" style="font-size:12px;margin-top:6px">"Optimizar fotos" recomprime las fotos de producto ya cargadas al mismo tamano que usa el sistema hoy (400px) sin volver a subirlas: suele bajar varios MB del arranque. "Borrar fotos de remito viejas" quita las fotos de rendicion de mas de 60 dias (el pedido y su rendicion quedan igual).</p>
+      </div>
+    `;
+  }
+
+  // Recomprime una imagen base64 ya guardada (sin volver a subir el archivo original).
+  function recompressDataUrl(dataUrl, maxDim, quality) {
+    return new Promise((resolve) => {
+      try {
+        const image = new Image();
+        image.onerror = () => resolve("");
+        image.onload = () => {
+          try {
+            const scale = Math.min(1, maxDim / Math.max(image.width, image.height));
+            const canvas = document.createElement("canvas");
+            canvas.width = Math.max(1, Math.round(image.width * scale));
+            canvas.height = Math.max(1, Math.round(image.height * scale));
+            const ctx = canvas.getContext("2d");
+            ctx.fillStyle = "#ffffff";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+            resolve(canvas.toDataURL("image/jpeg", quality));
+          } catch (e) { resolve(""); }
+        };
+        image.src = dataUrl;
+      } catch (e) { resolve(""); }
+    });
+  }
+
+  async function optimizeProductImages() {
+    const products = (state.products || []).filter((p) => p && p.imageData);
+    if (!products.length) return alert("No hay fotos de producto guardadas en el sistema.");
+    const before = products.reduce((sum, p) => sum + String(p.imageData || "").length, 0);
+    if (!confirm("Se van a recomprimir " + products.length + " fotos de producto (" + formatBytes(before) + "). Las fotos siguen viendose, solo pesan menos. Continuar?")) return;
+    let optimized = 0;
+    for (const product of products) {
+      const small = await recompressDataUrl(product.imageData, 400, 0.65);
+      if (small && small.length < String(product.imageData).length) {
+        product.imageData = small;
+        product.updatedAt = new Date().toISOString();
+        optimized++;
+      }
+    }
+    const after = (state.products || []).reduce((sum, p) => sum + String((p && p.imageData) || "").length, 0);
+    saveState();
+    flushLocalStateSnapshot();
+    render();
+    alert("Listo: " + optimized + " fotos optimizadas. Antes " + formatBytes(before) + ", ahora " + formatBytes(after) + ".");
+  }
+
+  function purgeOldRemitoPhotos() {
+    const cutoff = addDaysISO(todayISO(), -60);
+    const targets = (state.orders || []).filter((o) => o && o.deliveryRemitoPhoto && o.deliveryRemitoPhoto.data && String(o.date || "") < cutoff);
+    if (!targets.length) return alert("No hay fotos de remito de mas de 60 dias.");
+    const bytes = targets.reduce((sum, o) => sum + String(o.deliveryRemitoPhoto.data || "").length, 0);
+    if (!confirm("Se van a borrar " + targets.length + " fotos de remito anteriores a " + formatDate(cutoff) + " (" + formatBytes(bytes) + "). Los pedidos y su rendicion no se tocan. Continuar?")) return;
+    targets.forEach((order) => {
+      order.deliveryRemitoPhotoPurgedAt = new Date().toISOString();
+      delete order.deliveryRemitoPhoto;
+      order.updatedAt = new Date().toISOString();
+    });
+    saveState();
+    flushLocalStateSnapshot();
+    render();
+    alert("Listo: se liberaron " + formatBytes(bytes) + ".");
+  }
+
   function renderBackup() {
     afterRender.push(bindBackup);
     const cloudConfig = getCloudSyncConfig();
@@ -13174,6 +13386,7 @@
         </div>
       </div>
       ${renderLocalBackupPanel()}
+      ${renderStateWeightPanel()}
       <div class="panel" style="margin-top:14px">
         <h2 class="page-title" style="font-size:18px">Sincronización en la nube (Cloudflare)</h2>
         <p class="muted">Conecte el backend de la Opcion E (DEPLOYMENT.md) para compartir los datos entre dispositivos. Version de la app: <strong>${APP_VERSION}</strong>. Ultima sincronización: <strong id="cloud-sync-status">${escapeHtml(getCloudSyncConfig().lastSync ? formatTimestampShort(getCloudSyncConfig().lastSync) : "nunca")}</strong></p>
@@ -13286,6 +13499,14 @@
   }
 
   function bindBackup() {
+    const optimizeBtn = document.getElementById("optimize-product-images");
+    if (optimizeBtn) optimizeBtn.addEventListener("click", () => {
+      optimizeBtn.disabled = true;
+      optimizeProductImages().catch((error) => alert("No se pudieron optimizar las fotos: " + error.message))
+        .finally(() => { optimizeBtn.disabled = false; });
+    });
+    const purgeBtn = document.getElementById("purge-remito-photos");
+    if (purgeBtn) purgeBtn.addEventListener("click", () => purgeOldRemitoPhotos());
     document.getElementById("export-backup").addEventListener("click", () => {
       const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
@@ -13948,7 +14169,7 @@
           let imageData = product ? product.imageData || "" : "";
           const fileInput = document.getElementById("product-image-file");
           if (fileInput && fileInput.files && fileInput.files[0]) {
-            imageData = await compressImageFile(fileInput.files[0], 700, 0.7);
+            imageData = await compressImageFile(fileInput.files[0], 400, 0.65);
           }
           const payload = {
             id: productId,
@@ -16719,23 +16940,49 @@
     provider.productsSupplied = Array.from(ids);
   }
 
-  function getProviderBalance(providerId) {
+  // Saldo por proveedor en UNA sola pasada. Ademas de providerLedger suma las compras en CUENTA
+  // CORRIENTE que nunca generaron movimiento en el ledger (importaciones masivas, carga por la
+  // API externa / bot, o egresos viejos): esas compras se ven en el resumen de cuenta pero antes
+  // no entraban en el saldo, y el total a pagar salia MENOR al real.
+  function getProviderDebtMap() {
+    const totals = Object.create(null);
+    const add = (providerId, amount) => {
+      if (!providerId) return;
+      totals[providerId] = (totals[providerId] || 0) + Number(amount || 0);
+    };
+    const ledgerByPurchase = new Set();
+    (state.providerLedger || []).forEach((entry) => {
+      if (!entry) return;
+      add(entry.providerId, entry.amount);
+      if (entry.relatedEntityId) ledgerByPurchase.add(entry.relatedEntityId);
+      if (entry.purchaseId) ledgerByPurchase.add(entry.purchaseId);
+    });
+    (state.purchases || []).forEach((purchase) => {
+      if (!purchase || purchase.status === "anulado") return;
+      if (purchase.paymentStatus !== "account_current") return;
+      if (ledgerByPurchase.has(purchase.id)) return;
+      add(getPurchaseProviderId(purchase), purchase.totalCost || purchase.amount || 0);
+    });
+    return totals;
+  }
+
+  function getProviderBalance(providerId, debtMap) {
+    const totals = debtMap || getProviderDebtMap();
     if (providerId === "all") {
-      return activeProviders().reduce((sum, provider) => sum + Math.max(0, getProviderBalance(provider.id)), 0);
+      return activeProviders().reduce((sum, provider) => sum + Math.max(0, Number(totals[provider.id] || 0)), 0);
     }
-    return state.providerLedger
-      .filter((entry) => entry.providerId === providerId)
-      .reduce((sum, entry) => sum + Number(entry.amount || 0), 0);
+    return Number(totals[providerId] || 0);
   }
 
   function getProviderBalances() {
+    const totals = getProviderDebtMap();
     return activeProviders().map((provider) => {
       const movements = state.providerLedger.filter((entry) => entry.providerId === provider.id);
       const last = movements.slice().sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
       return {
         providerId: provider.id,
         providerName: provider.name,
-        balance: getProviderBalance(provider.id),
+        balance: getProviderBalance(provider.id, totals),
         lastDate: last ? last.date : ""
       };
     }).sort((a, b) => b.balance - a.balance);
@@ -17905,6 +18152,35 @@
         relatedEntityType: "purchase_annul",
         notes: "Egreso anulado: se descuenta de la deuda con el proveedor."
       });
+    }
+
+    // Anular un PAGO a proveedor tiene que devolver la deuda: el pago habia descontado el importe
+    // en providerLedger (amount negativo). Sin esta compensacion la caja se devolvia pero el saldo
+    // del proveedor quedaba MENOR al real (deuda que ya no estaba pero seguia descontada).
+    if (expenseType === "provider_payment" && purchase.providerId) {
+      const paymentId = purchase.providerPaymentId || "";
+      const relatedPayment = paymentId ? (state.providerPayments || []).find((p) => p && p.id === paymentId) : null;
+      const ledgerSum = (state.providerLedger || [])
+        .filter((e) => e && e.relatedEntityType === "provider_payment" && e.relatedEntityId === paymentId)
+        .reduce((sum, e) => sum + Number(e.amount || 0), 0);
+      const reverseAmount = ledgerSum ? -ledgerSum : amount;
+      if (reverseAmount) {
+        addProviderLedgerEntry({
+          providerId: purchase.providerId,
+          date: purchase.date,
+          type: "anulacion",
+          description: "Anulacion pago proveedor " + purchase.id,
+          amount: reverseAmount,
+          relatedEntityId: paymentId || purchase.id,
+          relatedEntityType: "provider_payment_annul",
+          notes: "Pago anulado: la deuda con el proveedor vuelve a su valor anterior."
+        });
+      }
+      if (relatedPayment && relatedPayment.status !== "anulado") {
+        relatedPayment.status = "anulado";
+        relatedPayment.annulledAt = new Date().toISOString();
+        relatedPayment.annulledBy = currentUser ? currentUser.name : "";
+      }
     }
 
     // Revertir caja para egresos pagados (incluye pago a proveedor)
