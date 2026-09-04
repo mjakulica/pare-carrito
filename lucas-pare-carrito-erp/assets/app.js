@@ -448,12 +448,15 @@
     }, 60 * 1000);
   }
 
-  window.addEventListener("DOMContentLoaded", async () => {
+  window.addEventListener("DOMContentLoaded", () => {
+    // La pantalla se dibuja PRIMERO, con los datos que ya tiene el dispositivo, y la descarga va
+    // despues en segundo plano (al terminar vuelve a dibujar sola). Antes se esperaba la descarga
+    // ANTES de dibujar: si tardaba o se colgaba, la pantalla quedaba en blanco sin explicacion.
+    render();
     const cloudConfig = getCloudSyncConfig();
     if (canReadCloudState() && cloudSyncReady(cloudConfig) && cloudConfig.auto !== false) {
-      await cloudPull(false, true);
+      cloudPull(false, true).catch((error) => console.warn("Descarga inicial:", error.message));
     }
-    render();
     startCloudAutoSync();
     // Si quedo un cambio pendiente de una sesion anterior (ej. se bloqueo el celular antes de
     // que saliera), se envia apenas abre la app.
@@ -1420,17 +1423,31 @@
     return payload;
   }
 
+  const CLOUD_REQUEST_TIMEOUT_MS = 45000;
+
   async function cloudRequest(config, path, options, retried) {
     const useJwt = !!config.username;
     if (useJwt && !config.jwt) await cloudLogin(config);
-    const response = await fetch(cloudBaseUrl(config) + path, {
-      ...(options || {}),
-      headers: {
-        "content-type": "application/json",
-        authorization: "Bearer " + (useJwt ? config.jwt : config.token),
-        ...((options && options.headers) || {})
-      }
-    });
+    // Corte por tiempo: una conexion colgada tiene que fallar y no dejar la app esperando.
+    const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), CLOUD_REQUEST_TIMEOUT_MS) : null;
+    let response;
+    try {
+      response = await fetch(cloudBaseUrl(config) + path, {
+        ...(options || {}),
+        ...(controller ? { signal: controller.signal } : {}),
+        headers: {
+          "content-type": "application/json",
+          authorization: "Bearer " + (useJwt ? config.jwt : config.token),
+          ...((options && options.headers) || {})
+        }
+      });
+    } catch (error) {
+      if (error && error.name === "AbortError") throw new Error("el servidor tardo demasiado en responder");
+      throw error;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
     if (response.status === 401 && useJwt && !retried) {
       await cloudLogin(config);
       return cloudRequest(config, path, options, true);
@@ -2138,6 +2155,24 @@
   }
 
   function render() {
+    try {
+      renderInner();
+    } catch (error) {
+      // Nunca dejar la pantalla en blanco: si algo falla al dibujar, se muestra el motivo.
+      console.error("Error al dibujar la pantalla:", error);
+      const app = document.getElementById("app");
+      if (app) {
+        app.innerHTML = `<div style="padding:24px;font-family:system-ui,sans-serif;max-width:640px;margin:0 auto">
+          <h2 style="margin:0 0 8px">No se pudo dibujar la pantalla</h2>
+          <p style="color:#475569">El sistema sigue funcionando, pero esta vista fallo. Proba recargar; si sigue igual, mostrale este mensaje al soporte.</p>
+          <pre style="white-space:pre-wrap;background:#f1f5f9;padding:12px;border-radius:8px;font-size:12px">${escapeHtml(String((error && error.message) || error))}</pre>
+          <button onclick="location.reload()" style="padding:8px 14px;border-radius:8px;border:0;background:#1d4ed8;color:#fff;cursor:pointer">Recargar</button>
+        </div>`;
+      }
+    }
+  }
+
+  function renderInner() {
     afterRender = [];
     realignDatesToTodayOnDayChange();
     const app = document.getElementById("app");
@@ -2157,7 +2192,6 @@
     app.innerHTML = `
       <div id="offline-banner" class="offline-banner" style="display:${typeof navigator !== "undefined" && navigator.onLine === false ? "block" : "none"}">Sin conexión a internet: los cambios se guardan en este dispositivo y se sincronizarán al volver la conexión.</div>
       ${(() => { const n = pendingSyncCount(); return n ? `<div class="offline-banner" style="display:block;background:#b45309;color:#fff">\u26A0 ${n} cambio(s) sin enviar al sistema. Se enviarán al reconectar; no cierres el sistema con internet apagado.</div>` : ""; })()}
-      ${isWindowedState() && historyMode() === "rapida" ? `<div class="offline-banner" style="display:block;background:#1d4ed8;color:#fff">Vista rapida: este dispositivo tiene los movimientos desde el ${escapeHtml(formatDate(windowCutoff()))}. Los saldos son los reales. En cada pagina de historial hay botones para traer 100 dias o todo.</div>` : ""}
       <div class="app-shell">
         ${renderSidebar(route.base)}
         <div class="sidebar-overlay" aria-hidden="true"></div>
@@ -13633,8 +13667,25 @@
       { label: "Comprobantes de transferencias (clientTransfers)", bytes: (state.clientTransfers || []).reduce((sum, t) => sum + String((t && (t.proofFile || t.proof)) || "").length, 0) },
       { label: "Fotos de recambio (replacements)", bytes: (state.replacements || []).reduce((sum, r) => sum + (Array.isArray(r && r.items) ? r.items.reduce((s2, it) => s2 + String((it && it.photo) || "").length, 0) : 0), 0) }
     ].filter((bucket) => bucket.bytes > 0).sort((a, b) => b.bytes - a.bytes);
+    // Detalle de "orders", que suele ser el 80% del peso: cuantos pedidos hay, cuanto pesan sus
+    // items y cuanto las cabeceras. Sirve para saber que ventana conviene.
+    const orders = state.orders || [];
+    const conItems = orders.filter((o) => o && Array.isArray(o.items) && o.items.length);
+    const itemsBytes = orders.reduce((sum, o) => sum + sizeOf((o && o.items) || []), 0);
+    const ordersBytes = sizeOf(orders);
+    const fechas = orders.map((o) => String((o && o.date) || "")).filter(Boolean).sort();
+    const ordersDetail = {
+      total: orders.length,
+      conItems: conItems.length,
+      itemsBytes,
+      headerBytes: Math.max(0, ordersBytes - itemsBytes),
+      porPedido: orders.length ? Math.round((ordersBytes - itemsBytes) / orders.length) : 0,
+      desde: fechas[0] || "",
+      hasta: fechas[fechas.length - 1] || ""
+    };
     return {
       total,
+      ordersDetail,
       rows: rows.sort((a, b) => b.bytes - a.bytes).slice(0, 12),
       imageBuckets,
       imageTotal: imageBuckets.reduce((sum, bucket) => sum + bucket.bytes, 0)
@@ -13773,6 +13824,18 @@
             <tbody>${weight.rows.map((row) => `<tr><td>${escapeHtml(row.key)}</td><td class="num">${formatBytes(row.bytes)}</td><td class="num">${pct(row.bytes)}%</td></tr>`).join("")}</tbody>
           </table>
         </div>
+        ${weight.ordersDetail.total ? `<div class="table-wrap" style="margin-top:10px">
+          <table>
+            <thead><tr><th>Detalle de pedidos</th><th>Valor</th></tr></thead>
+            <tbody>
+              <tr><td>Pedidos en el dispositivo</td><td class="num">${weight.ordersDetail.total}${weight.ordersDetail.desde ? " (" + escapeHtml(formatDate(weight.ordersDetail.desde)) + " a " + escapeHtml(formatDate(weight.ordersDetail.hasta)) + ")" : ""}</td></tr>
+              <tr><td>Con detalle de productos</td><td class="num">${weight.ordersDetail.conItems}</td></tr>
+              <tr><td>Peso del detalle de productos</td><td class="num">${formatBytes(weight.ordersDetail.itemsBytes)}</td></tr>
+              <tr><td>Peso de las cabeceras</td><td class="num">${formatBytes(weight.ordersDetail.headerBytes)}</td></tr>
+              <tr><td>Bytes por cabecera</td><td class="num">${weight.ordersDetail.porPedido}</td></tr>
+            </tbody>
+          </table>
+        </div>` : ""}
         ${weight.imageBuckets.length ? `<div class="table-wrap" style="margin-top:10px">
           <table>
             <thead><tr><th>Imagenes en base64</th><th>Peso</th><th>%</th></tr></thead>

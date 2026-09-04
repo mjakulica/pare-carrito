@@ -1,5 +1,31 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.129 - Arreglo de la pantalla en blanco + pedidos cerrados como archivo (2026-09-04)
+
+### Pantalla en blanco en desktop (fix)
+El arranque hacia `await cloudPull()` y recien despues `render()`: si esa descarga tardaba o se colgaba, **la pantalla no se dibujaba nunca**. Por eso en la computadora quedaba en blanco aunque se esperara dos minutos, mientras el celular (con otra conexion) igual terminaba cargando.
+
+Tres cambios para que no vuelva a pasar:
+1. **Se dibuja primero y se sincroniza despues.** La pantalla sale con lo que ya tiene el dispositivo y la descarga corre en segundo plano; al terminar, se vuelve a dibujar sola. Ademas se siente mucho mas rapido.
+2. **Corte por tiempo (45 s) en las llamadas al servidor.** Una conexion colgada ahora falla con un aviso en vez de dejar la app esperando para siempre.
+3. **Si el dibujado falla, se ve el error en pantalla** (con boton de recargar) en vez de una pagina en blanco.
+
+### El banner azul de arriba se saco
+Los botones de historial quedan solo en cada pagina, que es donde se usan.
+
+### Pedidos cerrados = archivo
+Un pedido **entregado o cancelado Y cobrado** ya no necesita estar en el dispositivo: se manda solo **10 dias** (antes 30). Los que siguen **vivos** —pendientes, entregados sin cobrar, cobrados a medias— se siguen mandando los **30 dias completos**, que son los que hay que mirar.
+
+En el estado de prueba de 32,45 MB la vista rapida baja de 3,00 MB a **2,48 MB** (140 KB por la red). En un sistema como el tuyo, donde los pedidos son el 85% del peso, la mejora deberia ser bastante mayor.
+
+### Panel de peso con detalle de pedidos
+Backup -> "Peso de los datos" ahora muestra cuantos pedidos hay en el dispositivo, desde y hasta que fecha, cuantos traen el detalle de productos, cuanto pesan los items y cuanto las cabeceras, y los bytes por cabecera. Sirve para ajustar las ventanas con datos reales.
+
+### Deploy
+- **REQUIERE `./deploy.sh`** (server.js) + `git pull` del frontend.
+
+---
+
 ## v12.9.128 - Ventanas ajustadas y carga de historial en cada pagina (2026-09-04)
 
 ### Ventanas de la vista rapida

@@ -684,6 +684,15 @@ Completa 12.50: ningun archivo subido queda ya en base64 adentro del JSON de est
 - Helpers: `getChildClientIds(padre)`, `getClientGroupIds(clienteId)`, `getClientGroupBalance(clienteId)` e `isParentClient(clienteId)`.
 - El usuario del cliente padre ve los saldos consolidados del grupo y puede operar por cada cuenta hija: `getCustomerVisibleClientIds` se expande con el grupo.
 
+### 12.59 Arranque a prueba de fallos y pedidos cerrados como archivo (v12.9.129)
+- **Pantalla en blanco (fix):** el handler de `DOMContentLoaded` hacia `await cloudPull(false, true)` ANTES de `render()`. Una descarga lenta o colgada dejaba la pagina sin dibujar (sintoma: desktop en blanco indefinidamente). Ahora `render()` va primero y la descarga corre en segundo plano (`cloudPull(...).catch(...)`, y `cloudPull` ya redibuja al terminar).
+- `cloudRequest` corta por tiempo con `AbortController` (`CLOUD_REQUEST_TIMEOUT_MS` = 45 s) y traduce el abort a "el servidor tardo demasiado en responder".
+- `render()` pasa a ser un envoltorio con try/catch sobre `renderInner()`: si el dibujado falla, muestra el error y un boton de recargar en vez de una pagina vacia.
+- Se quito el banner azul global; los botones de historial quedan en `renderHistoryLoadBar` por pagina.
+- **`isClosedOrder(order)`**: entregado/cancelado/anulado Y saldado (`paymentStatus === "paid"` o `paymentReceived >= totalAmount`). En `buildWindowedState`, los pedidos cerrados usan `preset.closedOrdersDays` (liviano 10, equilibrado 15, conservador 30) y los vivos la ventana completa de `days.orders`. Un entregado sin cobrar de 20 dias sigue llegando; uno cobrado de 20 dias no.
+- Vista rapida en el estado de prueba: 3,00 MB -> 2,48 MB (167 KB -> 140 KB por la red).
+- El panel de peso de Backup suma el detalle de `orders` (cantidad, rango de fechas, cuantos con items, bytes de items vs cabeceras, bytes por cabecera).
+
 ### 12.58 Ventanas ajustadas y carga de historial por pagina (v12.9.128)
 - Preset `liviano` ajustado a pedido: `itemsOrders` 5 -> 8, `orders` 15 -> 30, `providerLedger` y `providerPayments` 30 -> 10, `billingLog` 60 -> 45. El resto sin cambios. Resultado: 3,00 MB de JSON / 167 KB por la red (antes 2,29 MB / 131 KB), con saldos exactos.
 - `windowPresetForDays(n)` arma una ventana pareja de N dias CON items para todas las colecciones; `GET /state?days=100` la usa. Es lo que pide "Cargar 100 dias" (21,90 MB / 1073 KB en el estado de prueba).
@@ -712,7 +721,7 @@ El cuello de botella despues de sacar las imagenes era el TEXTO historico: pedid
 
 ## 13. Ultimo Cambio y Version
 
-**Version operativa:** 12.9.128
+**Version operativa:** 12.9.129
 **Fecha:** 2026-09-04
 **Rama:** `master` (repositorio `mjakulica/pare-carrito`)
 **Entorno:** VPS productivo `/opt/pare-carrito` con frontend estatico servido por Caddy y API Docker Compose. Frontend `sistema.parecarrito.com.ar`, API en `/api`, lista de precios publica en `/precios`.
@@ -721,7 +730,11 @@ El cuello de botella despues de sacar las imagenes era el TEXTO historico: pedid
 
 Ver secciones 12.53 a 12.55: pagina "Ganancias" (ganancia real por producto y cliente), boton "Agregar producto nuevo" en el pop-up de alias, y super usuario (cliente padre con saldos consolidados). Se numeraron 120-122 en paralelo a los cambios de esta rama, que quedaron renumerados 123-125.
 
-### Detalle del ultimo cambio (v12.9.128)
+### Detalle del ultimo cambio (v12.9.129)
+
+- Fix de la pantalla en blanco: se dibuja antes de sincronizar, con corte por tiempo en la red y guarda de errores en `render()`. Los pedidos cerrados y cobrados pasan a mandarse 10 dias en vez de 30. **Requiere `./deploy.sh`.**
+
+### Cambios de v12.9.128
 
 - Ventanas ajustadas (items de pedidos 8 dias, cabeceras 30, proveedores 10, facturacion 45) y botones "Cargar 100 dias" / "Cargar historial completo" / "Volver a la vista rapida" en las 17 paginas con historial. **Requiere `./deploy.sh`.**
 

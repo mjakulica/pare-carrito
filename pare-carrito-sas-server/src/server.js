@@ -724,21 +724,21 @@ const WINDOW_COLLECTIONS = [
 
 const STATE_WINDOW_PRESETS = {
   liviano: {
-    itemsOrders: 8, itemsPurchases: 5,
+    itemsOrders: 8, itemsPurchases: 5, closedOrdersDays: 10,
     days: { orders: 30, saldos: 15, caja: 15, purchases: 15, payments: 15, remitos: 7, providerLedger: 10,
       providerPayments: 10, clientTransfers: 15, vendorLedger: 7, attendance: 30, employeePayments: 30,
       employeeReimbursements: 30, performanceAdjustments: 30, stockMovements: 7, cashClosings: 15,
       priceAutoLog: 7, replacements: 7, billingLog: 45, checklistLog: 7, deletedOrders: 3 }
   },
   equilibrado: {
-    itemsOrders: 7, itemsPurchases: 7,
+    itemsOrders: 7, itemsPurchases: 7, closedOrdersDays: 15,
     days: { orders: 30, saldos: 30, caja: 30, purchases: 30, payments: 30, remitos: 15, providerLedger: 45,
       providerPayments: 45, clientTransfers: 30, vendorLedger: 15, attendance: 45, employeePayments: 45,
       employeeReimbursements: 45, performanceAdjustments: 45, stockMovements: 15, cashClosings: 30,
       priceAutoLog: 15, replacements: 15, billingLog: 90, checklistLog: 15, deletedOrders: 7 }
   },
   conservador: {
-    itemsOrders: 10, itemsPurchases: 10,
+    itemsOrders: 10, itemsPurchases: 10, closedOrdersDays: 30,
     days: { orders: 60, saldos: 60, caja: 60, purchases: 60, payments: 60, remitos: 30, providerLedger: 60,
       providerPayments: 60, clientTransfers: 60, vendorLedger: 30, attendance: 60, employeePayments: 60,
       employeeReimbursements: 60, performanceAdjustments: 60, stockMovements: 30, cashClosings: 60,
@@ -750,6 +750,16 @@ const STATE_WINDOW_DEFAULT = String(process.env.STATE_WINDOW_PRESET || "liviano"
 // dispositivo con vista rapida la tiene cargada.
 const MAX_WINDOW_DAYS = Math.max(...Object.values(STATE_WINDOW_PRESETS)
   .flatMap((preset) => Object.values(preset.days))) + 30;
+
+function isClosedOrder(order) {
+  if (!order) return false;
+  const status = String(order.status || "");
+  if (!["entregado", "cancelado", "anulado"].includes(status)) return false;
+  const total = Number(order.totalAmount || 0);
+  const paid = Number(order.paymentReceived || 0);
+  const settled = String(order.paymentStatus || "") === "paid" || paid >= total - 0.01;
+  return settled;
+}
 
 function recordDate(row) {
   if (!row) return "";
@@ -788,6 +798,17 @@ function buildWindowedState(data, presetName, customDays) {
     const days = preset.days[key];
     if (days == null || !Array.isArray(source[key])) { out[key] = source[key]; return; }
     cutoffs[key] = cutoffDate(days);
+    if (key === "orders" && preset.closedOrdersDays) {
+      // Los pedidos cerrados (entregados/cancelados y cobrados) son archivo: se mandan menos dias.
+      // Los que siguen vivos viajan con la ventana completa aunque sean mas viejos.
+      const closedCutoff = cutoffDate(preset.closedOrdersDays);
+      cutoffs.ordersClosed = closedCutoff;
+      out[key] = source[key].filter((row) => {
+        const date = recordDate(row);
+        return date >= (isClosedOrder(row) ? closedCutoff : cutoffs[key]);
+      });
+      return;
+    }
     out[key] = source[key].filter((row) => recordDate(row) >= cutoffs[key]);
   });
   const before = (key) => (source[key] || []).filter((row) => recordDate(row) < cutoffs[key]);
