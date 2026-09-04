@@ -1,5 +1,18 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.130 - Cabeceras de pedidos a 15 dias, sin distinguir por estado (2026-09-04)
+
+- **Pedidos solo con cabecera: 30 -> 15 dias.** Vuelve al valor que tenia antes de v12.9.128.
+- **Se saco la distincion entre pedidos "cerrados" y "vivos"** que habia agregado v12.9.129 (`isClosedOrder` / `closedOrdersDays`). Los estados entregado/cancelado/cobrado no se usan en la operacion, asi que filtrar por ellos no aportaba nada y solo agregaba una regla que entender. Ahora TODOS los pedidos usan la misma ventana de dias, sin importar su estado.
+- Sin cambios en lo demas: detalle de productos 8 dias, saldos/caja/compras/pagos 15, proveedores 10, facturacion 45.
+
+Vista rapida en el estado de prueba de 32,45 MB: **2,61 MB** (146 KB por la red).
+
+### Deploy
+- **REQUIERE `./deploy.sh`** (server.js). El frontend no cambio en esta version.
+
+---
+
 ## v12.9.129 - Arreglo de la pantalla en blanco + pedidos cerrados como archivo (2026-09-04)
 
 ### Pantalla en blanco en desktop (fix)
