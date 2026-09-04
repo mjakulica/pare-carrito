@@ -802,7 +802,46 @@
     }
   }
 
+  // El servidor manda los pedidos COMPACTADOS: saca de cada item los datos que ya estan en el
+  // catalogo (nombre, unidad, IVA, asignacion) y los valores que se recalculan (subtotal, IVA del
+  // renglon), pero solo cuando coinciden exacto. Aca se reconstruyen antes de que el resto del
+  // sistema toque el estado, asi todo el codigo sigue viendo el pedido completo como siempre.
+  function expandCompactOrders(data) {
+    const orders = Array.isArray(data && data.orders) ? data.orders : null;
+    if (!orders || !orders.length) return data;
+    const productsById = new Map((data.products || []).map((p) => [String(p && p.id), p]));
+    const clientsById = new Map((data.clients || []).map((c) => [String(c && c.id), c]));
+    const round2 = (value) => Math.round(Number(value || 0) * 100) / 100;
+    orders.forEach((order) => {
+      if (!order) return;
+      const client = clientsById.get(String(order.clientId || ""));
+      if (client) {
+        if (order.deliveryVehicleId === undefined) order.deliveryVehicleId = client.vehicleId || "";
+        if (order.priceTier === undefined) order.priceTier = client.priceTier || "";
+        if (order.priceAdjustmentPct === undefined) order.priceAdjustmentPct = Number(client.priceAdjustmentPct || 0);
+      }
+      // Campos de texto que el servidor manda solo si tienen contenido.
+      ["notes", "priceTier", "deliveryVehicleId"].forEach((key) => { if (order[key] === undefined) order[key] = ""; });
+      (Array.isArray(order.items) ? order.items : []).forEach((item) => {
+        if (!item) return;
+        const product = productsById.get(String(item.productId || ""));
+        if (product) {
+          if (item.productName === undefined) item.productName = product.name;
+          if (item.unitType === undefined) item.unitType = product.unitType;
+          if (item.assignedToType === undefined) item.assignedToType = product.assignedToType || "";
+          if (item.assignedToId === undefined) item.assignedToId = product.assignedToId || "";
+          if (item.ivaRate === undefined) item.ivaRate = Number(product.ivaType || 0);
+        }
+        if (item.note === undefined) item.note = "";
+        if (item.subtotal === undefined) item.subtotal = round2(Number(item.quantity || 0) * Number(item.unitPrice || 0));
+        if (item.ivaAmount === undefined) item.ivaAmount = round2(Number(item.subtotal || 0) * Number(item.ivaRate || 0) / 100);
+      });
+    });
+    return data;
+  }
+
   function normalizeLoadedState(loaded, seeded) {
+    expandCompactOrders(loaded);
     const users = Array.isArray(loaded.users) ? loaded.users.slice() : [];
     seeded.users.forEach((defaultUser) => {
       const existing = users.find((user) => user.username === defaultUser.username || user.id === defaultUser.id);

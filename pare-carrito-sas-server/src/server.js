@@ -778,6 +778,56 @@ function windowPresetForDays(days) {
   return { itemsOrders: n, itemsPurchases: n, days: uniform, custom: n };
 }
 
+// ---------- Compactado de pedidos ----------
+// Cada item repite datos que YA estan en el catalogo de productos (nombre, unidad, IVA, a quien
+// esta asignado) y valores que se recalculan solos (subtotal, IVA del renglon). A 200 pedidos por
+// dia eso son megas de texto repetido. Se sacan del envio SOLO cuando el valor coincide EXACTO
+// con lo que el dispositivo puede reconstruir, asi la reconstruccion es identica y no se pierde
+// nada; si algun valor difiere (un precio a mano, un nombre viejo), viaja tal cual.
+const round2 = (value) => Math.round(Number(value || 0) * 100) / 100;
+// Campos de texto que viajan solo si tienen contenido; el cliente los repone como "".
+const ORDER_EMPTY_STRING_FIELDS = ["notes", "priceTier", "deliveryVehicleId"];
+
+function compactOrderItem(item, product) {
+  if (!item || !product) return item;
+  const out = { ...item };
+  if (out.productName === product.name) delete out.productName;
+  if (out.unitType === product.unitType) delete out.unitType;
+  if ((out.assignedToType || "") === (product.assignedToType || "")) delete out.assignedToType;
+  if ((out.assignedToId || "") === (product.assignedToId || "")) delete out.assignedToId;
+  if (out.ivaRate != null && Number(out.ivaRate) === Number(product.ivaType)) delete out.ivaRate;
+  const subtotal = round2(Number(out.quantity || 0) * Number(out.unitPrice || 0));
+  if (out.subtotal != null && round2(out.subtotal) === subtotal) delete out.subtotal;
+  const rate = item.ivaRate != null ? Number(item.ivaRate) : Number(product.ivaType || 0);
+  if (out.ivaAmount != null && round2(out.ivaAmount) === round2(subtotal * rate / 100)) delete out.ivaAmount;
+  if (out.note === "") delete out.note;
+  return out;
+}
+
+function compactOrder(order, productsById, clientsById) {
+  const out = { ...order };
+  const client = clientsById.get(String(out.clientId || ""));
+  if (client) {
+    if ((out.deliveryVehicleId || "") === (client.vehicleId || "")) delete out.deliveryVehicleId;
+    if ((out.priceTier || "") === (client.priceTier || "")) delete out.priceTier;
+    if (out.priceAdjustmentPct != null && Number(out.priceAdjustmentPct) === Number(client.priceAdjustmentPct || 0)) delete out.priceAdjustmentPct;
+  }
+  // Solo se saca lo que el cliente sabe reconstruir (ver expandCompactOrders en app.js). Nada de
+  // borrar campos vacios en general: cualquier campo que el cliente no restaure volveria como
+  // undefined en vez de "" y el pedido dejaria de ser identico.
+  ORDER_EMPTY_STRING_FIELDS.forEach((key) => { if (out[key] === "") delete out[key]; });
+  if (Array.isArray(out.items) && out.items.length) {
+    out.items = out.items.map((item) => compactOrderItem(item, productsById.get(String(item && item.productId))));
+  }
+  return out;
+}
+
+function compactOrders(orders, data) {
+  const productsById = new Map((data.products || []).map((p) => [String(p && p.id), p]));
+  const clientsById = new Map((data.clients || []).map((c) => [String(c && c.id), c]));
+  return (orders || []).map((order) => compactOrder(order, productsById, clientsById));
+}
+
 function buildWindowedState(data, presetName, customDays) {
   const preset = customDays ? windowPresetForDays(customDays) : STATE_WINDOW_PRESETS[presetName];
   if (!preset) return { data, window: { preset: "full", full: true } };
@@ -833,7 +883,7 @@ function buildWindowedState(data, presetName, customDays) {
       ? { ...row, items: [], itemsCount: row.items.length, __itemsStripped: true }
       : row
   ));
-  out.orders = stripItems(out.orders, preset.itemsOrders);
+  out.orders = compactOrders(stripItems(out.orders, preset.itemsOrders), source);
   out.purchases = stripItems(out.purchases, preset.itemsPurchases);
 
   return {

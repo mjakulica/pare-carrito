@@ -1,5 +1,34 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
+## v12.9.132 - Cada pedido pesa la mitad: se saca del envio lo que ya esta en el catalogo (2026-09-04)
+
+### El problema que se venia
+A 200 pedidos por dia, la vista rapida volveria a pesar **7,61 MB**. Midiendo un pedido campo por campo aparecio por que: de los **232 bytes de cada item**, unos 130 son datos que el dispositivo YA TIENE en el catalogo de productos (nombre, unidad, IVA, a quien esta asignado) o que puede recalcular (subtotal, IVA del renglon). Multiplicado por 8 items y 3.000 pedidos, son megas de texto repetido.
+
+### Como quedo
+El servidor saca del envio esos campos y el dispositivo los reconstruye al recibirlos, **antes de que el resto del sistema toque el estado**. La regla es estricta: se saca un campo **solo si su valor coincide EXACTO** con lo que el dispositivo puede reconstruir. Si algo difiere, viaja tal cual.
+
+| | A 200 pedidos/dia |
+|---|---|
+| Pedidos antes | 4,59 MB |
+| **Pedidos ahora** | **2,30 MB** |
+| Estado completo | 7,61 MB -> **5,33 MB** |
+| Por la red | 422 KB -> **367 KB** |
+
+### Los precios por cliente NO se tocan
+`unitPrice` **nunca** se saca del envio: viaja siempre, en cada item de cada pedido. El subtotal solo se omite cuando es exactamente cantidad x ese precio, y se reconstruye con el mismo precio. Verificado con un harness que usa el mismo producto a tres precios distintos (mayorista, preferencial y al costo) mas un subtotal pactado a mano:
+- cada cliente conserva su precio (1500 / 1320 / 1080),
+- un subtotal cargado a mano NO se recalcula,
+- un nombre de producto viejo, una unidad distinta a la del catalogo o un producto borrado se conservan tal cual,
+- el tier y el ajuste % de cada pedido se conservan.
+
+Lo unico que cambia es el ORDEN de las claves dentro del pedido, que el sistema no usa para nada (accede por nombre).
+
+### Deploy
+- **REQUIERE `./deploy.sh`** (server.js) + `git pull` del frontend. Los dos lados tienen que ir juntos: el servidor compacta y el frontend reconstruye.
+
+---
+
 ## v12.9.131 - La foto del pedido manuscrito sale del estado (era el 85% del peso) (2026-09-04)
 
 ### El hallazgo

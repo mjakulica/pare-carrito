@@ -684,6 +684,14 @@ Completa 12.50: ningun archivo subido queda ya en base64 adentro del JSON de est
 - Helpers: `getChildClientIds(padre)`, `getClientGroupIds(clienteId)`, `getClientGroupBalance(clienteId)` e `isParentClient(clienteId)`.
 - El usuario del cliente padre ve los saldos consolidados del grupo y puede operar por cada cuenta hija: `getCustomerVisibleClientIds` se expande con el grupo.
 
+### 12.62 Compactado de pedidos: sacar del envio lo derivable (v12.9.132)
+- **Medicion:** a 200 pedidos/dia la vista rapida pesaria 7,61 MB. Un item ocupa 232 bytes, de los cuales ~130 son datos ya presentes en el catalogo (`productName`, `unitType`, `assignedToType`, `assignedToId`, `ivaRate`) o recalculables (`subtotal`, `ivaAmount`).
+- **Servidor** (`compactOrderItem` / `compactOrder` / `compactOrders`, aplicados en `buildWindowedState`): saca un campo **solo si coincide exacto** con lo reconstruible — el nombre y la unidad solo si son identicos a los del producto, `ivaRate` solo si es igual a `product.ivaType`, `subtotal` solo si es `cantidad x unitPrice`, `ivaAmount` solo si es `subtotal x tasa / 100`. A nivel pedido: `deliveryVehicleId`, `priceTier` y `priceAdjustmentPct` solo si son iguales a los del cliente, y `ORDER_EMPTY_STRING_FIELDS` (`notes`, `priceTier`, `deliveryVehicleId`) cuando estan vacios.
+- **`unitPrice` nunca se saca**: es el dato que cambia por cliente y no es derivable de nada.
+- **Cliente** (`expandCompactOrders`, llamado al principio de `normalizeLoadedState`): repone los campos ausentes desde el catalogo con las mismas formulas. Como solo se saca lo identico, la reconstruccion es lossless; lo unico que cambia es el orden de las claves.
+- **Resultado a 200 pedidos/dia:** pedidos 4,59 -> 2,30 MB; estado 7,61 -> 5,33 MB; red 422 -> 367 KB.
+- **Caveat documentado:** si un producto se renombra, los pedidos de la ventana en los que el nombre coincidia se reconstruyen con el nombre NUEVO. Los que tenian un nombre distinto al del catalogo (historicos) viajan tal cual y no se tocan.
+
 ### 12.61 La foto del manuscrito y la migracion del lado del servidor (v12.9.131)
 - **Hallazgo:** con la vista rapida el estado quedo en 3,3 MB, pero 139 pedidos ocupaban 2,2 MB de cabeceras (16.959 bytes por pedido, contra ~400 normales) mientras el detalle de productos pesaba 172 KB. La causa era `order.handwrittenImage.data`: la foto del pedido manuscrito guardada en base64 dentro del pedido (~150 KB cada una), un campo que quedo afuera de 12.50/12.52.
 - Ahora se sube con `uploadPrivateFile` al crear el pedido (`handwrittenImage.key`), el visor usa `openProofViewer`, entra en `pendingAttachments()` y el panel de peso la lista aparte.
@@ -730,7 +738,7 @@ El cuello de botella despues de sacar las imagenes era el TEXTO historico: pedid
 
 ## 13. Ultimo Cambio y Version
 
-**Version operativa:** 12.9.131
+**Version operativa:** 12.9.132
 **Fecha:** 2026-09-04
 **Rama:** `master` (repositorio `mjakulica/pare-carrito`)
 **Entorno:** VPS productivo `/opt/pare-carrito` con frontend estatico servido por Caddy y API Docker Compose. Frontend `sistema.parecarrito.com.ar`, API en `/api`, lista de precios publica en `/precios`.
@@ -739,7 +747,11 @@ El cuello de botella despues de sacar las imagenes era el TEXTO historico: pedid
 
 Ver secciones 12.53 a 12.55: pagina "Ganancias" (ganancia real por producto y cliente), boton "Agregar producto nuevo" en el pop-up de alias, y super usuario (cliente padre con saldos consolidados). Se numeraron 120-122 en paralelo a los cambios de esta rama, que quedaron renumerados 123-125.
 
-### Detalle del ultimo cambio (v12.9.131)
+### Detalle del ultimo cambio (v12.9.132)
+
+- Compactado de pedidos: el servidor no manda lo que el dispositivo puede reconstruir del catalogo y el cliente lo repone. A 200 pedidos/dia, los pedidos pasan de 4,59 a 2,30 MB. Los precios por cliente no se tocan (`unitPrice` viaja siempre). **Requiere `./deploy.sh`.**
+
+### Cambios de v12.9.131
 
 - La foto del pedido manuscrito sale del estado (era el 85% del peso: 16.959 bytes por cabecera) y el servidor migra solo, en cada arranque, todo lo que haya quedado en base64. **Requiere `./deploy.sh`.**
 
