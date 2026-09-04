@@ -1446,7 +1446,7 @@ app.get("/public/price-list", async (req, res) => {
   const wholesaleSet = new Set(unitCfg.filter((u) => u && u.wholesale).map((u) => String(u.name || "").toLowerCase()));
   const categoryRank = (c) => ({ FRUTAS: 1, VERDURAS: 2, HUEVOS: 3, OTROS: 4 }[String(c || "").toUpperCase()] || 99);
   // Ultima compra directa por producto (para la fecha de "ultima actualizacion").
-  const EXCL_P = ["other_expense", "freight", "market_price", "provider_payment", "cash_movement", "prepared"];
+  const EXCL_P = ["other_expense", "freight", "market_price", "provider_payment", "provider_return", "cash_movement", "prepared"];
   const lastPurchaseByProduct = {};
   (d.purchases || []).forEach((p) => {
     if (!p || p.status === "anulado" || EXCL_P.includes(p.expenseType || "purchase") || !p.date) return;

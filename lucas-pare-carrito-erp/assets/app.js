@@ -319,6 +319,7 @@
     { id: "reposiciones", label: "Reposiciones", icon: "RP", roles: ["manager", "admin", "employee"] },
     { id: "historiales", label: "Historiales", icon: "HI", roles: ["manager", "admin"] },
     { id: "rendimiento", label: "Rendimiento", icon: "RE", roles: ["manager"] },
+    { id: "ganancias", label: "Ganancias", icon: "GA", roles: ["manager", "admin"] },
     { id: "compras", label: "Compras/Gastos", icon: "CO", roles: ["manager", "admin", "employee", "proveedor"] },
     { id: "dividir", label: "Dividir Compras", icon: "DV", roles: ["manager", "admin", "employee", "proveedor"] },
     { id: "stock", label: "Stock", icon: "ST", roles: ["manager", "admin", "employee"] },
@@ -2634,6 +2635,7 @@
       reposiciones: renderReplacementsPage,
       historiales: renderHistories,
       rendimiento: renderPerformance,
+      ganancias: renderProfit,
       compras: renderPurchases,
       dividir: renderDividePurchases,
       stock: renderStock,
@@ -6613,6 +6615,108 @@
       .sort((a, b) => String(a.category).localeCompare(String(b.category)) || String(a.productName).localeCompare(String(b.productName)));
   }
 
+  function computeProfitAnalysis(from, to) {
+    const orders = (state.orders || []).filter((o) => o && o.date >= from && o.date <= to && !["cancelado", "anulado"].includes(o.status));
+    const dayCostCache = {};
+    const costFor = (date, productId) => {
+      if (!dayCostCache[date]) dayCostCache[date] = getDayPurchaseCosts(date) || {};
+      const c = dayCostCache[date][productId];
+      return c && c > 0 ? c : getProductCost(productId);
+    };
+    const byProduct = {};
+    const byClient = {};
+    let totRevenue = 0, totCost = 0;
+    orders.forEach((o) => {
+      (o.items || []).forEach((it) => {
+        const qty = Number(it.quantity || 0);
+        const revenue = Number(it.subtotal != null ? it.subtotal : qty * Number(it.unitPrice || 0));
+        const cost = qty * costFor(o.date, it.productId);
+        totRevenue += revenue; totCost += cost;
+        const p = byProduct[it.productId] || (byProduct[it.productId] = { productId: it.productId, name: it.productName || it.productId, qty: 0, revenue: 0, cost: 0 });
+        p.qty += qty; p.revenue += revenue; p.cost += cost;
+        const c = byClient[o.clientId] || (byClient[o.clientId] = { clientId: o.clientId, revenue: 0, cost: 0, orderIds: new Set() });
+        c.revenue += revenue; c.cost += cost; c.orderIds.add(o.id);
+      });
+    });
+    const finP = Object.values(byProduct).map((p) => ({ ...p, profit: p.revenue - p.cost, margin: p.revenue > 0 ? (p.revenue - p.cost) / p.revenue * 100 : 0 })).sort((a, b) => b.profit - a.profit);
+    const finC = Object.values(byClient).map((c) => ({ ...c, orders: c.orderIds.size, profit: c.revenue - c.cost, margin: c.revenue > 0 ? (c.revenue - c.cost) / c.revenue * 100 : 0 })).sort((a, b) => b.profit - a.profit);
+    return { byProduct: finP, byClient: finC, totRevenue, totCost, totProfit: totRevenue - totCost, orders: orders.length };
+  }
+
+  function renderProfit() {
+    const today = todayISO();
+    const from = ui.profitFrom || addDaysISO(today, -29);
+    const to = ui.profitTo || today;
+    ui.profitFrom = from; ui.profitTo = to;
+    const a = computeProfitAnalysis(from, to);
+    const marginPill = (m) => `<span class="pill ${m >= 15 ? "green" : (m >= 0 ? "amber" : "red")}">${formatNumber(m)}%</span>`;
+    const prodRows = a.byProduct.map((p) => `<tr>
+      <td>${escapeHtml(p.name)}</td>
+      <td class="num">${formatNumber(p.qty)}</td>
+      <td class="num">${formatMoney(p.revenue)}</td>
+      <td class="num">${formatMoney(p.cost)}</td>
+      <td class="num"><strong>${formatMoney(p.profit)}</strong></td>
+      <td class="num">${marginPill(p.margin)}</td>
+    </tr>`).join("") || emptyRow(6, "Sin ventas en el rango.");
+    const cliRows = a.byClient.map((c) => {
+      const cl = getClient(c.clientId);
+      return `<tr>
+        <td><strong>${escapeHtml(String(c.clientId))}</strong> - ${escapeHtml(cl ? cl.name : c.clientId)}</td>
+        <td class="num">${c.orders}</td>
+        <td class="num">${formatMoney(c.revenue)}</td>
+        <td class="num">${formatMoney(c.cost)}</td>
+        <td class="num"><strong>${formatMoney(c.profit)}</strong></td>
+        <td class="num">${marginPill(c.margin)}</td>
+      </tr>`;
+    }).join("") || emptyRow(6, "Sin ventas en el rango.");
+
+    afterRender.push(() => {
+      const fEl = document.getElementById("profit-from");
+      const tEl = document.getElementById("profit-to");
+      if (fEl) fEl.addEventListener("change", () => { ui.profitFrom = fEl.value || addDaysISO(todayISO(), -29); render(); });
+      if (tEl) tEl.addEventListener("change", () => { ui.profitTo = tEl.value || todayISO(); render(); });
+      document.querySelectorAll("[data-profit-range]").forEach((b) => b.addEventListener("click", () => {
+        const r = b.dataset.profitRange;
+        if (r === "this-month") { const d = new Date(); ui.profitFrom = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-01`; ui.profitTo = todayISO(); }
+        else if (r === "30") { ui.profitFrom = addDaysISO(todayISO(), -29); ui.profitTo = todayISO(); }
+        render();
+      }));
+    });
+
+    return pageShell(
+      "Ganancias",
+      "Ganancia real (ventas netas menos costo de la compra del dia) por producto y por cliente.",
+      `<div class="form-grid">
+        <div class="field"><label>Desde</label><input type="date" id="profit-from" value="${escapeAttr(from)}" /></div>
+        <div class="field"><label>Hasta</label><input type="date" id="profit-to" value="${escapeAttr(to)}" /></div>
+        <div class="field"><label>&nbsp;</label><button class="btn ghost full" type="button" data-profit-range="30">Ult. 30 dias</button></div>
+        <div class="field"><label>&nbsp;</label><button class="btn ghost full" type="button" data-profit-range="this-month">Este mes</button></div>
+      </div>`,
+      `
+      <div class="metrics-grid" style="margin-bottom:14px">
+        ${metricCard("Ventas (neto)", formatMoney(a.totRevenue), a.orders + " pedidos")}
+        ${metricCard("Costo", formatMoney(a.totCost), "Compras del dia / costo registrado")}
+        ${metricCard("Ganancia", formatMoney(a.totProfit), "Margen " + formatNumber(a.totRevenue > 0 ? a.totProfit / a.totRevenue * 100 : 0) + "%")}
+      </div>
+      <div class="panel" style="margin-bottom:14px">
+        <h2 class="page-title" style="font-size:18px">Ganancia por producto</h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Producto</th><th class="num">Cant.</th><th class="num">Ventas</th><th class="num">Costo</th><th class="num">Ganancia</th><th class="num">Margen</th></tr></thead>
+          <tbody>${prodRows}</tbody>
+        </table></div>
+      </div>
+      <div class="panel">
+        <h2 class="page-title" style="font-size:18px">Ganancia por cliente</h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Cliente</th><th class="num">Pedidos</th><th class="num">Ventas</th><th class="num">Costo</th><th class="num">Ganancia</th><th class="num">Margen</th></tr></thead>
+          <tbody>${cliRows}</tbody>
+        </table></div>
+      </div>
+      `,
+      "ganancias"
+    );
+  }
+
   function renderPerformance() {
     const from = ui.performanceFrom || ui.performanceDate || todayISO();
     const to = ui.performanceTo || from;
@@ -10185,11 +10289,15 @@
     });
     const rows = balances.map((item) => {
       const client = getClient(item.clientId);
+      const parentOf = getChildClientIds(item.clientId);
+      const parentTag = parentOf.length ? `<br><span class="pill gray">Grupo: ${parentOf.length} cuenta(s)</span>` : "";
+      const childTag = client && client.parentClientId ? `<br><span class="muted">Hijo de ${escapeHtml(String(client.parentClientId))}</span>` : "";
+      const groupLine = parentOf.length ? `<br><span class="muted">Consolidado: ${formatMoney(getClientGroupBalance(item.clientId))}</span>` : "";
       return `
         <tr>
           <td>${escapeHtml(client ? client.id : item.clientId)}</td>
-          <td>${escapeHtml(client ? client.name : item.clientId)}</td>
-          <td class="num">${formatMoney(item.balance)}</td>
+          <td>${escapeHtml(client ? client.name : item.clientId)}${parentTag}${childTag}</td>
+          <td class="num">${formatMoney(item.balance)}${groupLine}</td>
           <td class="num">${client && shouldApplyInvoiceVat(client) ? formatMoney(getClientAccumulatedIva(item.clientId)) : "-"}</td>
           <td>${escapeHtml(client ? paymentTypeLabel(client.paymentType) : "")}</td>
           <td><button class="btn small ghost" data-show-balance="${item.clientId}">Ver movimientos</button></td>
@@ -10380,7 +10488,7 @@
         <div class="table-wrap" style="margin-top:10px">
           <table>
             <thead><tr><th>ID</th><th>Cliente</th><th>Saldo</th><th>Tipo</th></tr></thead>
-            <tbody>${balanceRows || emptyRow(4, "No hay saldos para mostrar.")}</tbody>
+            <tbody>${balanceRows || emptyRow(4, "No hay saldos para mostrar.")}${clientIds.length > 1 ? `<tr><td></td><td><strong>Total consolidado</strong></td><td class="num"><strong>${formatMoney(isExample ? 0 : clientIds.reduce((sm, id) => sm + getClientBalance(id), 0))}</strong></td><td></td></tr>` : ""}</tbody>
           </table>
         </div>
       </div>
@@ -14374,6 +14482,7 @@
         <div class="field"><label>Precio</label><select id="client-tier"><option value="general" ${client && client.priceTier === "general" ? "selected" : ""}>General</option><option value="preferencial" ${client && client.priceTier === "preferencial" ? "selected" : ""}>Preferencial</option><option value="con_factura" ${client && client.priceTier === "con_factura" ? "selected" : ""}>Con Factura</option><option value="al_costo" ${client && client.priceTier === "al_costo" ? "selected" : ""}>Al Costo</option></select></div>
         <div class="field"><label>Ajuste precio %</label><input id="client-adjustment" inputmode="decimal" value="${formatAmountInput(client ? client.priceAdjustmentPct || 0 : 0)}" /></div>
         <div class="field"><label>Envío ($)</label><input id="client-shipping" inputmode="decimal" value="${formatAmountInput(client ? client.shippingFee || 0 : 0)}" placeholder="0 = sin envío" /></div>
+        <div class="field span-2"><label>Cliente padre (consolida saldos)</label><select id="client-parent"><option value="">— Ninguno —</option>${activeClients().filter((cl) => !client || cl.id !== client.id).map((cl) => `<option value="${escapeAttr(cl.id)}" ${client && client.parentClientId === cl.id ? "selected" : ""}>${escapeHtml(cl.id)} - ${escapeHtml(cl.name)}</option>`).join("")}</select></div>
         <div class="field"><label>Vehículo</label><select id="client-vehicle">${activeVehicles().map((vehicle) => `<option value="${vehicle.id}" ${client && client.vehicleId === vehicle.id ? "selected" : ""}>${escapeHtml(vehicle.name)}</option>`).join("")}</select></div>
         <label class="field" style="display:flex;align-items:center;gap:8px;grid-template-columns:auto 1fr">
           <input type="checkbox" id="client-needs-invoice" style="width:auto;min-height:auto" ${client && client.needsInvoice ? "checked" : ""} />
@@ -14431,6 +14540,7 @@
             priceTier: priceTierValue,
             priceAdjustmentPct: parseAmount(document.getElementById("client-adjustment").value),
             shippingFee: Math.max(0, parseAmount(document.getElementById("client-shipping").value) || 0),
+            parentClientId: (document.getElementById("client-parent") ? document.getElementById("client-parent").value : (client ? client.parentClientId || "" : "")),
             needsInvoice: needsInvoiceValue,
             cuit: document.getElementById("client-cuit").value.trim(),
             legalName: document.getElementById("client-legal-name").value.trim(),
@@ -14592,8 +14702,12 @@
     }).join("");
     showModal(
       "Vincular productos no reconocidos",
-      `<p class="muted">Seleccione el producto correcto para guardar el alias y reconocerlo la proxima vez.</p><div class="grid">${rows}</div>`,
+      `<p class="muted">Seleccione el producto correcto para guardar el alias, o cree un producto nuevo. Se reconocera la proxima vez.</p>
+       <div class="page-actions" style="margin-bottom:8px"><button class="btn ghost" type="button" id="unmatched-new-product">+ Agregar producto nuevo</button></div>
+       <div class="grid">${rows}</div>`,
       () => {
+        const unmatchedNewProduct = document.getElementById("unmatched-new-product");
+        if (unmatchedNewProduct) unmatchedNewProduct.addEventListener("click", () => openProductForm());
         document.querySelectorAll("[data-remove-unmatched-alias]").forEach((button) => {
           button.addEventListener("click", () => {
             const row = button.closest("[data-unmatched-alias-row]");
@@ -15954,10 +16068,31 @@
     return getCajaBalance("cash-banco");
   }
 
+  function getChildClientIds(parentId) {
+    if (!parentId) return [];
+    return (state.clients || []).filter((c) => c && c.parentClientId === parentId && c.isActive !== false).map((c) => c.id);
+  }
+
+  function getClientGroupIds(clientId) {
+    return Array.from(new Set([clientId, ...getChildClientIds(clientId)].filter(Boolean)));
+  }
+
+  function getClientGroupBalance(clientId) {
+    return getClientGroupIds(clientId).reduce((sum, id) => sum + getClientBalance(id), 0);
+  }
+
+  function isParentClient(clientId) {
+    return getChildClientIds(clientId).length > 0;
+  }
+
   function getCustomerVisibleClientIds(user) {
     const account = user || currentUser;
     if (!account || !isClientLikeRole(account.role)) return [];
-    return Array.from(new Set([account.clientId, ...(account.linkedClientIds || [])].filter(Boolean)));
+    // El super usuario (cuenta vinculada a un cliente padre) tambien opera/ve las cuentas hijas.
+    const base = [account.clientId, ...(account.linkedClientIds || [])].filter(Boolean);
+    const all = [];
+    base.forEach((id) => { all.push(id); getChildClientIds(id).forEach((cid) => all.push(cid)); });
+    return Array.from(new Set(all));
   }
 
   function getCustomerOrdersForIds(ids) {
@@ -18050,7 +18185,7 @@
   // Costo por producto de las compras de un dia (ultima compra del dia gana). Solo compras de
   // producto (no otros gastos, flete, pago proveedor, movimientos de caja, ni market_price).
   function getDayPurchaseCosts(dateISO) {
-    const EXCL = ["other_expense", "freight", "market_price", "provider_payment", "cash_movement", "prepared"];
+    const EXCL = ["other_expense", "freight", "market_price", "provider_payment", "provider_return", "cash_movement", "prepared"];
     const map = {};
     (state.purchases || [])
       .filter((p) => p && p.date === dateISO && p.status !== "anulado" && !EXCL.includes(p.expenseType || "purchase"))
@@ -18417,7 +18552,7 @@
   function getProductLastPriceUpdate(productId) {
     const rec = (state.prices && state.prices[productId]) || {};
     let d = rec.date || "";
-    const EXCL = ["other_expense", "freight", "market_price", "provider_payment", "cash_movement", "prepared"];
+    const EXCL = ["other_expense", "freight", "market_price", "provider_payment", "provider_return", "cash_movement", "prepared"];
     (state.purchases || []).forEach((p) => {
       if (!p || p.status === "anulado" || EXCL.includes(p.expenseType || "purchase")) return;
       if (!p.date || p.date <= d) return;

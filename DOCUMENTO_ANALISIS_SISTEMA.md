@@ -241,8 +241,8 @@ Tablas adicionales:
 | PUT | `/state` | manager, admin, employee, contador | Guardar estado completo |
 | POST | `/transfers` | customer, example | Registrar transferencia cliente |
 | POST | `/proofs` | Cualquier logueado | Subir comprobante |
-| POST | `/product-images` | manager, admin, employee | **(v12.9.121)** Sube una foto de producto (JPG/PNG/WEBP, hasta 8 MB) al volumen `uploads` y devuelve su `key`. Queda marcada `public_read = TRUE` |
-| GET | `/public/product-image/:key` | **Público (sin auth)** | **(v12.9.121)** Sirve la foto de producto con `Cache-Control: public, max-age=31536000, immutable`. Solo archivos con `public_read = TRUE`: los comprobantes siguen pidiendo login |
+| POST | `/product-images` | manager, admin, employee | **(v12.9.124)** Sube una foto de producto (JPG/PNG/WEBP, hasta 8 MB) al volumen `uploads` y devuelve su `key`. Queda marcada `public_read = TRUE` |
+| GET | `/public/product-image/:key` | **Público (sin auth)** | **(v12.9.124)** Sirve la foto de producto con `Cache-Control: public, max-age=31536000, immutable`. Solo archivos con `public_read = TRUE`: los comprobantes siguen pidiendo login |
 | POST | `/ocr/order-image` | manager, admin, employee | OCR de la foto de un pedido manuscrito. Cadena de proveedores (v12.9.112-114): **Google Cloud Vision** (`DOCUMENT_TEXT_DETECTION`, `languageHints` = `GOOGLE_VISION_LANG`, por defecto `es-t-i0-handwrit`) -> OpenRouter -> Moonshot/Kimi; devuelve `{text, provider}` |
 | GET | `/proofs/:key` | Cualquier logueado | Descargar comprobante |
 | GET | `/reports/sales` | manager, admin | Ventas vs gastos por día |
@@ -610,7 +610,7 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 - **Boton "Nuevo producto" (v12.9.118):** junto a "Ver alias" / "Subir imagen"; abre `openProductForm` y al guardar deja el producto disponible sin salir de la pagina.
 - **Borrador persistente (v12.9.119):** el texto pegado en "Pegar pedido de WhatsApp" se guarda en `ui.orderWhatsappDraft` (en cada tecla y al leer una imagen por OCR) y el textarea se renderiza con ese valor, de modo que sobrevive a cualquier `render()` — antes se vaciaba al vincular alias o abrir "Ver alias". Se limpia solo al crear el pedido.
 
-### 12.47 Proveedores: saldo real, devoluciones y carga por proveedor (v12.9.120)
+### 12.47 Proveedores: saldo real, devoluciones y carga por proveedor (v12.9.123)
 
 **Saldo de proveedor (fix de un saldo mas BAJO que el real).** Dos causas, las dos corregidas:
 - Al anular un "Pago a Proveedor", `annulPurchase` revertia la caja pero no el movimiento negativo que el pago habia dejado en `providerLedger`: la deuda quedaba descontada por un pago inexistente. Ahora la anulacion compensa ese movimiento (`provider_payment_annul`) y marca el pago como `anulado`.
@@ -626,17 +626,17 @@ El frontend mantiene una cola local de parches pendientes. Cada parche incluye `
 
 **Compras y Gastos - "Cargar productos".** Con un proveedor (o empleado) elegido, carga una fila por cada producto asignado (`productsSupplied` / `assignedTo*`) con el ultimo costo (`getStoredProductCost`) y la cantidad que falta comprar hoy; primero los pendientes, sin duplicar los ya cargados (`purchaseProductsForAssignee`, `loadPurchaseLinesForAssignee`).
 
-### 12.49 Dividir Compras: unidades y formato de cantidad (v12.9.120)
-- `divideItemUnit()` devuelve "" para los productos `allowUnitWeight` (por unidad, cobrados por peso): en Dividir la cantidad son unidades y mostrar su `unitType` ("kg") confundia. Los remitos no usan esta funcion, asi que ahi el kg se sigue mostrando siempre.
-- `divideQtyLabel(cantidad, unidad)` arma la etiqueta sin espacios sobrantes y con el formato de `formatDivideQty`: enteros sin decimal ("1", no "1,0") y coma solo cuando hace falta ("1,5"). Se usa en la tabla de asignacion, en las vistas por producto y por cliente, en el PDF y en el texto de WhatsApp.
-
-### 12.48 Peso del estado y arranque (v12.9.120)
+### 12.48 Peso del estado y arranque (v12.9.123)
 - **Causa de la lentitud:** el estado viaja y se guarda como UN solo JSON, y adentro lleva imagenes en base64 (`products[].imageData`, `orders[].deliveryRemitoPhoto.data`, comprobantes de egresos, pagos y transferencias). El texto (pedidos, saldos, caja) comprime bien con el gzip de Caddy; el base64 no. Por eso el peso lo dominan las imagenes, no el historico.
 - `saveState()` hacia `JSON.stringify` de TODO el estado en cada mutacion. Ahora el snapshot local se agenda (`scheduleLocalStateSnapshot`, 1,5 s) y se fuerza con `flushLocalStateSnapshot()` antes de leerlo, al ocultar la pestania (`visibilitychange`) y al cerrar (`beforeunload` / `pagehide`).
 - Backup: panel "Peso de los datos" (`measureStateWeight`) con el peso por seccion y el detalle de cuanto son imagenes; boton "Optimizar fotos de producto" (`recompressDataUrl` a 400px) y "Borrar fotos de remito viejas" (mas de 60 dias). Las fotos nuevas de producto se comprimen a 400px (antes 700px).
-- Fix de fondo (HECHO en v12.9.121, ver 12.50): las fotos de producto salieron del JSON de estado y se guardan como archivo en el servidor. Quedan adentro del estado las fotos de remito entregado y los comprobantes de egresos, pagos y transferencias, que se pueden mover igual mas adelante.
+- Fix de fondo (HECHO en v12.9.124, ver 12.50): las fotos de producto salieron del JSON de estado y se guardan como archivo en el servidor. Quedan adentro del estado las fotos de remito entregado y los comprobantes de egresos, pagos y transferencias, que se pueden mover igual mas adelante.
 
-### 12.50 Fotos de producto fuera del estado (v12.9.121)
+### 12.49 Dividir Compras: unidades y formato de cantidad (v12.9.123)
+- `divideItemUnit()` devuelve "" para los productos `allowUnitWeight` (por unidad, cobrados por peso): en Dividir la cantidad son unidades y mostrar su `unitType` ("kg") confundia. Los remitos no usan esta funcion, asi que ahi el kg se sigue mostrando siempre.
+- `divideQtyLabel(cantidad, unidad)` arma la etiqueta sin espacios sobrantes y con el formato de `formatDivideQty`: enteros sin decimal ("1", no "1,0") y coma solo cuando hace falta ("1,5"). Se usa en la tabla de asignacion, en las vistas por producto y por cliente, en el PDF y en el texto de WhatsApp.
+
+### 12.50 Fotos de producto fuera del estado (v12.9.124)
 
 Es el fix de fondo que quedaba pendiente en 12.48: el arranque bajaba las fotos en base64 dentro del JSON de estado, en cada dispositivo y cada vez.
 
@@ -648,10 +648,10 @@ Es el fix de fondo que quedaba pendiente en 12.48: el arranque bajaba las fotos 
 - **Nota operativa:** al reemplazar la foto de un producto, el archivo anterior queda en el volumen (no se borra, para no romper dispositivos que todavia no sincronizaron). El volumen `uploads` deberia entrar en el backup del VPS.
 - **Deploy:** requiere `./deploy.sh` (server.js, schema.sql y docker-compose.yml). La columna `public_read` se crea sola al arrancar.
 
-### 12.51 Correccion de despliegue: variables de Google Vision (v12.9.121)
+### 12.51 Correccion de despliegue: variables de Google Vision (v12.9.124)
 - `docker-compose.yml` no le pasaba a la API las variables `GOOGLE_VISION_API_KEY` / `GOOGLE_VISION_URL` / `GOOGLE_VISION_LANG` que `server.js` lee desde v12.9.113: estaban documentadas en `.env.example` pero no llegaban al contenedor, asi que el OCR con Google Vision no podia activarse en produccion. Ya se pasan.
 
-### 12.52 Todos los adjuntos fuera del estado (v12.9.122)
+### 12.52 Todos los adjuntos fuera del estado (v12.9.125)
 
 Completa 12.50: ningun archivo subido queda ya en base64 adentro del JSON de estado.
 
@@ -670,26 +670,43 @@ Completa 12.50: ningun archivo subido queda ya en base64 adentro del JSON de est
 - **Sin cambios de backend:** usa el `POST /proofs` / `GET /proofs/:key` que ya existian.
 - **Operacion:** el volumen Docker `uploads` pasa a ser critico para el backup del VPS (estos archivos ya no viajan en el `pg_dump` del estado). Limitacion preexistente: `GET /proofs/:key` sirve el archivo a cualquier usuario logueado que conozca la clave; las claves no son adivinables, pero si se quiere control por rol hay que agregarlo en el endpoint.
 
+### 12.53 Analisis de ganancia real (v12.9.120)
+- Nueva pagina "Ganancias" (gerente/admin, `renderProfit`): ganancia por producto y por cliente en un rango de fechas, con cantidad/pedidos, ventas, costo, ganancia y margen % (semaforo), mas tarjetas de total.
+- `computeProfitAnalysis(desde, hasta)` valua cada item vendido con el COSTO REAL del dia de la compra (`getDayPurchaseCosts`, con fallback al costo guardado del producto). Estado del rango en `ui.profitFrom` / `ui.profitTo`, con atajos "Ult. 30 dias" y "Este mes".
+- Nota de v12.9.123: las devoluciones a proveedor quedaron EXCLUIDAS de `getDayPurchaseCosts` y de `getProductLastPriceUpdate` (y del `EXCL_P` del backend). Una devolucion no es una senal de precio: si entrara, pisaria el costo del dia usado por esta pagina y por el repricing de Remitos. Si sigue restando en las cantidades compradas y en los gastos, que es lo correcto.
+
+### 12.54 Alias: alta de producto desde el pop-up (v12.9.121)
+- En el pop-up de productos no reconocidos (Nuevo Pedido) se agrego "Agregar producto nuevo", que abre el alta de producto sin salir de la pantalla. Complementa el boton "Nuevo producto" de v12.9.118.
+
+### 12.55 Super usuario: cliente padre con saldos consolidados (v12.9.122)
+- Nuevo campo `client.parentClientId` (un nivel): un cliente "hijo" apunta a su "padre". Se elige en la ficha del cliente ("Cliente padre (consolida saldos)").
+- Helpers: `getChildClientIds(padre)`, `getClientGroupIds(clienteId)`, `getClientGroupBalance(clienteId)` e `isParentClient(clienteId)`.
+- El usuario del cliente padre ve los saldos consolidados del grupo y puede operar por cada cuenta hija: `getCustomerVisibleClientIds` se expande con el grupo.
+
 ---
 
 ## 13. Ultimo Cambio y Version
 
-**Version operativa:** 12.9.122
+**Version operativa:** 12.9.125
 **Fecha:** 2026-09-04
 **Rama:** `master` (repositorio `mjakulica/pare-carrito`)
 **Entorno:** VPS productivo `/opt/pare-carrito` con frontend estatico servido por Caddy y API Docker Compose. Frontend `sistema.parecarrito.com.ar`, API en `/api`, lista de precios publica en `/precios`.
 
-### Detalle del ultimo cambio (v12.9.122)
+### Cambios que venian de master (v12.9.120 a v12.9.122)
 
-- Todo lo que se sube (comprobantes de egresos, pagos y transferencias, fotos de remito y de recambio) sale del JSON de estado y se guarda como archivo en el servidor, igual que las fotos de producto en v12.9.121. Lo nuevo se sube solo; lo viejo se migra con un boton en Backup. Solo frontend (`git pull`).
+Ver secciones 12.53 a 12.55: pagina "Ganancias" (ganancia real por producto y cliente), boton "Agregar producto nuevo" en el pop-up de alias, y super usuario (cliente padre con saldos consolidados). Se numeraron 120-122 en paralelo a los cambios de esta rama, que quedaron renumerados 123-125.
 
-### Cambios de v12.9.121
+### Detalle del ultimo cambio (v12.9.125)
+
+- Todo lo que se sube (comprobantes de egresos, pagos y transferencias, fotos de remito y de recambio) sale del JSON de estado y se guarda como archivo en el servidor, igual que las fotos de producto en v12.9.124. Lo nuevo se sube solo; lo viejo se migra con un boton en Backup. Solo frontend (`git pull`).
+
+### Cambios de v12.9.124
 
 - Las fotos de producto salen del JSON de estado: se guardan como archivo en el servidor (`product.imageKey`) y se sirven publicas y cacheadas. Las nuevas se suben solas; las que ya estaban se migran desde Backup con un boton.
 - `docker-compose.yml` ahora le pasa a la API las variables de Google Vision.
 - **Requiere `./deploy.sh`** + `git pull`.
 
-### Cambios de v12.9.120
+### Cambios de v12.9.123
 
 - Proveedores: el saldo ya no queda por debajo del real (anulacion de pagos + compras en cuenta corriente sin movimiento en el ledger).
 - Nuevo tipo de egreso "Devolución a proveedor", que descuenta deuda o devuelve plata a la caja y resta en todas las metricas y en el stock.
@@ -698,9 +715,9 @@ Completa 12.50: ningun archivo subido queda ya en base64 adentro del JSON de est
 - Arranque y respuesta: snapshot local diferido, panel de peso de datos y herramientas para bajar el peso de las imagenes.
 - Solo frontend: `git pull`.
 
-### Rango de cambios recientes documentados (v12.9.106 a v12.9.120)
+### Rango de cambios recientes documentados (v12.9.106 a v12.9.123)
 
-Ver tambien 12.47 y 12.48 (v12.9.120: saldo de proveedores, devoluciones, carga por proveedor, peso del estado).
+Ver tambien 12.47 y 12.48 (v12.9.123: saldo de proveedores, devoluciones, carga por proveedor, peso del estado).
 
 Resumen por tema del rango v12.9.106-119 (secciones 12.41 a 12.46):
 - **Datos / sincronizacion (v12.9.106):** ids de producto y proveedor globalmente unicos; corrige la desaparicion de productos en el merge entre dispositivos.

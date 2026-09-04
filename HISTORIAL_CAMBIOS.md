@@ -1,9 +1,9 @@
 # Historial de Cambios — Pare Carrito SAS ERP
 
-## v12.9.122 - TODO lo que se sube sale del JSON: comprobantes, fotos de remito y de recambio (2026-09-04)
+## v12.9.125 - TODO lo que se sube sale del JSON: comprobantes, fotos de remito y de recambio (2026-09-04)
 
 ### Que se movio
-Completa lo que empezo v12.9.121 (fotos de producto). Ahora NADA de lo que se sube queda guardado en base64 adentro del estado:
+Completa lo que empezo v12.9.124 (fotos de producto). Ahora NADA de lo que se sube queda guardado en base64 adentro del estado:
 
 | Archivo | Antes (en el estado) | Ahora |
 |---|---|---|
@@ -12,7 +12,7 @@ Completa lo que empezo v12.9.121 (fotos de producto). Ahora NADA de lo que se su
 | Comprobante de transferencia | `clientTransfers[].proofFile` | `clientTransfers[].proofKey` |
 | Foto del remito rendido | `orders[].deliveryRemitoPhoto.data` | `orders[].deliveryRemitoPhoto.key` |
 | Foto de recambio | `replacements[].items[].photo` | `replacements[].items[].photoKey` |
-| Foto de producto | `products[].imageData` | `products[].imageKey` (v12.9.121) |
+| Foto de producto | `products[].imageData` | `products[].imageKey` (v12.9.124) |
 
 ### Como funciona
 - **Lo que se sube de ahora en mas** va derecho al servidor al guardar (egreso, pago, transferencia, rendicion de entrega y recambio). Si no hay conexion o el servidor rechaza el archivo, queda guardado como antes y se puede mover despues: NUNCA se pierde.
@@ -21,13 +21,13 @@ Completa lo que empezo v12.9.121 (fotos de producto). Ahora NADA de lo que se su
 - Las vistas siguen igual: "Ver comprobante" en egresos y transferencias, la foto en la rendicion de entregas y las miniaturas de recambio ahora resuelven solo el archivo despues de dibujar la pantalla.
 
 ### Deploy
-- **Solo frontend** (`assets/app.js`): `git pull`. Usa el `POST /proofs` que ya existia desde antes; no hay cambios de backend en esta version (si el de v12.9.121, que si necesita `./deploy.sh`).
+- **Solo frontend** (`assets/app.js`): `git pull`. Usa el `POST /proofs` que ya existia desde antes; no hay cambios de backend en esta version (si el de v12.9.124, que si necesita `./deploy.sh`).
 - Los archivos viven en el volumen Docker `uploads`, que sobrevive a los rebuilds. **Conviene sumarlo al backup del VPS**: antes estos archivos entraban en el `pg_dump` porque vivian adentro del estado.
 - Nota conocida (de antes, no la introduce este cambio): `GET /proofs/:key` deja ver el archivo a cualquier usuario logueado que conozca la clave. Las claves no son adivinables (fecha + 8 caracteres al azar) y hace falta estar logueado, pero si se quiere restringir por rol hay que hacerlo en el endpoint.
 
 ---
 
-## v12.9.121 - Las fotos de producto salen del estado y se guardan en el servidor (2026-09-04)
+## v12.9.124 - Las fotos de producto salen del estado y se guardan en el servidor (2026-09-04)
 
 ### El problema
 - El sistema descarga y guarda TODO en un solo JSON, y adentro viajaban las fotos de producto en base64 (`imageData`). Con ~200 fotos son varios MB que se bajaban ENTERA cada vez que se abria el sistema, en cada dispositivo y todos los dias. El texto (pedidos, saldos, caja) comprime bien; el base64 no.
@@ -57,7 +57,7 @@ Completa lo que empezo v12.9.121 (fotos de producto). Ahora NADA de lo que se su
 
 ---
 
-## v12.9.120 - Devolucion a proveedores, saldo de proveedor corregido, Compras por proveedor y arranque mas liviano (2026-09-04)
+## v12.9.123 - Devolucion a proveedores, saldo de proveedor corregido, Compras por proveedor y arranque mas liviano (2026-09-04)
 
 ### Saldos de proveedores: aparecia MENOS de lo que hay que pagar (fix)
 - Causa principal: al ANULAR un "Pago a Proveedor" se devolvia la plata a la caja pero NO se devolvia la deuda. El movimiento negativo del pago quedaba en `providerLedger` para siempre, asi que el saldo del proveedor quedaba descontado por un pago que ya no existia. Ahora la anulacion compensa ese movimiento y marca el pago como anulado.
@@ -93,6 +93,47 @@ Completa lo que empezo v12.9.121 (fotos de producto). Ahora NADA de lo que se su
 
 ### Deploy
 - Solo frontend (`assets/app.js`): `git pull` en el VPS.
+
+---
+
+## Nota sobre la numeracion (2026-09-04)
+
+Las versiones 12.9.120, 121 y 122 de abajo (Ganancias, alias y super usuario) se desarrollaron en paralelo a las de arriba. Para no pisarse, los cambios de la otra rama quedaron renumerados como **12.9.123, 124 y 125**. Los numeros 120-122 son los que ya estaban publicados en master.
+
+---
+
+## v12.9.122 - Super usuario: cliente padre con saldos consolidados (2026-08-22)
+
+### Nuevo
+- Cliente "padre" que agrupa hijos: nuevo campo "Cliente padre (consolida saldos)" en la ficha del cliente (client.parentClientId). Un cliente hijo apunta a su padre (1 nivel).
+- El super usuario (usuario cliente vinculado al padre) ahora VE y OPERA todas las cuentas del grupo (padre + hijos) en toda la app. Se logro expandiendo `getCustomerVisibleClientIds` para incluir los hijos de cada cuenta accesible; esa funcion la usan Nuevo Pedido, Saldos, Remitos, Mis pedidos, Mi facturacion, transferencias, etc.
+- Saldos consolidados: en la vista de Saldos del cliente/super usuario se agrega una fila "Total consolidado" = suma de los saldos de todas sus cuentas. En la tabla de Saldos del gerente, los clientes padre muestran un tag "Grupo: N cuenta(s)" y su saldo "Consolidado", y los hijos muestran "Hijo de <id>".
+- Helpers: getChildClientIds, getClientGroupIds, getClientGroupBalance, isParentClient.
+- Verificado con harness: hijos, grupo, consolidado (suma) y expansion de cuentas visibles del super usuario.
+- Solo frontend (git pull). parentClientId viaja en el objeto cliente (ya sincronizado).
+
+### Como configurarlo
+- En cada cliente hijo: setear "Cliente padre" = el cliente padre.
+- Crear/usar un usuario cliente cuyo clientId (o cuenta vinculada) sea el padre: ese es el super usuario; automaticamente vera/operara los hijos y su saldo consolidado.
+
+---
+
+## v12.9.121 - Alias no reconocido: boton "Agregar producto nuevo" (2026-08-22)
+
+### Nuevo
+- En el pop-up de "Vincular productos no reconocidos" (parse de WhatsApp) se agrego el boton "+ Agregar producto nuevo", que abre el formulario de alta de producto. Como el texto pegado ahora se conserva (v12.9.119), tras crear el producto se vuelve a apretar "Cargar" y ya lo reconoce o se puede vincular el alias.
+- Solo frontend (git pull).
+
+---
+
+## v12.9.120 - Analisis de ganancia real por producto y por cliente (2026-08-22)
+
+### Nueva pagina "Ganancias" (gerente/admin)
+- Ganancia = ventas netas (sin IVA, usa item.subtotal) menos costo. El costo es el REAL de la compra de ESE dia (getDayPurchaseCosts por fecha del pedido); si ese dia no hubo compra del producto, usa el costo registrado (getProductCost).
+- Dos tablas: ganancia por producto y por cliente, con cantidad/pedidos, ventas, costo, ganancia y margen % (pill verde/ambar/rojo). Ordenadas por ganancia. Tarjetas de total (ventas, costo, ganancia, margen).
+- Selector de fechas (Desde/Hasta) con atajos "Ult. 30 dias" y "Este mes". Estado en ui.profitFrom/ui.profitTo.
+- Verificado con harness sobre backup real: totales coherentes (suma por producto = ganancia total) y ranking razonable.
+- Solo frontend (git pull).
 
 ---
 
