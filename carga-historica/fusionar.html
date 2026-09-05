@@ -9,6 +9,8 @@
  th,td{border-bottom:1px solid #e2e8f0;padding:5px 6px;text-align:left} td.num{text-align:right}
  button{padding:9px 16px;border:0;border-radius:8px;background:#1d4ed8;color:#fff;font-size:14px;cursor:pointer}
  button:disabled{background:#94a3b8;cursor:default}
+ select{max-width:100%;padding:4px;font-size:13px}
+ .mapa td{vertical-align:middle}
  pre{background:#f1f5f9;padding:10px;border-radius:8px;font-size:12px;white-space:pre-wrap;max-height:280px;overflow:auto}
 </style></head><body>
 <h1>Cargar pedidos y pagos del 31/08 al 03/09</h1>
@@ -42,16 +44,50 @@ leer($("backup"), "b"); leer($("registros"), "r");
 const norm = (s) => String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
 const money = (n) => "$" + Number(n || 0).toLocaleString("es-AR", { maximumFractionDigits: 2 });
 
+const OMITIR = "__omitir__";
+const CLAVE_MAPEO = "pare-carrito-mapeo-productos";
+let mapeo = {};
+try { mapeo = JSON.parse(localStorage.getItem(CLAVE_MAPEO) || "{}"); } catch (e) { mapeo = {}; }
+const guardarMapeo = () => { try { localStorage.setItem(CLAVE_MAPEO, JSON.stringify(mapeo)); } catch (e) {} };
+
+// Palabras que solo dicen la unidad: no distinguen un producto de otro.
+const UNIDAD = new Set(["por", "x", "de", "kg", "kgs", "kilo", "kilos", "unidad", "unidades", "uni", "u", "docena", "doc"]);
+const nucleo = (nombre) => norm(nombre).split(" ").map((t) => t.replace(/s$/, "")).filter((t) => t && !UNIDAD.has(t));
+function sugerencias(nombre, activos) {
+  const a = nucleo(nombre);
+  return activos.map((p) => {
+    const b = nucleo(p.name);
+    const comunes = a.filter((t) => b.includes(t)).length;
+    const union = new Set(a.concat(b)).size || 1;
+    return { p, score: comunes / union + (a[0] && a[0] === b[0] ? 0.25 : 0) };
+  }).filter((x) => x.score > 0).sort((x, y) => y.score - x.score || x.p.name.localeCompare(y.p.name));
+}
+
 function armar() {
   const productos = backup.products || [], clientes = backup.clients || [];
-  const porNombre = new Map(productos.filter((p) => p && p.isActive !== false).map((p) => [norm(p.name), p]));
-  const buscarProducto = (nombre) => porNombre.get(norm(nombre)) ||
-    productos.find((p) => p && p.isActive !== false && norm(p.name) === norm(nombre).replace(/s$/, "")) || null;
+  const activos = productos.filter((p) => p && p.isActive !== false);
+  const porNombre = new Map(activos.map((p) => [norm(p.name), p]));
+  const porId = new Map(productos.map((p) => [String(p.id), p]));
+  // Los remitos salen de la planilla, donde los productos no siempre se llaman igual que en el
+  // sistema ("Palta Madura por Kg" vs "Palta Madura Unidad"). Lo que no matchea solo se resuelve
+  // con el mapeo que elige el usuario: nunca se adivina ni se descarta la linea por las suyas.
+  const buscarProducto = (nombre) => {
+    const k = norm(nombre);
+    if (porNombre.has(k)) return porNombre.get(k);
+    const sing = k.replace(/s$/, "");
+    if (porNombre.has(sing)) return porNombre.get(sing);
+    if (Object.prototype.hasOwnProperty.call(mapeo, k)) {
+      if (mapeo[k] === OMITIR) return OMITIR;
+      return porId.get(String(mapeo[k])) || null;
+    }
+    return null;
+  };
   const buscarCliente = (id) => clientes.find((c) => String(c.id) === String(id)) ||
     clientes.find((c) => String(parseInt(c.id, 10)) === String(parseInt(id, 10)));
 
   const sello = new Date().toISOString();
   const pedidos = [], saldos = [], pagos = [], caja = [], problemas = [], resumen = [];
+  const sinResolver = new Map();
   let n = 0;
   for (const p of registros.pedidos) {
     const cli = buscarCliente(p.clienteSistema);
@@ -59,13 +95,24 @@ function armar() {
     const items = []; let faltantes = [];
     p.items.forEach((it, j) => {
       const prod = buscarProducto(it.producto);
-      if (!prod) { faltantes.push(it.producto); return; }
+      if (prod === OMITIR) return;
+      if (!prod) {
+        faltantes.push(it.producto);
+        const k = norm(it.producto);
+        const acc = sinResolver.get(k) || { nombre: it.producto, lineas: 0, monto: 0 };
+        acc.lineas += 1;
+        acc.monto += Number(it.subtotal != null ? it.subtotal : it.cantidad * it.precioUnitario) || 0;
+        sinResolver.set(k, acc);
+        return;
+      }
       const sub = Math.round((it.subtotal != null ? it.subtotal : it.cantidad * it.precioUnitario) * 100) / 100;
       items.push({ id: "ITM-HIST-" + (++n), productId: prod.id, productName: prod.name, unitType: prod.unitType,
         quantity: it.cantidad, unitPrice: it.precioUnitario, subtotal: sub, ivaRate: 0, ivaAmount: 0, note: "",
         assignedToType: prod.assignedToType || "", assignedToId: prod.assignedToId || "" });
     });
-    if (faltantes.length) problemas.push(p.fecha + " " + cli.name + ": no encontré estos productos → " + faltantes.join(", "));
+    // Un pedido al que le falta una linea NO se arma: cargarlo incompleto ensucia el saldo del
+    // cliente y la unica forma de darse cuenta despues es rehacer la cuenta contra el remito.
+    if (faltantes.length) { problemas.push(p.fecha + " " + cli.name + ": faltan resolver " + faltantes.join(", ")); continue; }
     if (!items.length) continue;
     const sub = Math.round(items.reduce((s, i) => s + i.subtotal, 0) * 100) / 100;
     const id = "ORD-" + p.fecha.replace(/-/g, "") + "-H" + String(pedidos.length + 1).padStart(2, "0");
@@ -91,7 +138,7 @@ function armar() {
       amountIngreso: g.monto, amountEgreso: 0, cashBoxId: (backup.cashBoxes && backup.cashBoxes[0] && backup.cashBoxes[0].id) || "",
       relatedEntityId: id, relatedEntityType: "payment", timestamp: sello, recordedBy: "Carga historica" });
   });
-  return { pedidos, saldos, pagos, caja, problemas, resumen };
+  return { pedidos, saldos, pagos, caja, problemas, resumen, sinResolver, activos };
 }
 
 $("analizar").addEventListener("click", () => {
@@ -103,15 +150,48 @@ $("analizar").addEventListener("click", () => {
     "<li><strong>" + plan.pagos.length + " pagos</strong> por " + money(plan.pagos.reduce((s, p) => s + p.amount, 0)) + "</li>" +
     "<li>" + plan.saldos.length + " movimientos de saldo y " + plan.caja.length + " de caja</li></ul>";
   if (yaEstan.length) h += '<p class="avisa"><strong>Atención:</strong> tu backup YA tiene ' + yaEstan.length + ' pedido(s) entre el 31/08 y el 03/09. Revisá que no se dupliquen antes de importar.</p>';
+  if (plan.sinResolver.size) {
+    const filas = [...plan.sinResolver.entries()].sort((a, b) => b[1].monto - a[1].monto);
+    h += '<h3 class="mal">Faltan ' + filas.length + ' producto(s) por resolver</h3>' +
+      "<p>Estos nombres vienen de la planilla de remitos y no existen igual en tu sistema. " +
+      "Elegí con cuál producto tuyo corresponde cada uno. Hasta que estén todos, los pedidos que los usan " +
+      "<strong>no se cargan</strong>: si se cargaran sin esa línea, el total del pedido y el saldo del cliente quedarían mal.</p>" +
+      '<table class="mapa"><tr><th>Nombre en el remito</th><th>Líneas</th><th>Monto</th><th>Producto en tu sistema</th></tr>' +
+      filas.map(([k, v]) => {
+        const sug = sugerencias(v.nombre, plan.activos);
+        const elegido = mapeo[k];
+        const ops = ['<option value="">— elegir —</option>']
+          .concat(sug.slice(0, 6).map((x) => '<option value="' + x.p.id + '"' + (elegido === x.p.id ? " selected" : "") + ">" + x.p.name + " (sugerido)</option>"))
+          .concat(plan.activos.filter((p) => !sug.slice(0, 6).some((x) => x.p.id === p.id))
+            .sort((a, b) => a.name.localeCompare(b.name))
+            .map((p) => '<option value="' + p.id + '"' + (elegido === p.id ? " selected" : "") + ">" + p.name + "</option>"))
+          .concat(['<option value="' + OMITIR + '"' + (elegido === OMITIR ? " selected" : "") + ">— no cargar estas líneas —</option>"]);
+        return "<tr><td>" + v.nombre + "</td><td class='num'>" + v.lineas + "</td><td class='num'>" + money(v.monto) +
+          '</td><td><select data-mapa="' + k + '">' + ops.join("") + "</select></td></tr>";
+      }).join("") + "</table>" +
+      '<p><button id="aplicar">Aplicar y volver a analizar</button></p>';
+  }
   if (plan.problemas.length) h += '<p class="mal"><strong>Revisar:</strong></p><pre>' + plan.problemas.join("\n") + "</pre>";
   else h += '<p class="ok">Todos los clientes y productos se encontraron en tu sistema.</p>';
   h += "<h3>Detalle por pedido</h3><table><tr><th>Fecha</th><th>Cliente</th><th>Líneas</th><th>Total</th><th>Remito</th><th>Dif</th></tr>" +
     plan.resumen.map((r) => "<tr><td>" + r.fecha + "</td><td>" + r.cliente + "</td><td class='num'>" + r.lineas +
       "</td><td class='num'>" + money(r.total) + "</td><td class='num'>" + (r.remito != null ? money(r.remito) : "-") +
       "</td><td class='num " + (r.dif && Math.abs(r.dif) > 1 ? "avisa" : "") + "'>" + (r.dif != null ? r.dif : "-") + "</td></tr>").join("") + "</table>";
-  if (difs.length) h += '<p class="avisa">' + difs.length + " remito(s) con diferencia de redondeo respecto del total impreso (el sistema redondea el total final).</p>";
+  const chicas = difs.filter((r) => Math.abs(r.dif) <= 10), grandes = difs.filter((r) => Math.abs(r.dif) > 10);
+  if (chicas.length) h += '<p class="avisa">' + chicas.length + " remito(s) con hasta $10 de diferencia: el remito trunca el total a la decena, el detalle línea por línea es el bueno.</p>";
+  if (grandes.length) h += '<p class="mal"><strong>' + grandes.length + " remito(s) con más de $10 de diferencia contra el total impreso.</strong> Revisalos antes de importar.</p>";
   $("salida").innerHTML = h;
-  $("generar").disabled = false;
+  const aplicar = $("aplicar");
+  if (aplicar) aplicar.addEventListener("click", () => {
+    document.querySelectorAll("[data-mapa]").forEach((sel) => {
+      if (sel.value) mapeo[sel.getAttribute("data-mapa")] = sel.value;
+      else delete mapeo[sel.getAttribute("data-mapa")];
+    });
+    guardarMapeo();
+    $("analizar").click();
+  });
+  // Con productos sin resolver hay pedidos que no se armaron: descargar seria cargar de menos.
+  $("generar").disabled = plan.sinResolver.size > 0;
 });
 
 $("generar").addEventListener("click", () => {

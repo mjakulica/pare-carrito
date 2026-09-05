@@ -13,10 +13,16 @@ historial. Esta herramienta fusiona en vez de reemplazar.
 2. Abrir `fusionar.html` con doble clic. Corre 100% en el navegador: no sube nada a
    ningun servidor.
 3. Cargar el backup y el archivo de registros, y apretar "Analizar". Muestra pedido
-   por pedido el total calculado contra el total del remito, avisa si algun cliente o
-   producto no existe en el sistema, y avisa si el backup ya tiene pedidos en esas
-   fechas (para no duplicar).
-4. "Descargar backup con los datos cargados" e importarlo en Backup.
+   por pedido el total calculado contra el total del remito, y avisa si el backup ya
+   tiene pedidos en esas fechas (para no duplicar).
+4. Los remitos salen de la planilla, donde los productos no siempre se llaman igual que
+   en el sistema ("Palta Madura por Kg" contra "Palta Madura Unidad"). Lo que no matchea
+   se lista con un desplegable para elegir el producto del sistema, ordenado por
+   parecido. Hasta que esten todos resueltos **la descarga queda bloqueada**: un pedido
+   al que le falta una linea deja mal el total y el saldo del cliente, y despues solo se
+   descubre rehaciendo la cuenta contra el remito. El mapeo queda guardado en el
+   navegador, asi que se elige una sola vez.
+5. "Descargar backup con los datos cargados" e importarlo en Backup.
 
 ## Leer los remitos desde los PDF
 
