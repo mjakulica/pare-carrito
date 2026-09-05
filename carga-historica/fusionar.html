@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8" /><title>Cargar pedidos 31/08 al 03/09</title>
+<style>
+ body{font-family:system-ui,sans-serif;max-width:860px;margin:24px auto;padding:0 16px;color:#0f172a}
+ h1{font-size:20px} h2{font-size:16px;margin-top:24px}
+ .caja{border:1px solid #e2e8f0;border-radius:10px;padding:14px;margin:12px 0;background:#f8fafc}
+ .ok{color:#15803d} .mal{color:#b91c1c} .avisa{color:#b45309}
+ table{border-collapse:collapse;width:100%;font-size:13px;margin-top:8px}
+ th,td{border-bottom:1px solid #e2e8f0;padding:5px 6px;text-align:left} td.num{text-align:right}
+ button{padding:9px 16px;border:0;border-radius:8px;background:#1d4ed8;color:#fff;font-size:14px;cursor:pointer}
+ button:disabled{background:#94a3b8;cursor:default}
+ pre{background:#f1f5f9;padding:10px;border-radius:8px;font-size:12px;white-space:pre-wrap;max-height:280px;overflow:auto}
+</style></head><body>
+<h1>Cargar pedidos y pagos del 31/08 al 03/09</h1>
+<p>Esta página trabaja <strong>en tu computadora</strong>: no manda nada a internet. Toma tu backup, le agrega los pedidos y pagos verificados contra los remitos, y te devuelve un backup nuevo para importar.</p>
+
+<div class="caja">
+  <h2>1. Tu backup del sistema</h2>
+  <p>En el sistema: <em>Backup → "Cargar historial completo" → Descargar backup</em>.</p>
+  <input type="file" id="backup" accept="application/json" />
+</div>
+<div class="caja">
+  <h2>2. Los registros a agregar</h2>
+  <input type="file" id="registros" accept="application/json" /> <span class="avisa">(registros.json)</span>
+</div>
+<div class="caja">
+  <h2>3. Revisar y generar</h2>
+  <button id="analizar" disabled>Analizar</button>
+  <button id="generar" disabled>Descargar backup con los datos cargados</button>
+  <div id="salida"></div>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+let backup = null, registros = null, plan = null;
+const leer = (input, destino) => input.addEventListener("change", async () => {
+  const f = input.files && input.files[0]; if (!f) return;
+  try { const d = JSON.parse(await f.text()); if (destino === "b") backup = d; else registros = d;
+    $("analizar").disabled = !(backup && registros); } catch (e) { alert("No se pudo leer el archivo: " + e.message); }
+});
+leer($("backup"), "b"); leer($("registros"), "r");
+
+const norm = (s) => String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+const money = (n) => "$" + Number(n || 0).toLocaleString("es-AR", { maximumFractionDigits: 2 });
+
+function armar() {
+  const productos = backup.products || [], clientes = backup.clients || [];
+  const porNombre = new Map(productos.filter((p) => p && p.isActive !== false).map((p) => [norm(p.name), p]));
+  const buscarProducto = (nombre) => porNombre.get(norm(nombre)) ||
+    productos.find((p) => p && p.isActive !== false && norm(p.name) === norm(nombre).replace(/s$/, "")) || null;
+  const buscarCliente = (id) => clientes.find((c) => String(c.id) === String(id)) ||
+    clientes.find((c) => String(parseInt(c.id, 10)) === String(parseInt(id, 10)));
+
+  const sello = new Date().toISOString();
+  const pedidos = [], saldos = [], pagos = [], caja = [], problemas = [], resumen = [];
+  let n = 0;
+  for (const p of registros.pedidos) {
+    const cli = buscarCliente(p.clienteSistema);
+    if (!cli) { problemas.push("No existe el cliente " + p.clienteSistema + " (" + p.clienteNombre + ") para el pedido del " + p.fecha); continue; }
+    const items = []; let faltantes = [];
+    p.items.forEach((it, j) => {
+      const prod = buscarProducto(it.producto);
+      if (!prod) { faltantes.push(it.producto); return; }
+      const sub = Math.round((it.subtotal != null ? it.subtotal : it.cantidad * it.precioUnitario) * 100) / 100;
+      items.push({ id: "ITM-HIST-" + (++n), productId: prod.id, productName: prod.name, unitType: prod.unitType,
+        quantity: it.cantidad, unitPrice: it.precioUnitario, subtotal: sub, ivaRate: 0, ivaAmount: 0, note: "",
+        assignedToType: prod.assignedToType || "", assignedToId: prod.assignedToId || "" });
+    });
+    if (faltantes.length) problemas.push(p.fecha + " " + cli.name + ": no encontré estos productos → " + faltantes.join(", "));
+    if (!items.length) continue;
+    const sub = Math.round(items.reduce((s, i) => s + i.subtotal, 0) * 100) / 100;
+    const id = "ORD-" + p.fecha.replace(/-/g, "") + "-H" + String(pedidos.length + 1).padStart(2, "0");
+    pedidos.push({ id, date: p.fecha, clientId: cli.id, deliveryVehicleId: cli.vehicleId || "", status: "entregado",
+      items, subtotalAmount: sub, ivaAmount: 0, totalAmount: sub, paymentReceived: 0, paymentStatus: "pending",
+      priceTier: cli.priceTier || "general", priceAdjustmentPct: Number(cli.priceAdjustmentPct || 0),
+      remitoPrinted: true, notes: "Carga historica desde remito " + p.origen, userId: "USR-000",
+      createdAt: p.fecha + "T09:00:00.000Z", updatedAt: sello });
+    saldos.push({ id: "SAL-HIST-" + pedidos.length, date: p.fecha, clientId: cli.id, type: "venta",
+      description: "Pedido " + id, amount: sub, balance: 0, relatedEntityId: id, relatedEntityType: "order", timestamp: sello });
+    resumen.push({ fecha: p.fecha, cliente: cli.id + " " + cli.name, lineas: items.length, total: sub,
+      remito: p.totalImpreso, dif: p.totalImpreso != null ? Math.round((sub - p.totalImpreso) * 100) / 100 : null });
+  }
+  registros.pagos.forEach((g, i) => {
+    const cli = buscarCliente(g.clienteSistema);
+    if (!cli) { problemas.push("No existe el cliente " + g.clienteSistema + " (" + g.clienteNombre + ") para el pago del " + g.fecha); return; }
+    const id = "PAY-HIST-" + (i + 1);
+    pagos.push({ id, date: g.fecha, clientId: cli.id, amount: g.monto, method: "efectivo", receivedByUserId: "USR-000",
+      orderIds: [], notes: "Carga historica - " + g.origen, timestamp: sello, transferProofFile: "", transferProofKey: "" });
+    saldos.push({ id: "SAL-HIST-P" + (i + 1), date: g.fecha, clientId: cli.id, type: "pago",
+      description: "Pago " + id, amount: -g.monto, balance: 0, relatedEntityId: id, relatedEntityType: "payment", timestamp: sello });
+    caja.push({ id: "CAJ-HIST-" + (i + 1), date: g.fecha, type: "payment", concept: "Pago de " + cli.name + " (carga historica)",
+      amountIngreso: g.monto, amountEgreso: 0, cashBoxId: (backup.cashBoxes && backup.cashBoxes[0] && backup.cashBoxes[0].id) || "",
+      relatedEntityId: id, relatedEntityType: "payment", timestamp: sello, recordedBy: "Carga historica" });
+  });
+  return { pedidos, saldos, pagos, caja, problemas, resumen };
+}
+
+$("analizar").addEventListener("click", () => {
+  try { plan = armar(); } catch (e) { $("salida").innerHTML = '<p class="mal">Error: ' + e.message + '</p>'; return; }
+  const yaEstan = (backup.orders || []).filter((o) => o && o.date >= "2026-08-31" && o.date <= "2026-09-03");
+  const difs = plan.resumen.filter((r) => r.dif != null && Math.abs(r.dif) > 1);
+  let h = "<h3>Qué se va a agregar</h3><ul>" +
+    "<li><strong>" + plan.pedidos.length + " pedidos</strong> por " + money(plan.resumen.reduce((s, r) => s + r.total, 0)) + "</li>" +
+    "<li><strong>" + plan.pagos.length + " pagos</strong> por " + money(plan.pagos.reduce((s, p) => s + p.amount, 0)) + "</li>" +
+    "<li>" + plan.saldos.length + " movimientos de saldo y " + plan.caja.length + " de caja</li></ul>";
+  if (yaEstan.length) h += '<p class="avisa"><strong>Atención:</strong> tu backup YA tiene ' + yaEstan.length + ' pedido(s) entre el 31/08 y el 03/09. Revisá que no se dupliquen antes de importar.</p>';
+  if (plan.problemas.length) h += '<p class="mal"><strong>Revisar:</strong></p><pre>' + plan.problemas.join("\n") + "</pre>";
+  else h += '<p class="ok">Todos los clientes y productos se encontraron en tu sistema.</p>';
+  h += "<h3>Detalle por pedido</h3><table><tr><th>Fecha</th><th>Cliente</th><th>Líneas</th><th>Total</th><th>Remito</th><th>Dif</th></tr>" +
+    plan.resumen.map((r) => "<tr><td>" + r.fecha + "</td><td>" + r.cliente + "</td><td class='num'>" + r.lineas +
+      "</td><td class='num'>" + money(r.total) + "</td><td class='num'>" + (r.remito != null ? money(r.remito) : "-") +
+      "</td><td class='num " + (r.dif && Math.abs(r.dif) > 1 ? "avisa" : "") + "'>" + (r.dif != null ? r.dif : "-") + "</td></tr>").join("") + "</table>";
+  if (difs.length) h += '<p class="avisa">' + difs.length + " remito(s) con diferencia de redondeo respecto del total impreso (el sistema redondea el total final).</p>";
+  $("salida").innerHTML = h;
+  $("generar").disabled = false;
+});
+
+$("generar").addEventListener("click", () => {
+  const nuevo = JSON.parse(JSON.stringify(backup));
+  const sumar = (clave, filas) => { nuevo[clave] = (nuevo[clave] || []).concat(filas); };
+  sumar("orders", plan.pedidos); sumar("payments", plan.pagos); sumar("caja", plan.caja);
+  // Los saldos se agregan y se recalcula el acumulado por cliente, en orden de fecha.
+  nuevo.saldos = (nuevo.saldos || []).concat(plan.saldos);
+  const porCliente = {};
+  nuevo.saldos.sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.id).localeCompare(String(b.id)));
+  nuevo.saldos.forEach((s) => { const c = String(s.clientId); porCliente[c] = (porCliente[c] || 0) + Number(s.amount || 0); s.balance = Math.round(porCliente[c] * 100) / 100; });
+  const blob = new Blob([JSON.stringify(nuevo, null, 2)], { type: "application/json" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+  a.download = "backup-con-pedidos-31-08-al-03-09.json"; a.click();
+});
+</script></body></html>

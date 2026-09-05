@@ -9,3 +9,6 @@ project.tar.gz
 app_state_now.json
 backups/
 *.NUEVO-*.js
+
+# Datos operativos de las cargas historicas (no se versionan)
+carga-historica/registros*.json
