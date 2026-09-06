@@ -326,6 +326,7 @@
     { id: "ajustes-precios", label: "Ajustes de precios", icon: "$", roles: ["manager", "admin"] },
     { id: "reposiciones", label: "Reposiciones", icon: "RP", roles: ["manager", "admin", "employee"] },
     { id: "historiales", label: "Historiales", icon: "HI", roles: ["manager", "admin"] },
+    { id: "compras-producto", label: "Compras por producto", icon: "CP", roles: ["manager", "admin"] },
     { id: "rendimiento", label: "Rendimiento", icon: "RE", roles: ["manager"] },
     { id: "ganancias", label: "Ganancias", icon: "GA", roles: ["manager", "admin"] },
     { id: "compras", label: "Compras/Gastos", icon: "CO", roles: ["manager", "admin", "employee", "proveedor"] },
@@ -2756,6 +2757,7 @@
       rendimiento: renderPerformance,
       ganancias: renderProfit,
       compras: renderPurchases,
+      "compras-producto": renderProductPurchaseLog,
       dividir: renderDividePurchases,
       stock: renderStock,
       vehiculos: renderVehicles,
@@ -2908,6 +2910,7 @@
       ${renderPendingTransfersBanner()}
       ${renderPendingUsersBanner()}
       ${renderPendingReplacementsBanner()}
+      ${unassignedOrderedBannerHtml()}
       <div class="grid four dash-metrics-grid">
         ${metricCard("Pedidos de hoy", todaysOrders.length, "Pedidos activos cargados")}
         ${metricCard("Caja", formatMoney(cajaBalance), "Ingresos menos egresos")}
@@ -3875,6 +3878,35 @@
       `,
       "dashboard"
     );
+  }
+
+  // Productos pedidos para una fecha que no tienen proveedor/empleado asignado: si nadie los
+  // compra, el pedido sale incompleto, asi que se avisa fuerte en Inicio y en Division de compras.
+  function unassignedOrderedProducts(dateISO) {
+    const date = dateISO || todayISO();
+    const map = new Map();
+    (state.orders || [])
+      .filter((order) => order.date === date && !["cancelado", "anulado"].includes(order.status))
+      .forEach((order) => (order.items || []).forEach((item) => {
+        if (getEffectiveItemAssigneeValue(item)) return;
+        const key = item.productId || normalizeText(item.productName);
+        const entry = map.get(key) || { productId: item.productId, name: item.productName, quantity: 0, unitType: divideItemUnit(item), clients: new Set() };
+        entry.quantity += Number(item.quantity || 0);
+        entry.clients.add(order.clientId);
+        map.set(key, entry);
+      }));
+    return [...map.values()].sort((a, b) => normalizeText(a.name).localeCompare(normalizeText(b.name)));
+  }
+  function unassignedOrderedBannerHtml(dateISO) {
+    const items = unassignedOrderedProducts(dateISO);
+    if (!items.length) return "";
+    const detalle = items.map((item) => `<li><strong>${escapeHtml(item.name)}</strong> - ${escapeHtml(divideQtyLabel(item.quantity, item.unitType))} (${item.clients.size} cliente${item.clients.size === 1 ? "" : "s"})</li>`).join("");
+    return `<div class="panel highlight-panel unassigned-alert" style="margin-bottom:14px">
+      <strong style="font-size:15px">\u26A0 ${items.length} producto${items.length === 1 ? "" : "s"} con pedido y sin asignar</strong>
+      <div class="muted">Nadie los tiene asignados, asi que no le van a aparecer a ningun proveedor ni empleado para comprar. Asignalos en Division de compras.</div>
+      <ul style="margin:8px 0 10px 18px">${detalle}</ul>
+      <button class="btn small yellow" type="button" data-route="dividir">Ir a Division de compras</button>
+    </div>`;
   }
 
   function upcomingHolidayBannerHtml() {
@@ -6819,6 +6851,20 @@
     return { byProduct: finP, byClient: finC, totRevenue, totCost, totProfit: totRevenue - totCost, orders: orders.length };
   }
 
+  // Grafico de barras de la ganancia: los 10 primeros del ranking. Las perdidas van en rojo y la
+  // barra se mide sobre el valor absoluto mas grande, asi se ven aunque sean negativas.
+  function profitBarsHtml(title, items, labelFor) {
+    const top = items.slice(0, 10);
+    const max = Math.max(0, ...top.map((item) => Math.abs(item.profit)));
+    if (!top.length) return `<h2 class="page-title" style="font-size:18px">${escapeHtml(title)}</h2><div class="empty">Sin datos para graficar.</div>`;
+    return `
+      <h2 class="page-title" style="font-size:18px">${escapeHtml(title)}</h2>
+      <div class="bar-chart">
+        ${top.map((item, index) => `<div class="bar-row"><span>${escapeHtml(labelFor(item))}</span><div><i style="width:${max ? (Math.abs(item.profit) / max) * 100 : 0}%;background:${item.profit < 0 ? "#b42318" : chartColor(index)}"></i></div><strong>${formatMoney(item.profit)}</strong></div>`).join("")}
+      </div>
+    `;
+  }
+
   function renderProfit() {
     const today = todayISO();
     const from = ui.profitFrom || addDaysISO(today, -29);
@@ -6873,6 +6919,10 @@
         ${metricCard("Ventas (neto)", formatMoney(a.totRevenue), a.orders + " pedidos")}
         ${metricCard("Costo", formatMoney(a.totCost), "Compras del dia / costo registrado")}
         ${metricCard("Ganancia", formatMoney(a.totProfit), "Margen " + formatNumber(a.totRevenue > 0 ? a.totProfit / a.totRevenue * 100 : 0) + "%")}
+      </div>
+      <div class="grid two" style="margin-bottom:14px">
+        <div class="panel">${profitBarsHtml("Top 10 ganancia por producto", a.byProduct, (item) => item.name)}</div>
+        <div class="panel">${profitBarsHtml("Top 10 ganancia por cliente", a.byClient, (item) => { const cl = getClient(item.clientId); return String(item.clientId) + " - " + (cl ? cl.name : item.clientId); })}</div>
       </div>
       <div class="panel" style="margin-bottom:14px">
         <h2 class="page-title" style="font-size:18px">Ganancia por producto</h2>
@@ -8627,6 +8677,129 @@
     });
   }
 
+  // Todas las compras de un producto, linea por linea, con fecha y proveedor. Es el registro que
+  // faltaba para poder responder "cuanto y a quien le compre este producto".
+  function getProductPurchaseLog(productId, from, to) {
+    const EXCL = ["other_expense", "freight", "market_price", "provider_payment", "cash_movement"];
+    const rows = [];
+    (state.purchases || [])
+      .filter((purchase) => purchase
+        && purchase.status !== "anulado"
+        && !EXCL.includes(purchase.expenseType || "purchase")
+        && isDateInRange(purchase.date, from, to))
+      .forEach((purchase) => {
+        const items = Array.isArray(purchase.items) && purchase.items.length
+          ? purchase.items
+          : (purchase.productId ? [{ productId: purchase.productId, productName: purchase.productName, quantity: purchase.quantity, unitCost: purchase.unitCost, totalCost: purchase.totalCost }] : []);
+        items.forEach((item) => {
+          if (!productId || item.productId !== productId) return;
+          const providerId = getPurchaseProviderId(purchase);
+          const provider = providerId ? getProvider(providerId) : null;
+          const quantity = Number(item.quantity || 0);
+          const unitCost = Number(item.unitCost || 0);
+          rows.push({
+            date: purchase.date,
+            purchaseId: purchase.id,
+            providerName: provider ? provider.name : (purchase.providerName || "Sin proveedor"),
+            quantity,
+            unitCost,
+            total: Number(item.totalCost != null ? item.totalCost : quantity * unitCost),
+            devolucion: (purchase.expenseType || "") === "provider_return",
+            paymentStatus: purchase.paymentStatus || ""
+          });
+        });
+      });
+    return rows.sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.purchaseId).localeCompare(String(a.purchaseId)));
+  }
+
+  function renderProductPurchaseLog() {
+    const today = todayISO();
+    const from = ui.productLogFrom || addDaysISO(today, -29);
+    const to = ui.productLogTo || today;
+    ui.productLogFrom = from; ui.productLogTo = to;
+    const productos = activeProducts().slice().sort((a, b) => normalizeText(a.name).localeCompare(normalizeText(b.name)));
+    const productId = ui.productLogProductId && getProduct(ui.productLogProductId) ? ui.productLogProductId : (productos[0] ? productos[0].id : "");
+    ui.productLogProductId = productId;
+    const product = getProduct(productId);
+    const rows = productId ? getProductPurchaseLog(productId, from, to) : [];
+    const cantidad = rows.reduce((sum, row) => sum + row.quantity, 0);
+    const total = rows.reduce((sum, row) => sum + row.total, 0);
+    const promedio = cantidad !== 0 ? total / cantidad : 0;
+
+    // Resumen por proveedor, para ver de un vistazo a quien se le compra mas.
+    const porProveedor = {};
+    rows.forEach((row) => {
+      const entry = porProveedor[row.providerName] || { providerName: row.providerName, quantity: 0, total: 0, compras: 0 };
+      entry.quantity += row.quantity;
+      entry.total += row.total;
+      entry.compras += 1;
+      porProveedor[row.providerName] = entry;
+    });
+    const proveedores = Object.values(porProveedor).sort((a, b) => b.total - a.total);
+
+    afterRender.push(() => {
+      const sel = document.getElementById("product-log-product");
+      const f = document.getElementById("product-log-from");
+      const t = document.getElementById("product-log-to");
+      if (sel) sel.addEventListener("change", () => { ui.productLogProductId = sel.value; render(); });
+      if (f) f.addEventListener("change", () => { ui.productLogFrom = f.value || addDaysISO(todayISO(), -29); render(); });
+      if (t) t.addEventListener("change", () => { ui.productLogTo = t.value || todayISO(); render(); });
+      document.querySelectorAll("[data-product-log-range]").forEach((button) => button.addEventListener("click", () => {
+        const r = button.dataset.productLogRange;
+        if (r === "90") { ui.productLogFrom = addDaysISO(todayISO(), -89); ui.productLogTo = todayISO(); }
+        else { ui.productLogFrom = addDaysISO(todayISO(), -29); ui.productLogTo = todayISO(); }
+        render();
+      }));
+    });
+
+    return pageShell(
+      "Compras por producto",
+      "Todas las compras de un producto, con fecha y proveedor.",
+      `<div class="form-grid">
+        <div class="field span-2"><label>Producto</label><select id="product-log-product">${productos.map((item) => `<option value="${item.id}" ${item.id === productId ? "selected" : ""}>${escapeHtml(item.name)}</option>`).join("")}</select></div>
+        <div class="field"><label>Desde</label><input type="date" id="product-log-from" value="${escapeAttr(from)}" /></div>
+        <div class="field"><label>Hasta</label><input type="date" id="product-log-to" value="${escapeAttr(to)}" /></div>
+        <div class="field"><label>&nbsp;</label><button class="btn ghost full" type="button" data-product-log-range="30">Ult. 30 dias</button></div>
+        <div class="field"><label>&nbsp;</label><button class="btn ghost full" type="button" data-product-log-range="90">Ult. 90 dias</button></div>
+      </div>`,
+      `
+      <div class="metrics-grid" style="margin-bottom:14px">
+        ${metricCard("Comprado", formatNumber(cantidad) + " " + escapeHtml(product ? product.unitType : ""), rows.length + " compras")}
+        ${metricCard("Total", formatMoney(total), "Costo de las compras del rango")}
+        ${metricCard("Costo unitario promedio", formatMoney(promedio), "Total dividido cantidad")}
+      </div>
+      <div class="panel" style="margin-bottom:14px">
+        <h2 class="page-title" style="font-size:18px">Por proveedor</h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Proveedor</th><th class="num">Compras</th><th class="num">Cantidad</th><th class="num">Total</th><th class="num">Costo u. prom.</th></tr></thead>
+          <tbody>${proveedores.map((entry) => `<tr>
+            <td>${escapeHtml(entry.providerName)}</td>
+            <td class="num">${entry.compras}</td>
+            <td class="num">${formatNumber(entry.quantity)}</td>
+            <td class="num">${formatMoney(entry.total)}</td>
+            <td class="num">${formatMoney(entry.quantity !== 0 ? entry.total / entry.quantity : 0)}</td>
+          </tr>`).join("") || emptyRow(5, "Sin compras de este producto en el rango.")}</tbody>
+        </table></div>
+      </div>
+      <div class="panel">
+        <h2 class="page-title" style="font-size:18px">Compra por compra</h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Fecha</th><th>Proveedor</th><th class="num">Cantidad</th><th class="num">Costo unitario</th><th class="num">Total</th><th>Compra</th></tr></thead>
+          <tbody>${rows.map((row) => `<tr>
+            <td>${formatDate(row.date)}</td>
+            <td>${escapeHtml(row.providerName)}</td>
+            <td class="num">${formatNumber(row.quantity)}</td>
+            <td class="num">${formatMoney(row.unitCost)}</td>
+            <td class="num">${formatMoney(row.total)}</td>
+            <td><span class="muted">${escapeHtml(row.purchaseId)}</span>${row.devolucion ? ` <span class="pill amber">devolucion</span>` : ""}${row.paymentStatus === "account_current" ? ` <span class="pill gray">cta cte</span>` : ""}</td>
+          </tr>`).join("") || emptyRow(6, "Sin compras de este producto en el rango.")}</tbody>
+        </table></div>
+      </div>
+      `,
+      "compras-producto"
+    );
+  }
+
   function renderDividePurchases() {
     const assignees = activeAssignees();
     const allValues = assignees.map((entry) => entry.value);
@@ -8735,6 +8908,7 @@
          <button class="btn ghost" data-copy-divide="${escapeAttr(selected.join(","))}">${WHATSAPP_SVG} Seleccionado</button>
        </div>`,
       `
+      ${currentProviderId() ? "" : unassignedOrderedBannerHtml(getDivideContextDate())}
       ${currentProviderId() ? "" : `<div class="panel" style="margin-bottom:14px">
         <div class="form-grid">
           <div class="field span-2">
@@ -11669,10 +11843,13 @@
       const registered = ccPaidSet.has(o.id);
       return `<label class="cc-order-row" style="display:flex;gap:8px;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);padding:5px 2px"><span style="display:flex;gap:6px;align-items:center"><input type="checkbox" data-cc-order="${escapeAttr(o.id)}" data-cc-total="${Number(o.totalAmount || 0)}" data-cc-registered="${registered ? 1 : 0}" ${ccCheckedSet.has(o.id) ? "checked" : ""} style="width:auto;min-height:auto" /><span>${escapeHtml(o.clientId)} - ${escapeHtml(client ? client.name : o.clientId)}${registered ? "" : ` <span class="pill amber" style="font-size:10px">sin pago</span>`}</span></span><strong>${formatMoney(o.totalAmount || 0)}</strong></label>`;
     }).join("");
-    const rows = state.attendance.filter((entry) => entry.userId === currentUser.id).slice().sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, 12).map((entry) => `
+    // Se muestran tambien los feriados: no tienen horario cargado pero se pagan igual.
+    const rows = state.attendance.filter((entry) => entry.userId === currentUser.id)
+      .concat(holidayAttendanceEntries(currentUser.id, addDaysISO(todayISO(), -120), todayISO()))
+      .slice().sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, 12).map((entry) => `
       <tr>
         <td>${formatDate(entry.date)}</td>
-        <td>${entry.present ? `<span class="pill green">Presente</span>` : `<span class="pill gray">Ausente</span>`}</td>
+        <td>${entry.holiday ? `<span class="pill amber">Feriado pago</span>` : entry.present ? `<span class="pill green">Presente</span>` : `<span class="pill gray">Ausente</span>`}</td>
         <td>${escapeHtml(entry.startTime || "-")} / ${escapeHtml(entry.endTime || "-")}</td>
         <td class="num">${formatNumber(getAttendanceHours(entry))} hs</td>
         <td>${escapeHtml(entry.notes || "")}</td>
@@ -12268,11 +12445,12 @@
     const totalsRow = orders.length ? `<tr class="billing-pending-totals"><td colspan="2" class="num"><strong>Totales (${orders.length} pedidos)</strong></td><td class="num"><strong>${formatMoney(pending.total)}</strong><br><span class="muted">IVA ${formatMoney(pending.iva)}</span></td><td></td></tr>` : "";
     showModal(
       "Pedidos que acumulan IVA - " + (client.name || client.id) + " (" + formatDate(from) + " - " + formatDate(to) + ")",
-      `<div class="page-actions" style="justify-content:flex-end;margin-bottom:8px"><button class="btn ghost" type="button" data-print-billing-pending="${escapeAttr(client.id)}">&#128424; Imprimir todo</button></div>
+      `<div class="page-actions" style="justify-content:flex-end;margin-bottom:8px"><button class="btn ghost" type="button" data-print-billing-pending="${escapeAttr(client.id)}">&#128424; Imprimir todo</button><button class="btn blue" type="button" data-print-billing-summary="${escapeAttr(client.id)}" title="Una linea por pedido con neto, IVA y total, sin el detalle de productos">&#128424; Imprimir totales e IVA</button></div>
        <div class="table-wrap"><table><thead><tr><th>Pedido</th><th>Detalle</th><th class="num">Total</th><th>Remito</th></tr></thead><tbody>${rows || emptyRow(4, "Sin pedidos que acumulen en el periodo.")}${totalsRow}</tbody></table></div>`,
       () => {
         document.querySelectorAll("[data-print-order-remito]").forEach((button) => button.addEventListener("click", () => printOrderRemitoDirect(button.dataset.printOrderRemito)));
         document.querySelectorAll("[data-print-billing-pending]").forEach((button) => button.addEventListener("click", () => printBillingPendingDetail(button.dataset.printBillingPending)));
+        document.querySelectorAll("[data-print-billing-summary]").forEach((button) => button.addEventListener("click", () => printBillingPendingSummary(button.dataset.printBillingSummary)));
       },
       { className: "wide" }
     );
@@ -12304,6 +12482,37 @@
     </div>`;
     printHtmlDocument(fileDate(todayISO()) + " Detalle " + (client.name || client.id), body);
   }
+  // Igual que "Imprimir detalle" pero sin los productos: una linea por pedido con neto, IVA y
+  // total, que es lo que se necesita para pasarle a facturacion.
+  function printBillingPendingSummary(clientId) {
+    const client = getClient(clientId);
+    if (!client) return;
+    const { from, to, pending, orders } = getBillingPendingOrdersSorted(client);
+    const rows = orders.map((order) => {
+      const total = getOrderTotal(order);
+      const iva = getOrderIva(order);
+      return `<tr>
+        <td>${formatDate(order.date)}</td>
+        <td>${escapeHtml(order.id)}</td>
+        <td class="num">${formatMoney(total - iva)}</td>
+        <td class="num">${formatMoney(iva)}</td>
+        <td class="num">${formatMoney(total)}</td>
+      </tr>`;
+    }).join("");
+    const body = `<div class="print-compact">
+      <h1 style="margin:0 0 2px;font-size:18px">${BUSINESS_NAME}</h1>
+      <h2 style="margin:0 0 2px;font-size:14px">Totales de pedidos a facturar</h2>
+      <p style="margin:0 0 2px;font-size:11px"><strong>${escapeHtml(client.id)} - ${escapeHtml(client.name)}</strong>${client.legalName ? " - " + escapeHtml(client.legalName) : ""}${client.cuit ? " - CUIT " + escapeHtml(client.cuit) : ""}</p>
+      <p style="margin:0 0 8px;font-size:11px">Periodo: ${formatDate(from)} - ${formatDate(to)} (${orders.length} pedidos)</p>
+      <table class="print-table">
+        <thead><tr><th>Fecha</th><th>Pedido</th><th class="num">Neto</th><th class="num">IVA</th><th class="num">Total</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="5">Sin pedidos en el periodo.</td></tr>`}</tbody>
+        <tfoot><tr><th colspan="2">Totales</th><th class="num">${formatMoney(pending.neto)}</th><th class="num">${formatMoney(pending.iva)}</th><th class="num">${formatMoney(pending.total)}</th></tr></tfoot>
+      </table>
+    </div>`;
+    printHtmlDocument(fileDate(todayISO()) + " Totales " + (client.name || client.id), body);
+  }
+
   function bindCustomerBilling() {
     document.querySelectorAll("[data-billing-client-tab]").forEach((button) => button.addEventListener("click", () => { ui.customerBillingClient = button.dataset.billingClientTab; render(); }));
     const f = document.getElementById("cbilling-from");
@@ -17409,13 +17618,38 @@
     return (hours || 0) * 60 + (minutes || 0);
   }
 
+  // Los feriados aprobados se pagan como si el empleado hubiera trabajado la jornada completa:
+  // no hay horario cargado (no se trabaja), asi que se arma un horario ficticio con el turno del
+  // empleado. Si igual vino a trabajar ese dia, manda el horario real que quedo cargado.
+  function holidayAttendanceEntries(userId, fromISO, toISO) {
+    const user = getUser(userId) || {};
+    return getHolidays()
+      .filter((holiday) => holiday && holiday.status === "aprobado" && holiday.date >= fromISO && holiday.date <= toISO)
+      .filter((holiday) => !getAttendanceEntry(userId, holiday.date))
+      .map((holiday) => ({
+        id: "ATT-FERIADO-" + userId + "-" + holiday.date,
+        userId,
+        date: holiday.date,
+        present: true,
+        holiday: true,
+        holidayName: holiday.name || "",
+        startTime: user.shiftStart || "05:45",
+        endTime: user.shiftEnd || "13:45",
+        notes: "Feriado" + (holiday.name ? " - " + holiday.name : "")
+      }));
+  }
+
   function getWeeklyAttendanceSummary(userId, refDate) {
     const week = getWeekBounds(refDate || todayISO());
     const user = getUser(userId);
-    const entries = state.attendance.filter((entry) => entry.userId === userId && entry.date >= week.start && entry.date <= week.end);
+    const entries = state.attendance
+      .filter((entry) => entry.userId === userId && entry.date >= week.start && entry.date <= week.end)
+      .concat(holidayAttendanceEntries(userId, week.start, week.end));
     const hours = entries.reduce((sum, entry) => sum + getAttendanceHours(entry), 0);
     const paidHours = entries.reduce((sum, entry) => sum + getAttendancePay(entry, user).normalHours + getAttendancePay(entry, user).overtimeHours, 0);
     const gross = entries.reduce((sum, entry) => sum + getAttendancePay(entry, user).amount, 0);
+    const holidayEntries = entries.filter((entry) => entry.holiday);
+    const holidayPay = holidayEntries.reduce((sum, entry) => sum + getAttendancePay(entry, user).amount, 0);
     const reimbursements = (state.employeeReimbursements || [])
       .filter((item) => item.userId === userId && item.weekStart === week.start)
       .reduce((sum, item) => sum + Number(item.amount || 0), 0);
@@ -17426,8 +17660,10 @@
       weekStart: week.start,
       weekEnd: week.end,
       hours,
-      hoursText: formatNumber(paidHours || hours) + " hs",
+      hoursText: formatNumber(paidHours || hours) + " hs" + (holidayEntries.length ? " (incl. " + holidayEntries.length + " feriado" + (holidayEntries.length === 1 ? "" : "s") + ")" : ""),
       gross,
+      holidays: holidayEntries.length,
+      holidayPay,
       reimbursements,
       paid,
       due: Math.max(0, gross + reimbursements - paid)

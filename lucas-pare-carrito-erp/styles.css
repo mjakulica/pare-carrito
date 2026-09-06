@@ -1,0 +1,9 @@
+
+/* Alerta de productos pedidos que no tiene asignados nadie. */
+.unassigned-alert {
+  border-left: 5px solid #b45309;
+  background: #fffbeb;
+}
+.unassigned-alert ul {
+  font-size: 13px;
+}
