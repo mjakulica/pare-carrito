@@ -10458,6 +10458,7 @@
               <datalist id="payment-client-list">${activeClients().map((client) => `<option value="${escapeAttr(client.id + " - " + client.name)}"></option>`).join("")}</datalist>
               <input type="hidden" id="payment-client" value="${activeClients()[0] ? escapeAttr(activeClients()[0].id) : ""}" />
               <label id="payment-related-wrap" style="display:none;align-items:center;gap:6px;margin-top:6px"><input type="checkbox" id="payment-related-accounts" style="width:auto;min-height:auto" /> Cuentas relacionadas</label>
+              <label id="payment-group-wrap" style="display:none;align-items:center;gap:6px;margin-top:6px"><input type="checkbox" id="payment-group-accounts" style="width:auto;min-height:auto" /> <span>Pagar al saldo del grupo <span id="payment-group-info" class="muted"></span></span></label>
             </div>
             <div class="field payment-amount-field">
               <label>Monto recibido</label>
@@ -10577,9 +10578,26 @@
       ordersBox.innerHTML = renderPaymentOrderSelect("", clientHidden.value, [], relatedCheck ? relatedCheck.checked : false);
       updatePaymentOrders(true);
     };
+    const groupWrap = document.getElementById("payment-group-wrap");
+    const groupCheck = document.getElementById("payment-group-accounts");
+    const groupInfo = document.getElementById("payment-group-info");
     const syncRelatedVisibility = () => {
       if (relatedWrap) relatedWrap.style.display = getPaymentClientIds(clientHidden.value).length > 1 ? "inline-flex" : "none";
+      const grupo = getAccountGroupIds(clientHidden.value);
+      if (groupWrap) groupWrap.style.display = grupo.length > 1 ? "inline-flex" : "none";
+      if (grupo.length <= 1 && groupCheck) groupCheck.checked = false;
+      if (groupInfo) {
+        groupInfo.textContent = grupo.length > 1
+          ? "(" + grupo.length + " cuentas, saldo " + formatMoney(getAccountGroupBalance(clientHidden.value)) + ")"
+          : "";
+      }
     };
+    if (groupCheck) groupCheck.addEventListener("change", () => {
+      // Al marcarlo, el monto por defecto es el saldo total del grupo.
+      const amountEl = document.getElementById("payment-amount");
+      const total = getAccountGroupBalance(clientHidden.value);
+      if (groupCheck.checked && amountEl && !parseAmount(amountEl.value) && total > 0) amountEl.value = formatAmountInput(total);
+    });
     const currentPaymentClientLabel = () => {
       const c = getClient(clientHidden.value);
       return c ? c.id + " - " + c.name : "";
@@ -10589,6 +10607,22 @@
       syncRelatedVisibility();
       reloadPaymentOrders();
     };
+    // Prellenado al venir de "Registrar pago al grupo" en Saldos.
+    if (ui.paymentPrefillClientId && getClient(ui.paymentPrefillClientId)) {
+      const prefillId = ui.paymentPrefillClientId;
+      const prefillGroup = !!ui.paymentPrefillGroup;
+      delete ui.paymentPrefillClientId;
+      delete ui.paymentPrefillGroup;
+      const prefillClient = getClient(prefillId);
+      if (clientSearch) clientSearch.value = prefillClient.id + " - " + prefillClient.name;
+      applyPaymentClient(prefillId);
+      if (prefillGroup && groupCheck && getAccountGroupIds(prefillId).length > 1) {
+        groupCheck.checked = true;
+        const amountEl = document.getElementById("payment-amount");
+        const total = getAccountGroupBalance(prefillId);
+        if (amountEl && total > 0) amountEl.value = formatAmountInput(total);
+      }
+    }
     const resolvePaymentClient = () => {
       const found = findClientByInput(clientSearch ? clientSearch.value : "");
       if (found) clientHidden.value = found.id;
@@ -10649,8 +10683,10 @@
           if (key) { transferProofKey = key; transferProofFile = ""; }
         } catch (error) { console.warn("No se pudo subir el comprobante, queda guardado en el sistema:", error.message); }
       }
+      const pagoAlGrupo = document.getElementById("payment-group-accounts");
       recordPayment({
         clientId: document.getElementById("payment-client").value,
+        groupClientIds: pagoAlGrupo && pagoAlGrupo.checked ? getAccountGroupIds(document.getElementById("payment-client").value) : [],
         orderIds: Array.from(document.querySelectorAll("[data-payment-order]")).map((select) => select.value).filter(Boolean),
         amount,
         method: method.value,
@@ -10671,6 +10707,40 @@
       saveState();
       render();
     }));
+  }
+
+  // Cuentas de un mismo dueño juntas, con el saldo de cada una y la suma del grupo, para poder
+  // cobrarle todo de una.
+  function accountGroupsPanelHtml() {
+    const grupos = getAccountGroups();
+    if (!grupos.length) return "";
+    const filas = grupos.map((grupo) => {
+      const cuentas = grupo.clientIds.map((id) => {
+        const client = getClient(id);
+        return `<div class="group-account"><span>${escapeHtml(String(id))} - ${escapeHtml(client ? client.name : id)}</span><strong>${formatMoney(getClientBalance(id))}</strong></div>`;
+      }).join("");
+      return `<tr>
+        <td><strong>${escapeHtml(grupo.name)}</strong><br><span class="muted">${grupo.clientIds.length} cuentas</span></td>
+        <td>${cuentas}</td>
+        <td class="num"><strong>${formatMoney(grupo.balance)}</strong></td>
+        <td><button class="btn small blue" type="button" data-pay-group="${escapeAttr(grupo.id)}">Registrar pago al grupo</button></td>
+      </tr>`;
+    }).join("");
+    afterRender.push(() => {
+      document.querySelectorAll("[data-pay-group]").forEach((button) => button.addEventListener("click", () => {
+        ui.paymentPrefillClientId = button.dataset.payGroup;
+        ui.paymentPrefillGroup = true;
+        navigate("pagos");
+      }));
+    });
+    return `<div class="panel" style="margin-bottom:14px">
+      <h2 class="page-title" style="font-size:18px">Cuentas vinculadas</h2>
+      <p class="muted">Cuentas del mismo dueño. El saldo del grupo es la suma de todas; al cobrar al grupo la plata se reparte entre las cuentas que deben, de mayor a menor.</p>
+      <div class="table-wrap" style="margin-top:10px"><table>
+        <thead><tr><th>Grupo</th><th>Cuentas</th><th class="num">Saldo del grupo</th><th>Accion</th></tr></thead>
+        <tbody>${filas}</tbody>
+      </table></div>
+    </div>`;
   }
 
   function renderBalances() {
@@ -10749,6 +10819,7 @@
           <div class="field span-4"><label>&nbsp;</label><span class="muted">El rango se usa al abrir Ver movimientos y al imprimir/exportar.</span></div>
         </div>
       </div>
+      ${accountGroupsPanelHtml()}
       <div class="panel">
         <div class="table-wrap">
           <table>
@@ -16635,6 +16706,60 @@
     return Array.from(new Set([clientId, ...getChildClientIds(clientId)].filter(Boolean)));
   }
 
+  // Un "grupo de cuentas" son todas las cuentas que terminan siendo del mismo dueño, sin importar
+  // por donde quedaron atadas: por cliente padre/hijo o por el usuario cliente que las tiene
+  // vinculadas. Se camina la relacion hasta que no aparecen cuentas nuevas, asi entrar por
+  // cualquiera de ellas devuelve el grupo entero.
+  function getAccountGroupIds(clientId) {
+    if (!clientId || !getClient(clientId)) return [];
+    const out = new Set([clientId]);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      Array.from(out).forEach((id) => {
+        const client = getClient(id);
+        const vecinos = [];
+        if (client && client.parentClientId) vecinos.push(client.parentClientId);
+        getChildClientIds(id).forEach((child) => vecinos.push(child));
+        (state.users || [])
+          .filter((user) => isClientLikeRole(user.role) && (user.clientId === id || (Array.isArray(user.linkedClientIds) && user.linkedClientIds.includes(id))))
+          .forEach((user) => {
+            if (user.clientId) vecinos.push(user.clientId);
+            (user.linkedClientIds || []).forEach((linked) => vecinos.push(linked));
+          });
+        vecinos.forEach((vecino) => {
+          if (vecino && getClient(vecino) && !out.has(vecino)) { out.add(vecino); changed = true; }
+        });
+      });
+    }
+    return Array.from(out);
+  }
+
+  function getAccountGroupBalance(clientId) {
+    return getAccountGroupIds(clientId).reduce((sum, id) => sum + getClientBalance(id), 0);
+  }
+
+  // Grupos disjuntos: cada cuenta aparece en uno solo. Se ignoran las cuentas sueltas.
+  function getAccountGroups() {
+    const visto = new Set();
+    const grupos = [];
+    activeClients().forEach((client) => {
+      if (visto.has(client.id)) return;
+      const ids = getAccountGroupIds(client.id);
+      ids.forEach((id) => visto.add(id));
+      if (ids.length < 2) return;
+      const ordenados = ids.slice().sort((a, b) => String(a).localeCompare(String(b)));
+      const principal = ordenados.find((id) => { const c = getClient(id); return c && !c.parentClientId; }) || ordenados[0];
+      grupos.push({
+        id: principal,
+        name: (getClient(principal) || {}).name || principal,
+        clientIds: ordenados,
+        balance: ordenados.reduce((sum, id) => sum + getClientBalance(id), 0)
+      });
+    });
+    return grupos.sort((a, b) => b.balance - a.balance);
+  }
+
   function getClientGroupBalance(clientId) {
     return getClientGroupIds(clientId).reduce((sum, id) => sum + getClientBalance(id), 0);
   }
@@ -19866,6 +19991,7 @@
       orderId: orderIds[0] || "",
       orderIds,
       amount,
+      groupClientIds: Array.isArray(payment.groupClientIds) && payment.groupClientIds.length > 1 ? payment.groupClientIds.slice() : undefined,
       pendingDifference: Math.max(0, selectedPendingTotal - amount),
       method: payment.method,
       notes: payment.notes || "",
@@ -19887,6 +20013,26 @@
       allocations.push({ clientId: order.clientId, order, amount: applied });
       remaining -= applied;
     });
+    // Pago al grupo: si no se eligieron pedidos y vino la lista de cuentas del grupo, la plata se
+    // reparte entre las cuentas que deben, de mayor a menor deuda, hasta que se acaba. Lo que
+    // sobre (pagaron de mas) queda en la cuenta elegida, como en un pago comun.
+    const groupClientIds = Array.isArray(payment.groupClientIds)
+      ? payment.groupClientIds.filter((id) => getClient(id))
+      : [];
+    if (!allocations.length && groupClientIds.length > 1) {
+      let resto = amount;
+      groupClientIds
+        .map((id) => ({ clientId: id, deuda: Math.max(0, getClientBalance(id)) }))
+        .filter((entry) => entry.deuda > 0)
+        .sort((a, b) => b.deuda - a.deuda)
+        .forEach((entry) => {
+          if (resto <= 0.005) return;
+          const aplicado = Math.min(resto, entry.deuda);
+          allocations.push({ clientId: entry.clientId, order: null, amount: aplicado });
+          resto -= aplicado;
+        });
+      if (resto > 0.005) allocations.push({ clientId: payment.clientId, order: null, amount: resto });
+    }
     if (!allocations.length) allocations.push({ clientId: payment.clientId, order: null, amount });
     const byClient = {};
     allocations.forEach((allocation) => {

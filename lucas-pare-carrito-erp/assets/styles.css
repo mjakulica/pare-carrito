@@ -4031,3 +4031,16 @@ tr:last-child td {
   font-weight: 600;
   color: #b45309;
 }
+
+/* Cuentas de un mismo grupo, dentro de la tabla de cuentas vinculadas. */
+.group-account {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  padding: 2px 0;
+  border-bottom: 1px dashed rgba(15, 23, 42, 0.12);
+}
+.group-account:last-child {
+  border-bottom: 0;
+}
