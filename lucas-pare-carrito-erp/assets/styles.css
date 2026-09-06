@@ -3991,3 +3991,43 @@ tr:last-child td {
 .checklist-text { font-size:15px; }
 .checklist-item.done { opacity:.6; }
 .checklist-item.done .checklist-text { text-decoration:line-through; }
+
+/* Escala de color del margen en la tabla de Precios: de rojo (pierde plata) a verde fuerte. */
+.prices-table td[data-margin-cell] {
+  transition: background-color 0.15s ease;
+}
+.prices-table td[data-margin-cell] input {
+  background: transparent;
+  border-color: rgba(15, 23, 42, 0.18);
+  font-weight: 600;
+}
+.margin-c0 { background: #fecaca; }
+.margin-c1 { background: #fed7aa; }
+.margin-c2 { background: #fde68a; }
+.margin-c3 { background: #fef08a; }
+.margin-c4 { background: #d9f99d; }
+.margin-c5 { background: #bbf7d0; }
+.margin-c6 { background: #86efac; }
+.margin-c7 { background: #4ade80; }
+.margin-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 10px;
+  font-size: 12px;
+}
+.margin-legend span {
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+}
+
+/* Cuanto falta comprar del producto, debajo del nombre en la linea de compra. */
+.purchase-line .pl-falta {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #b45309;
+}

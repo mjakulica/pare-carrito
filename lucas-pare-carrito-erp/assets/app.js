@@ -6045,6 +6045,25 @@
     return list.length ? list[list.length - 1] : null;
   }
 
+  // Escala de color del margen: 8 tramos, de rojo (pierde plata) a verde fuerte.
+  const MARGIN_BANDS = [
+    { max: 0, cls: "margin-c0", label: "menos de 0%" },
+    { max: 10, cls: "margin-c1", label: "0 a 10%" },
+    { max: 20, cls: "margin-c2", label: "10 a 20%" },
+    { max: 30, cls: "margin-c3", label: "20 a 30%" },
+    { max: 40, cls: "margin-c4", label: "30 a 40%" },
+    { max: 55, cls: "margin-c5", label: "40 a 55%" },
+    { max: 70, cls: "margin-c6", label: "55 a 70%" },
+    { max: Infinity, cls: "margin-c7", label: "70% o mas" }
+  ];
+  function marginBandClass(margin) {
+    const value = Number(margin || 0);
+    return (MARGIN_BANDS.find((band) => value < band.max) || MARGIN_BANDS[MARGIN_BANDS.length - 1]).cls;
+  }
+  function marginLegendHtml() {
+    return `<div class="margin-legend"><strong>Margen:</strong>${MARGIN_BANDS.map((band) => `<span class="${band.cls}">${escapeHtml(band.label)}</span>`).join("")}</div>`;
+  }
+
   function renderPrices() {
     const rows = activeProducts().sort((a, b) => a.sortOrder - b.sortOrder).map((product) => {
       const rec = state.prices[product.id] || { cost: product.baseCost || 0, price: product.salePrice || 0, marketPrice: 0, marginPct: calcMargin(product.baseCost, product.salePrice) };
@@ -6058,7 +6077,7 @@
           <td>${escapeHtml(product.name)}<br><span class="muted">${escapeHtml(product.category)} - ${escapeHtml(product.unitType)}</span></td>
           <td><input data-cost value="${formatAmountInput(rec.cost)}" inputmode="decimal" /></td>
           <td><input data-market-price value="${formatAmountInput(rec.marketPrice || 0)}" inputmode="decimal" /></td>
-          <td><input data-margin-pct value="${formatAmountInput(roundOne(rec.marginPct || calcMargin(rec.cost, rec.price)))}" inputmode="decimal" /></td>
+          <td data-margin-cell class="${marginBandClass(rec.marginPct || calcMargin(rec.cost, rec.price))}"><input data-margin-pct value="${formatAmountInput(roundOne(rec.marginPct || calcMargin(rec.cost, rec.price)))}" inputmode="decimal" /></td>
           <td><input data-sale-price value="${formatAmountInput(rec.price)}" inputmode="decimal" /></td>
           <td><select data-margin-section="${product.id}">${getMarginSections().map((sec) => `<option value="${sec.id}" ${sec.id === secId ? "selected" : ""}>${escapeHtml(sec.name)}</option>`).join("")}</select></td>
           <td><label style="display:inline-flex;gap:4px;align-items:center;white-space:nowrap"><input type="checkbox" data-price-exempt="${product.id}" ${product.priceAutoExempt ? "checked" : ""} style="width:auto;min-height:auto" />No ajustar</label> ${autoPill}</td>
@@ -6082,6 +6101,7 @@
       `<button class="btn primary" id="save-prices">Guardar precios</button><button class="btn ghost" id="import-prices-paste">Importar precios (pegar)</button>`,
       `
       <div class="panel">
+        ${marginLegendHtml()}
         <div class="table-wrap">
           <table class="prices-table">
             <thead><tr><th>Producto</th><th>Costo</th><th>Precio mercado</th><th>Margen %</th><th>Precio lista</th><th>Sección</th><th>Auto</th></tr></thead>
@@ -6119,15 +6139,27 @@
       const cost = parseAmount(costInput.value);
       const margin = parseAmount(marginInput.value);
       const price = parseAmount(priceInput.value);
+      // El margen se mide contra el costo real; el precio de venta se calcula sobre el precio de
+      // mercado cuando hay uno cargado.
+      const market = parseAmount(row.querySelector("[data-market-price]").value);
+      const base = market > 0 ? market : cost;
       if (source && source.matches("[data-sale-price]")) {
-        if (cost > 0 && price > 0) marginInput.value = formatAmountInput(roundOne(calcMargin(cost, price)));
+        if (cost > 0 && price > 0) marginInput.value = formatAmountInput(roundOne(calcMargin(base, price)));
+        pintarMargen(row);
         return;
       }
-      if (cost > 0 && margin > 0) {
-        priceInput.value = formatAmountInput(Math.ceil(cost * (1 + margin / 100)));
-      } else if (cost > 0 && price > 0) {
-        marginInput.value = formatAmountInput(roundOne(calcMargin(cost, price)));
+      if (base > 0 && margin > 0) {
+        priceInput.value = formatAmountInput(Math.ceil(base * (1 + margin / 100)));
+      } else if (base > 0 && price > 0) {
+        marginInput.value = formatAmountInput(roundOne(calcMargin(base, price)));
       }
+      pintarMargen(row);
+    };
+    const pintarMargen = (row) => {
+      const cell = row.querySelector("[data-margin-cell]");
+      if (!cell) return;
+      MARGIN_BANDS.forEach((band) => cell.classList.remove(band.cls));
+      cell.classList.add(marginBandClass(parseAmount(row.querySelector("[data-margin-pct]").value)));
     };
     document.querySelectorAll("[data-cost],[data-sale-price],[data-market-price],[data-margin-pct]").forEach((input) => {
       input.addEventListener("input", () => recalcRow(input.closest("[data-price-row]"), input));
@@ -6142,15 +6174,29 @@
       document.querySelectorAll("[data-price-row]").forEach((row) => {
         const productId = row.dataset.priceRow;
         const cost = parseAmount(row.querySelector("[data-cost]").value);
-        const marketPrice = parseAmount(row.querySelector("[data-market-price]").value);
+        const marketPriceInput = parseAmount(row.querySelector("[data-market-price]").value);
+        const previousMarket = Number((state.prices[productId] || {}).marketPrice || 0);
+        // El precio de mercado se cae solo cuando se carga un costo nuevo y no se carga un
+        // precio de mercado nuevo: vuelve a venderse sobre el costo real.
+        const marketPrice = (Number((state.prices[productId] || {}).cost || 0) !== cost && marketPriceInput === previousMarket) ? 0 : marketPriceInput;
         const marginPct = parseAmount(row.querySelector("[data-margin-pct]").value);
-        const price = Math.ceil(parseAmount(row.querySelector("[data-sale-price]").value));
+        // Si el precio de mercado se acaba de caer, el precio de lista vuelve a salir del costo.
+        const price = (previousMarket > 0 && marketPrice === 0 && cost > 0 && marginPct > 0)
+          ? Math.ceil(cost * (1 + marginPct / 100))
+          : Math.ceil(parseAmount(row.querySelector("[data-sale-price]").value));
         const previousPrice = state.prices[productId] || {};
         const costChanged = Number(previousPrice.cost || 0) !== cost;
+        // La fecha del precio es la del ULTIMO cambio de ese producto: si la fila quedo igual se
+        // conserva, asi "Guardar precios" no le pone la fecha de hoy a toda la lista.
+        const filaCambio = costChanged ||
+          Number(previousPrice.price || 0) !== price ||
+          Number(previousPrice.marketPrice || 0) !== marketPrice ||
+          roundOne(Number(previousPrice.marginPct || 0)) !== roundOne(marginPct);
         state.prices[productId] = {
+          ...previousPrice,
           productId,
-          date: todayISO(),
-          updatedAt: new Date().toISOString(),
+          date: filaCambio ? todayISO() : (previousPrice.date || todayISO()),
+          updatedAt: filaCambio ? new Date().toISOString() : (previousPrice.updatedAt || new Date().toISOString()),
           cost,
           marketPrice,
           marginPct,
@@ -6161,10 +6207,10 @@
           product.baseCost = cost;
           product.salePrice = price;
         }
-        changedProducts.push({ productId });
+        if (filaCambio) changedProducts.push({ productId });
         // La edicion manual SIEMPRE gana: se guarda tal cual y se registra en el log del motor
         // como nueva linea de base (evento "manual").
-        const changedManually = Number(previousPrice.cost || 0) !== cost || Number(previousPrice.price || 0) !== price || roundOne(Number(previousPrice.marginPct || 0)) !== roundOne(marginPct);
+        const changedManually = costChanged || Number(previousPrice.price || 0) !== price || roundOne(Number(previousPrice.marginPct || 0)) !== roundOne(marginPct);
         if (changedManually) pushPriceAutoLog({ productId, event: "manual", costPrev: Number(previousPrice.cost || 0), costNew: cost, deltaPct: 0, basketIdx: 0, excessPct: 0, marginPrev: roundOne(Number(previousPrice.marginPct || 0)), marginNew: roundOne(marginPct), pricePrev: Number(previousPrice.price || 0), priceNew: price, sectionId: (product && product.marginSectionId) || "SEC-5", applied: true, userId: currentUser ? currentUser.id : "" });
         // Solo propagar a productos relacionados si cambio el costo de ESTA fila
         // (evita que al guardar se pisen precios editados a mano de productos derivados).
@@ -7258,14 +7304,13 @@
               <label>Proveedor / Asignado a</label>
               <div class="input-with-button">
                 <select id="purchase-provider">
-                  <option value="all">Todos</option>
-                  ${activeProviders().map((provider) => `<option value="provider:${provider.id}" ${firstProvider && firstProvider.id === provider.id ? "selected" : ""}>${escapeHtml(provider.name)}</option>`).join("")}
+                  <option value="all" selected>Todos</option>
+                  ${activeProviders().map((provider) => `<option value="provider:${provider.id}">${escapeHtml(provider.name)}</option>`).join("")}
                   ${activeEmployees().map((employee) => `<option value="employee:${employee.id}">${escapeHtml(employee.name)}</option>`).join("")}
                 </select>
                 <button class="btn small ghost" type="button" data-add-provider>Agregar</button>
-                <button class="btn small yellow" type="button" data-load-provider-products title="Carga una fila por cada producto de este proveedor con su ultimo costo">Cargar productos</button>
               </div>
-              <span class="muted" style="font-size:12px">"Cargar productos" trae todos los productos del proveedor para editar costo unitario y cantidad de una sola vez.</span>
+              <span class="muted" style="font-size:12px" id="purchase-provider-note">Al elegir un proveedor se cargan solos los productos suyos que hay que comprar hoy, con la cantidad que falta.</span>
             </div>
             <div class="field" id="purchase-payment-status-wrap">
               <label>Estado</label>
@@ -7728,22 +7773,39 @@
         recalc();
       });
     }
-    const loadProviderProductsBtn = document.querySelector("[data-load-provider-products]");
-    if (loadProviderProductsBtn && providerInput) {
-      loadProviderProductsBtn.addEventListener("click", () => {
-        const parsed = parsePurchaseProviderValue(providerInput.value);
-        if (parsed.type === "all") return alert("Elegi primero un proveedor (o empleado) para cargar sus productos.");
-        const total = purchaseProductsForAssignee(parsed).length;
-        if (!total) {
-          return alert(parsed.type === "provider"
-            ? "Este proveedor no tiene productos cargados. Asignaselos en Proveedores -> \"Productos que vende\"."
-            : "Este empleado no tiene productos asignados.");
-        }
-        const added = loadPurchaseLinesForAssignee(parsed);
+    // Al elegir un proveedor se cargan solas sus compras del dia. No hay boton: el desplegable
+    // arranca en "Todos" y elegir a alguien es la accion.
+    const providerNote = document.getElementById("purchase-provider-note");
+    const cargarProductosDelProveedor = () => {
+      if (!providerInput) return;
+      const parsed = parsePurchaseProviderValue(providerInput.value);
+      clearAutoProviderLines();
+      const setNota = (texto) => { if (providerNote) providerNote.textContent = texto; };
+      if (parsed.type === "all") {
+        setNota("Al elegir un proveedor se cargan solos los productos suyos que hay que comprar hoy, con la cantidad que falta.");
         recalc();
-        if (!added) alert("Los " + total + " productos de esta seleccion ya estan cargados en el detalle.");
-      });
-    }
+        return;
+      }
+      const entries = purchaseProductsForAssignee(parsed);
+      const conFalta = entries.filter((entry) => entry.pendingQty > 0);
+      if (!entries.length) {
+        setNota(parsed.type === "provider"
+          ? "Este proveedor no tiene productos cargados. Asignaselos en Proveedores -> \"Productos que vende\"."
+          : "Este empleado no tiene productos asignados.");
+        recalc();
+        return;
+      }
+      if (!conFalta.length) {
+        setNota("Hoy no queda nada por comprarle: sus " + entries.length + " productos ya estan cubiertos por los pedidos y las compras del dia.");
+        recalc();
+        return;
+      }
+      const added = loadPurchaseLinesForAssignee(parsed);
+      recalc();
+      setNota(added
+        ? "Se cargaron " + added + " producto(s) que hay que comprar hoy, con la cantidad que falta."
+        : "Los " + conFalta.length + " producto(s) que faltan hoy ya estaban en el detalle.");
+    };
     const returnSourceSelect = document.getElementById("purchase-return-source");
     if (returnSourceSelect) {
       returnSourceSelect.addEventListener("change", () => {
@@ -7753,7 +7815,10 @@
         if (!added) alert("Esa compra no tiene productos con cantidad para devolver.");
       });
     }
-    if (providerInput) providerInput.addEventListener("change", () => { if (kind.value === "provider_return") refreshReturnSourceOptions(); });
+    if (providerInput) providerInput.addEventListener("change", () => {
+      if (kind.value === "provider_return") { refreshReturnSourceOptions(); return; }
+      if (["purchase", "product_expense"].includes(kind.value)) cargarProductosDelProveedor();
+    });
     kind.addEventListener("change", updateKind);
     updateKind();
     if (currentUser.role === "proveedor") {
@@ -8093,6 +8158,7 @@
           <select data-product-select class="sr-select">
             ${purchaseProductOptions(selected ? selected.id : "", selected ? selected.name : "")}
           </select>
+          <span class="pl-falta" data-shortage-note hidden></span>
         </div>
         <div class="field">
           <label>cant</label>
@@ -8227,22 +8293,30 @@
       products = activeProducts().filter((product) => getProductAssigneeValue(product.id) === parsed.assigneeValue);
     }
     const shortages = getProductPurchaseShortages(todayISO());
-    const pending = new Map(shortages.map((entry) => [entry.productId, Number(entry.shortageQuantity || entry.quantity || 0)]));
+    const pending = new Map(shortages.map((entry) => [entry.productId, entry]));
     return products
-      .map((product) => ({ product, pendingQty: Number(pending.get(product.id) || 0) }))
+      .map((product) => {
+        const entry = pending.get(product.id);
+        return {
+          product,
+          pendingQty: entry ? Number(entry.shortageQuantity || entry.quantity || 0) : 0,
+          unitLabel: (entry && entry.unitType) || product.unitType || ""
+        };
+      })
       .sort((a, b) => (Number(b.pendingQty > 0) - Number(a.pendingQty > 0)) || normalizeText(a.product.name).localeCompare(normalizeText(b.product.name)));
   }
 
-  // Carga una fila de compra por cada producto del proveedor/empleado elegido, con el ultimo
-  // costo conocido y la cantidad que falta comprar hoy (si la hay), para editar todo junto.
+  // Carga una fila de compra por cada producto del proveedor/empleado elegido que HAY QUE COMPRAR
+  // HOY, con la cantidad que falta ya puesta y el ultimo costo conocido. Las filas quedan marcadas
+  // como automaticas para poder reemplazarlas si se cambia de proveedor, sin tocar lo tipeado a mano.
   function loadPurchaseLinesForAssignee(parsed) {
     const container = document.getElementById("purchase-items");
     if (!container) return 0;
-    const entries = purchaseProductsForAssignee(parsed);
+    const entries = purchaseProductsForAssignee(parsed).filter((entry) => entry.pendingQty > 0);
     if (!entries.length) return 0;
     const existing = new Set(Array.from(container.querySelectorAll("[data-product-select]")).map((select) => select.value).filter(Boolean));
     let added = 0;
-    entries.forEach(({ product, pendingQty }) => {
+    entries.forEach(({ product, pendingQty, unitLabel }) => {
       if (existing.has(product.id)) return;
       addProductLineFromFavorite(product.id);
       existing.add(product.id);
@@ -8250,14 +8324,29 @@
       const row = Array.from(container.querySelectorAll("[data-purchase-item-row]"))
         .find((entry) => entry.querySelector("[data-product-select]").value === product.id);
       if (!row) return;
+      row.dataset.autoProvider = "1";
       syncPurchaseRow(row);
       const cost = getStoredProductCost(product.id);
       const costInput = row.querySelector("[data-item-cost]");
       if (costInput && !costInput.value && cost > 0) costInput.value = formatAmountInput(cost);
       const qtyInput = row.querySelector("[data-item-qty]");
-      if (qtyInput && !qtyInput.value && pendingQty > 0) qtyInput.value = formatAmountInput(pendingQty);
+      if (qtyInput && !qtyInput.value) qtyInput.value = formatAmountInput(pendingQty);
+      const note = row.querySelector("[data-shortage-note]");
+      if (note) {
+        note.textContent = "Falta " + formatNumber(pendingQty) + (unitLabel ? " " + unitLabel : "");
+        note.hidden = false;
+      }
     });
     return added;
+  }
+
+  // Saca las filas que se cargaron solas al elegir un proveedor, dejando las tipeadas a mano.
+  // Si no queda ninguna, deja una vacia para poder seguir cargando a mano.
+  function clearAutoProviderLines() {
+    const container = document.getElementById("purchase-items");
+    if (!container) return;
+    container.querySelectorAll("[data-purchase-item-row][data-auto-provider]").forEach((row) => row.remove());
+    if (!container.querySelector("[data-purchase-item-row]")) container.insertAdjacentHTML("beforeend", renderPurchaseItemRow());
   }
 
   // Compras del proveedor elegido que todavia se pueden devolver (no anuladas, con productos).
@@ -18336,12 +18425,18 @@
     const currentMargin = Number.isFinite(Number(rec.marginPct)) ? Number(rec.marginPct) : (opts.fallbackMargin != null ? Number(opts.fallbackMargin) : calcMargin(rec.cost, rec.price));
     const currentPrice = Number(rec.price || product.salePrice || 0);
     const persist = (margin, price) => {
+      // El precio de mercado es un costo "de referencia": el margen se sigue decidiendo con el
+      // costo real (que es lo que se imputa en el gasto), pero el precio de venta sale del precio
+      // de mercado. Si llega un costo nuevo sin precio de mercado, el de mercado se borra y el
+      // producto vuelve a venderse sobre su costo real.
+      const market = opts.marketPrice != null ? Number(opts.marketPrice) || 0 : 0;
+      if (market > 0) price = ceilMoney(market * (1 + margin / 100));
       // La fecha ("ultima actualizacion de precio") solo se toca si el costo o el precio
       // realmente cambian. Antes se ponia hoy siempre, aunque no cambiara nada (reprocesos,
       // relaciones de costo), por lo que figuraba "actualizado hoy" sin motivo.
       const priceChanged = Number(rec.cost || 0) !== Number(costNew || 0) || Number(rec.price || 0) !== Number(price || 0);
       rec.cost = costNew;
-      rec.marketPrice = opts.marketPrice != null ? opts.marketPrice : (rec.marketPrice || 0);
+      rec.marketPrice = market;
       rec.marginPct = roundOne(margin);
       rec.price = price;
       if (priceChanged || !rec.date) rec.date = todayISO();
@@ -18429,16 +18524,32 @@
     });
   }
 
+  // Carga de precio de mercado: no toca el costo (el gasto sigue imputado al costo real), pero
+  // el precio de venta pasa a calcularse como si el costo fuera el de mercado, con el mismo
+  // margen del producto. Vale hasta que entre un costo nuevo sin precio de mercado.
   function updateMarketPrices(items) {
+    const changed = [];
     items.forEach((item) => {
       const product = getProduct(item.productId);
       if (!product || item.marketPrice <= 0) return;
       const rec = state.prices[item.productId] || { productId: item.productId, cost: product.baseCost || 0, price: product.salePrice || 0, marginPct: calcMargin(product.baseCost, product.salePrice) };
-      rec.marketPrice = item.marketPrice;
+      let margin = Number(rec.marginPct);
+      if (!Number.isFinite(margin) || margin <= 0) margin = calcMargin(rec.cost || product.baseCost, rec.price || product.salePrice);
+      const pricePrev = Number(rec.price || product.salePrice || 0);
+      const priceNew = ceilMoney(Number(item.marketPrice) * (1 + margin / 100));
+      rec.marketPrice = Number(item.marketPrice);
+      rec.marginPct = roundOne(margin);
+      rec.price = priceNew;
       rec.date = todayISO();
       rec.updatedAt = new Date().toISOString();
       state.prices[item.productId] = rec;
+      product.salePrice = priceNew;
+      if (priceNew !== pricePrev) {
+        changed.push({ productId: item.productId });
+        pushPriceAutoLog({ productId: item.productId, event: "mercado", costPrev: Number(rec.cost || 0), costNew: Number(rec.cost || 0), deltaPct: 0, basketIdx: 0, excessPct: 0, marginPrev: roundOne(margin), marginNew: roundOne(margin), pricePrev, priceNew, sectionId: product.marginSectionId || "SEC-5", applied: true, userId: currentUser ? currentUser.id : "" });
+      }
     });
+    if (changed.length) updateOrdersWithNewPrices(todayISO(), changed);
   }
 
   // === Recalcular precios de un dia segun las compras de ese dia ===
@@ -18483,7 +18594,10 @@
         let margin = Number(rec.marginPct);
         if (!Number.isFinite(margin)) margin = calcMargin(rec.cost || product.baseCost, rec.price || product.salePrice);
         const isAlCosto = client && client.priceTier === "al_costo";
-        const listPrice = ceilMoney(cost * (1 + margin / 100));
+        // "Al costo" siempre va sobre el costo real; el resto se cobra sobre el precio de
+        // mercado cuando hay uno cargado.
+        const baseVenta = Number(rec.marketPrice) > 0 ? Number(rec.marketPrice) : cost;
+        const listPrice = ceilMoney(baseVenta * (1 + margin / 100));
         const newUnit = isAlCosto ? Math.max(0, cost * (1 + adj / 100)) : Math.max(0, listPrice * (1 + adj / 100));
         if (Math.abs(newUnit - Number(item.unitPrice || 0)) < 0.5) return;
         item.unitPrice = newUnit;
