@@ -295,6 +295,8 @@
     historyLoading: false,
     historyLoadingKey: "",
     historyError: "",
+    historyAnalysisSort: "totalProfit",
+    historyAnalysisDir: "desc",
     billingSelectedClients: null,
     billingIvaOverrides: {},
     lastOverwrite: null
@@ -6284,18 +6286,25 @@
     const loadingThisRange = ui.historyLoading && ui.historyLoadingKey === historyKey;
     const purchaseRows = historyReady ? (ui.historyData.purchaseRows || buildPurchaseHistoryMatrix(from, to, ui.historyData.purchaseHistory || [])) : [];
     const salesRows = historyReady ? (ui.historyData.salesRows || buildSalesHistoryMatrix(from, to, ui.historyData.salesQuantityHistory || [], ui.historyData.listPriceHistory || [])) : [];
-    const historyBody = (rows, type) => {
+    const performanceRows = historyReady ? buildPerformanceHistoryMatrix(dates, purchaseRows, salesRows) : [];
+    const analysis = buildPerformanceAnalysis(performanceRows);
+    const analysisSortKey = ui.historyAnalysisSort || "totalProfit";
+    const analysisDirection = ui.historyAnalysisDir === "asc" ? "asc" : "desc";
+    const pending = () => {
       if (ui.historyError) return `<div class="alert">${escapeHtml(ui.historyError)}</div>`;
       if (!historyReady || loadingThisRange) return `<div class="empty compact">Cargando historiales...</div>`;
-      return renderHistoryMatrixTable(rows, dates, type);
+      return "";
     };
+    const historyBody = (rows, type) => pending() || renderHistoryMatrixTable(rows, dates, type);
+    const performanceBody = () => pending() || renderPerformanceMatrixTable(performanceRows, dates);
+    const analysisBody = () => pending() || renderPerformanceAnalysisTable(analysis, { sortKey: analysisSortKey, direction: analysisDirection });
     afterRender.push(() => {
       bindHistories();
       ensureHistoryRangeLoaded(from, to);
     });
     return pageShell(
       "Historiales",
-      "Compras y ventas por rango, con una columna por dia.",
+      "Compras, ventas y rendimiento por rango, con una columna por dia.",
       "",
       `
       <div class="panel" style="margin-bottom:14px">
@@ -6309,7 +6318,7 @@
               <button class="btn small ghost" type="button" data-history-range="30">30 dias</button>
               <button class="btn small ghost" type="button" data-history-range="3m">3 meses</button>
               <button class="btn small ghost" type="button" data-history-range="6m">6 meses</button>
-              <button class="btn small blue history-print-btn" type="button" data-print-history="all" title="Imprimir compras y ventas" aria-label="Imprimir compras y ventas">&#128424;</button>
+              <button class="btn small blue history-print-btn" type="button" data-print-history="all" title="Imprimir todos los historiales" aria-label="Imprimir todos los historiales">&#128424;</button>
             </div>
           </div>
         </div>
@@ -6329,6 +6338,31 @@
         </div>
         <p class="muted">Cada dia muestra el precio de lista y la cantidad total vendida.</p>
         ${historyBody(salesRows, "sales")}
+      </div>
+      <div class="panel" style="margin-top:14px" data-history-panel="performance">
+        <div class="history-panel-head">
+          <h2 class="page-title" style="font-size:18px">Rendimiento</h2>
+          <button class="btn small ghost history-print-btn" type="button" data-print-history="performance" title="Imprimir rendimiento" aria-label="Imprimir rendimiento">&#128424;</button>
+        </div>
+        <p class="muted">Cada dia muestra la diferencia entre el precio de lista y el de compra, el margen sobre el costo y el total vendido ese dia. El color va de rojo (pierde plata) a verde (margen alto).</p>
+        ${marginLegendHtml()}
+        ${performanceBody()}
+      </div>
+      <div class="panel" style="margin-top:14px" data-history-panel="analysis">
+        <div class="history-panel-head">
+          <h2 class="page-title" style="font-size:18px">Analisis de rentabilidad</h2>
+          <button class="btn small ghost history-print-btn" type="button" data-print-history="analysis" title="Imprimir analisis" aria-label="Imprimir analisis">&#128424;</button>
+        </div>
+        <p class="muted">Todo el rango en una fila por producto. Toque cualquier encabezado para ordenar y ver que producto es el que mas gasto genera, el que mas factura, el que mejor margen tiene y el que mas aporta a la ganancia total.</p>
+        ${historyReady && !loadingThisRange && !ui.historyError ? `
+          <div class="grid four" style="margin:10px 0 12px">
+            ${metricCard("Venta total", formatMoney(analysis.totals.totalAmount), formatDate(from) + " - " + formatDate(to))}
+            ${metricCard("Costo de lo vendido", formatMoney(analysis.totals.totalCost), "Cantidad vendida por el costo del dia")}
+            ${metricCard("Ganancia bruta", formatMoney(analysis.totals.totalProfit), "Venta menos costo de lo vendido")}
+            ${metricCard("Margen promedio", formatSharePct(analysis.totals.marginPct), "Sobre el costo, ponderado por venta")}
+          </div>
+        ` : ""}
+        ${analysisBody()}
       </div>
       `,
       "historiales"
@@ -6386,6 +6420,17 @@
     document.querySelectorAll("[data-history-row]").forEach((row) => row.addEventListener("click", () => {
       openHistoryProductChart(row.dataset.historyType, row.dataset.historyProductId || "", row.dataset.historyProductName || "");
     }));
+    document.querySelectorAll("[data-analysis-sort]").forEach((header) => header.addEventListener("click", () => {
+      const key = header.dataset.analysisSort;
+      if (ui.historyAnalysisSort === key) {
+        ui.historyAnalysisDir = ui.historyAnalysisDir === "asc" ? "desc" : "asc";
+      } else {
+        ui.historyAnalysisSort = key;
+        // Los nombres se leen mejor de la A a la Z; los numeros, del mas grande al mas chico.
+        ui.historyAnalysisDir = key === "productName" || key === "unitType" ? "asc" : "desc";
+      }
+      render();
+    }));
   }
 
   function printHistoryRange(scope, from, to, printWindow) {
@@ -6400,6 +6445,19 @@
     if (scope === "all" || scope === "sales") {
       const rows = ui.historyData.salesRows || buildSalesHistoryMatrix(from, to, ui.historyData.salesQuantityHistory || [], ui.historyData.listPriceHistory || []);
       sections.push(`<section class="print-sheet history-print-sheet">${renderHistoryPrintTitle("Historial de ventas", from, to)}${renderHistoryMatrixTable(rows, dates, "sales")}</section>`);
+    }
+    if (scope === "all" || scope === "performance" || scope === "analysis") {
+      const purchaseRows = ui.historyData.purchaseRows || buildPurchaseHistoryMatrix(from, to, ui.historyData.purchaseHistory || []);
+      const salesRows = ui.historyData.salesRows || buildSalesHistoryMatrix(from, to, ui.historyData.salesQuantityHistory || [], ui.historyData.listPriceHistory || []);
+      const performanceRows = buildPerformanceHistoryMatrix(dates, purchaseRows, salesRows);
+      if (scope === "all" || scope === "performance") {
+        sections.push(`<section class="print-sheet history-print-sheet">${renderHistoryPrintTitle("Rendimiento", from, to)}${renderPerformanceMatrixTable(performanceRows, dates)}</section>`);
+      }
+      if (scope === "all" || scope === "analysis") {
+        const analysis = buildPerformanceAnalysis(performanceRows);
+        const table = renderPerformanceAnalysisTable(analysis, { sortKey: ui.historyAnalysisSort || "totalProfit", direction: ui.historyAnalysisDir === "asc" ? "asc" : "desc", interactive: false });
+        sections.push(`<section class="print-sheet history-print-sheet">${renderHistoryPrintTitle("Analisis de rentabilidad", from, to)}${table}</section>`);
+      }
     }
     printHtmlDocument("Historiales " + formatDate(from) + " - " + formatDate(to), `<section class="history-print-page">${sections.join("")}</section>`, { landscape: true, margin: "4mm", useWindow: true, printWindow });
   }
@@ -6445,18 +6503,23 @@
     const historyReady = ui.historyData && ui.historyData.from === from && ui.historyData.to === to;
     if (!historyReady) return alert("Todavia se estan cargando los historiales del rango.");
     const dates = buildDateRange(from, to);
+    const purchaseMatrix = () => ui.historyData.purchaseRows || buildPurchaseHistoryMatrix(from, to, ui.historyData.purchaseHistory || []);
+    const salesMatrix = () => ui.historyData.salesRows || buildSalesHistoryMatrix(from, to, ui.historyData.salesQuantityHistory || [], ui.historyData.listPriceHistory || []);
     const rows = type === "purchase"
-      ? (ui.historyData.purchaseRows || buildPurchaseHistoryMatrix(from, to, ui.historyData.purchaseHistory || []))
-      : (ui.historyData.salesRows || buildSalesHistoryMatrix(from, to, ui.historyData.salesQuantityHistory || [], ui.historyData.listPriceHistory || []));
+      ? purchaseMatrix()
+      : type === "performance"
+        ? buildPerformanceHistoryMatrix(dates, purchaseMatrix(), salesMatrix())
+        : salesMatrix();
     const row = rows.find((item) => String(item.productId || "") === String(productId || "") && String(item.productName || "") === String(productName || ""))
       || rows.find((item) => String(item.productId || "") === String(productId || ""))
       || rows.find((item) => String(item.productName || "") === String(productName || ""));
     if (!row) return alert("No se encontro el producto en el rango seleccionado.");
-    const quantitySeries = dates.map((date) => ({ date, value: Number(row.days[date] && row.days[date].quantity || 0) }));
-    const priceSeries = dates.map((date) => ({ date, value: Number(row.days[date] && row.days[date].price || 0) }));
-    const title = (type === "purchase" ? "Compra - " : "Venta - ") + row.productName;
-    const quantityChart = renderHistoryLineChart("Cantidad", quantitySeries, formatNumber, "#2457a6", "quantity");
-    const priceChart = renderHistoryLineChart(type === "purchase" ? "Precio de compra" : "Precio de lista", priceSeries, formatMoney, "#0f7a5d", "price");
+    const isPerformance = type === "performance";
+    const quantitySeries = dates.map((date) => ({ date, value: Number(row.days[date] && (isPerformance ? row.days[date].profit : row.days[date].quantity) || 0) }));
+    const priceSeries = dates.map((date) => ({ date, value: Number(row.days[date] && (isPerformance ? row.days[date].unitMargin : row.days[date].price) || 0) }));
+    const title = (type === "purchase" ? "Compra - " : isPerformance ? "Rendimiento - " : "Venta - ") + row.productName;
+    const quantityChart = renderHistoryLineChart(isPerformance ? "Ganancia del dia" : "Cantidad", quantitySeries, isPerformance ? formatMoney : formatNumber, "#2457a6", "quantity");
+    const priceChart = renderHistoryLineChart(type === "purchase" ? "Precio de compra" : isPerformance ? "Margen por unidad" : "Precio de lista", priceSeries, formatMoney, "#0f7a5d", "price");
     showModal(
       title,
       `<div class="history-product-modal">
@@ -6697,6 +6760,247 @@
       });
     return Object.values(rows).sort((a, b) => String(a.category).localeCompare(String(b.category)) || String(a.productName).localeCompare(String(b.productName)));
   }
+
+  // Rendimiento por producto: cruza el historial de compras (costo del dia) con el de ventas
+  // (precio de lista y cantidad del dia) para saber cuanto dejo cada producto cada dia.
+  // El costo de un dia sin compra se arrastra del ultimo dia comprado; si el rango arranca sin
+  // compras previas se usa la primera compra del rango y, en ultima instancia, el costo de la lista.
+  function buildPerformanceHistoryMatrix(dates, purchaseRows, salesRows) {
+    const keyOf = (row) => String(row.productId || row.productName || "");
+    const purchaseByKey = {};
+    (purchaseRows || []).forEach((row) => { purchaseByKey[keyOf(row)] = row; });
+    const rows = {};
+    const ensureRow = (source) => {
+      const key = keyOf(source);
+      if (!rows[key]) rows[key] = {
+        productId: source.productId,
+        productName: source.productName || key,
+        category: source.category || "OTROS",
+        unitType: source.unitType || "",
+        totalQuantity: 0,
+        totalAmount: 0,
+        totalCost: 0,
+        totalProfit: 0,
+        purchaseAmount: 0,
+        purchaseQuantity: 0,
+        days: {}
+      };
+      return rows[key];
+    };
+    (salesRows || []).forEach((salesRow) => {
+      const key = keyOf(salesRow);
+      const purchaseRow = purchaseByKey[key];
+      const row = ensureRow(salesRow);
+      if (purchaseRow) {
+        row.purchaseAmount = Number(purchaseRow.totalAmount || 0);
+        row.purchaseQuantity = Number(purchaseRow.totalQuantity || 0);
+        if (!row.unitType) row.unitType = purchaseRow.unitType || "";
+      }
+      const costByDate = {};
+      let carried = 0;
+      dates.forEach((date) => {
+        const purchaseDay = purchaseRow && purchaseRow.days ? purchaseRow.days[date] : null;
+        const dayCost = purchaseDay && Number(purchaseDay.quantity || 0) > 0 ? Number(purchaseDay.price || 0) : 0;
+        if (dayCost > 0) carried = dayCost;
+        costByDate[date] = carried;
+      });
+      // Los dias previos a la primera compra del rango quedan en 0: los completamos hacia atras
+      // con esa primera compra para no inventar una ganancia igual al precio de venta entero.
+      const firstCost = dates.map((date) => costByDate[date]).find((value) => value > 0) || 0;
+      const fallbackCost = firstCost > 0 ? firstCost : getProductCost(salesRow.productId);
+      dates.forEach((date) => {
+        if (!(costByDate[date] > 0)) costByDate[date] = fallbackCost;
+      });
+      dates.forEach((date) => {
+        const salesDay = salesRow.days ? salesRow.days[date] : null;
+        const quantity = Number(salesDay && salesDay.quantity || 0);
+        if (quantity <= 0) return;
+        const listPrice = Number(salesDay.price || 0);
+        const cost = Number(costByDate[date] || 0);
+        const amount = Number(salesDay.amount || quantity * listPrice);
+        const costAmount = quantity * cost;
+        const profit = amount - costAmount;
+        row.days[date] = {
+          quantity,
+          amount,
+          price: listPrice,
+          cost,
+          unitMargin: listPrice - cost,
+          marginPct: calcMargin(cost, listPrice),
+          costAmount,
+          profit
+        };
+        row.totalQuantity += quantity;
+        row.totalAmount += amount;
+        row.totalCost += costAmount;
+        row.totalProfit += profit;
+      });
+    });
+    // Productos que se compraron pero no se vendieron en el rango: aparecen con gasto y sin ganancia.
+    (purchaseRows || []).forEach((purchaseRow) => {
+      const key = keyOf(purchaseRow);
+      if (rows[key]) return;
+      if (!(Number(purchaseRow.totalAmount || 0) > 0)) return;
+      const row = ensureRow(purchaseRow);
+      row.purchaseAmount = Number(purchaseRow.totalAmount || 0);
+      row.purchaseQuantity = Number(purchaseRow.totalQuantity || 0);
+    });
+    return Object.values(rows).map((row) => {
+      row.avgCost = row.totalQuantity > 0 ? row.totalCost / row.totalQuantity : 0;
+      row.avgPrice = row.totalQuantity > 0 ? row.totalAmount / row.totalQuantity : 0;
+      row.unitMargin = row.avgPrice - row.avgCost;
+      row.marginPct = calcMargin(row.avgCost, row.avgPrice);
+      return row;
+    }).sort((a, b) => String(a.category).localeCompare(String(b.category)) || String(a.productName).localeCompare(String(b.productName)));
+  }
+
+  const HISTORY_ANALYSIS_COLUMNS = [
+    { key: "productName", label: "Producto", type: "text" },
+    { key: "unitType", label: "Unidad", type: "text" },
+    { key: "totalQuantity", label: "Cant. vendida", type: "number" },
+    { key: "avgCost", label: "Costo prom.", type: "money" },
+    { key: "avgPrice", label: "Precio lista prom.", type: "money" },
+    { key: "unitMargin", label: "Margen $", type: "money" },
+    { key: "marginPct", label: "Margen %", type: "margin" },
+    { key: "totalAmount", label: "Venta $", type: "money" },
+    { key: "salesShare", label: "% de la venta", type: "share" },
+    { key: "totalCost", label: "Costo vendido $", type: "money" },
+    { key: "costShare", label: "% del gasto", type: "share" },
+    { key: "purchaseAmount", label: "Compras $", type: "money" },
+    { key: "purchaseShare", label: "% de compras", type: "share" },
+    { key: "totalProfit", label: "Ganancia $", type: "money" },
+    { key: "profitShare", label: "% de la ganancia", type: "share" }
+  ];
+
+  function buildPerformanceAnalysis(performanceRows) {
+    const totals = { totalQuantity: 0, totalAmount: 0, totalCost: 0, totalProfit: 0, purchaseAmount: 0 };
+    (performanceRows || []).forEach((row) => {
+      totals.totalQuantity += Number(row.totalQuantity || 0);
+      totals.totalAmount += Number(row.totalAmount || 0);
+      totals.totalCost += Number(row.totalCost || 0);
+      totals.totalProfit += Number(row.totalProfit || 0);
+      totals.purchaseAmount += Number(row.purchaseAmount || 0);
+    });
+    // La participacion en la ganancia se mide contra la suma de las ganancias positivas: si se
+    // dividiera por el neto, un producto que pierde plata daria porcentajes mayores a 100.
+    const positiveProfit = (performanceRows || []).reduce((sum, row) => sum + Math.max(0, Number(row.totalProfit || 0)), 0);
+    const share = (value, total) => (total > 0 ? (Number(value || 0) / total) * 100 : 0);
+    const rows = (performanceRows || []).map((row) => ({
+      ...row,
+      salesShare: share(row.totalAmount, totals.totalAmount),
+      costShare: share(row.totalCost, totals.totalCost),
+      purchaseShare: share(row.purchaseAmount, totals.purchaseAmount),
+      profitShare: share(row.totalProfit, positiveProfit)
+    }));
+    totals.avgCost = totals.totalQuantity > 0 ? totals.totalCost / totals.totalQuantity : 0;
+    totals.avgPrice = totals.totalQuantity > 0 ? totals.totalAmount / totals.totalQuantity : 0;
+    totals.unitMargin = totals.avgPrice - totals.avgCost;
+    totals.marginPct = calcMargin(totals.avgCost, totals.avgPrice);
+    return { rows, totals };
+  }
+
+  function sortPerformanceAnalysisRows(rows, sortKey, direction) {
+    const column = HISTORY_ANALYSIS_COLUMNS.find((item) => item.key === sortKey) || HISTORY_ANALYSIS_COLUMNS[0];
+    const factor = direction === "asc" ? 1 : -1;
+    return rows.slice().sort((a, b) => {
+      if (column.type === "text") return factor * String(a[column.key] || "").localeCompare(String(b[column.key] || ""));
+      return factor * (Number(a[column.key] || 0) - Number(b[column.key] || 0));
+    });
+  }
+
+  function formatSharePct(value) {
+    return formatNumber(roundOne(Number(value || 0))) + "%";
+  }
+
+  function renderPerformanceMatrixTable(rows, dates) {
+    if (!rows.length) return `<div class="empty compact">Sin datos en el rango seleccionado.</div>`;
+    const dateHeaders = dates.map((date) => `<th class="num">${formatDateShort(date)}</th>`).join("");
+    const body = Array.from(new Set([...getProductCategories(), ...rows.map((row) => row.category || "OTROS")])).map((category) => {
+      const categoryRows = rows.filter((row) => (row.category || "OTROS") === category);
+      if (!categoryRows.length) return "";
+      return `
+        <tr class="history-category-row"><td colspan="${3 + dates.length}">${escapeHtml(category)}</td></tr>
+        ${categoryRows.map((row) => `
+          <tr class="history-product-row" data-history-row data-history-type="performance" data-history-product-id="${escapeAttr(row.productId || "")}" data-history-product-name="${escapeAttr(row.productName || "")}">
+            <td>${escapeHtml(row.productName)}</td>
+            <td>${escapeHtml(row.unitType)}</td>
+            <td class="num ${row.totalQuantity > 0 ? marginBandClass(row.marginPct) : ""}">
+              <strong>${formatMoney(row.totalProfit)}</strong><br>
+              <span class="muted">${row.totalQuantity > 0 ? formatSharePct(row.marginPct) + " · " + formatMoney(row.totalAmount) : "-"}</span>
+            </td>
+            ${dates.map((date) => {
+              const day = row.days[date];
+              if (!day || !(day.quantity > 0)) return `<td class="num">-</td>`;
+              return `<td class="num ${marginBandClass(day.marginPct)}">
+                <strong>${formatMoney(day.unitMargin)}</strong><br>
+                <span class="muted">${formatSharePct(day.marginPct)} · ${formatMoney(day.amount)}</span>
+              </td>`;
+            }).join("")}
+          </tr>
+        `).join("")}
+      `;
+    }).join("");
+    return `
+      <div class="table-wrap history-matrix history-performance-matrix">
+        <table>
+          <thead><tr><th>Producto</th><th>Unidad</th><th>Ganancia del rango</th>${dateHeaders}</tr></thead>
+          <tbody>${body}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  function renderPerformanceAnalysisTable(analysis, options = {}) {
+    const sortKey = options.sortKey || "totalProfit";
+    const direction = options.direction === "asc" ? "asc" : "desc";
+    const interactive = options.interactive !== false;
+    if (!analysis.rows.length) return `<div class="empty compact">Sin datos en el rango seleccionado.</div>`;
+    const sorted = sortPerformanceAnalysisRows(analysis.rows, sortKey, direction);
+    const cell = (row, column) => {
+      const value = row[column.key];
+      if (column.type === "text") return `<td>${escapeHtml(value || "")}</td>`;
+      if (column.type === "number") return `<td class="num">${formatNumber(value)}</td>`;
+      if (column.type === "share") return `<td class="num">${formatSharePct(value)}</td>`;
+      if (column.type === "margin") return `<td class="num ${row.totalQuantity > 0 ? marginBandClass(value) : ""}">${row.totalQuantity > 0 ? formatSharePct(value) : "-"}</td>`;
+      return `<td class="num">${formatMoney(value)}</td>`;
+    };
+    const headers = HISTORY_ANALYSIS_COLUMNS.map((column) => {
+      const active = column.key === sortKey;
+      const arrow = active ? (direction === "asc" ? " ▲" : " ▼") : "";
+      const attrs = interactive ? ` data-analysis-sort="${escapeAttr(column.key)}" class="sortable${active ? " sorted" : ""}"` : "";
+      return `<th${attrs}>${escapeHtml(column.label)}${arrow}</th>`;
+    }).join("");
+    const body = sorted.map((row) => `<tr>${HISTORY_ANALYSIS_COLUMNS.map((column) => cell(row, column)).join("")}</tr>`).join("");
+    const totals = analysis.totals;
+    const totalRow = `
+      <tr class="history-analysis-total">
+        <td><strong>TOTAL</strong></td>
+        <td></td>
+        <td class="num">${formatNumber(totals.totalQuantity)}</td>
+        <td class="num">${formatMoney(totals.avgCost)}</td>
+        <td class="num">${formatMoney(totals.avgPrice)}</td>
+        <td class="num">${formatMoney(totals.unitMargin)}</td>
+        <td class="num">${formatSharePct(totals.marginPct)}</td>
+        <td class="num">${formatMoney(totals.totalAmount)}</td>
+        <td class="num">100,0%</td>
+        <td class="num">${formatMoney(totals.totalCost)}</td>
+        <td class="num">100,0%</td>
+        <td class="num">${formatMoney(totals.purchaseAmount)}</td>
+        <td class="num">100,0%</td>
+        <td class="num">${formatMoney(totals.totalProfit)}</td>
+        <td class="num">100,0%</td>
+      </tr>
+    `;
+    return `
+      <div class="table-wrap history-analysis-table">
+        <table>
+          <thead><tr>${headers}</tr></thead>
+          <tbody>${body}${totalRow}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
 
   function renderHistoryTable(rows, type) {
     const categories = Array.from(new Set([...getProductCategories(), ...rows.map((row) => row.category || "OTROS")]));
