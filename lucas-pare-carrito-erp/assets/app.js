@@ -6283,25 +6283,14 @@
     const loadingThisRange = ui.historyLoading && ui.historyLoadingKey === historyKey;
     const purchaseRows = historyReady ? (ui.historyData.purchaseRows || buildPurchaseHistoryMatrix(from, to, ui.historyData.purchaseHistory || [])) : [];
     const salesRows = historyReady ? (ui.historyData.salesRows || buildSalesHistoryMatrix(from, to, ui.historyData.salesQuantityHistory || [], ui.historyData.listPriceHistory || [])) : [];
-    const performanceRows = historyReady ? buildPerformanceHistoryMatrix(dates, purchaseRows, salesRows) : [];
-    const analysis = buildPerformanceAnalysis(performanceRows);
-    const analysisSortKey = ui.historyAnalysisSort || "totalProfit";
-    const analysisDirection = ui.historyAnalysisDir === "asc" ? "asc" : "desc";
-    const pending = () => {
-      if (ui.historyError) return `<div class="alert">${escapeHtml(ui.historyError)}</div>`;
-      if (!historyReady || loadingThisRange) return `<div class="empty compact">Cargando historiales...</div>`;
-      return "";
-    };
-    const historyBody = (rows, type) => pending() || renderHistoryMatrixTable(rows, dates, type);
-    const performanceBody = () => pending() || renderPerformanceMatrixTable(performanceRows, dates);
-    const analysisBody = () => pending() || renderPerformanceAnalysisTable(analysis, { sortKey: analysisSortKey, direction: analysisDirection });
+    const historyBody = (rows, type) => historyPendingMessage(historyReady, loadingThisRange) || renderHistoryMatrixTable(rows, dates, type);
     afterRender.push(() => {
       bindHistories();
       ensureHistoryRangeLoaded(from, to);
     });
     return pageShell(
       "Historiales",
-      "Compras, ventas y rendimiento por rango, con una columna por dia.",
+      "Compras y ventas por rango, con una columna por dia.",
       "",
       `
       <div class="panel" style="margin-bottom:14px">
@@ -6315,7 +6304,7 @@
               <button class="btn small ghost" type="button" data-history-range="30">30 dias</button>
               <button class="btn small ghost" type="button" data-history-range="3m">3 meses</button>
               <button class="btn small ghost" type="button" data-history-range="6m">6 meses</button>
-              <button class="btn small blue history-print-btn" type="button" data-print-history="all" title="Imprimir todos los historiales" aria-label="Imprimir todos los historiales">&#128424;</button>
+              <button class="btn small blue history-print-btn" type="button" data-print-history="all" title="Imprimir compras y ventas" aria-label="Imprimir compras y ventas">&#128424;</button>
             </div>
           </div>
         </div>
@@ -6335,31 +6324,6 @@
         </div>
         <p class="muted">Cada dia muestra el precio de lista y la cantidad total vendida.</p>
         ${historyBody(salesRows, "sales")}
-      </div>
-      <div class="panel" style="margin-top:14px" data-history-panel="performance">
-        <div class="history-panel-head">
-          <h2 class="page-title" style="font-size:18px">Rendimiento</h2>
-          <button class="btn small ghost history-print-btn" type="button" data-print-history="performance" title="Imprimir rendimiento" aria-label="Imprimir rendimiento">&#128424;</button>
-        </div>
-        <p class="muted">Cada dia muestra la diferencia entre el precio de lista y el de compra, el margen sobre el costo y el total vendido ese dia. El color va de rojo (pierde plata) a verde (margen alto).</p>
-        ${marginLegendHtml()}
-        ${performanceBody()}
-      </div>
-      <div class="panel" style="margin-top:14px" data-history-panel="analysis">
-        <div class="history-panel-head">
-          <h2 class="page-title" style="font-size:18px">Analisis de rentabilidad</h2>
-          <button class="btn small ghost history-print-btn" type="button" data-print-history="analysis" title="Imprimir analisis" aria-label="Imprimir analisis">&#128424;</button>
-        </div>
-        <p class="muted">Todo el rango en una fila por producto. Toque cualquier encabezado para ordenar y ver que producto es el que mas gasto genera, el que mas factura, el que mejor margen tiene y el que mas aporta a la ganancia total.</p>
-        ${historyReady && !loadingThisRange && !ui.historyError ? `
-          <div class="grid four" style="margin:10px 0 12px">
-            ${metricCard("Venta total", formatMoney(analysis.totals.totalAmount), formatDate(from) + " - " + formatDate(to))}
-            ${metricCard("Costo de lo vendido", formatMoney(analysis.totals.totalCost), "Cantidad vendida por el costo del dia")}
-            ${metricCard("Ganancia bruta", formatMoney(analysis.totals.totalProfit), "Venta menos costo de lo vendido")}
-            ${metricCard("Margen promedio", formatSharePct(analysis.totals.marginPct), "Sobre el costo, ponderado por venta")}
-          </div>
-        ` : ""}
-        ${analysisBody()}
       </div>
       `,
       "historiales"
@@ -6417,17 +6381,6 @@
     document.querySelectorAll("[data-history-row]").forEach((row) => row.addEventListener("click", () => {
       openHistoryProductChart(row.dataset.historyType, row.dataset.historyProductId || "", row.dataset.historyProductName || "");
     }));
-    document.querySelectorAll("[data-analysis-sort]").forEach((header) => header.addEventListener("click", () => {
-      const key = header.dataset.analysisSort;
-      if (ui.historyAnalysisSort === key) {
-        ui.historyAnalysisDir = ui.historyAnalysisDir === "asc" ? "desc" : "asc";
-      } else {
-        ui.historyAnalysisSort = key;
-        // Los nombres se leen mejor de la A a la Z; los numeros, del mas grande al mas chico.
-        ui.historyAnalysisDir = key === "productName" || key === "unitType" ? "asc" : "desc";
-      }
-      render();
-    }));
   }
 
   function printHistoryRange(scope, from, to, printWindow) {
@@ -6443,20 +6396,102 @@
       const rows = ui.historyData.salesRows || buildSalesHistoryMatrix(from, to, ui.historyData.salesQuantityHistory || [], ui.historyData.listPriceHistory || []);
       sections.push(`<section class="print-sheet history-print-sheet">${renderHistoryPrintTitle("Historial de ventas", from, to)}${renderHistoryMatrixTable(rows, dates, "sales")}</section>`);
     }
-    if (scope === "all" || scope === "performance" || scope === "analysis") {
-      const purchaseRows = ui.historyData.purchaseRows || buildPurchaseHistoryMatrix(from, to, ui.historyData.purchaseHistory || []);
-      const salesRows = ui.historyData.salesRows || buildSalesHistoryMatrix(from, to, ui.historyData.salesQuantityHistory || [], ui.historyData.listPriceHistory || []);
-      const performanceRows = buildPerformanceHistoryMatrix(dates, purchaseRows, salesRows);
-      if (scope === "all" || scope === "performance") {
-        sections.push(`<section class="print-sheet history-print-sheet">${renderHistoryPrintTitle("Rendimiento", from, to)}${renderPerformanceMatrixTable(performanceRows, dates)}</section>`);
-      }
-      if (scope === "all" || scope === "analysis") {
-        const analysis = buildPerformanceAnalysis(performanceRows);
-        const table = renderPerformanceAnalysisTable(analysis, { sortKey: ui.historyAnalysisSort || "totalProfit", direction: ui.historyAnalysisDir === "asc" ? "asc" : "desc", interactive: false });
-        sections.push(`<section class="print-sheet history-print-sheet">${renderHistoryPrintTitle("Analisis de rentabilidad", from, to)}${table}</section>`);
-      }
-    }
     printHtmlDocument("Historiales " + formatDate(from) + " - " + formatDate(to), `<section class="history-print-page">${sections.join("")}</section>`, { landscape: true, margin: "4mm", useWindow: true, printWindow });
+  }
+
+  function historyPendingMessage(historyReady, loadingThisRange) {
+    if (ui.historyError) return `<div class="alert">${escapeHtml(ui.historyError)}</div>`;
+    if (!historyReady || loadingThisRange) return `<div class="empty compact">Cargando historiales...</div>`;
+    return "";
+  }
+
+  // El rendimiento por producto sale del historial de compras y ventas del servidor, igual que
+  // Historiales, pero con el rango de fechas de la pagina de Rendimiento.
+  function getPerformanceRangeData(from, to) {
+    const dates = buildDateRange(from, to);
+    const ready = !!(ui.historyData && ui.historyData.from === from && ui.historyData.to === to);
+    const loading = ui.historyLoading && ui.historyLoadingKey === from + "|" + to;
+    const purchaseRows = ready ? (ui.historyData.purchaseRows || buildPurchaseHistoryMatrix(from, to, ui.historyData.purchaseHistory || [])) : [];
+    const salesRows = ready ? (ui.historyData.salesRows || buildSalesHistoryMatrix(from, to, ui.historyData.salesQuantityHistory || [], ui.historyData.listPriceHistory || [])) : [];
+    const rows = ready ? buildPerformanceHistoryMatrix(dates, purchaseRows, salesRows) : [];
+    return { dates, ready, loading, rows, analysis: buildPerformanceAnalysis(rows) };
+  }
+
+  function renderPerformanceProductPanels(from, to) {
+    const data = getPerformanceRangeData(from, to);
+    const pending = historyPendingMessage(data.ready, data.loading);
+    const sortKey = ui.historyAnalysisSort || "totalProfit";
+    const direction = ui.historyAnalysisDir === "asc" ? "asc" : "desc";
+    return `
+      <div class="panel" style="margin-top:14px" data-history-panel="analysis">
+        <div class="history-panel-head">
+          <h2 class="page-title" style="font-size:18px">Analisis de rentabilidad por producto</h2>
+          <button class="btn small ghost history-print-btn" type="button" data-print-performance="analysis" title="Imprimir analisis" aria-label="Imprimir analisis">&#128424;</button>
+        </div>
+        <p class="muted">Todo el rango en una fila por producto. Toque cualquier encabezado para ordenar y ver que producto es el que mas gasto genera, el que mas factura, el que mejor margen tiene y el que mas aporta a la ganancia total.</p>
+        ${pending ? "" : `
+          <div class="grid four" style="margin:10px 0 12px">
+            ${metricCard("Venta total", formatMoney(data.analysis.totals.totalAmount), formatDate(from) + " - " + formatDate(to))}
+            ${metricCard("Costo de lo vendido", formatMoney(data.analysis.totals.totalCost), "Cantidad vendida por el costo del dia")}
+            ${metricCard("Ganancia bruta", formatMoney(data.analysis.totals.totalProfit), "Venta menos costo de lo vendido")}
+            ${metricCard("Margen promedio", formatSharePct(data.analysis.totals.marginPct), "Sobre el costo, ponderado por venta")}
+          </div>
+        `}
+        ${pending || renderPerformanceAnalysisTable(data.analysis, { sortKey, direction })}
+      </div>
+      <div class="panel" style="margin-top:14px" data-history-panel="performance">
+        <div class="history-panel-head">
+          <h2 class="page-title" style="font-size:18px">Rendimiento por dia</h2>
+          <button class="btn small ghost history-print-btn" type="button" data-print-performance="performance" title="Imprimir rendimiento por dia" aria-label="Imprimir rendimiento por dia">&#128424;</button>
+        </div>
+        <p class="muted">Cada dia muestra la diferencia entre el precio de lista y el de compra, el margen sobre el costo y el total vendido ese dia. El color va de rojo (pierde plata) a verde (margen alto).</p>
+        ${pending ? "" : marginLegendHtml()}
+        ${pending || renderPerformanceMatrixTable(data.rows, data.dates)}
+      </div>
+    `;
+  }
+
+  function printPerformanceRange(scope, from, to, printWindow) {
+    const data = getPerformanceRangeData(from, to);
+    if (!data.ready) return alert("Todavia se estan cargando los historiales del rango.");
+    const sections = [];
+    if (scope === "all" || scope === "analysis") {
+      const table = renderPerformanceAnalysisTable(data.analysis, { sortKey: ui.historyAnalysisSort || "totalProfit", direction: ui.historyAnalysisDir === "asc" ? "asc" : "desc", interactive: false });
+      sections.push(`<section class="print-sheet history-print-sheet">${renderHistoryPrintTitle("Analisis de rentabilidad por producto", from, to)}${table}</section>`);
+    }
+    if (scope === "all" || scope === "performance") {
+      sections.push(`<section class="print-sheet history-print-sheet">${renderHistoryPrintTitle("Rendimiento por dia", from, to)}${renderPerformanceMatrixTable(data.rows, data.dates)}</section>`);
+    }
+    printHtmlDocument("Rendimiento " + formatDate(from) + " - " + formatDate(to), `<section class="history-print-page">${sections.join("")}</section>`, { landscape: true, margin: "4mm", useWindow: true, printWindow });
+  }
+
+  function bindPerformanceProductPanels() {
+    document.querySelectorAll("[data-analysis-sort]").forEach((header) => header.addEventListener("click", () => {
+      const key = header.dataset.analysisSort;
+      if (ui.historyAnalysisSort === key) {
+        ui.historyAnalysisDir = ui.historyAnalysisDir === "asc" ? "desc" : "asc";
+      } else {
+        ui.historyAnalysisSort = key;
+        // Los nombres se leen mejor de la A a la Z; los numeros, del mas grande al mas chico.
+        ui.historyAnalysisDir = key === "productName" || key === "unitType" ? "asc" : "desc";
+      }
+      render();
+    }));
+    document.querySelectorAll("[data-history-row]").forEach((row) => row.addEventListener("click", () => {
+      openHistoryProductChart(row.dataset.historyType, row.dataset.historyProductId || "", row.dataset.historyProductName || "");
+    }));
+    document.querySelectorAll("[data-print-performance]").forEach((button) => button.addEventListener("click", async () => {
+      const scope = button.dataset.printPerformance || "all";
+      const currentFrom = ui.performanceFrom || ui.performanceDate || todayISO();
+      const currentTo = ui.performanceTo || currentFrom;
+      const printWindow = window.open("", "_blank");
+      await ensureHistoryRangeLoaded(currentFrom, currentTo, { forceRender: false });
+      if (ui.historyError) {
+        if (printWindow) printWindow.close();
+        return alert(ui.historyError);
+      }
+      printPerformanceRange(scope, currentFrom, currentTo, printWindow);
+    }));
   }
 
   function renderHistoryPrintTitle(title, from, to) {
@@ -6495,8 +6530,10 @@
   }
 
   function openHistoryProductChart(type, productId, productName) {
-    const from = ui.historyFrom || todayISO();
-    const to = ui.historyTo || from;
+    // Las filas de rendimiento viven en la pagina Rendimiento, que tiene su propio rango.
+    const onPerformancePage = getRoute().base === "rendimiento";
+    const from = onPerformancePage ? (ui.performanceFrom || ui.performanceDate || todayISO()) : (ui.historyFrom || todayISO());
+    const to = (onPerformancePage ? ui.performanceTo : ui.historyTo) || from;
     const historyReady = ui.historyData && ui.historyData.from === from && ui.historyData.to === to;
     if (!historyReady) return alert("Todavia se estan cargando los historiales del rango.");
     const dates = buildDateRange(from, to);
@@ -6587,7 +6624,7 @@
   }
 
   async function ensureHistoryRangeLoaded(from, to, options = {}) {
-    const isCurrentPage = () => getRoute().base === "historiales";
+    const isCurrentPage = () => ["historiales", "rendimiento"].includes(getRoute().base);
     const requestKey = from + "|" + to;
     if (ui.historyLoading && ui.historyLoadingKey === requestKey) {
       const startedAt = Date.now();
@@ -7292,10 +7329,14 @@
         <td class="num">${formatMoney(item.companyProfit)}</td>
       </tr>
     `).join("");
-    afterRender.push(bindPerformance);
+    afterRender.push(() => {
+      bindPerformance();
+      bindPerformanceProductPanels();
+      ensureHistoryRangeLoaded(from, to);
+    });
     return pageShell(
       "Rendimiento",
-      "Gastos, ventas cobradas, saldos a cobrar y rendimiento de la empresa.",
+      "Gastos, ventas cobradas, saldos a cobrar y rentabilidad por producto.",
       "",
       `
       <div class="panel" style="margin-bottom:14px">
@@ -7355,6 +7396,7 @@
           </div>
         </form>
       </div>
+      ${renderPerformanceProductPanels(from, to)}
       `,
       "rendimiento"
     );
