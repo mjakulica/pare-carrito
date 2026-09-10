@@ -1176,7 +1176,7 @@ tr:last-child td {
 
 .purchase-line {
   display: grid;
-  grid-template-columns: minmax(140px, 1.3fr) 58px 84px 66px 66px 80px 82px 30px;
+  grid-template-columns: minmax(150px, 1.3fr) 58px 84px 66px 66px 80px 64px 82px;
   gap: 6px;
   align-items: end;
   padding: 6px;
@@ -1186,7 +1186,22 @@ tr:last-child td {
 }
 
 .purchase-line.pl-norel {
-  grid-template-columns: minmax(140px, 1.3fr) 58px 84px 66px 80px 82px 30px;
+  grid-template-columns: minmax(150px, 1.3fr) 58px 84px 66px 80px 64px 82px;
+}
+
+/* La X va pegada al nombre del producto, no en una columna aparte al final. En escritorio se
+   apoya en el renglon de la etiqueta, que esta libre, para no taparle el "Falta xx". */
+.purchase-line .purchase-product-combo {
+  position: relative;
+}
+.purchase-line .pl-quitar {
+  position: absolute;
+  top: -2px;
+  right: 0;
+  min-height: 20px;
+  padding: 0 7px;
+  font-size: 11px;
+  line-height: 18px;
 }
 
 .purchase-line.pl-norel [data-relation-field] { display: none; }
@@ -1274,11 +1289,12 @@ tr:last-child td {
   grid-template-columns: minmax(220px, 1fr) 160px 42px;
 }
 
-.market-price-mode .purchase-line .field:nth-of-type(2),
-.market-price-mode .purchase-line .field:nth-of-type(3),
-.market-price-mode .purchase-line .field:nth-of-type(4),
-.market-price-mode .purchase-line .field:nth-of-type(5),
-.market-price-mode .purchase-line .field:nth-of-type(7) {
+.market-price-mode .purchase-line .pl-qty,
+.market-price-mode .purchase-line .pl-cost,
+.market-price-mode .purchase-line .pl-ult,
+.market-price-mode .purchase-line [data-relation-field],
+.market-price-mode .purchase-line .pl-cc,
+.market-price-mode .purchase-line .pl-sub {
   display: none;
 }
 
@@ -3344,16 +3360,13 @@ tr:last-child td {
 
   /* En el celular el nombre del producto no entra en una columna angosta: la primera fila es
      "Producto <nombre> Falta xx kg" a lo ancho, y todos los demas recuadros van abajo. */
-  .purchase-line {
+  .purchase-line,
+  .purchase-line.pl-norel {
     display: grid;
-    grid-template-columns: minmax(40px, 1fr) minmax(46px, 1.2fr) minmax(44px, 1fr) minmax(44px, 1fr) minmax(44px, 1fr) 26px;
+    grid-template-columns: minmax(38px, 1fr) minmax(46px, 1.2fr) minmax(44px, 1fr) minmax(42px, 1fr) minmax(46px, 1fr) minmax(40px, 0.8fr);
     grid-template-rows: auto auto;
     gap: 4px;
     align-items: end;
-  }
-
-  .purchase-line.pl-norel {
-    grid-template-columns: minmax(40px, 1fr) minmax(46px, 1.2fr) minmax(44px, 1fr) minmax(44px, 1fr) minmax(44px, 1fr) 26px;
   }
 
   .purchase-line .purchase-product-combo {
@@ -3382,6 +3395,16 @@ tr:last-child td {
   .purchase-line .purchase-product-combo .pl-falta[hidden] {
     display: none;
   }
+  /* Aca la fila del producto es horizontal, asi que la X es un item mas al final y no se
+     superpone con el "Falta xx". */
+  .purchase-line .pl-quitar {
+    position: static;
+    flex: 0 0 auto;
+    min-height: var(--tap);
+    padding: 0 8px;
+    font-size: 12px;
+    line-height: normal;
+  }
 
   .purchase-line .field {
     min-width: 0;
@@ -3401,31 +3424,28 @@ tr:last-child td {
     font-size: 12px;
   }
 
-  .purchase-line .field:nth-child(2) { grid-column: 1; grid-row: 2; }
-  .purchase-line .field:nth-child(3) { grid-column: 2; grid-row: 2; }
-  .purchase-line .field:nth-child(4) { grid-column: 3; grid-row: 2; }
-  .purchase-line .field:nth-child(5) { display: none; }
-  .purchase-line .field:nth-child(6) { grid-column: 4; grid-row: 2; }
-  .purchase-line .field:nth-child(7) { grid-column: 5; grid-row: 2; }
-  .purchase-line > [data-remove-purchase-item] {
-    grid-column: 6;
-    grid-row: 2;
-    justify-self: stretch;
-    align-self: end;
-    min-height: var(--tap);
-    padding: 0 3px;
-    font-size: 11px;
-  }
+  /* Cada recuadro se ubica por su clase y no por la posicion: al agregar la casilla C.C se
+     corrian todos y las etiquetas quedaban cambiadas ("subt." dos veces). */
+  .purchase-line .pl-qty { grid-column: 1; grid-row: 2; }
+  .purchase-line .pl-cost { grid-column: 2; grid-row: 2; }
+  .purchase-line .pl-ult { grid-column: 3; grid-row: 2; }
+  .purchase-line [data-relation-field] { display: none; }
+  .purchase-line .pl-market { grid-column: 4; grid-row: 2; }
+  .purchase-line .pl-sub { grid-column: 5; grid-row: 2; }
+  #purchase-items.cc-mode .purchase-line .pl-cc { grid-column: 6; grid-row: 2; }
 
   .purchase-line .pl-ult-btn { width: 100%; min-height: var(--tap); padding: 0 2px; font-size: 9px; white-space: nowrap; overflow: hidden; }
-  .purchase-line .field:nth-child(4) label { font-size: 9px; }
+  .purchase-line .pl-ult label { font-size: 9px; }
 
-  .purchase-line .field:nth-child(3) label { font-size: 0; }
-  .purchase-line .field:nth-child(3) label::before { content: "costo u."; font-size: 9px; }
-  .purchase-line .field:nth-child(6) label { font-size: 0; }
-  .purchase-line .field:nth-child(6) label::before { content: "$ merc."; font-size: 9px; }
-  .purchase-line .field:nth-child(7) label { font-size: 0; }
-  .purchase-line .field:nth-child(7) label::before { content: "subt."; font-size: 9px; }
+  .purchase-line .pl-cost label { font-size: 0; }
+  .purchase-line .pl-cost label::before { content: "costo u."; font-size: 9px; }
+  .purchase-line .pl-market label { font-size: 0; }
+  .purchase-line .pl-market label::before { content: "$ merc."; font-size: 9px; }
+  .purchase-line .pl-sub label { font-size: 0; }
+  .purchase-line .pl-sub label::before { content: "subt."; font-size: 9px; }
+  .purchase-line .pl-cc label:first-child { font-size: 0; }
+  .purchase-line .pl-cc label:first-child::before { content: "C.C"; font-size: 9px; }
+  .purchase-line .pl-cc .cc-check select { min-width: 0; width: 100%; }
 
   .market-price-mode .purchase-line {
     grid-template-columns: minmax(0, 1fr) 90px 42px;
@@ -3433,8 +3453,7 @@ tr:last-child td {
   }
 
   .market-price-mode .purchase-line .purchase-product-combo { grid-column: 1 / -1; grid-row: 1; }
-  .market-price-mode .purchase-line .field:nth-child(6) { grid-column: 1; grid-row: 2; }
-  .market-price-mode .purchase-line > [data-remove-purchase-item] { grid-column: 2; grid-row: 2; }
+  .market-price-mode .purchase-line .pl-market { grid-column: 1 / -1; grid-row: 2; }
 
   .divide-page-actions {
     display: grid;

@@ -5,7 +5,7 @@
   const USER_KEY = "lpc_current_user_v1";
   const OPERATIONAL_RESET_VERSION = "20260610-operational-clean-1";
   const BUSINESS_NAME = "Pare Carrito SAS";
-  const APP_VERSION = "v15";
+  const APP_VERSION = "v16";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -4317,10 +4317,7 @@
       return selectedCategories.includes(product.category || "OTROS");
     };
     const productMatches = (product) => categoryMatches(product) && wholesaleMatches(product);
-    const nameMatches = (product) => {
-      if (!ui.orderProductFilter) return true;
-      return product.name.toLowerCase().includes(ui.orderProductFilter.toLowerCase());
-    };
+    const nameMatches = (product) => productSearchMatches(product, ui.orderProductFilter, ui.selectedClientId);
     const filteredProducts = products.filter((product) => productMatches(product) && nameMatches(product));
     const initialOrderLimit = getOrderProductBatchLimit();
     if (!supportsOrderProductLazyLoad() || !Number.isFinite(Number(ui.orderRenderedLimit)) || Number(ui.orderRenderedLimit) < ORDER_PRODUCT_BATCH_SIZE) ui.orderRenderedLimit = initialOrderLimit;
@@ -4379,7 +4376,7 @@
                 </div>
                 <button class="btn small ghost" id="clear-order-search" type="button">X</button>
               </div>
-              <datalist id="order-product-options">${activeProducts().map((product) => `<option value="${escapeAttr(product.name)}"></option>`).join("")}</datalist>
+              <datalist id="order-product-options">${activeProducts().map((product) => `<option value="${escapeAttr(product.name)}"></option>`).join("")}${orderSearchAliasOptions(ui.selectedClientId)}</datalist>
             </div>
             <div class="field order-quick-note-field">
               <label>Nota</label>
@@ -4593,7 +4590,7 @@
     };
     const filterMatches = (product) => {
       if (!product) return false;
-      const nameOk = !ui.orderProductFilter || product.name.toLowerCase().includes(ui.orderProductFilter.toLowerCase());
+      const nameOk = productSearchMatches(product, ui.orderProductFilter, ui.selectedClientId);
       const categories = getProductCategories();
       const selected = Array.isArray(ui.orderSelectedCategories) ? ui.orderSelectedCategories : [];
       const catOk = selected.length === 0 || selected.includes(product.category || "OTROS") || categories.length === 0;
@@ -8286,12 +8283,13 @@
             ${purchaseProductOptions(selected ? selected.id : "", selected ? selected.name : "")}
           </select>
           <span class="pl-falta" data-shortage-note hidden></span>
+          <button class="btn small ghost pl-quitar" type="button" data-remove-purchase-item title="Quitar">X</button>
         </div>
-        <div class="field">
+        <div class="field pl-qty">
           <label>cant</label>
           <input data-item-qty inputmode="decimal" placeholder="0" />
         </div>
-        <div class="field">
+        <div class="field pl-cost">
           <label>costo u.</label>
           <input data-item-cost inputmode="decimal" placeholder="0" />
         </div>
@@ -8303,7 +8301,7 @@
           <label>C. doc</label>
           <input data-item-relation-units inputmode="decimal" placeholder="auto" />
         </div>
-        <div class="field">
+        <div class="field pl-market">
           <label>$ mercado</label>
           <input data-item-market-price inputmode="decimal" placeholder="0" />
         </div>
@@ -8311,11 +8309,10 @@
           <label>C.C</label>
           <label class="cc-check"><input type="checkbox" data-item-cc style="width:auto;min-height:auto" /><select data-item-provider hidden></select></label>
         </div>
-        <div class="field">
+        <div class="field pl-sub">
           <label>Subtotal</label>
           <input data-item-total disabled value="$0" />
         </div>
-        <button class="btn small ghost" type="button" data-remove-purchase-item title="Quitar">X</button>
       </div>
     `;
   }
@@ -17773,6 +17770,36 @@
 
   function normalizeText(value) {
     return String(value || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+  }
+
+  // Busqueda de productos en Nuevo pedido: sin tildes y tambien por alias. Asi "coreano" encuentra
+  // el producto que tiene ese alias cargado, y "limon" encuentra "Limón" igual que "limón".
+  function productSearchMatches(product, filtro, clientId) {
+    const texto = normalizeText(filtro);
+    if (!texto) return true;
+    if (!product) return false;
+    if (normalizeText(product.name).includes(texto)) return true;
+    const alias = (a) => a && a.productId === product.id && normalizeText(a.alias).includes(texto);
+    if ((state.productAliases || []).some(alias)) return true;
+    return (state.clientProductAliases || []).some((a) => alias(a) && (!clientId || a.clientId === clientId));
+  }
+
+  // Los alias tambien aparecen en el desplegable del buscador, mostrando a que producto llevan.
+  function orderSearchAliasOptions(clientId) {
+    const vistos = new Set(activeProducts().map((product) => normalizeText(product.name)));
+    const opciones = [];
+    const agregar = (alias, productId) => {
+      const product = getProduct(productId);
+      const clave = normalizeText(alias);
+      if (!product || !clave || vistos.has(clave)) return;
+      vistos.add(clave);
+      opciones.push(`<option value="${escapeAttr(alias)}">${escapeHtml(product.name)}</option>`);
+    };
+    (state.productAliases || []).forEach((a) => agregar(a.alias, a.productId));
+    (state.clientProductAliases || [])
+      .filter((a) => !clientId || a.clientId === clientId)
+      .forEach((a) => agregar(a.alias, a.productId));
+    return opciones.join("");
   }
 
   function normalizeAliasKey(value) {
