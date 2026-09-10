@@ -8143,7 +8143,7 @@
     if (parts.length > 1) out += "," + parts.slice(1).join("").replace(/\D/g, "");
     el.value = out;
   }
-  // Muestra/oculta "Unid. calculo" (solo mayoristas con relacion minorista), el boton de
+  // Muestra/oculta "C. doc" (solo mayoristas con relacion minorista), el boton de
   // ultimo costo y la advertencia de suba >30% de cada fila de compra.
   function syncPurchaseRow(row) {
     if (!row) return;
@@ -8223,7 +8223,7 @@
           <button type="button" class="btn small ghost pl-ult-btn" data-fill-last-cost style="display:none"></button>
         </div>
         <div class="field" data-relation-field style="display:none">
-          <label>Unid. calc</label>
+          <label>C. doc</label>
           <input data-item-relation-units inputmode="decimal" placeholder="auto" />
         </div>
         <div class="field">
@@ -9145,7 +9145,9 @@
       byProduct[productKey].clients[order.clientId] = (byProduct[productKey].clients[order.clientId] || 0) + Number(item.quantity || 0);
       if (item.note) (byProduct[productKey].notes[order.clientId] = byProduct[productKey].notes[order.clientId] || []).push(item.note);
       if (!byClient[order.clientId]) byClient[order.clientId] = [];
-      byClient[order.clientId].push(`${divideQtyLabel(item.quantity, divideItemUnit(item))} ${item.productName}${isAll ? " - " + (assigned ? assigned.name : "Sin asignar") : ""}`);
+      // La nota tiene que ir tambien aca: el que compra mira el agrupado por producto, pero el que
+      // arma el pedido del cliente mira este, y sin la nota se pierde ("ni duras ni blandas").
+      byClient[order.clientId].push(`${divideQtyLabel(item.quantity, divideItemUnit(item))} ${item.productName}${isAll ? " - " + (assigned ? assigned.name : "Sin asignar") : ""}${item.note ? " (" + item.note + ")" : ""}`);
     });
     const productGroups = Object.values(byProduct);
     sortDivideGroupsByAssignee(productGroups);
@@ -16826,8 +16828,22 @@
     return { items, unmatched };
   }
 
+  // Abreviaturas de unidad que se escriben con punto ("3 doc. naranjas", "1 un. de ajo"). El punto
+  // se saca ANTES de partir por oraciones: si no, "3 doc. naranjas" se partia en "3 doc" y
+  // "naranjas", y salia un producto fantasma con la cantidad del otro.
+  const UNIT_ABBREVIATIONS = /\b(docs?|doc|dc|dna|dnas|unid|uni|un|u|kgs?|kg|k|grs?|gr|caj|cjs?|cj|bls?|jls?|atad|band|maple)\.(?=\s|$)/gi;
+
+  // "3 y media" / "1 y medio" tienen que resolverse antes de partir la linea por la "y", si no
+  // queda "3" por un lado y "media" suelto por el otro.
+  const HALF_SUFFIX = /(\d+(?:[.,]\d+)?)\s+y\s+medi[oa]\b/gi;
+
   function expandWhatsappOrderLines(text) {
-    const rawLines = String(text || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    const rawLines = String(text || "").split(/\r?\n/)
+      .map((line) => String(line || "")
+        .replace(UNIT_ABBREVIATIONS, "$1")
+        .replace(HALF_SUFFIX, (mm, n) => (parseFloat(String(n).replace(",", ".")) + 0.5).toString().replace(".", ","))
+        .trim())
+      .filter(Boolean);
     const expanded = [];
     rawLines.forEach((line) => {
       const protectedLine = line
@@ -16957,6 +16973,12 @@
         const kgProduct = findProductForParsedLine(resolved.name, "kg", clientId);
         if (kgProduct && normalizeText(kgProduct.unitType) === "kg") unitType = "kg";
       }
+      // Cantidad entera sin unidad y el producto tiene variante "por unidad" ("4 zanahorias"
+      // con Zanahoria Kg y Zanahoria Unidad): se pide por unidad, no por kilo.
+      if (!unitType && quantity > 0 && Number.isInteger(quantity)) {
+        const unitProduct = findProductForParsedLine(resolved.name, "unidad", clientId);
+        if (unitProduct && normalizeText(unitProduct.unitType) === "unidad") unitType = "unidad";
+      }
       const product = findProductForParsedLine(resolved.name, unitType, clientId);
       const adjusted = adjustParsedQuantityAndUnitForProduct(quantity, unitType, product, nameTokens);
       return { name: resolved.name, quantity: adjusted.quantity, unitType: adjusted.unitType, note: resolved.note };
@@ -17036,8 +17058,11 @@
       .replace(/\bbolsas?\s+de\b/gi, "bolsa de")
       // "cebolla blanca" -> "cebolla" (blanca es la variedad por defecto; no debe quedar como nota)
       .replace(/\bcebollas?\s+blanc[ao]s?\b/gi, "cebolla")
-      // "cebolla verde / cebolla de verdeo / cebolla verdeo" -> Verdeo
-      .replace(/\bcebollas?\s+(?:de\s+)?verde?o?\b/gi, "verdeo")
+      // "cebolla de verdeo" / "cebolla verdeo" siempre es Verdeo. "cebolla verde" a secas tambien,
+      // SALVO que la linea venga en kilos: el verdeo se vende por atado, asi que "6 kg cebolla
+      // verde" es cebolla comun y no verdeo.
+      .replace(/\bcebollas?\s+(?:de\s+)?verdeos?\b/gi, "verdeo")
+      .replace(/\bcebollas?\s+verdes?\b/gi, (match, offset, full) => (/\b(kg|kgs|kilos?|grs?|gramos)\b/i.test(full) ? "cebolla" : "verdeo"))
       // "1 docena y media", "2 atados y medio", etc. -> "1,5 docena" / "2,5 atados"
       .replace(/(\d+(?:[.,]\d+)?)\s+(docenas?|atados?|bolsas?|cajones?|cajon|jaulas?|plantas?|unidad(?:es)?|maples?|kg|kgs|kilos?)\s+y\s+medi[oa]\b/gi, (mm, n, u) => (parseFloat(String(n).replace(",", ".")) + 0.5).toString().replace(".", ",") + " " + u)
       .replace(/(\d+(?:[.,]\d+)?)\s*(kg|kgs|k|kilos?|kilo|grs?|gramos)\s+y\s+medi[oa]\b/gi, (mm, n, u) => (parseFloat(String(n).replace(",", ".")) + 0.5).toString().replace(".", ",") + " " + u)
@@ -17412,8 +17437,11 @@
 
   function stripTrailingProductUnitWords(value) {
     const units = new Set(DEFAULT_UNIT_TYPES.map((unit) => normalizeText(unit.name)).concat(["kg", "kilo", "kilos", "unidad", "unidades", "cajon", "cajones", "atado", "atados", "bolsas", "jaulas", "docenas"]));
+    // Calificativos de tamanio que van DESPUES de la unidad ("Calabaza Bolsa Chica"): sin sacarlos,
+    // la base quedaba "calabaza bolsa chica" y no matcheaba con "calabaza" + unidad bolsa.
+    const sizes = new Set(["chica", "chico", "chicas", "chicos", "grande", "grandes", "mediana", "mediano", "medianas", "medianos"]);
     const words = normalizeText(value).split(" ").filter(Boolean);
-    while (words.length > 1 && units.has(words[words.length - 1])) words.pop();
+    while (words.length > 1 && (units.has(words[words.length - 1]) || sizes.has(words[words.length - 1]))) words.pop();
     return words.join(" ");
   }
 
