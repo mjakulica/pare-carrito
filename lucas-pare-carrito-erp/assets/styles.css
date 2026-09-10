@@ -4150,3 +4150,12 @@ tr:last-child td {
   font-weight: 800;
   border-top: 2px solid var(--line);
 }
+
+/* Aviso de facturas que quedaron sin emitir (fallidas o atrasadas). */
+.billing-warning {
+  border-left: 5px solid #b45309;
+}
+
+.billing-warning ul {
+  font-size: 13px;
+}

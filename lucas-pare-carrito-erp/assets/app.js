@@ -2913,6 +2913,7 @@
       ${renderPendingUsersBanner()}
       ${renderPendingReplacementsBanner()}
       ${unassignedOrderedBannerHtml()}
+      ${["manager", "admin", "contador"].includes(currentUser.role) ? unbilledWarningHtml({ compact: true }) : ""}
       <div class="grid four dash-metrics-grid">
         ${metricCard("Pedidos de hoy", todaysOrders.length, "Pedidos activos cargados")}
         ${metricCard("Caja", formatMoney(cajaBalance), "Ingresos menos egresos")}
@@ -5245,6 +5246,7 @@
             ${["manager", "admin", "employee"].includes(currentUser.role) ? `<button class="btn small ghost" data-edit-order="${order.id}">Editar</button>` : ""}
             ${["manager", "admin", "employee"].includes(currentUser.role) ? `<button class="btn small ghost" data-print-order-remito="${order.id}" title="Imprimir" aria-label="Imprimir">&#128424;</button>` : ""}
             ${["manager", "admin", "employee"].includes(currentUser.role) ? `<button class="btn small ghost" data-add-recambio-order="${order.id}" title="Pedir recambio de este pedido" aria-label="Pedir recambio">&#8635;</button>` : ""}
+            ${["manager", "admin", "contador"].includes(currentUser.role) ? renderOrderInvoiceButton(order.id) : ""}
             ${order.handwrittenImage ? `<button class="btn small ghost" data-view-handwritten="${order.id}" title="Ver pedido manuscrito" aria-label="Pedido manuscrito">&#128196;</button>` : ""}
             ${order.whatsappText ? `<button class="btn small ghost" data-view-whatsapp="${order.id}" title="Ver texto interpretado" aria-label="Texto del pedido">&#128221;</button>` : ""}
             ${!annulledView && order.status === "entregado" && ["manager", "admin", "employee"].includes(currentUser.role)
@@ -5265,6 +5267,7 @@
       : `<th>Pedido</th><th>Cliente</th><th>Productos</th><th>Total</th>${canEditStatus ? "<th>Estado</th>" : "<th>Cobrado</th><th>Estado</th>"}${showActions ? "<th>Acciones</th>" : ""}`;
 
     afterRender.push(bindOrders);
+    afterRender.push(bindOrderInvoiceButtons);
     afterRender.push(() => {
       document.querySelectorAll("[data-open-recambio]").forEach((b) => b.addEventListener("click", openRecambioModal));
       document.querySelectorAll("[data-add-recambio-order]").forEach((b) => b.addEventListener("click", () => openRecambioModal(b.dataset.addRecambioOrder)));
@@ -5610,7 +5613,10 @@
           <td class="page-actions">
             ${canViewRemito ? `<button class="btn small ghost" data-view-customer-remito="${order.id}">Remito</button>` : `<span class="muted">Remito disponible 8:00</span>`}
             ${canEdit ? `<button class="btn small ghost" data-edit-order="${order.id}">Editar</button>` : ""}
-            ${clientNeedsDailyInvoice(order.clientId) && getOrderInvoicePdf(order.id) ? `<a class="btn small ghost" href="${escapeAttr(getOrderInvoicePdf(order.id))}" target="_blank" rel="noopener">Factura</a>` : ""}
+            ${(() => {
+              const invoiceLog = getOrderInvoiceLog(order.id);
+              return invoiceLog && invoiceLog.pdf ? `<a class="btn small ghost" href="${escapeAttr(invoiceLog.pdf)}" target="_blank" rel="noopener" title="${escapeAttr(orderInvoiceTitle(invoiceLog))}">Factura</a>` : "";
+            })()}
           </td>
         </tr>
       `;
@@ -5710,9 +5716,48 @@
     const c = getClient(clientId);
     return !!(c && c.needsInvoice && c.invoiceFrequency === "diaria");
   }
-  function getOrderInvoicePdf(orderId) {
-    const log = (state.billingLog || []).filter((l) => l.status === "ok" && l.pdf && Array.isArray(l.orders) && l.orders.indexOf(orderId) !== -1).pop();
-    return log ? log.pdf : "";
+  // El servidor guarda en billingLog la CANTIDAD de pedidos en "orders" y los IDs en "orderIds".
+  // Las facturas viejas guardaban los IDs directamente en "orders", asi que se aceptan las dos.
+  function getBillingLogOrderIds(log) {
+    if (!log) return [];
+    if (Array.isArray(log.orderIds)) return log.orderIds;
+    if (Array.isArray(log.orders)) return log.orders;
+    return [];
+  }
+
+  // Factura emitida que incluye este pedido. Si el pedido entro en mas de una (por ejemplo una
+  // re-emision), vale la ultima. Solo sirven las que tienen con que abrir el PDF.
+  function getOrderInvoiceLog(orderId) {
+    if (!orderId) return null;
+    return (state.billingLog || [])
+      .filter((log) => log.status === "ok" && (log.numero || log.pdf) && getBillingLogOrderIds(log).indexOf(orderId) !== -1)
+      .pop() || null;
+  }
+
+  function orderInvoiceTitle(log) {
+    const parts = [log.invoiceType || "Factura"];
+    if (log.numero) parts.push(String(log.numero).trim());
+    parts.push("del " + formatDate(String(log.from || log.emittedAt || "").slice(0, 10)));
+    return parts.join(" ");
+  }
+
+  // Boton "Factura" de la fila de un pedido. Con numero de comprobante se pide el PDF al servidor
+  // (TusFacturas), que es el caso normal; si la factura vieja solo tiene la URL, se abre directo.
+  function renderOrderInvoiceButton(orderId) {
+    const log = getOrderInvoiceLog(orderId);
+    if (!log) return "";
+    const title = orderInvoiceTitle(log);
+    if (log.numero) return `<button class="btn small ghost" type="button" data-order-invoice="${escapeAttr(orderId)}" title="${escapeAttr(title)}" aria-label="${escapeAttr(title)}">Factura</button>`;
+    return `<a class="btn small ghost" href="${escapeAttr(log.pdf)}" target="_blank" rel="noopener" title="${escapeAttr(title)}" aria-label="${escapeAttr(title)}">Factura</a>`;
+  }
+
+  function bindOrderInvoiceButtons() {
+    document.querySelectorAll("[data-order-invoice]").forEach((button) => button.addEventListener("click", () => {
+      const log = getOrderInvoiceLog(button.dataset.orderInvoice);
+      if (!log) return alert("Ese pedido todavia no figura en ninguna factura emitida.");
+      if (log.numero) return abrirFacturaPdf(log.invoiceType || "", log.numero);
+      if (log.pdf) window.open(log.pdf, "_blank");
+    }));
   }
   function printOrderRemitoDirect(orderId) {
     const order = getOrder(orderId);
@@ -12988,7 +13033,7 @@
         <td>${log.cae ? `<span class="pill green">CAE ${escapeHtml(String(log.cae).trim())}</span>` : `<span class="pill amber">${escapeHtml(log.status || "")}</span>`}</td>
         <td class="page-actions">
           ${log.numero ? `<button class="btn small ghost" type="button" data-billing-pdf data-pdf-inv="${escapeAttr(log.invoiceType || "")}" data-pdf-num="${escapeAttr(log.numero)}" title="Ver / imprimir PDF">&#128424;</button>` : (log.pdf ? `<a class="btn small ghost" href="${escapeAttr(log.pdf)}" target="_blank" rel="noopener" title="Ver / imprimir PDF">&#128424;</a>` : "")}
-          ${Array.isArray(log.orders) && log.orders.length ? `<button class="btn small ghost" type="button" data-billing-orders="${escapeAttr(log.id)}">Ver Pedidos</button>` : ""}
+          ${getBillingLogOrderIds(log).length ? `<button class="btn small ghost" type="button" data-billing-orders="${escapeAttr(log.id)}">Ver Pedidos</button>` : ""}
         </td>
       </tr>
     `).join("");
@@ -13045,7 +13090,7 @@
   function openBillingOrdersModal(logId) {
     const log = (state.billingLog || []).find((l) => l.id === logId);
     if (!log) return;
-    const orderIds = Array.isArray(log.orders) ? log.orders : [];
+    const orderIds = getBillingLogOrderIds(log);
     const rows = orderIds.map((oid) => {
       const order = getOrder(oid);
       if (!order) return `<tr><td>${escapeHtml(oid)}</td><td class="muted">No disponible</td><td></td></tr>`;
@@ -13184,7 +13229,7 @@
         <div class="field"><label>Periodo hasta</label><input type="date" id="mb-hasta" /></div>
         <div class="field"><label>Vencimiento para el pago</label><input type="date" id="mb-venc" value="${escapeAttr(vencDefault)}" /></div>
         <div class="field"><label>Punto de venta</label><input id="mb-pv" inputmode="numeric" value="${escapeAttr(ui.billingPuntoVenta || "")}" placeholder="vacio = el configurado" /></div>
-        <div class="field span-2"><label>User token del PDV (opcional)</label><input id="mb-usertoken" autocomplete="off" placeholder="dejar vacio si el PDV usa el token de siempre" /></div>
+        <div class="field span-2"><label>User token del PDV (opcional)</label><input id="mb-usertoken" autocomplete="off" placeholder="dejalo vacio: el servidor ya tiene el token de cada PDV" /></div>
         <div class="field"><label>IVA</label><select id="mb-iva"><option value="10.5">10,5%</option><option value="21">21%</option></select></div>
         <div class="field"><label>Monto TOTAL a emitir</label><input id="mb-total" inputmode="decimal" /></div>
         <div class="field span-2"><span class="muted" id="mb-neto-info" style="font-size:12px"></span></div>
@@ -13246,7 +13291,9 @@
         const pvEl = document.getElementById("mb-pv");
         const pv = pvEl ? String(pvEl.value || "").trim() : "";
         const overrides = { fecha, vencimiento: venc, periodoDesde: desde, periodoHasta: hasta, concepto };
-        if (pv) overrides.puntoVenta = pv;
+        // El punto de venta queda recordado para la proxima emision manual; el user token de cada
+        // PDV lo resuelve el servidor con TUSFACTURAS_PV<n>_USERTOKEN, no se guarda en el navegador.
+        if (pv) { overrides.puntoVenta = pv; ui.billingPuntoVenta = pv; }
         const utEl = document.getElementById("mb-usertoken");
         const ut = utEl ? String(utEl.value || "").trim() : "";
         if (ut) overrides.usertoken = ut;
@@ -13273,6 +13320,81 @@
       });
       function elVenc() { const v = document.getElementById("mb-venc"); return v ? v.value : ""; }
     });
+  }
+
+  // Dias que se toleran sin facturar segun la frecuencia del cliente, antes de avisar.
+  const BILLING_OVERDUE_DAYS = { diaria: 1, semanal: 8, quincenal: 16, mensual: 35 };
+
+  // Facturas que quedaron sin emitir. Dos casos distintos:
+  //  - "error": la emision se intento y TusFacturas la rechazo (queda en el log y nadie la mira).
+  //  - "atrasada": el cliente acumula pedidos sin facturar mas alla de lo que permite su frecuencia
+  //    (por ejemplo un cliente de factura diaria con pedidos de ayer todavia pendientes).
+  function getUnbilledWarnings() {
+    const today = todayISO();
+    const errors = [];
+    const seenError = new Set();
+    (state.billingLog || []).slice().reverse().forEach((log) => {
+      if (log.status !== "error") return;
+      const key = String(log.clientId) + "|" + String(log.from || "") + "|" + String(log.to || "");
+      if (seenError.has(key)) return;
+      seenError.add(key);
+      // Si despues de ese error salio una factura OK que cubre el mismo periodo, ya esta resuelto.
+      const solved = (state.billingLog || []).some((other) => other.status === "ok"
+        && other.clientId === log.clientId
+        && String(other.emittedAt || "") > String(log.emittedAt || "")
+        && String(other.to || "") >= String(log.to || ""));
+      if (solved) return;
+      errors.push({
+        clientId: log.clientId,
+        clientName: log.clientName || log.clientId,
+        from: log.from,
+        to: log.to,
+        total: Number(log.total || 0),
+        detail: log.detail || "",
+        emittedAt: log.emittedAt || ""
+      });
+    });
+    const overdue = [];
+    activeClients()
+      .filter((client) => client.needsInvoice && ["Factura A", "Factura B"].includes(client.invoiceType))
+      .forEach((client) => {
+        const pending = getBillingPendingForClient(client);
+        if (!pending.orders || !(pending.total > 0)) return;
+        const oldest = pending.orderList
+          .map((order) => String(order.date || "").slice(0, 10))
+          .filter(Boolean)
+          .sort()[0];
+        if (!oldest) return;
+        const freq = String(client.invoiceFrequency || "mensual").toLowerCase();
+        const tolerance = BILLING_OVERDUE_DAYS[freq] == null ? BILLING_OVERDUE_DAYS.mensual : BILLING_OVERDUE_DAYS[freq];
+        const days = Math.round((new Date(today + "T12:00:00") - new Date(oldest + "T12:00:00")) / 86400000);
+        if (days < tolerance) return;
+        overdue.push({
+          clientId: client.id,
+          clientName: client.name,
+          frequency: freq,
+          oldest,
+          days,
+          orders: pending.orders,
+          total: pending.total
+        });
+      });
+    overdue.sort((a, b) => b.days - a.days);
+    return { errors, overdue, count: errors.length + overdue.length };
+  }
+
+  function unbilledWarningHtml(options = {}) {
+    const warnings = getUnbilledWarnings();
+    if (!warnings.count) return "";
+    const compact = !!options.compact;
+    const errorItems = warnings.errors.map((item) => `<li><strong>${escapeHtml(item.clientName)}</strong> - ${formatDate(item.from)} a ${formatDate(item.to)} por ${formatMoney(item.total)}${item.detail ? `<br><span class="muted">${escapeHtml(item.detail)}</span>` : ""}</li>`).join("");
+    const overdueItems = warnings.overdue.map((item) => `<li><strong>${escapeHtml(item.clientName)}</strong> (${escapeHtml(item.frequency)}) - ${item.orders} pedido${item.orders === 1 ? "" : "s"} sin facturar por ${formatMoney(item.total)}, el mas viejo del ${formatDate(item.oldest)} (${item.days} dia${item.days === 1 ? "" : "s"})</li>`).join("");
+    return `<div class="panel highlight-panel billing-warning" style="margin-bottom:14px">
+      <strong style="font-size:15px">\u26A0 ${warnings.count} factura${warnings.count === 1 ? "" : "s"} sin emitir</strong>
+      ${warnings.errors.length ? `<div class="muted" style="margin-top:6px">Se intentaron emitir y fallaron:</div><ul style="margin:6px 0 0 18px">${errorItems}</ul>` : ""}
+      ${warnings.overdue.length ? `<div class="muted" style="margin-top:8px">Acumulan pedidos sin facturar mas alla de su frecuencia:</div><ul style="margin:6px 0 0 18px">${overdueItems}</ul>` : ""}
+      ${compact ? `<div style="margin-top:10px"><button class="btn small yellow" type="button" data-route="facturacion">Ir a Facturacion</button></div>` : ""}
+    </div>`;
   }
 
   function renderFacturacion() {
@@ -13426,12 +13548,13 @@
        <button class="btn blue" data-billing-manual>Emitir manual</button>
        <button class="btn primary" data-billing-run="real">Emitir pendientes ahora</button>` : "",
       `
+      ${unbilledWarningHtml()}
       <div class="panel" style="margin-bottom:14px">
         <div class="page-actions" style="justify-content:space-between">
           <h2 class="page-title" style="font-size:18px">Estado del servicio</h2>
           <span id="billing-server-status"><span class="muted">Consultando...</span></span>
         </div>
-        <p class="muted">Las credenciales (apikey, apitoken, usertoken) se configuran en el archivo .env del servidor. Sin credenciales, la emision corre en modo simulacion para que pruebe los periodos sin facturar de verdad.</p>
+        <p class="muted">Las credenciales (apikey, apitoken, usertoken) se configuran en el archivo .env del servidor. Cada punto de venta puede tener su propio user token con TUSFACTURAS_PV&lt;numero&gt;_USERTOKEN, asi no hay que pegarlo a mano en cada emision. Sin credenciales, la emision corre en modo simulacion para que pruebe los periodos sin facturar de verdad.</p>
       </div>
       <div class="panel" style="margin-bottom:14px">
         <h2 class="page-title" style="font-size:18px">Rango de facturacion</h2>
