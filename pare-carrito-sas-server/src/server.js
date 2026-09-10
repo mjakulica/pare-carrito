@@ -548,6 +548,71 @@ function filterHistoryByRange(records, from, to) {
   });
 }
 
+
+// El historial de productos se guardaba en product_history_state, pero nadie llena esa tabla: el
+// cliente saca esas tres listas del estado antes de sincronizar (stripHistoryForSync), asi que
+// quedaba siempre vacia y la pagina Historiales no mostraba nada. Se arma desde los pedidos y las
+// compras que ya estan en el estado, que es de donde salen los datos igual.
+function historyRecordsFromState(data, from, to) {
+  const source = data || {};
+  const start = String(from || "0000-01-01").slice(0, 10);
+  const end = String(to || "9999-12-31").slice(0, 10);
+  const enRango = (date) => date && date >= start && date <= end;
+  const EXCL = ["other_expense", "freight", "market_price", "provider_payment", "cash_movement"];
+
+  const purchaseHistory = [];
+  for (const purchase of Array.isArray(source.purchases) ? source.purchases : []) {
+    const date = String(purchase && purchase.date || "").slice(0, 10);
+    if (!purchase || !enRango(date) || purchase.status === "anulado") continue;
+    if (EXCL.includes(purchase.expenseType || "purchase")) continue;
+    const items = Array.isArray(purchase.items) && purchase.items.length
+      ? purchase.items
+      : (purchase.productId ? [{ productId: purchase.productId, productName: purchase.productName, quantity: purchase.quantity, unitCost: purchase.unitCost, totalCost: purchase.totalCost }] : []);
+    for (const item of items) {
+      if (!item || !item.productId) continue;
+      const quantity = Number(item.quantity || 0);
+      const unitCost = Number(item.unitCost || 0);
+      purchaseHistory.push({
+        date,
+        productId: String(item.productId),
+        productName: item.productName || "",
+        quantity,
+        unitCost,
+        totalCost: Number(item.totalCost != null ? item.totalCost : quantity * unitCost)
+      });
+    }
+  }
+
+  const salesQuantityHistory = [];
+  const minPrice = {};
+  for (const order of Array.isArray(source.orders) ? source.orders : []) {
+    const date = String(order && order.date || "").slice(0, 10);
+    if (!order || !enRango(date) || ["cancelado", "anulado"].includes(order.status)) continue;
+    for (const item of Array.isArray(order.items) ? order.items : []) {
+      if (!item || !item.productId) continue;
+      const price = Number(item.unitPrice || 0);
+      // Sin "price" a proposito: la columna de la matriz es el PRECIO DE LISTA del dia, que se
+      // arma abajo. Si se manda el precio del item, cada fila pisaria al anterior con el precio
+      // del ultimo cliente (que puede tener ajuste).
+      salesQuantityHistory.push({
+        date,
+        productId: String(item.productId),
+        productName: item.productName || "",
+        quantity: Number(item.quantity || 0)
+      });
+      // Precio de lista del dia: el mas bajo que se cobro, que es el del cliente sin ajuste.
+      const key = String(item.productId) + "|" + date;
+      if (price > 0 && (minPrice[key] == null || price < minPrice[key])) minPrice[key] = price;
+    }
+  }
+  const listPriceHistory = Object.keys(minPrice).map((key) => {
+    const [productId, date] = key.split("|");
+    return { date, productId, price: minPrice[key] };
+  });
+
+  return { purchaseHistory, salesQuantityHistory, listPriceHistory };
+}
+
 function productLookupFromState(data) {
   const map = new Map();
   for (const product of Array.isArray(data && data.products) ? data.products : []) {
@@ -753,7 +818,9 @@ const MAX_WINDOW_DAYS = Math.max(...Object.values(STATE_WINDOW_PRESETS)
 
 function recordDate(row) {
   if (!row) return "";
-  return String(row.date || row.dayKey || String(row.createdAt || row.timestamp || "").slice(0, 10) || "");
+  // billingLog usa emittedAt/from y no tiene date: sin esto quedaba sin fecha y se filtraba entero,
+  // por eso el "Historial de emisiones" de Facturacion aparecia vacio en los dispositivos.
+  return String(row.date || row.dayKey || row.from || String(row.emittedAt || row.createdAt || row.timestamp || row.at || "").slice(0, 10) || "").slice(0, 10);
 }
 
 function cutoffDate(days) {
@@ -838,9 +905,12 @@ function buildWindowedState(data, presetName, customDays) {
     const days = preset.days[key];
     if (days == null || !Array.isArray(source[key])) { out[key] = source[key]; return; }
     cutoffs[key] = cutoffDate(days);
-    out[key] = source[key].filter((row) => recordDate(row) >= cutoffs[key]);
+    // Una fila sin fecha reconocible viaja siempre entera: es preferible mandar de mas a que
+    // desaparezca del sistema sin que nadie se entere.
+    out[key] = source[key].filter((row) => { const d = recordDate(row); return !d || d >= cutoffs[key]; });
   });
-  const before = (key) => (source[key] || []).filter((row) => recordDate(row) < cutoffs[key]);
+  // Las filas sin fecha tampoco cuentan para los saldos de apertura: ya viajan enteras.
+  const before = (key) => (source[key] || []).filter((row) => { const d = recordDate(row); return d && d < cutoffs[key]; });
 
   // Saldo de cada cliente anterior al corte, en una sola fila.
   const byClient = {};
@@ -957,23 +1027,31 @@ app.get("/product-history", authenticate, requireRole("manager", "admin"), async
       stateUpdatedAt
     ].join("|");
     if (historyMatrixCache.has(cacheKey)) return res.json(historyMatrixCache.get(cacheKey));
+    const stateData = stateRow.rows[0] ? stateRow.rows[0].data : {};
+    const derivado = historyRecordsFromState(stateData, req.query.from, req.query.to);
     const listPriceHistory = filterHistoryByRange(history.listPriceHistory, req.query.from, req.query.to);
     const salesQuantityHistory = filterHistoryByRange(history.salesQuantityHistory, req.query.from, req.query.to);
     const purchaseHistory = filterHistoryByRange(history.purchaseHistory, req.query.from, req.query.to);
-    const productMap = productLookupFromState(stateRow.rows[0] ? stateRow.rows[0].data : {});
+    const productMap = productLookupFromState(stateData);
     return res.json(rememberHistoryMatrixCache(cacheKey, {
-      purchaseRows: buildPurchaseHistoryMatrix(purchaseHistory, productMap),
-      salesRows: buildSalesHistoryMatrix(salesQuantityHistory, listPriceHistory, productMap),
+      purchaseRows: buildPurchaseHistoryMatrix(purchaseHistory.length ? purchaseHistory : derivado.purchaseHistory, productMap),
+      salesRows: buildSalesHistoryMatrix(
+        salesQuantityHistory.length ? salesQuantityHistory : derivado.salesQuantityHistory,
+        listPriceHistory.length ? listPriceHistory : derivado.listPriceHistory,
+        productMap
+      ),
       updatedAt: history.updatedAt
     }));
   }
+  const stateRowPlain = await pool.query("SELECT data FROM app_state WHERE id = 'main'");
+  const derivadoPlain = historyRecordsFromState(stateRowPlain.rows[0] ? stateRowPlain.rows[0].data : {}, req.query.from, req.query.to);
   const listPriceHistory = filterHistoryByRange(history.listPriceHistory, req.query.from, req.query.to);
   const salesQuantityHistory = filterHistoryByRange(history.salesQuantityHistory, req.query.from, req.query.to);
   const purchaseHistory = filterHistoryByRange(history.purchaseHistory, req.query.from, req.query.to);
   res.json({
-    listPriceHistory,
-    salesQuantityHistory,
-    purchaseHistory,
+    listPriceHistory: listPriceHistory.length ? listPriceHistory : derivadoPlain.listPriceHistory,
+    salesQuantityHistory: salesQuantityHistory.length ? salesQuantityHistory : derivadoPlain.salesQuantityHistory,
+    purchaseHistory: purchaseHistory.length ? purchaseHistory : derivadoPlain.purchaseHistory,
     updatedAt: history.updatedAt
   });
 });

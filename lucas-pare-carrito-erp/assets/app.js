@@ -5,7 +5,7 @@
   const USER_KEY = "lpc_current_user_v1";
   const OPERATIONAL_RESET_VERSION = "20260610-operational-clean-1";
   const BUSINESS_NAME = "Pare Carrito SAS";
-  const APP_VERSION = "v12";
+  const APP_VERSION = "v16";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -4319,10 +4319,7 @@
       return selectedCategories.includes(product.category || "OTROS");
     };
     const productMatches = (product) => categoryMatches(product) && wholesaleMatches(product);
-    const nameMatches = (product) => {
-      if (!ui.orderProductFilter) return true;
-      return product.name.toLowerCase().includes(ui.orderProductFilter.toLowerCase());
-    };
+    const nameMatches = (product) => productSearchMatches(product, ui.orderProductFilter, ui.selectedClientId);
     const filteredProducts = products.filter((product) => productMatches(product) && nameMatches(product));
     const initialOrderLimit = getOrderProductBatchLimit();
     if (!supportsOrderProductLazyLoad() || !Number.isFinite(Number(ui.orderRenderedLimit)) || Number(ui.orderRenderedLimit) < ORDER_PRODUCT_BATCH_SIZE) ui.orderRenderedLimit = initialOrderLimit;
@@ -4381,7 +4378,7 @@
                 </div>
                 <button class="btn small ghost" id="clear-order-search" type="button">X</button>
               </div>
-              <datalist id="order-product-options">${activeProducts().map((product) => `<option value="${escapeAttr(product.name)}"></option>`).join("")}</datalist>
+              <datalist id="order-product-options">${activeProducts().map((product) => `<option value="${escapeAttr(product.name)}"></option>`).join("")}${orderSearchAliasOptions(ui.selectedClientId)}</datalist>
             </div>
             <div class="field order-quick-note-field">
               <label>Nota</label>
@@ -4595,7 +4592,7 @@
     };
     const filterMatches = (product) => {
       if (!product) return false;
-      const nameOk = !ui.orderProductFilter || product.name.toLowerCase().includes(ui.orderProductFilter.toLowerCase());
+      const nameOk = productSearchMatches(product, ui.orderProductFilter, ui.selectedClientId);
       const categories = getProductCategories();
       const selected = Array.isArray(ui.orderSelectedCategories) ? ui.orderSelectedCategories : [];
       const catOk = selected.length === 0 || selected.includes(product.category || "OTROS") || categories.length === 0;
@@ -8130,14 +8127,40 @@
     // Al elegir un proveedor se cargan solas sus compras del dia. No hay boton: el desplegable
     // arranca en "Todos" y elegir a alguien es la accion.
     const providerNote = document.getElementById("purchase-provider-note");
+    // La casilla C.C solo tiene sentido cuando se compra con el proveedor en "Todos": ahi cada
+    // linea puede ir a un proveedor distinto. Con un proveedor elegido manda el "Estado" de arriba.
+    const syncCcMode = () => {
+      const itemsBox = document.getElementById("purchase-items");
+      if (!itemsBox || !providerInput) return;
+      const esTodos = parsePurchaseProviderValue(providerInput.value).type === "all";
+      const compraDeProductos = ["purchase", "product_expense"].includes(kind.value);
+      itemsBox.classList.toggle("cc-mode", esTodos && compraDeProductos);
+      const statusWrap = document.getElementById("purchase-payment-status-wrap");
+      if (statusWrap && compraDeProductos) statusWrap.style.display = esTodos ? "none" : "";
+    };
     const cargarProductosDelProveedor = () => {
       if (!providerInput) return;
       const parsed = parsePurchaseProviderValue(providerInput.value);
       clearAutoProviderLines();
       const setNota = (texto) => { if (providerNote) providerNote.textContent = texto; };
+      // Con "Todos" se cargan TODOS los productos que hay que comprar hoy, sin importar el
+      // proveedor: cada linea se guarda despues a nombre del ultimo proveedor que nos lo vendio,
+      // y la casilla C.C decide si va a cuenta corriente o se paga en efectivo.
       if (parsed.type === "all") {
-        setNota("Al elegir un proveedor se cargan solos los productos suyos que hay que comprar hoy, con la cantidad que falta.");
+        const fecha = (document.getElementById("purchase-date") || {}).value || todayISO();
+        const pendientes = productsToBuyToday(fecha)
+          .filter((row) => row.falta > 0 && getProduct(row.productId))
+          .map((row) => ({ product: getProduct(row.productId), pendingQty: row.falta, unitLabel: row.unitType }));
+        if (!pendientes.length) {
+          setNota("Hoy no queda nada por comprar: los pedidos del dia ya estan cubiertos por las compras cargadas.");
+          recalc();
+          return;
+        }
+        const cargados = loadPurchaseLinesForAssignee(parsed, pendientes);
         recalc();
+        setNota(cargados
+          ? "Se cargaron " + cargados + " producto(s) que hay que comprar hoy. Cada uno se guarda a nombre del ultimo proveedor que nos lo vendio; tilda C.C para mandarlo a la cuenta corriente en vez de pagarlo en efectivo."
+          : "Los productos que faltan hoy ya estaban en el detalle.");
         return;
       }
       const entries = purchaseProductsForAssignee(parsed);
@@ -8170,11 +8193,20 @@
       });
     }
     if (providerInput) providerInput.addEventListener("change", () => {
+      syncCcMode();
       if (kind.value === "provider_return") { refreshReturnSourceOptions(); return; }
       if (["purchase", "product_expense"].includes(kind.value)) cargarProductosDelProveedor();
     });
-    kind.addEventListener("change", updateKind);
+    kind.addEventListener("change", () => { updateKind(); syncCcMode(); });
     updateKind();
+    syncCcMode();
+    // Al abrir la pantalla el proveedor esta en "Todos": se cargan solos los productos que hay que
+    // comprar hoy, que es con lo que se arranca el dia.
+    if (providerInput && ["purchase", "product_expense"].includes(kind.value)
+      && parsePurchaseProviderValue(providerInput.value).type === "all"
+      && !document.querySelector("[data-purchase-item-row] [data-product-select]").value) {
+      cargarProductosDelProveedor();
+    }
     if (currentUser.role === "proveedor") {
       const provStatus = document.getElementById("purchase-payment-status");
       const provCashWrap = document.getElementById("purchase-cash-box-wrap");
@@ -8184,6 +8216,14 @@
         syncProvCash();
       }
     }
+    // Al tildar C.C aparece el desplegable de proveedores de ese producto.
+    itemsContainer.addEventListener("change", (event) => {
+      if (event.target.matches("[data-item-provider]")) { event.target.dataset.touched = "1"; return; }
+      if (!event.target.matches("[data-item-cc]")) return;
+      const row = event.target.closest("[data-purchase-item-row]");
+      const select = row ? row.querySelector("[data-item-provider]") : null;
+      if (select) select.hidden = !event.target.checked;
+    });
     document.getElementById("purchase-form").addEventListener("submit", async (event) => {
       event.preventDefault();
       const purchaseSubmitBtn = event.target.querySelector("button[type=submit]");
@@ -8287,6 +8327,27 @@
         });
         if (!created) return;
         saveState();
+        render();
+        return;
+      }
+      // Compra con el proveedor en "Todos": se reparte por proveedor segun la linea.
+      if (expenseType === "purchase" && !provider && providerInput && parsePurchaseProviderValue(providerInput.value).type === "all") {
+        const multiItems = readPurchaseItems(false);
+        if (!multiItems.length) return alert("Agregue al menos un producto valido.");
+        if (purchaseSubmitBtn && purchaseSubmitBtn.dataset.busy === "1") return;
+        const creadas = registerMultiProviderPurchase({
+          items: multiItems,
+          date: document.getElementById("purchase-date").value || todayISO(),
+          description,
+          notes: document.getElementById("purchase-notes").value.trim(),
+          cashBoxId: cashBoxSelect ? cashBoxSelect.value : getDefaultOutgoingCashBoxId(),
+          assignedEmployeeId: currentUser.role === "employee" ? currentUser.id : (document.getElementById("purchase-assigned-employee") || { value: "" }).value
+        });
+        if (!creadas) return;
+        saveState();
+        const enCuenta = multiItems.filter((item) => item.cuentaCorriente).length;
+        alert("Se registraron " + multiItems.length + " producto(s) en " + creadas.length + " egreso(s): "
+          + (multiItems.length - enCuenta) + " en efectivo y " + enCuenta + " en cuenta corriente.");
         render();
         return;
       }
@@ -8447,7 +8508,7 @@
     if (parts.length > 1) out += "," + parts.slice(1).join("").replace(/\D/g, "");
     el.value = out;
   }
-  // Muestra/oculta "Unid. calculo" (solo mayoristas con relacion minorista), el boton de
+  // Muestra/oculta "C. doc" (solo mayoristas con relacion minorista), el boton de
   // ultimo costo y la advertencia de suba >30% de cada fila de compra.
   function syncPurchaseRow(row) {
     if (!row) return;
@@ -8463,6 +8524,19 @@
     if (lastBtn) {
       if (product && storedCost > 0) { lastBtn.style.display = ""; lastBtn.textContent = "$" + Math.round(storedCost).toLocaleString("es-AR"); lastBtn.dataset.cost = storedCost; }
       else lastBtn.style.display = "none";
+    }
+    // Proveedores que venden ESTE producto, con el ultimo al que se le compro preseleccionado.
+    // Solo se usa cuando la compra se carga con el proveedor en "Todos".
+    const providerSelect = row.querySelector("[data-item-provider]");
+    if (providerSelect) {
+      // Solo se respeta lo elegido si lo eligio la persona: si no, el navegador deja marcada la
+      // primera opcion de la lista anterior y eso pisaba al ultimo proveedor real del producto.
+      const elegido = providerSelect.dataset.touched === "1" ? providerSelect.value : "";
+      const lista = product ? providersSellingProduct(product.id) : activeProviders();
+      const ultimo = product ? lastProviderForProduct(product.id) : "";
+      providerSelect.innerHTML = lista.map((provider) => `<option value="${escapeAttr(provider.id)}">${escapeHtml(provider.name)}</option>`).join("");
+      const aElegir = lista.some((provider) => provider.id === elegido) ? elegido : ultimo;
+      if (aElegir) providerSelect.value = aElegir;
     }
   }
   function collectPriceIncreaseCandidates(items, date) {
@@ -8513,12 +8587,13 @@
             ${purchaseProductOptions(selected ? selected.id : "", selected ? selected.name : "")}
           </select>
           <span class="pl-falta" data-shortage-note hidden></span>
+          <button class="btn small ghost pl-quitar" type="button" data-remove-purchase-item title="Quitar">X</button>
         </div>
-        <div class="field">
+        <div class="field pl-qty">
           <label>cant</label>
           <input data-item-qty inputmode="decimal" placeholder="0" />
         </div>
-        <div class="field">
+        <div class="field pl-cost">
           <label>costo u.</label>
           <input data-item-cost inputmode="decimal" placeholder="0" />
         </div>
@@ -8527,18 +8602,21 @@
           <button type="button" class="btn small ghost pl-ult-btn" data-fill-last-cost style="display:none"></button>
         </div>
         <div class="field" data-relation-field style="display:none">
-          <label>Unid. calc</label>
+          <label>C. doc</label>
           <input data-item-relation-units inputmode="decimal" placeholder="auto" />
         </div>
-        <div class="field">
+        <div class="field pl-market">
           <label>$ mercado</label>
           <input data-item-market-price inputmode="decimal" placeholder="0" />
         </div>
-        <div class="field">
+        <div class="field pl-cc" data-cc-field>
+          <label>C.C</label>
+          <label class="cc-check"><input type="checkbox" data-item-cc style="width:auto;min-height:auto" /><select data-item-provider hidden></select></label>
+        </div>
+        <div class="field pl-sub">
           <label>Subtotal</label>
           <input data-item-total disabled value="$0" />
         </div>
-        <button class="btn small ghost" type="button" data-remove-purchase-item title="Quitar">X</button>
       </div>
     `;
   }
@@ -8663,10 +8741,10 @@
   // Carga una fila de compra por cada producto del proveedor/empleado elegido que HAY QUE COMPRAR
   // HOY, con la cantidad que falta ya puesta y el ultimo costo conocido. Las filas quedan marcadas
   // como automaticas para poder reemplazarlas si se cambia de proveedor, sin tocar lo tipeado a mano.
-  function loadPurchaseLinesForAssignee(parsed) {
+  function loadPurchaseLinesForAssignee(parsed, entriesOverride) {
     const container = document.getElementById("purchase-items");
     if (!container) return 0;
-    const entries = purchaseProductsForAssignee(parsed).filter((entry) => entry.pendingQty > 0);
+    const entries = entriesOverride || purchaseProductsForAssignee(parsed).filter((entry) => entry.pendingQty > 0);
     if (!entries.length) return 0;
     const existing = new Set(Array.from(container.querySelectorAll("[data-product-select]")).map((select) => select.value).filter(Boolean));
     let added = 0;
@@ -8841,6 +8919,95 @@
     container.insertAdjacentHTML("beforeend", renderPurchaseItemRow(product.id));
   }
 
+  // Compra cargada con el proveedor en "Todos": cada producto va al proveedor que se eligio en su
+  // linea (por defecto el ultimo que nos lo vendio) y la casilla C.C decide si se paga en efectivo
+  // (sale de la caja del que lo carga) o va a la cuenta corriente del proveedor. Se agrupa por
+  // proveedor y forma de pago para no dejar la caja con un movimiento por producto.
+  function registerMultiProviderPurchase(options) {
+    const items = options.items || [];
+    const sinProveedor = items.filter((item) => !getProvider(item.lineProviderId));
+    if (sinProveedor.length) {
+      alert("Estos productos no tienen proveedor: " + sinProveedor.map((item) => item.productName).join(", ")
+        + ". Elegilos en la casilla C.C de cada linea o cargalos con un proveedor puntual.");
+      return null;
+    }
+    const grupos = new Map();
+    items.forEach((item) => {
+      const clave = (item.cuentaCorriente ? "cc" : "efectivo") + "|" + item.lineProviderId;
+      if (!grupos.has(clave)) grupos.set(clave, { cuentaCorriente: item.cuentaCorriente, providerId: item.lineProviderId, items: [] });
+      grupos.get(clave).items.push(item);
+    });
+    const creadas = [];
+    grupos.forEach((grupo) => {
+      const provider = getProvider(grupo.providerId);
+      const groupItems = grupo.items.map((item) => ({
+        productId: item.productId,
+        productName: item.productName,
+        quantity: item.quantity,
+        unitCost: item.unitCost,
+        relationUnits: item.relationUnits || 0,
+        marketPrice: item.marketPrice || 0,
+        totalCost: item.totalCost
+      }));
+      const totalCost = groupItems.reduce((sum, item) => sum + item.totalCost, 0);
+      const purchase = {
+        id: nextDatedId("CMP", state.purchases),
+        createdAt: new Date().toISOString(),
+        date: options.date,
+        expenseType: "purchase",
+        providerId: provider.id,
+        providerName: provider.name,
+        productId: groupItems.length === 1 ? groupItems[0].productId : "",
+        productName: groupItems.length === 1 ? groupItems[0].productName : "",
+        description: options.description || "",
+        quantity: groupItems.length === 1 ? groupItems[0].quantity : groupItems.length,
+        unitCost: groupItems.length === 1 ? groupItems[0].unitCost : 0,
+        items: groupItems,
+        paymentStatus: grupo.cuentaCorriente ? "account_current" : "paid",
+        totalCost,
+        cashBoxId: grupo.cuentaCorriente ? "" : options.cashBoxId,
+        notes: options.notes || "",
+        assignedEmployeeId: options.assignedEmployeeId || "",
+        vendorName: "",
+        recordedBy: currentUser.name,
+        userRole: currentUser.role
+      };
+      state.purchases.push(purchase);
+      recordStockPurchaseMovements(purchase);
+      rememberProviderProducts(provider.id, groupItems);
+      const priceIncreaseNotices = collectPriceIncreaseCandidates(groupItems, purchase.date);
+      updateProductCostsFromPurchase(groupItems, provider);
+      updateOrdersWithNewPrices(purchase.date, groupItems);
+      sendPriceIncreaseNotices(priceIncreaseNotices);
+      if (grupo.cuentaCorriente) {
+        addProviderLedgerEntry({
+          providerId: provider.id,
+          date: purchase.date,
+          type: "deuda",
+          description: "Cuenta corriente - " + purchase.id,
+          amount: totalCost,
+          relatedEntityId: purchase.id,
+          relatedEntityType: "purchase",
+          notes: purchase.notes
+        });
+      } else {
+        addCajaEntry({
+          date: purchase.date,
+          type: "expense",
+          concept: buildExpenseConcept(purchase),
+          relatedEntityId: purchase.id,
+          relatedEntityType: "purchase",
+          amountIngreso: 0,
+          amountEgreso: totalCost,
+          cashBoxId: options.cashBoxId,
+          notes: purchase.notes
+        });
+      }
+      creadas.push(purchase);
+    });
+    return creadas;
+  }
+
   function readPurchaseItems(allowZeroCost) {
     const items = [];
     let invalidProduct = "";
@@ -8858,6 +9025,8 @@
         return;
       }
       if (quantity <= 0 || (!allowZeroCost && unitCost <= 0)) return;
+      const ccCheck = row.querySelector("[data-item-cc]");
+      const providerSelect = row.querySelector("[data-item-provider]");
       items.push({
         productId: product.id,
         productName: product.name,
@@ -8865,7 +9034,10 @@
         unitCost,
         relationUnits,
         marketPrice,
-        totalCost: quantity * unitCost
+        totalCost: quantity * unitCost,
+        // Solo se usan cuando se compra con el proveedor en "Todos".
+        cuentaCorriente: !!(ccCheck && ccCheck.checked),
+        lineProviderId: providerSelect ? providerSelect.value : ""
       });
     });
     if (invalidProduct) {
@@ -9102,6 +9274,54 @@
       `,
       "compras-producto"
     );
+  }
+
+  // ===== Egresos rapidos desde Dividir compras =====
+  // El ultimo proveedor al que se le compro este producto: es el que se propone al cargar el
+  // egreso, porque en la practica se le vuelve a comprar al mismo.
+  function lastProviderForProduct(productId) {
+    if (!productId) return "";
+    const EXCL = ["other_expense", "freight", "market_price", "provider_payment", "provider_return", "cash_movement"];
+    const compras = (state.purchases || [])
+      .filter((purchase) => purchase && purchase.status !== "anulado" && !EXCL.includes(purchase.expenseType || "purchase"))
+      .filter((purchase) => {
+        const items = Array.isArray(purchase.items) && purchase.items.length ? purchase.items : (purchase.productId ? [{ productId: purchase.productId }] : []);
+        return items.some((item) => item && item.productId === productId);
+      })
+      .sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+    for (const purchase of compras) {
+      const providerId = getPurchaseProviderId(purchase);
+      if (providerId && getProvider(providerId)) return providerId;
+    }
+    return "";
+  }
+
+  // Proveedores que venden el producto: los que lo tienen cargado como "producto que vende" mas
+  // los que ya nos lo vendieron alguna vez.
+  function providersSellingProduct(productId) {
+    const ids = new Set();
+    activeProviders().forEach((provider) => {
+      if (Array.isArray(provider.productsSupplied) && provider.productsSupplied.includes(productId)) ids.add(provider.id);
+    });
+    const ultimo = lastProviderForProduct(productId);
+    if (ultimo) ids.add(ultimo);
+    const lista = [...ids].map((id) => getProvider(id)).filter(Boolean);
+    return lista.length ? lista : activeProviders();
+  }
+
+  // Productos que todavia hay que comprar para una fecha, con lo que falta, el ultimo costo y el
+  // ultimo proveedor al que se le compro.
+  function productsToBuyToday(dateISO) {
+    return getProductPurchaseShortages(dateISO || todayISO())
+      .map((group) => ({
+        productId: group.productId,
+        productName: group.productName,
+        unitType: group.unitType || "",
+        falta: Number(group.shortageQuantity || 0),
+        cost: getStoredProductCost(group.productId),
+        providerId: lastProviderForProduct(group.productId),
+        providers: providersSellingProduct(group.productId)
+      }));
   }
 
   function renderDividePurchases() {
@@ -9449,7 +9669,9 @@
       byProduct[productKey].clients[order.clientId] = (byProduct[productKey].clients[order.clientId] || 0) + Number(item.quantity || 0);
       if (item.note) (byProduct[productKey].notes[order.clientId] = byProduct[productKey].notes[order.clientId] || []).push(item.note);
       if (!byClient[order.clientId]) byClient[order.clientId] = [];
-      byClient[order.clientId].push(`${divideQtyLabel(item.quantity, divideItemUnit(item))} ${item.productName}${isAll ? " - " + (assigned ? assigned.name : "Sin asignar") : ""}`);
+      // La nota tiene que ir tambien aca: el que compra mira el agrupado por producto, pero el que
+      // arma el pedido del cliente mira este, y sin la nota se pierde ("ni duras ni blandas").
+      byClient[order.clientId].push(`${divideQtyLabel(item.quantity, divideItemUnit(item))} ${item.productName}${isAll ? " - " + (assigned ? assigned.name : "Sin asignar") : ""}${item.note ? " (" + item.note + ")" : ""}`);
     });
     const productGroups = Object.values(byProduct);
     sortDivideGroupsByAssignee(productGroups);
@@ -17130,8 +17352,22 @@
     return { items, unmatched };
   }
 
+  // Abreviaturas de unidad que se escriben con punto ("3 doc. naranjas", "1 un. de ajo"). El punto
+  // se saca ANTES de partir por oraciones: si no, "3 doc. naranjas" se partia en "3 doc" y
+  // "naranjas", y salia un producto fantasma con la cantidad del otro.
+  const UNIT_ABBREVIATIONS = /\b(docs?|doc|dc|dna|dnas|unid|uni|un|u|kgs?|kg|k|grs?|gr|caj|cjs?|cj|bls?|jls?|atad|band|maple)\.(?=\s|$)/gi;
+
+  // "3 y media" / "1 y medio" tienen que resolverse antes de partir la linea por la "y", si no
+  // queda "3" por un lado y "media" suelto por el otro.
+  const HALF_SUFFIX = /(\d+(?:[.,]\d+)?)\s+y\s+medi[oa]\b/gi;
+
   function expandWhatsappOrderLines(text) {
-    const rawLines = String(text || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    const rawLines = String(text || "").split(/\r?\n/)
+      .map((line) => String(line || "")
+        .replace(UNIT_ABBREVIATIONS, "$1")
+        .replace(HALF_SUFFIX, (mm, n) => (parseFloat(String(n).replace(",", ".")) + 0.5).toString().replace(".", ","))
+        .trim())
+      .filter(Boolean);
     const expanded = [];
     rawLines.forEach((line) => {
       const protectedLine = line
@@ -17261,6 +17497,12 @@
         const kgProduct = findProductForParsedLine(resolved.name, "kg", clientId);
         if (kgProduct && normalizeText(kgProduct.unitType) === "kg") unitType = "kg";
       }
+      // Cantidad entera sin unidad y el producto tiene variante "por unidad" ("4 zanahorias"
+      // con Zanahoria Kg y Zanahoria Unidad): se pide por unidad, no por kilo.
+      if (!unitType && quantity > 0 && Number.isInteger(quantity)) {
+        const unitProduct = findProductForParsedLine(resolved.name, "unidad", clientId);
+        if (unitProduct && normalizeText(unitProduct.unitType) === "unidad") unitType = "unidad";
+      }
       const product = findProductForParsedLine(resolved.name, unitType, clientId);
       const adjusted = adjustParsedQuantityAndUnitForProduct(quantity, unitType, product, nameTokens);
       return { name: resolved.name, quantity: adjusted.quantity, unitType: adjusted.unitType, note: resolved.note };
@@ -17340,8 +17582,11 @@
       .replace(/\bbolsas?\s+de\b/gi, "bolsa de")
       // "cebolla blanca" -> "cebolla" (blanca es la variedad por defecto; no debe quedar como nota)
       .replace(/\bcebollas?\s+blanc[ao]s?\b/gi, "cebolla")
-      // "cebolla verde / cebolla de verdeo / cebolla verdeo" -> Verdeo
-      .replace(/\bcebollas?\s+(?:de\s+)?verde?o?\b/gi, "verdeo")
+      // "cebolla de verdeo" / "cebolla verdeo" siempre es Verdeo. "cebolla verde" a secas tambien,
+      // SALVO que la linea venga en kilos: el verdeo se vende por atado, asi que "6 kg cebolla
+      // verde" es cebolla comun y no verdeo.
+      .replace(/\bcebollas?\s+(?:de\s+)?verdeos?\b/gi, "verdeo")
+      .replace(/\bcebollas?\s+verdes?\b/gi, (match, offset, full) => (/\b(kg|kgs|kilos?|grs?|gramos)\b/i.test(full) ? "cebolla" : "verdeo"))
       // "1 docena y media", "2 atados y medio", etc. -> "1,5 docena" / "2,5 atados"
       .replace(/(\d+(?:[.,]\d+)?)\s+(docenas?|atados?|bolsas?|cajones?|cajon|jaulas?|plantas?|unidad(?:es)?|maples?|kg|kgs|kilos?)\s+y\s+medi[oa]\b/gi, (mm, n, u) => (parseFloat(String(n).replace(",", ".")) + 0.5).toString().replace(".", ",") + " " + u)
       .replace(/(\d+(?:[.,]\d+)?)\s*(kg|kgs|k|kilos?|kilo|grs?|gramos)\s+y\s+medi[oa]\b/gi, (mm, n, u) => (parseFloat(String(n).replace(",", ".")) + 0.5).toString().replace(".", ",") + " " + u)
@@ -17716,8 +17961,11 @@
 
   function stripTrailingProductUnitWords(value) {
     const units = new Set(DEFAULT_UNIT_TYPES.map((unit) => normalizeText(unit.name)).concat(["kg", "kilo", "kilos", "unidad", "unidades", "cajon", "cajones", "atado", "atados", "bolsas", "jaulas", "docenas"]));
+    // Calificativos de tamanio que van DESPUES de la unidad ("Calabaza Bolsa Chica"): sin sacarlos,
+    // la base quedaba "calabaza bolsa chica" y no matcheaba con "calabaza" + unidad bolsa.
+    const sizes = new Set(["chica", "chico", "chicas", "chicos", "grande", "grandes", "mediana", "mediano", "medianas", "medianos"]);
     const words = normalizeText(value).split(" ").filter(Boolean);
-    while (words.length > 1 && units.has(words[words.length - 1])) words.pop();
+    while (words.length > 1 && (units.has(words[words.length - 1]) || sizes.has(words[words.length - 1]))) words.pop();
     return words.join(" ");
   }
 
@@ -17826,6 +18074,36 @@
 
   function normalizeText(value) {
     return String(value || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+  }
+
+  // Busqueda de productos en Nuevo pedido: sin tildes y tambien por alias. Asi "coreano" encuentra
+  // el producto que tiene ese alias cargado, y "limon" encuentra "Limón" igual que "limón".
+  function productSearchMatches(product, filtro, clientId) {
+    const texto = normalizeText(filtro);
+    if (!texto) return true;
+    if (!product) return false;
+    if (normalizeText(product.name).includes(texto)) return true;
+    const alias = (a) => a && a.productId === product.id && normalizeText(a.alias).includes(texto);
+    if ((state.productAliases || []).some(alias)) return true;
+    return (state.clientProductAliases || []).some((a) => alias(a) && (!clientId || a.clientId === clientId));
+  }
+
+  // Los alias tambien aparecen en el desplegable del buscador, mostrando a que producto llevan.
+  function orderSearchAliasOptions(clientId) {
+    const vistos = new Set(activeProducts().map((product) => normalizeText(product.name)));
+    const opciones = [];
+    const agregar = (alias, productId) => {
+      const product = getProduct(productId);
+      const clave = normalizeText(alias);
+      if (!product || !clave || vistos.has(clave)) return;
+      vistos.add(clave);
+      opciones.push(`<option value="${escapeAttr(alias)}">${escapeHtml(product.name)}</option>`);
+    };
+    (state.productAliases || []).forEach((a) => agregar(a.alias, a.productId));
+    (state.clientProductAliases || [])
+      .filter((a) => !clientId || a.clientId === clientId)
+      .forEach((a) => agregar(a.alias, a.productId));
+    return opciones.join("");
   }
 
   function normalizeAliasKey(value) {
