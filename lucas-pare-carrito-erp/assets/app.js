@@ -5,7 +5,7 @@
   const USER_KEY = "lpc_current_user_v1";
   const OPERATIONAL_RESET_VERSION = "20260610-operational-clean-1";
   const BUSINESS_NAME = "Pare Carrito SAS";
-  const APP_VERSION = "v14";
+  const APP_VERSION = "v15";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -7826,14 +7826,40 @@
     // Al elegir un proveedor se cargan solas sus compras del dia. No hay boton: el desplegable
     // arranca en "Todos" y elegir a alguien es la accion.
     const providerNote = document.getElementById("purchase-provider-note");
+    // La casilla C.C solo tiene sentido cuando se compra con el proveedor en "Todos": ahi cada
+    // linea puede ir a un proveedor distinto. Con un proveedor elegido manda el "Estado" de arriba.
+    const syncCcMode = () => {
+      const itemsBox = document.getElementById("purchase-items");
+      if (!itemsBox || !providerInput) return;
+      const esTodos = parsePurchaseProviderValue(providerInput.value).type === "all";
+      const compraDeProductos = ["purchase", "product_expense"].includes(kind.value);
+      itemsBox.classList.toggle("cc-mode", esTodos && compraDeProductos);
+      const statusWrap = document.getElementById("purchase-payment-status-wrap");
+      if (statusWrap && compraDeProductos) statusWrap.style.display = esTodos ? "none" : "";
+    };
     const cargarProductosDelProveedor = () => {
       if (!providerInput) return;
       const parsed = parsePurchaseProviderValue(providerInput.value);
       clearAutoProviderLines();
       const setNota = (texto) => { if (providerNote) providerNote.textContent = texto; };
+      // Con "Todos" se cargan TODOS los productos que hay que comprar hoy, sin importar el
+      // proveedor: cada linea se guarda despues a nombre del ultimo proveedor que nos lo vendio,
+      // y la casilla C.C decide si va a cuenta corriente o se paga en efectivo.
       if (parsed.type === "all") {
-        setNota("Al elegir un proveedor se cargan solos los productos suyos que hay que comprar hoy, con la cantidad que falta.");
+        const fecha = (document.getElementById("purchase-date") || {}).value || todayISO();
+        const pendientes = productsToBuyToday(fecha)
+          .filter((row) => row.falta > 0 && getProduct(row.productId))
+          .map((row) => ({ product: getProduct(row.productId), pendingQty: row.falta, unitLabel: row.unitType }));
+        if (!pendientes.length) {
+          setNota("Hoy no queda nada por comprar: los pedidos del dia ya estan cubiertos por las compras cargadas.");
+          recalc();
+          return;
+        }
+        const cargados = loadPurchaseLinesForAssignee(parsed, pendientes);
         recalc();
+        setNota(cargados
+          ? "Se cargaron " + cargados + " producto(s) que hay que comprar hoy. Cada uno se guarda a nombre del ultimo proveedor que nos lo vendio; tilda C.C para mandarlo a la cuenta corriente en vez de pagarlo en efectivo."
+          : "Los productos que faltan hoy ya estaban en el detalle.");
         return;
       }
       const entries = purchaseProductsForAssignee(parsed);
@@ -7866,11 +7892,20 @@
       });
     }
     if (providerInput) providerInput.addEventListener("change", () => {
+      syncCcMode();
       if (kind.value === "provider_return") { refreshReturnSourceOptions(); return; }
       if (["purchase", "product_expense"].includes(kind.value)) cargarProductosDelProveedor();
     });
-    kind.addEventListener("change", updateKind);
+    kind.addEventListener("change", () => { updateKind(); syncCcMode(); });
     updateKind();
+    syncCcMode();
+    // Al abrir la pantalla el proveedor esta en "Todos": se cargan solos los productos que hay que
+    // comprar hoy, que es con lo que se arranca el dia.
+    if (providerInput && ["purchase", "product_expense"].includes(kind.value)
+      && parsePurchaseProviderValue(providerInput.value).type === "all"
+      && !document.querySelector("[data-purchase-item-row] [data-product-select]").value) {
+      cargarProductosDelProveedor();
+    }
     if (currentUser.role === "proveedor") {
       const provStatus = document.getElementById("purchase-payment-status");
       const provCashWrap = document.getElementById("purchase-cash-box-wrap");
@@ -7880,6 +7915,14 @@
         syncProvCash();
       }
     }
+    // Al tildar C.C aparece el desplegable de proveedores de ese producto.
+    itemsContainer.addEventListener("change", (event) => {
+      if (event.target.matches("[data-item-provider]")) { event.target.dataset.touched = "1"; return; }
+      if (!event.target.matches("[data-item-cc]")) return;
+      const row = event.target.closest("[data-purchase-item-row]");
+      const select = row ? row.querySelector("[data-item-provider]") : null;
+      if (select) select.hidden = !event.target.checked;
+    });
     document.getElementById("purchase-form").addEventListener("submit", async (event) => {
       event.preventDefault();
       const purchaseSubmitBtn = event.target.querySelector("button[type=submit]");
@@ -7983,6 +8026,27 @@
         });
         if (!created) return;
         saveState();
+        render();
+        return;
+      }
+      // Compra con el proveedor en "Todos": se reparte por proveedor segun la linea.
+      if (expenseType === "purchase" && !provider && providerInput && parsePurchaseProviderValue(providerInput.value).type === "all") {
+        const multiItems = readPurchaseItems(false);
+        if (!multiItems.length) return alert("Agregue al menos un producto valido.");
+        if (purchaseSubmitBtn && purchaseSubmitBtn.dataset.busy === "1") return;
+        const creadas = registerMultiProviderPurchase({
+          items: multiItems,
+          date: document.getElementById("purchase-date").value || todayISO(),
+          description,
+          notes: document.getElementById("purchase-notes").value.trim(),
+          cashBoxId: cashBoxSelect ? cashBoxSelect.value : getDefaultOutgoingCashBoxId(),
+          assignedEmployeeId: currentUser.role === "employee" ? currentUser.id : (document.getElementById("purchase-assigned-employee") || { value: "" }).value
+        });
+        if (!creadas) return;
+        saveState();
+        const enCuenta = multiItems.filter((item) => item.cuentaCorriente).length;
+        alert("Se registraron " + multiItems.length + " producto(s) en " + creadas.length + " egreso(s): "
+          + (multiItems.length - enCuenta) + " en efectivo y " + enCuenta + " en cuenta corriente.");
         render();
         return;
       }
@@ -8160,6 +8224,19 @@
       if (product && storedCost > 0) { lastBtn.style.display = ""; lastBtn.textContent = "$" + Math.round(storedCost).toLocaleString("es-AR"); lastBtn.dataset.cost = storedCost; }
       else lastBtn.style.display = "none";
     }
+    // Proveedores que venden ESTE producto, con el ultimo al que se le compro preseleccionado.
+    // Solo se usa cuando la compra se carga con el proveedor en "Todos".
+    const providerSelect = row.querySelector("[data-item-provider]");
+    if (providerSelect) {
+      // Solo se respeta lo elegido si lo eligio la persona: si no, el navegador deja marcada la
+      // primera opcion de la lista anterior y eso pisaba al ultimo proveedor real del producto.
+      const elegido = providerSelect.dataset.touched === "1" ? providerSelect.value : "";
+      const lista = product ? providersSellingProduct(product.id) : activeProviders();
+      const ultimo = product ? lastProviderForProduct(product.id) : "";
+      providerSelect.innerHTML = lista.map((provider) => `<option value="${escapeAttr(provider.id)}">${escapeHtml(provider.name)}</option>`).join("");
+      const aElegir = lista.some((provider) => provider.id === elegido) ? elegido : ultimo;
+      if (aElegir) providerSelect.value = aElegir;
+    }
   }
   function collectPriceIncreaseCandidates(items, date) {
     const notices = [];
@@ -8229,6 +8306,10 @@
         <div class="field">
           <label>$ mercado</label>
           <input data-item-market-price inputmode="decimal" placeholder="0" />
+        </div>
+        <div class="field pl-cc" data-cc-field>
+          <label>C.C</label>
+          <label class="cc-check"><input type="checkbox" data-item-cc style="width:auto;min-height:auto" /><select data-item-provider hidden></select></label>
         </div>
         <div class="field">
           <label>Subtotal</label>
@@ -8359,10 +8440,10 @@
   // Carga una fila de compra por cada producto del proveedor/empleado elegido que HAY QUE COMPRAR
   // HOY, con la cantidad que falta ya puesta y el ultimo costo conocido. Las filas quedan marcadas
   // como automaticas para poder reemplazarlas si se cambia de proveedor, sin tocar lo tipeado a mano.
-  function loadPurchaseLinesForAssignee(parsed) {
+  function loadPurchaseLinesForAssignee(parsed, entriesOverride) {
     const container = document.getElementById("purchase-items");
     if (!container) return 0;
-    const entries = purchaseProductsForAssignee(parsed).filter((entry) => entry.pendingQty > 0);
+    const entries = entriesOverride || purchaseProductsForAssignee(parsed).filter((entry) => entry.pendingQty > 0);
     if (!entries.length) return 0;
     const existing = new Set(Array.from(container.querySelectorAll("[data-product-select]")).map((select) => select.value).filter(Boolean));
     let added = 0;
@@ -8537,6 +8618,95 @@
     container.insertAdjacentHTML("beforeend", renderPurchaseItemRow(product.id));
   }
 
+  // Compra cargada con el proveedor en "Todos": cada producto va al proveedor que se eligio en su
+  // linea (por defecto el ultimo que nos lo vendio) y la casilla C.C decide si se paga en efectivo
+  // (sale de la caja del que lo carga) o va a la cuenta corriente del proveedor. Se agrupa por
+  // proveedor y forma de pago para no dejar la caja con un movimiento por producto.
+  function registerMultiProviderPurchase(options) {
+    const items = options.items || [];
+    const sinProveedor = items.filter((item) => !getProvider(item.lineProviderId));
+    if (sinProveedor.length) {
+      alert("Estos productos no tienen proveedor: " + sinProveedor.map((item) => item.productName).join(", ")
+        + ". Elegilos en la casilla C.C de cada linea o cargalos con un proveedor puntual.");
+      return null;
+    }
+    const grupos = new Map();
+    items.forEach((item) => {
+      const clave = (item.cuentaCorriente ? "cc" : "efectivo") + "|" + item.lineProviderId;
+      if (!grupos.has(clave)) grupos.set(clave, { cuentaCorriente: item.cuentaCorriente, providerId: item.lineProviderId, items: [] });
+      grupos.get(clave).items.push(item);
+    });
+    const creadas = [];
+    grupos.forEach((grupo) => {
+      const provider = getProvider(grupo.providerId);
+      const groupItems = grupo.items.map((item) => ({
+        productId: item.productId,
+        productName: item.productName,
+        quantity: item.quantity,
+        unitCost: item.unitCost,
+        relationUnits: item.relationUnits || 0,
+        marketPrice: item.marketPrice || 0,
+        totalCost: item.totalCost
+      }));
+      const totalCost = groupItems.reduce((sum, item) => sum + item.totalCost, 0);
+      const purchase = {
+        id: nextDatedId("CMP", state.purchases),
+        createdAt: new Date().toISOString(),
+        date: options.date,
+        expenseType: "purchase",
+        providerId: provider.id,
+        providerName: provider.name,
+        productId: groupItems.length === 1 ? groupItems[0].productId : "",
+        productName: groupItems.length === 1 ? groupItems[0].productName : "",
+        description: options.description || "",
+        quantity: groupItems.length === 1 ? groupItems[0].quantity : groupItems.length,
+        unitCost: groupItems.length === 1 ? groupItems[0].unitCost : 0,
+        items: groupItems,
+        paymentStatus: grupo.cuentaCorriente ? "account_current" : "paid",
+        totalCost,
+        cashBoxId: grupo.cuentaCorriente ? "" : options.cashBoxId,
+        notes: options.notes || "",
+        assignedEmployeeId: options.assignedEmployeeId || "",
+        vendorName: "",
+        recordedBy: currentUser.name,
+        userRole: currentUser.role
+      };
+      state.purchases.push(purchase);
+      recordStockPurchaseMovements(purchase);
+      rememberProviderProducts(provider.id, groupItems);
+      const priceIncreaseNotices = collectPriceIncreaseCandidates(groupItems, purchase.date);
+      updateProductCostsFromPurchase(groupItems, provider);
+      updateOrdersWithNewPrices(purchase.date, groupItems);
+      sendPriceIncreaseNotices(priceIncreaseNotices);
+      if (grupo.cuentaCorriente) {
+        addProviderLedgerEntry({
+          providerId: provider.id,
+          date: purchase.date,
+          type: "deuda",
+          description: "Cuenta corriente - " + purchase.id,
+          amount: totalCost,
+          relatedEntityId: purchase.id,
+          relatedEntityType: "purchase",
+          notes: purchase.notes
+        });
+      } else {
+        addCajaEntry({
+          date: purchase.date,
+          type: "expense",
+          concept: buildExpenseConcept(purchase),
+          relatedEntityId: purchase.id,
+          relatedEntityType: "purchase",
+          amountIngreso: 0,
+          amountEgreso: totalCost,
+          cashBoxId: options.cashBoxId,
+          notes: purchase.notes
+        });
+      }
+      creadas.push(purchase);
+    });
+    return creadas;
+  }
+
   function readPurchaseItems(allowZeroCost) {
     const items = [];
     let invalidProduct = "";
@@ -8554,6 +8724,8 @@
         return;
       }
       if (quantity <= 0 || (!allowZeroCost && unitCost <= 0)) return;
+      const ccCheck = row.querySelector("[data-item-cc]");
+      const providerSelect = row.querySelector("[data-item-provider]");
       items.push({
         productId: product.id,
         productName: product.name,
@@ -8561,7 +8733,10 @@
         unitCost,
         relationUnits,
         marketPrice,
-        totalCost: quantity * unitCost
+        totalCost: quantity * unitCost,
+        // Solo se usan cuando se compra con el proveedor en "Todos".
+        cuentaCorriente: !!(ccCheck && ccCheck.checked),
+        lineProviderId: providerSelect ? providerSelect.value : ""
       });
     });
     if (invalidProduct) {
@@ -8833,12 +9008,10 @@
     return lista.length ? lista : activeProviders();
   }
 
-  // Productos que hay que comprar hoy para la seleccion actual de Dividir compras.
-  function divideExpenseRows(assigneeValues) {
-    const isAll = !Array.isArray(assigneeValues) || assigneeValues.includes("all");
-    if (!isAll && !assigneeValues.length) return [];
-    return getProductPurchaseShortages(getDivideContextDate())
-      .filter((group) => isAll || assigneeValues.includes(getProductAssigneeValue(group.productId)))
+  // Productos que todavia hay que comprar para una fecha, con lo que falta, el ultimo costo y el
+  // ultimo proveedor al que se le compro.
+  function productsToBuyToday(dateISO) {
+    return getProductPurchaseShortages(dateISO || todayISO())
       .map((group) => ({
         productId: group.productId,
         productName: group.productName,
@@ -8848,126 +9021,6 @@
         providerId: lastProviderForProduct(group.productId),
         providers: providersSellingProduct(group.productId)
       }));
-  }
-
-  // Guarda de una los egresos cargados en Dividir compras: una compra por proveedor y forma de
-  // pago, para que la caja quede con un solo egreso por proveedor y no con veinte movimientos.
-  function saveDivideExpenses() {
-    const filas = Array.from(document.querySelectorAll("[data-expense-row]")).map((row) => {
-      const cc = row.querySelector("[data-expense-cc]").checked;
-      const select = row.querySelector("[data-expense-provider]");
-      return {
-        productId: row.dataset.expenseRow,
-        productName: (getProduct(row.dataset.expenseRow) || {}).name || "",
-        quantity: parseAmount(row.querySelector("[data-expense-qty]").value),
-        unitCost: parseAmount(row.querySelector("[data-expense-cost]").value),
-        cuentaCorriente: cc,
-        providerId: select ? select.value : ""
-      };
-    }).filter((fila) => fila.quantity > 0 && fila.unitCost > 0);
-    if (!filas.length) return alert("Complete cantidad y costo unitario en al menos un producto.");
-    const sinProveedor = filas.filter((fila) => fila.cuentaCorriente && !getProvider(fila.providerId));
-    if (sinProveedor.length) return alert("Elegi el proveedor de: " + sinProveedor.map((fila) => fila.productName).join(", "));
-
-    const grupos = new Map();
-    filas.forEach((fila) => {
-      const clave = (fila.cuentaCorriente ? "cc" : "efectivo") + "|" + (fila.providerId || "");
-      if (!grupos.has(clave)) grupos.set(clave, { cuentaCorriente: fila.cuentaCorriente, providerId: fila.providerId, items: [] });
-      grupos.get(clave).items.push(fila);
-    });
-
-    const date = getDivideContextDate();
-    const cashBoxId = getDefaultOutgoingCashBoxId();
-    let total = 0;
-    grupos.forEach((grupo) => {
-      const provider = grupo.providerId ? getProvider(grupo.providerId) : null;
-      const items = grupo.items.map((fila) => ({
-        productId: fila.productId,
-        productName: fila.productName,
-        quantity: fila.quantity,
-        unitCost: fila.unitCost,
-        relationUnits: 0,
-        marketPrice: 0,
-        totalCost: fila.quantity * fila.unitCost
-      }));
-      const totalCost = items.reduce((sum, item) => sum + item.totalCost, 0);
-      total += totalCost;
-      const purchase = {
-        id: nextDatedId("CMP", state.purchases),
-        createdAt: new Date().toISOString(),
-        date,
-        expenseType: "purchase",
-        providerId: provider ? provider.id : "",
-        providerName: provider ? provider.name : "",
-        description: "Egreso cargado desde Dividir compras",
-        items,
-        quantity: items.reduce((sum, item) => sum + item.quantity, 0),
-        unitCost: 0,
-        totalCost,
-        paymentStatus: grupo.cuentaCorriente ? "account_current" : "paid",
-        cashBoxId: grupo.cuentaCorriente ? "" : cashBoxId,
-        notes: "",
-        assignedEmployeeId: currentUser.id,
-        recordedBy: currentUser.name,
-        userRole: currentUser.role
-      };
-      state.purchases.push(purchase);
-      recordStockPurchaseMovements(purchase);
-      if (grupo.cuentaCorriente && provider) {
-        addProviderLedgerEntry({
-          providerId: provider.id,
-          date,
-          type: "deuda",
-          description: "Compra - " + purchase.id,
-          amount: totalCost,
-          relatedEntityId: purchase.id,
-          relatedEntityType: "purchase"
-        });
-      } else {
-        addCajaEntry({
-          date,
-          type: "expense",
-          concept: buildExpenseConcept(purchase),
-          relatedEntityId: purchase.id,
-          relatedEntityType: "purchase",
-          amountIngreso: 0,
-          amountEgreso: totalCost,
-          cashBoxId,
-          notes: ""
-        });
-      }
-    });
-    saveState();
-    alert("Se guardaron " + filas.length + " producto(s) por " + formatMoney(total) + " en " + grupos.size + " egreso(s).");
-    render();
-  }
-
-  function renderDivideExpensePanel(assigneeValues) {
-    const rows = divideExpenseRows(assigneeValues);
-    if (!rows.length) return "";
-    const cuerpo = rows.map((row) => {
-      const opciones = row.providers.map((provider) => `<option value="${escapeAttr(provider.id)}" ${provider.id === row.providerId ? "selected" : ""}>${escapeHtml(provider.name)}</option>`).join("");
-      return `<tr data-expense-row="${escapeAttr(row.productId)}">
-        <td><strong>${escapeHtml(row.productName)}</strong><br><span class="pl-falta">Falta ${escapeHtml(divideQtyLabel(row.falta, row.unitType))}</span></td>
-        <td><input data-expense-qty inputmode="decimal" value="${escapeAttr(formatAmountInput(row.falta))}" /></td>
-        <td><input data-expense-cost inputmode="decimal" value="${row.cost > 0 ? escapeAttr(formatAmountInput(row.cost)) : ""}" placeholder="0" /></td>
-        <td class="num" data-expense-total>${formatMoney(row.falta * row.cost)}</td>
-        <td><label class="cc-check"><input type="checkbox" data-expense-cc style="width:auto;min-height:auto" /> C.C</label></td>
-        <td><select data-expense-provider hidden>${opciones}</select><span class="muted" data-expense-provider-note>${escapeHtml(row.providerId && getProvider(row.providerId) ? getProvider(row.providerId).name : "sin proveedor")}</span></td>
-      </tr>`;
-    }).join("");
-    return `<div class="panel" style="margin-bottom:14px">
-      <h2 class="page-title" style="font-size:18px">Egresos de lo que falta comprar</h2>
-      <p class="muted">Cada producto se guarda a nombre del ultimo proveedor al que se le compro. Por defecto sale <strong>pagado en efectivo</strong> y se descuenta de tu caja; tildando <strong>C.C</strong> va a la cuenta corriente del proveedor y no toca la caja.</p>
-      <div class="table-wrap" style="margin-top:10px"><table>
-        <thead><tr><th>Producto</th><th>Cantidad</th><th>Costo unitario</th><th class="num">Total</th><th>C.C</th><th>Proveedor</th></tr></thead>
-        <tbody>${cuerpo}</tbody>
-      </table></div>
-      <div class="page-actions" style="margin-top:10px">
-        <button class="btn primary" type="button" id="save-divide-expenses">Guardar egreso</button>
-        <span class="muted" id="divide-expense-total"></span>
-      </div>
-    </div>`;
   }
 
   function renderDividePurchases() {
@@ -9028,36 +9081,6 @@
       document.querySelectorAll("[data-log-item-expense]").forEach((button) => {
         button.addEventListener("click", () => openItemExpenseForm(button.dataset.logItemExpense));
       });
-      // Egresos de lo que falta comprar: total en vivo, y el desplegable de proveedor solo
-      // aparece cuando se tilda C.C.
-      const recalcExpenses = () => {
-        let total = 0;
-        document.querySelectorAll("[data-expense-row]").forEach((row) => {
-          const cantidad = parseAmount(row.querySelector("[data-expense-qty]").value);
-          const costo = parseAmount(row.querySelector("[data-expense-cost]").value);
-          const subtotal = cantidad * costo;
-          total += subtotal;
-          row.querySelector("[data-expense-total]").textContent = formatMoney(subtotal);
-        });
-        const totalEl = document.getElementById("divide-expense-total");
-        if (totalEl) totalEl.textContent = total > 0 ? "Total a registrar: " + formatMoney(total) : "";
-      };
-      document.querySelectorAll("[data-expense-qty],[data-expense-cost]").forEach((input) => {
-        input.addEventListener("input", recalcExpenses);
-        input.addEventListener("change", recalcExpenses);
-      });
-      document.querySelectorAll("[data-expense-cc]").forEach((checkbox) => {
-        checkbox.addEventListener("change", () => {
-          const row = checkbox.closest("[data-expense-row]");
-          const select = row.querySelector("[data-expense-provider]");
-          const nota = row.querySelector("[data-expense-provider-note]");
-          if (select) select.hidden = !checkbox.checked;
-          if (nota) nota.hidden = checkbox.checked;
-        });
-      });
-      const saveExpensesBtn = document.getElementById("save-divide-expenses");
-      if (saveExpensesBtn) saveExpensesBtn.addEventListener("click", saveDivideExpenses);
-      recalcExpenses();
       document.querySelectorAll("[data-divide-order]").forEach((checkbox) => {
         checkbox.addEventListener("change", () => {
           const id = checkbox.dataset.divideOrder;
@@ -9109,7 +9132,6 @@
        </div>`,
       `
       ${currentProviderId() ? "" : unassignedOrderedBannerHtml(getDivideContextDate())}
-      ${currentProviderId() ? "" : renderDivideExpensePanel(isAllSelected ? ["all"] : selected)}
       ${currentProviderId() ? "" : `<div class="panel" style="margin-bottom:14px">
         <div class="form-grid">
           <div class="field span-2">

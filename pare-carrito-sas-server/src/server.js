@@ -753,7 +753,9 @@ const MAX_WINDOW_DAYS = Math.max(...Object.values(STATE_WINDOW_PRESETS)
 
 function recordDate(row) {
   if (!row) return "";
-  return String(row.date || row.dayKey || String(row.createdAt || row.timestamp || "").slice(0, 10) || "");
+  // billingLog usa emittedAt/from y no tiene date: sin esto quedaba sin fecha y se filtraba entero,
+  // por eso el "Historial de emisiones" de Facturacion aparecia vacio en los dispositivos.
+  return String(row.date || row.dayKey || row.from || String(row.emittedAt || row.createdAt || row.timestamp || row.at || "").slice(0, 10) || "").slice(0, 10);
 }
 
 function cutoffDate(days) {
@@ -838,9 +840,12 @@ function buildWindowedState(data, presetName, customDays) {
     const days = preset.days[key];
     if (days == null || !Array.isArray(source[key])) { out[key] = source[key]; return; }
     cutoffs[key] = cutoffDate(days);
-    out[key] = source[key].filter((row) => recordDate(row) >= cutoffs[key]);
+    // Una fila sin fecha reconocible viaja siempre entera: es preferible mandar de mas a que
+    // desaparezca del sistema sin que nadie se entere.
+    out[key] = source[key].filter((row) => { const d = recordDate(row); return !d || d >= cutoffs[key]; });
   });
-  const before = (key) => (source[key] || []).filter((row) => recordDate(row) < cutoffs[key]);
+  // Las filas sin fecha tampoco cuentan para los saldos de apertura: ya viajan enteras.
+  const before = (key) => (source[key] || []).filter((row) => { const d = recordDate(row); return d && d < cutoffs[key]; });
 
   // Saldo de cada cliente anterior al corte, en una sola fila.
   const byClient = {};

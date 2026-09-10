@@ -4082,3 +4082,14 @@ tr:last-child td {
   white-space: nowrap;
   cursor: pointer;
 }
+
+/* Casilla de cuenta corriente por linea: solo cuando se compra con el proveedor en "Todos". */
+.purchase-line .pl-cc { display: none; }
+#purchase-items.cc-mode .purchase-line .pl-cc { display: block; }
+.purchase-line .cc-check {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 34px;
+}
+.purchase-line .cc-check select { min-width: 90px; }
