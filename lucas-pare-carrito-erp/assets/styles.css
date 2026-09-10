@@ -4071,3 +4071,14 @@ tr:last-child td {
 .group-account:last-child {
   border-bottom: 0;
 }
+
+/* Casilla de cuenta corriente en los egresos de Dividir compras. */
+.cc-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
