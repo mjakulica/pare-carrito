@@ -4110,3 +4110,50 @@ tr:last-child td {
   min-height: 34px;
 }
 .purchase-line .cc-check select { min-width: 90px; }
+
+/* Historiales - panel de rendimiento y analisis de rentabilidad por producto. */
+.history-performance-matrix table {
+  min-width: 1040px;
+}
+
+.history-performance-matrix td.num strong {
+  display: block;
+}
+
+.history-analysis-table table {
+  min-width: 1480px;
+}
+
+.history-analysis-table th,
+.history-analysis-table td {
+  white-space: nowrap;
+}
+
+.history-analysis-table th.sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.history-analysis-table th.sortable:hover {
+  background: #eef4fb;
+}
+
+.history-analysis-table th.sorted {
+  color: var(--text);
+  font-weight: 800;
+}
+
+.history-analysis-table tr.history-analysis-total td {
+  background: #f0f4f8;
+  font-weight: 800;
+  border-top: 2px solid var(--line);
+}
+
+/* Aviso de facturas que quedaron sin emitir (fallidas o atrasadas). */
+.billing-warning {
+  border-left: 5px solid #b45309;
+}
+
+.billing-warning ul {
+  font-size: 13px;
+}

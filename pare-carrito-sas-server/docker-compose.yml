@@ -45,6 +45,16 @@ services:
       TUSFACTURAS_PROVINCIA: ${TUSFACTURAS_PROVINCIA:-17}
       TUSFACTURAS_RUBRO: ${TUSFACTURAS_RUBRO:-Frutas y verduras}
       TUSFACTURAS_CONDICION_PAGO: ${TUSFACTURAS_CONDICION_PAGO:-211}
+      # Credenciales por punto de venta: el user token (y si hace falta apikey/apitoken) cambia
+      # segun el PDV. billingConfig() las arma desde estas variables; sin listarlas aca no llegan
+      # al contenedor, porque el servicio pasa variables sueltas y no usa env_file.
+      TUSFACTURAS_PV_CREDS: ${TUSFACTURAS_PV_CREDS:-}
+      TUSFACTURAS_PV3_USERTOKEN: ${TUSFACTURAS_PV3_USERTOKEN:-}
+      TUSFACTURAS_PV3_APIKEY: ${TUSFACTURAS_PV3_APIKEY:-}
+      TUSFACTURAS_PV3_APITOKEN: ${TUSFACTURAS_PV3_APITOKEN:-}
+      TUSFACTURAS_PV4_USERTOKEN: ${TUSFACTURAS_PV4_USERTOKEN:-}
+      TUSFACTURAS_PV4_APIKEY: ${TUSFACTURAS_PV4_APIKEY:-}
+      TUSFACTURAS_PV4_APITOKEN: ${TUSFACTURAS_PV4_APITOKEN:-}
       MOONSHOT_API_KEY: ${MOONSHOT_API_KEY:-}
       MOONSHOT_API_URL: ${MOONSHOT_API_URL:-https://api.moonshot.ai/v1/chat/completions}
       MOONSHOT_MODEL: ${MOONSHOT_MODEL:-kimi-k2.7}

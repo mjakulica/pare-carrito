@@ -295,6 +295,9 @@
     historyLoading: false,
     historyLoadingKey: "",
     historyError: "",
+    billingServerPuntoVenta: "",
+    historyAnalysisSort: "totalProfit",
+    historyAnalysisDir: "desc",
     billingSelectedClients: null,
     billingIvaOverrides: {},
     lastOverwrite: null
@@ -2911,6 +2914,7 @@
       ${renderPendingUsersBanner()}
       ${renderPendingReplacementsBanner()}
       ${unassignedOrderedBannerHtml()}
+      ${["manager", "admin", "contador"].includes(currentUser.role) ? unbilledWarningHtml({ compact: true }) : ""}
       <div class="grid four dash-metrics-grid">
         ${metricCard("Pedidos de hoy", todaysOrders.length, "Pedidos activos cargados")}
         ${metricCard("Caja", formatMoney(cajaBalance), "Ingresos menos egresos")}
@@ -5243,6 +5247,7 @@
             ${["manager", "admin", "employee"].includes(currentUser.role) ? `<button class="btn small ghost" data-edit-order="${order.id}">Editar</button>` : ""}
             ${["manager", "admin", "employee"].includes(currentUser.role) ? `<button class="btn small ghost" data-print-order-remito="${order.id}" title="Imprimir" aria-label="Imprimir">&#128424;</button>` : ""}
             ${["manager", "admin", "employee"].includes(currentUser.role) ? `<button class="btn small ghost" data-add-recambio-order="${order.id}" title="Pedir recambio de este pedido" aria-label="Pedir recambio">&#8635;</button>` : ""}
+            ${["manager", "admin", "contador"].includes(currentUser.role) ? renderOrderInvoiceButton(order.id) : ""}
             ${order.handwrittenImage ? `<button class="btn small ghost" data-view-handwritten="${order.id}" title="Ver pedido manuscrito" aria-label="Pedido manuscrito">&#128196;</button>` : ""}
             ${order.whatsappText ? `<button class="btn small ghost" data-view-whatsapp="${order.id}" title="Ver texto interpretado" aria-label="Texto del pedido">&#128221;</button>` : ""}
             ${!annulledView && order.status === "entregado" && ["manager", "admin", "employee"].includes(currentUser.role)
@@ -5263,6 +5268,7 @@
       : `<th>Pedido</th><th>Cliente</th><th>Productos</th><th>Total</th>${canEditStatus ? "<th>Estado</th>" : "<th>Cobrado</th><th>Estado</th>"}${showActions ? "<th>Acciones</th>" : ""}`;
 
     afterRender.push(bindOrders);
+    afterRender.push(bindOrderInvoiceButtons);
     afterRender.push(() => {
       document.querySelectorAll("[data-open-recambio]").forEach((b) => b.addEventListener("click", openRecambioModal));
       document.querySelectorAll("[data-add-recambio-order]").forEach((b) => b.addEventListener("click", () => openRecambioModal(b.dataset.addRecambioOrder)));
@@ -5608,7 +5614,10 @@
           <td class="page-actions">
             ${canViewRemito ? `<button class="btn small ghost" data-view-customer-remito="${order.id}">Remito</button>` : `<span class="muted">Remito disponible 8:00</span>`}
             ${canEdit ? `<button class="btn small ghost" data-edit-order="${order.id}">Editar</button>` : ""}
-            ${clientNeedsDailyInvoice(order.clientId) && getOrderInvoicePdf(order.id) ? `<a class="btn small ghost" href="${escapeAttr(getOrderInvoicePdf(order.id))}" target="_blank" rel="noopener">Factura</a>` : ""}
+            ${(() => {
+              const invoiceLog = getOrderInvoiceLog(order.id);
+              return invoiceLog && invoiceLog.pdf ? `<a class="btn small ghost" href="${escapeAttr(invoiceLog.pdf)}" target="_blank" rel="noopener" title="${escapeAttr(orderInvoiceTitle(invoiceLog))}">Factura</a>` : "";
+            })()}
           </td>
         </tr>
       `;
@@ -5708,9 +5717,48 @@
     const c = getClient(clientId);
     return !!(c && c.needsInvoice && c.invoiceFrequency === "diaria");
   }
-  function getOrderInvoicePdf(orderId) {
-    const log = (state.billingLog || []).filter((l) => l.status === "ok" && l.pdf && Array.isArray(l.orders) && l.orders.indexOf(orderId) !== -1).pop();
-    return log ? log.pdf : "";
+  // El servidor guarda en billingLog la CANTIDAD de pedidos en "orders" y los IDs en "orderIds".
+  // Las facturas viejas guardaban los IDs directamente en "orders", asi que se aceptan las dos.
+  function getBillingLogOrderIds(log) {
+    if (!log) return [];
+    if (Array.isArray(log.orderIds)) return log.orderIds;
+    if (Array.isArray(log.orders)) return log.orders;
+    return [];
+  }
+
+  // Factura emitida que incluye este pedido. Si el pedido entro en mas de una (por ejemplo una
+  // re-emision), vale la ultima. Solo sirven las que tienen con que abrir el PDF.
+  function getOrderInvoiceLog(orderId) {
+    if (!orderId) return null;
+    return (state.billingLog || [])
+      .filter((log) => log.status === "ok" && (log.numero || log.pdf) && getBillingLogOrderIds(log).indexOf(orderId) !== -1)
+      .pop() || null;
+  }
+
+  function orderInvoiceTitle(log) {
+    const parts = [log.invoiceType || "Factura"];
+    if (log.numero) parts.push(String(log.numero).trim());
+    parts.push("del " + formatDate(String(log.from || log.emittedAt || "").slice(0, 10)));
+    return parts.join(" ");
+  }
+
+  // Boton "Factura" de la fila de un pedido. Con numero de comprobante se pide el PDF al servidor
+  // (TusFacturas), que es el caso normal; si la factura vieja solo tiene la URL, se abre directo.
+  function renderOrderInvoiceButton(orderId) {
+    const log = getOrderInvoiceLog(orderId);
+    if (!log) return "";
+    const title = orderInvoiceTitle(log);
+    if (log.numero) return `<button class="btn small ghost" type="button" data-order-invoice="${escapeAttr(orderId)}" title="${escapeAttr(title)}" aria-label="${escapeAttr(title)}">Factura</button>`;
+    return `<a class="btn small ghost" href="${escapeAttr(log.pdf)}" target="_blank" rel="noopener" title="${escapeAttr(title)}" aria-label="${escapeAttr(title)}">Factura</a>`;
+  }
+
+  function bindOrderInvoiceButtons() {
+    document.querySelectorAll("[data-order-invoice]").forEach((button) => button.addEventListener("click", () => {
+      const log = getOrderInvoiceLog(button.dataset.orderInvoice);
+      if (!log) return alert("Ese pedido todavia no figura en ninguna factura emitida.");
+      if (log.numero) return abrirFacturaPdf(log.invoiceType || "", log.numero);
+      if (log.pdf) window.open(log.pdf, "_blank");
+    }));
   }
   function printOrderRemitoDirect(orderId) {
     const order = getOrder(orderId);
@@ -6281,11 +6329,7 @@
     const loadingThisRange = ui.historyLoading && ui.historyLoadingKey === historyKey;
     const purchaseRows = historyReady ? (ui.historyData.purchaseRows || buildPurchaseHistoryMatrix(from, to, ui.historyData.purchaseHistory || [])) : [];
     const salesRows = historyReady ? (ui.historyData.salesRows || buildSalesHistoryMatrix(from, to, ui.historyData.salesQuantityHistory || [], ui.historyData.listPriceHistory || [])) : [];
-    const historyBody = (rows, type) => {
-      if (ui.historyError) return `<div class="alert">${escapeHtml(ui.historyError)}</div>`;
-      if (!historyReady || loadingThisRange) return `<div class="empty compact">Cargando historiales...</div>`;
-      return renderHistoryMatrixTable(rows, dates, type);
-    };
+    const historyBody = (rows, type) => historyPendingMessage(historyReady, loadingThisRange) || renderHistoryMatrixTable(rows, dates, type);
     afterRender.push(() => {
       bindHistories();
       ensureHistoryRangeLoaded(from, to);
@@ -6401,6 +6445,101 @@
     printHtmlDocument("Historiales " + formatDate(from) + " - " + formatDate(to), `<section class="history-print-page">${sections.join("")}</section>`, { landscape: true, margin: "4mm", useWindow: true, printWindow });
   }
 
+  function historyPendingMessage(historyReady, loadingThisRange) {
+    if (ui.historyError) return `<div class="alert">${escapeHtml(ui.historyError)}</div>`;
+    if (!historyReady || loadingThisRange) return `<div class="empty compact">Cargando historiales...</div>`;
+    return "";
+  }
+
+  // El rendimiento por producto sale del historial de compras y ventas del servidor, igual que
+  // Historiales, pero con el rango de fechas de la pagina de Rendimiento.
+  function getPerformanceRangeData(from, to) {
+    const dates = buildDateRange(from, to);
+    const ready = !!(ui.historyData && ui.historyData.from === from && ui.historyData.to === to);
+    const loading = ui.historyLoading && ui.historyLoadingKey === from + "|" + to;
+    const purchaseRows = ready ? (ui.historyData.purchaseRows || buildPurchaseHistoryMatrix(from, to, ui.historyData.purchaseHistory || [])) : [];
+    const salesRows = ready ? (ui.historyData.salesRows || buildSalesHistoryMatrix(from, to, ui.historyData.salesQuantityHistory || [], ui.historyData.listPriceHistory || [])) : [];
+    const rows = ready ? buildPerformanceHistoryMatrix(dates, purchaseRows, salesRows) : [];
+    return { dates, ready, loading, rows, analysis: buildPerformanceAnalysis(rows) };
+  }
+
+  function renderPerformanceProductPanels(from, to) {
+    const data = getPerformanceRangeData(from, to);
+    const pending = historyPendingMessage(data.ready, data.loading);
+    const sortKey = ui.historyAnalysisSort || "totalProfit";
+    const direction = ui.historyAnalysisDir === "asc" ? "asc" : "desc";
+    return `
+      <div class="panel" style="margin-top:14px" data-history-panel="analysis">
+        <div class="history-panel-head">
+          <h2 class="page-title" style="font-size:18px">Analisis de rentabilidad por producto</h2>
+          <button class="btn small ghost history-print-btn" type="button" data-print-performance="analysis" title="Imprimir analisis" aria-label="Imprimir analisis">&#128424;</button>
+        </div>
+        <p class="muted">Todo el rango en una fila por producto. Toque cualquier encabezado para ordenar y ver que producto es el que mas gasto genera, el que mas factura, el que mejor margen tiene y el que mas aporta a la ganancia total.</p>
+        ${pending ? "" : `
+          <div class="grid four" style="margin:10px 0 12px">
+            ${metricCard("Venta total", formatMoney(data.analysis.totals.totalAmount), formatDate(from) + " - " + formatDate(to))}
+            ${metricCard("Costo de lo vendido", formatMoney(data.analysis.totals.totalCost), "Cantidad vendida por el costo del dia")}
+            ${metricCard("Ganancia bruta", formatMoney(data.analysis.totals.totalProfit), "Venta menos costo de lo vendido")}
+            ${metricCard("Margen promedio", formatSharePct(data.analysis.totals.marginPct), "Sobre el costo, ponderado por venta")}
+          </div>
+        `}
+        ${pending || renderPerformanceAnalysisTable(data.analysis, { sortKey, direction })}
+      </div>
+      <div class="panel" style="margin-top:14px" data-history-panel="performance">
+        <div class="history-panel-head">
+          <h2 class="page-title" style="font-size:18px">Rendimiento por dia</h2>
+          <button class="btn small ghost history-print-btn" type="button" data-print-performance="performance" title="Imprimir rendimiento por dia" aria-label="Imprimir rendimiento por dia">&#128424;</button>
+        </div>
+        <p class="muted">Cada dia muestra la diferencia entre el precio de lista y el de compra, el margen sobre el costo y el total vendido ese dia. El color va de rojo (pierde plata) a verde (margen alto).</p>
+        ${pending ? "" : marginLegendHtml()}
+        ${pending || renderPerformanceMatrixTable(data.rows, data.dates)}
+      </div>
+    `;
+  }
+
+  function printPerformanceRange(scope, from, to, printWindow) {
+    const data = getPerformanceRangeData(from, to);
+    if (!data.ready) return alert("Todavia se estan cargando los historiales del rango.");
+    const sections = [];
+    if (scope === "all" || scope === "analysis") {
+      const table = renderPerformanceAnalysisTable(data.analysis, { sortKey: ui.historyAnalysisSort || "totalProfit", direction: ui.historyAnalysisDir === "asc" ? "asc" : "desc", interactive: false });
+      sections.push(`<section class="print-sheet history-print-sheet">${renderHistoryPrintTitle("Analisis de rentabilidad por producto", from, to)}${table}</section>`);
+    }
+    if (scope === "all" || scope === "performance") {
+      sections.push(`<section class="print-sheet history-print-sheet">${renderHistoryPrintTitle("Rendimiento por dia", from, to)}${renderPerformanceMatrixTable(data.rows, data.dates)}</section>`);
+    }
+    printHtmlDocument("Rendimiento " + formatDate(from) + " - " + formatDate(to), `<section class="history-print-page">${sections.join("")}</section>`, { landscape: true, margin: "4mm", useWindow: true, printWindow });
+  }
+
+  function bindPerformanceProductPanels() {
+    document.querySelectorAll("[data-analysis-sort]").forEach((header) => header.addEventListener("click", () => {
+      const key = header.dataset.analysisSort;
+      if (ui.historyAnalysisSort === key) {
+        ui.historyAnalysisDir = ui.historyAnalysisDir === "asc" ? "desc" : "asc";
+      } else {
+        ui.historyAnalysisSort = key;
+        // Los nombres se leen mejor de la A a la Z; los numeros, del mas grande al mas chico.
+        ui.historyAnalysisDir = key === "productName" || key === "unitType" ? "asc" : "desc";
+      }
+      render();
+    }));
+    document.querySelectorAll("[data-history-row]").forEach((row) => row.addEventListener("click", () => {
+      openHistoryProductChart(row.dataset.historyType, row.dataset.historyProductId || "", row.dataset.historyProductName || "");
+    }));
+    document.querySelectorAll("[data-print-performance]").forEach((button) => button.addEventListener("click", async () => {
+      const scope = button.dataset.printPerformance || "all";
+      const currentFrom = ui.performanceFrom || ui.performanceDate || todayISO();
+      const currentTo = ui.performanceTo || currentFrom;
+      const printWindow = window.open("", "_blank");
+      await ensureHistoryRangeLoaded(currentFrom, currentTo, { forceRender: false });
+      if (ui.historyError) {
+        if (printWindow) printWindow.close();
+        return alert(ui.historyError);
+      }
+      printPerformanceRange(scope, currentFrom, currentTo, printWindow);
+    }));
+  }
+
   function renderHistoryPrintTitle(title, from, to) {
     return `<div class="history-print-title"><strong>${escapeHtml(title)}</strong><span>${formatDate(from)} - ${formatDate(to)}</span></div>`;
   }
@@ -6437,23 +6576,30 @@
   }
 
   function openHistoryProductChart(type, productId, productName) {
-    const from = ui.historyFrom || todayISO();
-    const to = ui.historyTo || from;
+    // Las filas de rendimiento viven en la pagina Rendimiento, que tiene su propio rango.
+    const onPerformancePage = getRoute().base === "rendimiento";
+    const from = onPerformancePage ? (ui.performanceFrom || ui.performanceDate || todayISO()) : (ui.historyFrom || todayISO());
+    const to = (onPerformancePage ? ui.performanceTo : ui.historyTo) || from;
     const historyReady = ui.historyData && ui.historyData.from === from && ui.historyData.to === to;
     if (!historyReady) return alert("Todavia se estan cargando los historiales del rango.");
     const dates = buildDateRange(from, to);
+    const purchaseMatrix = () => ui.historyData.purchaseRows || buildPurchaseHistoryMatrix(from, to, ui.historyData.purchaseHistory || []);
+    const salesMatrix = () => ui.historyData.salesRows || buildSalesHistoryMatrix(from, to, ui.historyData.salesQuantityHistory || [], ui.historyData.listPriceHistory || []);
     const rows = type === "purchase"
-      ? (ui.historyData.purchaseRows || buildPurchaseHistoryMatrix(from, to, ui.historyData.purchaseHistory || []))
-      : (ui.historyData.salesRows || buildSalesHistoryMatrix(from, to, ui.historyData.salesQuantityHistory || [], ui.historyData.listPriceHistory || []));
+      ? purchaseMatrix()
+      : type === "performance"
+        ? buildPerformanceHistoryMatrix(dates, purchaseMatrix(), salesMatrix())
+        : salesMatrix();
     const row = rows.find((item) => String(item.productId || "") === String(productId || "") && String(item.productName || "") === String(productName || ""))
       || rows.find((item) => String(item.productId || "") === String(productId || ""))
       || rows.find((item) => String(item.productName || "") === String(productName || ""));
     if (!row) return alert("No se encontro el producto en el rango seleccionado.");
-    const quantitySeries = dates.map((date) => ({ date, value: Number(row.days[date] && row.days[date].quantity || 0) }));
-    const priceSeries = dates.map((date) => ({ date, value: Number(row.days[date] && row.days[date].price || 0) }));
-    const title = (type === "purchase" ? "Compra - " : "Venta - ") + row.productName;
-    const quantityChart = renderHistoryLineChart("Cantidad", quantitySeries, formatNumber, "#2457a6", "quantity");
-    const priceChart = renderHistoryLineChart(type === "purchase" ? "Precio de compra" : "Precio de lista", priceSeries, formatMoney, "#0f7a5d", "price");
+    const isPerformance = type === "performance";
+    const quantitySeries = dates.map((date) => ({ date, value: Number(row.days[date] && (isPerformance ? row.days[date].profit : row.days[date].quantity) || 0) }));
+    const priceSeries = dates.map((date) => ({ date, value: Number(row.days[date] && (isPerformance ? row.days[date].unitMargin : row.days[date].price) || 0) }));
+    const title = (type === "purchase" ? "Compra - " : isPerformance ? "Rendimiento - " : "Venta - ") + row.productName;
+    const quantityChart = renderHistoryLineChart(isPerformance ? "Ganancia del dia" : "Cantidad", quantitySeries, isPerformance ? formatMoney : formatNumber, "#2457a6", "quantity");
+    const priceChart = renderHistoryLineChart(type === "purchase" ? "Precio de compra" : isPerformance ? "Margen por unidad" : "Precio de lista", priceSeries, formatMoney, "#0f7a5d", "price");
     showModal(
       title,
       `<div class="history-product-modal">
@@ -6524,7 +6670,7 @@
   }
 
   async function ensureHistoryRangeLoaded(from, to, options = {}) {
-    const isCurrentPage = () => getRoute().base === "historiales";
+    const isCurrentPage = () => ["historiales", "rendimiento"].includes(getRoute().base);
     const requestKey = from + "|" + to;
     if (ui.historyLoading && ui.historyLoadingKey === requestKey) {
       const startedAt = Date.now();
@@ -6694,6 +6840,247 @@
       });
     return Object.values(rows).sort((a, b) => String(a.category).localeCompare(String(b.category)) || String(a.productName).localeCompare(String(b.productName)));
   }
+
+  // Rendimiento por producto: cruza el historial de compras (costo del dia) con el de ventas
+  // (precio de lista y cantidad del dia) para saber cuanto dejo cada producto cada dia.
+  // El costo de un dia sin compra se arrastra del ultimo dia comprado; si el rango arranca sin
+  // compras previas se usa la primera compra del rango y, en ultima instancia, el costo de la lista.
+  function buildPerformanceHistoryMatrix(dates, purchaseRows, salesRows) {
+    const keyOf = (row) => String(row.productId || row.productName || "");
+    const purchaseByKey = {};
+    (purchaseRows || []).forEach((row) => { purchaseByKey[keyOf(row)] = row; });
+    const rows = {};
+    const ensureRow = (source) => {
+      const key = keyOf(source);
+      if (!rows[key]) rows[key] = {
+        productId: source.productId,
+        productName: source.productName || key,
+        category: source.category || "OTROS",
+        unitType: source.unitType || "",
+        totalQuantity: 0,
+        totalAmount: 0,
+        totalCost: 0,
+        totalProfit: 0,
+        purchaseAmount: 0,
+        purchaseQuantity: 0,
+        days: {}
+      };
+      return rows[key];
+    };
+    (salesRows || []).forEach((salesRow) => {
+      const key = keyOf(salesRow);
+      const purchaseRow = purchaseByKey[key];
+      const row = ensureRow(salesRow);
+      if (purchaseRow) {
+        row.purchaseAmount = Number(purchaseRow.totalAmount || 0);
+        row.purchaseQuantity = Number(purchaseRow.totalQuantity || 0);
+        if (!row.unitType) row.unitType = purchaseRow.unitType || "";
+      }
+      const costByDate = {};
+      let carried = 0;
+      dates.forEach((date) => {
+        const purchaseDay = purchaseRow && purchaseRow.days ? purchaseRow.days[date] : null;
+        const dayCost = purchaseDay && Number(purchaseDay.quantity || 0) > 0 ? Number(purchaseDay.price || 0) : 0;
+        if (dayCost > 0) carried = dayCost;
+        costByDate[date] = carried;
+      });
+      // Los dias previos a la primera compra del rango quedan en 0: los completamos hacia atras
+      // con esa primera compra para no inventar una ganancia igual al precio de venta entero.
+      const firstCost = dates.map((date) => costByDate[date]).find((value) => value > 0) || 0;
+      const fallbackCost = firstCost > 0 ? firstCost : getProductCost(salesRow.productId);
+      dates.forEach((date) => {
+        if (!(costByDate[date] > 0)) costByDate[date] = fallbackCost;
+      });
+      dates.forEach((date) => {
+        const salesDay = salesRow.days ? salesRow.days[date] : null;
+        const quantity = Number(salesDay && salesDay.quantity || 0);
+        if (quantity <= 0) return;
+        const listPrice = Number(salesDay.price || 0);
+        const cost = Number(costByDate[date] || 0);
+        const amount = Number(salesDay.amount || quantity * listPrice);
+        const costAmount = quantity * cost;
+        const profit = amount - costAmount;
+        row.days[date] = {
+          quantity,
+          amount,
+          price: listPrice,
+          cost,
+          unitMargin: listPrice - cost,
+          marginPct: calcMargin(cost, listPrice),
+          costAmount,
+          profit
+        };
+        row.totalQuantity += quantity;
+        row.totalAmount += amount;
+        row.totalCost += costAmount;
+        row.totalProfit += profit;
+      });
+    });
+    // Productos que se compraron pero no se vendieron en el rango: aparecen con gasto y sin ganancia.
+    (purchaseRows || []).forEach((purchaseRow) => {
+      const key = keyOf(purchaseRow);
+      if (rows[key]) return;
+      if (!(Number(purchaseRow.totalAmount || 0) > 0)) return;
+      const row = ensureRow(purchaseRow);
+      row.purchaseAmount = Number(purchaseRow.totalAmount || 0);
+      row.purchaseQuantity = Number(purchaseRow.totalQuantity || 0);
+    });
+    return Object.values(rows).map((row) => {
+      row.avgCost = row.totalQuantity > 0 ? row.totalCost / row.totalQuantity : 0;
+      row.avgPrice = row.totalQuantity > 0 ? row.totalAmount / row.totalQuantity : 0;
+      row.unitMargin = row.avgPrice - row.avgCost;
+      row.marginPct = calcMargin(row.avgCost, row.avgPrice);
+      return row;
+    }).sort((a, b) => String(a.category).localeCompare(String(b.category)) || String(a.productName).localeCompare(String(b.productName)));
+  }
+
+  const HISTORY_ANALYSIS_COLUMNS = [
+    { key: "productName", label: "Producto", type: "text" },
+    { key: "unitType", label: "Unidad", type: "text" },
+    { key: "totalQuantity", label: "Cant. vendida", type: "number" },
+    { key: "avgCost", label: "Costo prom.", type: "money" },
+    { key: "avgPrice", label: "Precio lista prom.", type: "money" },
+    { key: "unitMargin", label: "Margen $", type: "money" },
+    { key: "marginPct", label: "Margen %", type: "margin" },
+    { key: "totalAmount", label: "Venta $", type: "money" },
+    { key: "salesShare", label: "% de la venta", type: "share" },
+    { key: "totalCost", label: "Costo vendido $", type: "money" },
+    { key: "costShare", label: "% del gasto", type: "share" },
+    { key: "purchaseAmount", label: "Compras $", type: "money" },
+    { key: "purchaseShare", label: "% de compras", type: "share" },
+    { key: "totalProfit", label: "Ganancia $", type: "money" },
+    { key: "profitShare", label: "% de la ganancia", type: "share" }
+  ];
+
+  function buildPerformanceAnalysis(performanceRows) {
+    const totals = { totalQuantity: 0, totalAmount: 0, totalCost: 0, totalProfit: 0, purchaseAmount: 0 };
+    (performanceRows || []).forEach((row) => {
+      totals.totalQuantity += Number(row.totalQuantity || 0);
+      totals.totalAmount += Number(row.totalAmount || 0);
+      totals.totalCost += Number(row.totalCost || 0);
+      totals.totalProfit += Number(row.totalProfit || 0);
+      totals.purchaseAmount += Number(row.purchaseAmount || 0);
+    });
+    // La participacion en la ganancia se mide contra la suma de las ganancias positivas: si se
+    // dividiera por el neto, un producto que pierde plata daria porcentajes mayores a 100.
+    const positiveProfit = (performanceRows || []).reduce((sum, row) => sum + Math.max(0, Number(row.totalProfit || 0)), 0);
+    const share = (value, total) => (total > 0 ? (Number(value || 0) / total) * 100 : 0);
+    const rows = (performanceRows || []).map((row) => ({
+      ...row,
+      salesShare: share(row.totalAmount, totals.totalAmount),
+      costShare: share(row.totalCost, totals.totalCost),
+      purchaseShare: share(row.purchaseAmount, totals.purchaseAmount),
+      profitShare: share(row.totalProfit, positiveProfit)
+    }));
+    totals.avgCost = totals.totalQuantity > 0 ? totals.totalCost / totals.totalQuantity : 0;
+    totals.avgPrice = totals.totalQuantity > 0 ? totals.totalAmount / totals.totalQuantity : 0;
+    totals.unitMargin = totals.avgPrice - totals.avgCost;
+    totals.marginPct = calcMargin(totals.avgCost, totals.avgPrice);
+    return { rows, totals };
+  }
+
+  function sortPerformanceAnalysisRows(rows, sortKey, direction) {
+    const column = HISTORY_ANALYSIS_COLUMNS.find((item) => item.key === sortKey) || HISTORY_ANALYSIS_COLUMNS[0];
+    const factor = direction === "asc" ? 1 : -1;
+    return rows.slice().sort((a, b) => {
+      if (column.type === "text") return factor * String(a[column.key] || "").localeCompare(String(b[column.key] || ""));
+      return factor * (Number(a[column.key] || 0) - Number(b[column.key] || 0));
+    });
+  }
+
+  function formatSharePct(value) {
+    return formatNumber(roundOne(Number(value || 0))) + "%";
+  }
+
+  function renderPerformanceMatrixTable(rows, dates) {
+    if (!rows.length) return `<div class="empty compact">Sin datos en el rango seleccionado.</div>`;
+    const dateHeaders = dates.map((date) => `<th class="num">${formatDateShort(date)}</th>`).join("");
+    const body = Array.from(new Set([...getProductCategories(), ...rows.map((row) => row.category || "OTROS")])).map((category) => {
+      const categoryRows = rows.filter((row) => (row.category || "OTROS") === category);
+      if (!categoryRows.length) return "";
+      return `
+        <tr class="history-category-row"><td colspan="${3 + dates.length}">${escapeHtml(category)}</td></tr>
+        ${categoryRows.map((row) => `
+          <tr class="history-product-row" data-history-row data-history-type="performance" data-history-product-id="${escapeAttr(row.productId || "")}" data-history-product-name="${escapeAttr(row.productName || "")}">
+            <td>${escapeHtml(row.productName)}</td>
+            <td>${escapeHtml(row.unitType)}</td>
+            <td class="num ${row.totalQuantity > 0 ? marginBandClass(row.marginPct) : ""}">
+              <strong>${formatMoney(row.totalProfit)}</strong><br>
+              <span class="muted">${row.totalQuantity > 0 ? formatSharePct(row.marginPct) + " · " + formatMoney(row.totalAmount) : "-"}</span>
+            </td>
+            ${dates.map((date) => {
+              const day = row.days[date];
+              if (!day || !(day.quantity > 0)) return `<td class="num">-</td>`;
+              return `<td class="num ${marginBandClass(day.marginPct)}">
+                <strong>${formatMoney(day.unitMargin)}</strong><br>
+                <span class="muted">${formatSharePct(day.marginPct)} · ${formatMoney(day.amount)}</span>
+              </td>`;
+            }).join("")}
+          </tr>
+        `).join("")}
+      `;
+    }).join("");
+    return `
+      <div class="table-wrap history-matrix history-performance-matrix">
+        <table>
+          <thead><tr><th>Producto</th><th>Unidad</th><th>Ganancia del rango</th>${dateHeaders}</tr></thead>
+          <tbody>${body}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  function renderPerformanceAnalysisTable(analysis, options = {}) {
+    const sortKey = options.sortKey || "totalProfit";
+    const direction = options.direction === "asc" ? "asc" : "desc";
+    const interactive = options.interactive !== false;
+    if (!analysis.rows.length) return `<div class="empty compact">Sin datos en el rango seleccionado.</div>`;
+    const sorted = sortPerformanceAnalysisRows(analysis.rows, sortKey, direction);
+    const cell = (row, column) => {
+      const value = row[column.key];
+      if (column.type === "text") return `<td>${escapeHtml(value || "")}</td>`;
+      if (column.type === "number") return `<td class="num">${formatNumber(value)}</td>`;
+      if (column.type === "share") return `<td class="num">${formatSharePct(value)}</td>`;
+      if (column.type === "margin") return `<td class="num ${row.totalQuantity > 0 ? marginBandClass(value) : ""}">${row.totalQuantity > 0 ? formatSharePct(value) : "-"}</td>`;
+      return `<td class="num">${formatMoney(value)}</td>`;
+    };
+    const headers = HISTORY_ANALYSIS_COLUMNS.map((column) => {
+      const active = column.key === sortKey;
+      const arrow = active ? (direction === "asc" ? " ▲" : " ▼") : "";
+      const attrs = interactive ? ` data-analysis-sort="${escapeAttr(column.key)}" class="sortable${active ? " sorted" : ""}"` : "";
+      return `<th${attrs}>${escapeHtml(column.label)}${arrow}</th>`;
+    }).join("");
+    const body = sorted.map((row) => `<tr>${HISTORY_ANALYSIS_COLUMNS.map((column) => cell(row, column)).join("")}</tr>`).join("");
+    const totals = analysis.totals;
+    const totalRow = `
+      <tr class="history-analysis-total">
+        <td><strong>TOTAL</strong></td>
+        <td></td>
+        <td class="num">${formatNumber(totals.totalQuantity)}</td>
+        <td class="num">${formatMoney(totals.avgCost)}</td>
+        <td class="num">${formatMoney(totals.avgPrice)}</td>
+        <td class="num">${formatMoney(totals.unitMargin)}</td>
+        <td class="num">${formatSharePct(totals.marginPct)}</td>
+        <td class="num">${formatMoney(totals.totalAmount)}</td>
+        <td class="num">100,0%</td>
+        <td class="num">${formatMoney(totals.totalCost)}</td>
+        <td class="num">100,0%</td>
+        <td class="num">${formatMoney(totals.purchaseAmount)}</td>
+        <td class="num">100,0%</td>
+        <td class="num">${formatMoney(totals.totalProfit)}</td>
+        <td class="num">100,0%</td>
+      </tr>
+    `;
+    return `
+      <div class="table-wrap history-analysis-table">
+        <table>
+          <thead><tr>${headers}</tr></thead>
+          <tbody>${body}${totalRow}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
 
   function renderHistoryTable(rows, type) {
     const categories = Array.from(new Set([...getProductCategories(), ...rows.map((row) => row.category || "OTROS")]));
@@ -6988,10 +7375,14 @@
         <td class="num">${formatMoney(item.companyProfit)}</td>
       </tr>
     `).join("");
-    afterRender.push(bindPerformance);
+    afterRender.push(() => {
+      bindPerformance();
+      bindPerformanceProductPanels();
+      ensureHistoryRangeLoaded(from, to);
+    });
     return pageShell(
       "Rendimiento",
-      "Gastos, ventas cobradas, saldos a cobrar y rendimiento de la empresa.",
+      "Gastos, ventas cobradas, saldos a cobrar y rentabilidad por producto.",
       "",
       `
       <div class="panel" style="margin-bottom:14px">
@@ -7051,6 +7442,7 @@
           </div>
         </form>
       </div>
+      ${renderPerformanceProductPanels(from, to)}
       `,
       "rendimiento"
     );
@@ -12628,7 +13020,7 @@
         <td>${log.cae ? `<span class="pill green">CAE ${escapeHtml(String(log.cae).trim())}</span>` : `<span class="pill amber">${escapeHtml(log.status || "")}</span>`}</td>
         <td class="page-actions">
           ${log.numero ? `<button class="btn small ghost" type="button" data-billing-pdf data-pdf-inv="${escapeAttr(log.invoiceType || "")}" data-pdf-num="${escapeAttr(log.numero)}" title="Ver / imprimir PDF">&#128424;</button>` : (log.pdf ? `<a class="btn small ghost" href="${escapeAttr(log.pdf)}" target="_blank" rel="noopener" title="Ver / imprimir PDF">&#128424;</a>` : "")}
-          ${Array.isArray(log.orders) && log.orders.length ? `<button class="btn small ghost" type="button" data-billing-orders="${escapeAttr(log.id)}">Ver Pedidos</button>` : ""}
+          ${getBillingLogOrderIds(log).length ? `<button class="btn small ghost" type="button" data-billing-orders="${escapeAttr(log.id)}">Ver Pedidos</button>` : ""}
         </td>
       </tr>
     `).join("");
@@ -12685,7 +13077,7 @@
   function openBillingOrdersModal(logId) {
     const log = (state.billingLog || []).find((l) => l.id === logId);
     if (!log) return;
-    const orderIds = Array.isArray(log.orders) ? log.orders : [];
+    const orderIds = getBillingLogOrderIds(log);
     const rows = orderIds.map((oid) => {
       const order = getOrder(oid);
       if (!order) return `<tr><td>${escapeHtml(oid)}</td><td class="muted">No disponible</td><td></td></tr>`;
@@ -12810,6 +13202,25 @@
     document.querySelectorAll("[data-billing-pdf]").forEach((button) => button.addEventListener("click", () => abrirFacturaPdf(button.dataset.pdfInv, button.dataset.pdfNum)));
   }
 
+  // Puntos de venta habilitados para emitir. El user token de cada uno vive en el .env del
+  // servidor (TUSFACTURAS_PV<n>_USERTOKEN), aca solo se elige con cual emitir.
+  const BILLING_PUNTOS_VENTA = ["3", "4"];
+
+  function formatPuntoVenta(value) {
+    const digits = String(value || "").replace(/\D/g, "").replace(/^0+(?=\d)/, "");
+    return digits ? "PV " + digits.padStart(5, "0") : "";
+  }
+
+  function renderPuntoVentaOptions(selected) {
+    const current = String(selected || "").replace(/\D/g, "").replace(/^0+(?=\d)/, "");
+    // Si el servidor esta configurado con un PDV que no esta en la lista, se agrega igual para no
+    // cambiarle el punto de venta sin que se note.
+    const values = BILLING_PUNTOS_VENTA.slice();
+    if (current && values.indexOf(current) === -1) values.push(current);
+    const fallback = current || BILLING_PUNTOS_VENTA[0];
+    return values.map((value) => `<option value="${escapeAttr(value)}" ${value === fallback ? "selected" : ""}>${escapeHtml(formatPuntoVenta(value))}</option>`).join("");
+  }
+
   function openManualBillingModal() {
     const clients = activeClients().filter((c) => c.needsInvoice && ["Factura A", "Factura B"].includes(c.invoiceType));
     if (!clients.length) return alert("No hay clientes con factura A o B.");
@@ -12823,8 +13234,8 @@
         <div class="field"><label>Periodo desde</label><input type="date" id="mb-desde" /></div>
         <div class="field"><label>Periodo hasta</label><input type="date" id="mb-hasta" /></div>
         <div class="field"><label>Vencimiento para el pago</label><input type="date" id="mb-venc" value="${escapeAttr(vencDefault)}" /></div>
-        <div class="field"><label>Punto de venta</label><input id="mb-pv" inputmode="numeric" value="${escapeAttr(ui.billingPuntoVenta || "")}" placeholder="vacio = el configurado" /></div>
-        <div class="field span-2"><label>User token del PDV (opcional)</label><input id="mb-usertoken" autocomplete="off" placeholder="dejar vacio si el PDV usa el token de siempre" /></div>
+        <div class="field"><label>Punto de venta</label><select id="mb-pv">${renderPuntoVentaOptions(ui.billingPuntoVenta || ui.billingServerPuntoVenta)}</select></div>
+        <div class="field span-2"><label>User token del PDV (opcional)</label><input id="mb-usertoken" autocomplete="off" placeholder="dejalo vacio: el servidor ya tiene el token de cada PDV" /></div>
         <div class="field"><label>IVA</label><select id="mb-iva"><option value="10.5">10,5%</option><option value="21">21%</option></select></div>
         <div class="field"><label>Monto TOTAL a emitir</label><input id="mb-total" inputmode="decimal" /></div>
         <div class="field span-2"><span class="muted" id="mb-neto-info" style="font-size:12px"></span></div>
@@ -12886,7 +13297,9 @@
         const pvEl = document.getElementById("mb-pv");
         const pv = pvEl ? String(pvEl.value || "").trim() : "";
         const overrides = { fecha, vencimiento: venc, periodoDesde: desde, periodoHasta: hasta, concepto };
-        if (pv) overrides.puntoVenta = pv;
+        // El punto de venta queda recordado para la proxima emision manual; el user token de cada
+        // PDV lo resuelve el servidor con TUSFACTURAS_PV<n>_USERTOKEN, no se guarda en el navegador.
+        if (pv) { overrides.puntoVenta = pv; ui.billingPuntoVenta = pv; }
         const utEl = document.getElementById("mb-usertoken");
         const ut = utEl ? String(utEl.value || "").trim() : "";
         if (ut) overrides.usertoken = ut;
@@ -12913,6 +13326,81 @@
       });
       function elVenc() { const v = document.getElementById("mb-venc"); return v ? v.value : ""; }
     });
+  }
+
+  // Dias que se toleran sin facturar segun la frecuencia del cliente, antes de avisar.
+  const BILLING_OVERDUE_DAYS = { diaria: 1, semanal: 8, quincenal: 16, mensual: 35 };
+
+  // Facturas que quedaron sin emitir. Dos casos distintos:
+  //  - "error": la emision se intento y TusFacturas la rechazo (queda en el log y nadie la mira).
+  //  - "atrasada": el cliente acumula pedidos sin facturar mas alla de lo que permite su frecuencia
+  //    (por ejemplo un cliente de factura diaria con pedidos de ayer todavia pendientes).
+  function getUnbilledWarnings() {
+    const today = todayISO();
+    const errors = [];
+    const seenError = new Set();
+    (state.billingLog || []).slice().reverse().forEach((log) => {
+      if (log.status !== "error") return;
+      const key = String(log.clientId) + "|" + String(log.from || "") + "|" + String(log.to || "");
+      if (seenError.has(key)) return;
+      seenError.add(key);
+      // Si despues de ese error salio una factura OK que cubre el mismo periodo, ya esta resuelto.
+      const solved = (state.billingLog || []).some((other) => other.status === "ok"
+        && other.clientId === log.clientId
+        && String(other.emittedAt || "") > String(log.emittedAt || "")
+        && String(other.to || "") >= String(log.to || ""));
+      if (solved) return;
+      errors.push({
+        clientId: log.clientId,
+        clientName: log.clientName || log.clientId,
+        from: log.from,
+        to: log.to,
+        total: Number(log.total || 0),
+        detail: log.detail || "",
+        emittedAt: log.emittedAt || ""
+      });
+    });
+    const overdue = [];
+    activeClients()
+      .filter((client) => client.needsInvoice && ["Factura A", "Factura B"].includes(client.invoiceType))
+      .forEach((client) => {
+        const pending = getBillingPendingForClient(client);
+        if (!pending.orders || !(pending.total > 0)) return;
+        const oldest = pending.orderList
+          .map((order) => String(order.date || "").slice(0, 10))
+          .filter(Boolean)
+          .sort()[0];
+        if (!oldest) return;
+        const freq = String(client.invoiceFrequency || "mensual").toLowerCase();
+        const tolerance = BILLING_OVERDUE_DAYS[freq] == null ? BILLING_OVERDUE_DAYS.mensual : BILLING_OVERDUE_DAYS[freq];
+        const days = Math.round((new Date(today + "T12:00:00") - new Date(oldest + "T12:00:00")) / 86400000);
+        if (days < tolerance) return;
+        overdue.push({
+          clientId: client.id,
+          clientName: client.name,
+          frequency: freq,
+          oldest,
+          days,
+          orders: pending.orders,
+          total: pending.total
+        });
+      });
+    overdue.sort((a, b) => b.days - a.days);
+    return { errors, overdue, count: errors.length + overdue.length };
+  }
+
+  function unbilledWarningHtml(options = {}) {
+    const warnings = getUnbilledWarnings();
+    if (!warnings.count) return "";
+    const compact = !!options.compact;
+    const errorItems = warnings.errors.map((item) => `<li><strong>${escapeHtml(item.clientName)}</strong> - ${formatDate(item.from)} a ${formatDate(item.to)} por ${formatMoney(item.total)}${item.detail ? `<br><span class="muted">${escapeHtml(item.detail)}</span>` : ""}</li>`).join("");
+    const overdueItems = warnings.overdue.map((item) => `<li><strong>${escapeHtml(item.clientName)}</strong> (${escapeHtml(item.frequency)}) - ${item.orders} pedido${item.orders === 1 ? "" : "s"} sin facturar por ${formatMoney(item.total)}, el mas viejo del ${formatDate(item.oldest)} (${item.days} dia${item.days === 1 ? "" : "s"})</li>`).join("");
+    return `<div class="panel highlight-panel billing-warning" style="margin-bottom:14px">
+      <strong style="font-size:15px">\u26A0 ${warnings.count} factura${warnings.count === 1 ? "" : "s"} sin emitir</strong>
+      ${warnings.errors.length ? `<div class="muted" style="margin-top:6px">Se intentaron emitir y fallaron:</div><ul style="margin:6px 0 0 18px">${errorItems}</ul>` : ""}
+      ${warnings.overdue.length ? `<div class="muted" style="margin-top:8px">Acumulan pedidos sin facturar mas alla de su frecuencia:</div><ul style="margin:6px 0 0 18px">${overdueItems}</ul>` : ""}
+      ${compact ? `<div style="margin-top:10px"><button class="btn small yellow" type="button" data-route="facturacion">Ir a Facturacion</button></div>` : ""}
+    </div>`;
   }
 
   function renderFacturacion() {
@@ -12969,7 +13457,7 @@
           .then((response) => response.ok ? response.json() : null)
           .then((payload) => {
             if (!payload || !statusNode) return;
-            if (payload.puntoVenta != null) ui.billingPuntoVenta = String(payload.puntoVenta);
+            if (payload.puntoVenta != null) ui.billingServerPuntoVenta = String(payload.puntoVenta);
             statusNode.innerHTML = payload.enabled
               ? `<span class="pill green">TusFacturas conectado (PDV ${escapeHtml(String(payload.puntoVenta))})</span>`
               : `<span class="pill amber">Credenciales de TusFacturas pendientes (modo simulacion)</span>`;
@@ -13066,12 +13554,13 @@
        <button class="btn blue" data-billing-manual>Emitir manual</button>
        <button class="btn primary" data-billing-run="real">Emitir pendientes ahora</button>` : "",
       `
+      ${unbilledWarningHtml()}
       <div class="panel" style="margin-bottom:14px">
         <div class="page-actions" style="justify-content:space-between">
           <h2 class="page-title" style="font-size:18px">Estado del servicio</h2>
           <span id="billing-server-status"><span class="muted">Consultando...</span></span>
         </div>
-        <p class="muted">Las credenciales (apikey, apitoken, usertoken) se configuran en el archivo .env del servidor. Sin credenciales, la emision corre en modo simulacion para que pruebe los periodos sin facturar de verdad.</p>
+        <p class="muted">Las credenciales (apikey, apitoken, usertoken) se configuran en el archivo .env del servidor. Cada punto de venta puede tener su propio user token con TUSFACTURAS_PV&lt;numero&gt;_USERTOKEN, asi no hay que pegarlo a mano en cada emision. Sin credenciales, la emision corre en modo simulacion para que pruebe los periodos sin facturar de verdad.</p>
       </div>
       <div class="panel" style="margin-bottom:14px">
         <h2 class="page-title" style="font-size:18px">Rango de facturacion</h2>
