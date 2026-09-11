@@ -295,6 +295,7 @@
     historyLoading: false,
     historyLoadingKey: "",
     historyError: "",
+    billingServerPuntoVenta: "",
     historyAnalysisSort: "totalProfit",
     historyAnalysisDir: "desc",
     billingSelectedClients: null,
@@ -13215,6 +13216,25 @@
     document.querySelectorAll("[data-billing-pdf]").forEach((button) => button.addEventListener("click", () => abrirFacturaPdf(button.dataset.pdfInv, button.dataset.pdfNum)));
   }
 
+  // Puntos de venta habilitados para emitir. El user token de cada uno vive en el .env del
+  // servidor (TUSFACTURAS_PV<n>_USERTOKEN), aca solo se elige con cual emitir.
+  const BILLING_PUNTOS_VENTA = ["3", "4"];
+
+  function formatPuntoVenta(value) {
+    const digits = String(value || "").replace(/\D/g, "").replace(/^0+(?=\d)/, "");
+    return digits ? "PV " + digits.padStart(5, "0") : "";
+  }
+
+  function renderPuntoVentaOptions(selected) {
+    const current = String(selected || "").replace(/\D/g, "").replace(/^0+(?=\d)/, "");
+    // Si el servidor esta configurado con un PDV que no esta en la lista, se agrega igual para no
+    // cambiarle el punto de venta sin que se note.
+    const values = BILLING_PUNTOS_VENTA.slice();
+    if (current && values.indexOf(current) === -1) values.push(current);
+    const fallback = current || BILLING_PUNTOS_VENTA[0];
+    return values.map((value) => `<option value="${escapeAttr(value)}" ${value === fallback ? "selected" : ""}>${escapeHtml(formatPuntoVenta(value))}</option>`).join("");
+  }
+
   function openManualBillingModal() {
     const clients = activeClients().filter((c) => c.needsInvoice && ["Factura A", "Factura B"].includes(c.invoiceType));
     if (!clients.length) return alert("No hay clientes con factura A o B.");
@@ -13228,7 +13248,7 @@
         <div class="field"><label>Periodo desde</label><input type="date" id="mb-desde" /></div>
         <div class="field"><label>Periodo hasta</label><input type="date" id="mb-hasta" /></div>
         <div class="field"><label>Vencimiento para el pago</label><input type="date" id="mb-venc" value="${escapeAttr(vencDefault)}" /></div>
-        <div class="field"><label>Punto de venta</label><input id="mb-pv" inputmode="numeric" value="${escapeAttr(ui.billingPuntoVenta || "")}" placeholder="vacio = el configurado" /></div>
+        <div class="field"><label>Punto de venta</label><select id="mb-pv">${renderPuntoVentaOptions(ui.billingPuntoVenta || ui.billingServerPuntoVenta)}</select></div>
         <div class="field span-2"><label>User token del PDV (opcional)</label><input id="mb-usertoken" autocomplete="off" placeholder="dejalo vacio: el servidor ya tiene el token de cada PDV" /></div>
         <div class="field"><label>IVA</label><select id="mb-iva"><option value="10.5">10,5%</option><option value="21">21%</option></select></div>
         <div class="field"><label>Monto TOTAL a emitir</label><input id="mb-total" inputmode="decimal" /></div>
@@ -13451,7 +13471,7 @@
           .then((response) => response.ok ? response.json() : null)
           .then((payload) => {
             if (!payload || !statusNode) return;
-            if (payload.puntoVenta != null) ui.billingPuntoVenta = String(payload.puntoVenta);
+            if (payload.puntoVenta != null) ui.billingServerPuntoVenta = String(payload.puntoVenta);
             statusNode.innerHTML = payload.enabled
               ? `<span class="pill green">TusFacturas conectado (PDV ${escapeHtml(String(payload.puntoVenta))})</span>`
               : `<span class="pill amber">Credenciales de TusFacturas pendientes (modo simulacion)</span>`;
