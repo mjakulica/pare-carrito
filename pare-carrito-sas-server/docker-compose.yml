@@ -43,6 +43,8 @@ services:
       TUSFACTURAS_USERTOKEN: ${TUSFACTURAS_USERTOKEN:-}
       TUSFACTURAS_PUNTO_VENTA: ${TUSFACTURAS_PUNTO_VENTA:-1}
       TUSFACTURAS_PROVINCIA: ${TUSFACTURAS_PROVINCIA:-17}
+      # CUIT propio: lo exige AFIP dentro de comprobantes_asociados al emitir notas de credito.
+      TUSFACTURAS_CUIT: ${TUSFACTURAS_CUIT:-}
       TUSFACTURAS_RUBRO: ${TUSFACTURAS_RUBRO:-Frutas y verduras}
       TUSFACTURAS_CONDICION_PAGO: ${TUSFACTURAS_CONDICION_PAGO:-211}
       # Credenciales por punto de venta: el user token (y si hace falta apikey/apitoken) cambia

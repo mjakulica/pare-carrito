@@ -68,6 +68,9 @@ function billingConfig(env = process.env) {
     usertoken: env.TUSFACTURAS_USERTOKEN || "",
     puntoVenta: env.TUSFACTURAS_PUNTO_VENTA || "1",
     provincia: env.TUSFACTURAS_PROVINCIA || "17",
+    // CUIT propio: va dentro de comprobantes_asociados de una nota de credito. AFIP exige que sea
+    // el del emisor del comprobante que se cancela, o sea el nuestro.
+    cuit: cleanCuit(env.TUSFACTURAS_CUIT || ""),
     rubro: env.TUSFACTURAS_RUBRO || "Frutas y verduras",
     condicionPago: "205" // 205 = Cuenta corriente (forzado para todas las facturas)
   };
@@ -197,7 +200,8 @@ function validateCuit(value) {
 function lastCutFor(state, clientId) {
   let last = "";
   for (const log of state.billingLog || []) {
-    if (log.clientId === clientId && ["ok", "simulada"].includes(log.status) && log.to > last) last = log.to;
+    // Una factura anulada por nota de credito no cierra el periodo: vuelve a quedar pendiente.
+    if (log.clientId === clientId && ["ok", "simulada"].includes(log.status) && !log.annulledBy && log.to > last) last = log.to;
   }
   return last;
 }
@@ -605,7 +609,9 @@ function buildBillingEntry(invoice, emittedAt, periodResult, simulate, cfg) {
       numero: r.numero,
       pdf: r.pdf,
       detail: r.rta,
-      externalReference: r.externalReference
+      externalReference: r.externalReference,
+      // Fecha con la que se emitio: la nota de credito tiene que citarla exacta.
+      comprobanteFecha: (invoice.overrides && invoice.overrides.fecha) || invoice.to
     };
   }
   return {
@@ -727,6 +733,145 @@ async function runBilling({ pool, force = false, simulate = false, onlyClientId 
 }
 
 // Regenera el PDF de un comprobante ya emitido y devuelve una URL fresca (la del alta caduca).
+// --- Notas de credito ---------------------------------------------------------------------
+// Cancelan una factura ya emitida. AFIP exige que la nota cite el comprobante que anula dentro de
+// comprobantes_asociados (tipo, punto de venta, numero, fecha y CUIT del emisor, que es el nuestro).
+
+// "0003-00001234" -> { puntoVenta: "0003", numero: "00001234" }. Tambien acepta solo el numero.
+function splitComprobanteNumero(numeroCompleto, fallbackPuntoVenta) {
+  const raw = String(numeroCompleto || "").trim();
+  const parts = raw.split("-");
+  let pv = fallbackPuntoVenta;
+  let nro = raw;
+  if (parts.length === 2) { pv = parts[0]; nro = parts[1]; }
+  const pvDigits = String(pv || "").replace(/\D/g, "");
+  const nroDigits = String(nro || "").replace(/\D/g, "");
+  if (!pvDigits || !nroDigits) return null;
+  return { puntoVenta: pvDigits, numero: nroDigits };
+}
+
+function creditNoteTypeFor(invoiceType) {
+  const t = String(invoiceType || "").trim().toUpperCase();
+  if (t === "FACTURA A") return "NOTA DE CREDITO A";
+  if (t === "FACTURA B") return "NOTA DE CREDITO B";
+  if (t === "FACTURA C") return "NOTA DE CREDITO C";
+  return "";
+}
+
+// Arma el payload de la nota de credito que cancela el comprobante de "log", por el total.
+// Se emite un renglon unico con el neto y la alicuota de la factura original: no hace falta
+// reconstruir el detalle (que puede haber cambiado) y el total cancelado da igual.
+function buildCreditNotePayload(log, client, cfg, options = {}) {
+  const tipo = creditNoteTypeFor(log.invoiceType);
+  if (!tipo) throw new Error(`No se puede anular un comprobante de tipo "${log.invoiceType || "?"}".`);
+  const cuitValidation = validateCuit(client.cuit);
+  if (!cuitValidation.ok) throw new Error(`CUIT invalido para cliente ${client.id}: ${cuitValidation.reason}`);
+  const asociado = splitComprobanteNumero(log.numero, cfg.puntoVenta);
+  if (!asociado) throw new Error("La factura no tiene numero de comprobante: no se puede asociar la nota de credito.");
+  if (!cfg.cuit) throw new Error("Falta TUSFACTURAS_CUIT en el .env del servidor: es el CUIT propio que AFIP exige dentro de la nota de credito.");
+
+  const neto = round2(Number(log.neto || 0));
+  const iva = round2(Number(log.iva || 0));
+  const total = round2(Number(log.total || 0));
+  if (!(total > 0)) throw new Error("La factura no tiene importe: no hay nada que anular.");
+  // Alicuota efectiva de la factura original, redondeada a la que exista en AFIP.
+  const ratio = neto > 0 ? (iva / neto) * 100 : 0;
+  const alicuota = options.alicuota != null ? Number(options.alicuota) : (ratio > 15 ? 21 : ratio > 0 ? 10.5 : 0);
+  const fechaFactura = options.comprobanteFecha || log.comprobanteFecha || log.to;
+  const fechaNota = options.fecha || nowArt().dateISO;
+  const contributor = options.contributorData || {};
+  const clientCondIva = VALID_CONDICION_IVA.includes(String(client.condicionIva || "").toUpperCase()) ? String(client.condicionIva).toUpperCase() : "";
+  const condicionIva = contributor.condicionIva || clientCondIva || (log.invoiceType === "Factura A" ? "RI" : "CF");
+
+  return {
+    apikey: cfg.apikey,
+    apitoken: cfg.apitoken,
+    usertoken: cfg.usertoken,
+    cliente: {
+      documento_tipo: "CUIT",
+      documento_nro: cuitValidation.cuit,
+      razon_social: String(contributor.razonSocial || client.legalName || client.name || "").slice(0, 255),
+      email: String(client.billingEmail || client.email || "").trim(),
+      domicilio: String(contributor.domicilio || client.address || "-").slice(0, 255),
+      provincia: PROVINCIA_MAP[normalizeProvinceKey(contributor.provinciaTexto)] || cfg.provincia,
+      envia_por_mail: "N",
+      condicion_pago: "205",
+      condicion_iva: condicionIva,
+      rg5329: "N"
+    },
+    comprobante: {
+      fecha: ddmmyyyy(fechaNota),
+      vencimiento: ddmmyyyy(fechaNota),
+      tipo,
+      operacion: "V",
+      punto_venta: asociado.puntoVenta,
+      moneda: "PES",
+      cotizacion: 1,
+      idioma: 1,
+      periodo_facturado_desde: ddmmyyyy(log.from || fechaFactura),
+      periodo_facturado_hasta: ddmmyyyy(log.to || fechaFactura),
+      rubro: cfg.rubro,
+      rubro_grupo_contable: cfg.rubro,
+      detalle: [{
+        cantidad: "1",
+        afecta_stock: "N",
+        bonificacion_porcentaje: 0,
+        producto: {
+          descripcion: String(options.motivo || `Anulacion de ${log.invoiceType} ${log.numero}`).slice(0, 255),
+          codigo: "NC",
+          precio_unitario_sin_iva: String(neto),
+          alicuota: String(alicuota),
+          impuestos_internos_alicuota: 0,
+          unidad_medida: "7",
+          unidad_bulto: 1
+        }
+      }],
+      bonificacion: "0",
+      leyenda_gral: String(options.motivo || `Anula ${log.invoiceType} ${log.numero}`).slice(0, 255),
+      external_reference: `NC-${log.clientId}-${asociado.numero}`.replace(/[^A-Za-z0-9_-]/g, ""),
+      total: String(total),
+      comprobantes_asociados: [{
+        tipo_comprobante: String(log.invoiceType || "").toUpperCase(),
+        punto_venta: asociado.puntoVenta,
+        numero: asociado.numero,
+        comprobante_fecha: ddmmyyyy(fechaFactura),
+        cuit: cfg.cuit
+      }]
+    }
+  };
+}
+
+async function emitCreditNote(log, client, cfg, options = {}, fetchImpl = fetch) {
+  // El punto de venta de la nota es el de la factura que anula, asi que las credenciales tienen
+  // que ser las de ESE punto de venta y no las del default.
+  const asociado = splitComprobanteNumero(log.numero, cfg.puntoVenta);
+  const effCfg = credsForEmission(cfg, { puntoVenta: asociado ? asociado.puntoVenta : "" });
+  const contributorData = effCfg.enabled ? await fetchContributorData(client.cuit, effCfg, fetchImpl) : null;
+  const payload = buildCreditNotePayload(log, client, effCfg, { ...options, contributorData });
+  console.log("[TusFacturas NC] comprobante:", JSON.stringify(payload.comprobante.comprobantes_asociados));
+  const response = await fetchWithRetry(TF_URL, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload)
+  }, fetchImpl);
+  const body = await response.json().catch(() => ({ error: "S", errores: ["respuesta invalida de TusFacturas"] }));
+  if (body.error === "S") return { ok: false, errors: (body.errores || []).filter(Boolean) };
+  return {
+    ok: true,
+    cae: body.cae || "",
+    numero: body.comprobante_nro || "",
+    tipo: body.comprobante_tipo || payload.comprobante.tipo,
+    pdf: body.comprobante_pdf_url || "",
+    rta: body.rta || "",
+    fecha: fechaISOFromPayload(payload.comprobante.fecha)
+  };
+}
+
+function fechaISOFromPayload(ddmmyyyyValue) {
+  const parts = String(ddmmyyyyValue || "").split("/");
+  return parts.length === 3 ? `${parts[2]}-${parts[1]}-${parts[0]}` : "";
+}
+
 // numeroCompleto puede venir como "00003-00000022" (punto_venta-numero) o solo el numero.
 async function regeneratePdf(cfg, { tipo, operacion, numeroCompleto, puntoVenta, numero }, fetchImpl = fetch) {
   let pv = puntoVenta;
@@ -763,6 +908,10 @@ async function regeneratePdf(cfg, { tipo, operacion, numeroCompleto, puntoVenta,
 
 module.exports = {
   billingConfig,
+  buildCreditNotePayload,
+  emitCreditNote,
+  creditNoteTypeFor,
+  splitComprobanteNumero,
   nowArt,
   computeDueInvoices,
   buildInvoicePayload,

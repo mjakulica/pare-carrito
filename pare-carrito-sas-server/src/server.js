@@ -9,7 +9,7 @@ const express = require("express");
 const { Pool } = require("pg");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-const { billingConfig, nowArt, computeDueInvoices, runBilling, regeneratePdf } = require("./billing");
+const { billingConfig, nowArt, computeDueInvoices, runBilling, regeneratePdf, emitCreditNote, creditNoteTypeFor } = require("./billing");
 const { syncSheetsFromStateDiff, pushPrecio } = require("./sheetsSync");
 
 const PORT = Number(process.env.PORT || 3000);
@@ -1704,6 +1704,86 @@ app.post("/billing/run", authenticate, requireRole("manager", "admin", "contador
     res.json(result);
   } catch (error) {
     res.status(500).json({ error: "Fallo la facturacion: " + error.message });
+  }
+});
+
+// Nota de credito: cancela una factura ya emitida. Recibe el id de la entrada de billingLog,
+// emite la nota contra TusFacturas citando ese comprobante, y deja en el log una entrada nueva
+// (status "nota_credito") mas la marca de anulada en la factura original.
+app.post("/billing/credit-note", authenticate, requireRole("manager", "admin", "contador"), async (req, res) => {
+  const cfg = billingConfig();
+  if (!cfg.enabled) return res.status(503).json({ error: "TusFacturas no esta configurado en el servidor." });
+  const body = req.body || {};
+  const logId = String(body.logId || "").trim();
+  if (!logId) return res.status(400).json({ error: "Se espera { logId }." });
+  const client_ = await pool.connect();
+  try {
+    await client_.query("BEGIN");
+    const stateRow = await client_.query("SELECT data FROM app_state WHERE id = 'main' FOR UPDATE");
+    if (!stateRow.rows.length) throw new Error("No hay estado cargado.");
+    const data = stateRow.rows[0].data;
+    data.billingLog = Array.isArray(data.billingLog) ? data.billingLog : [];
+    const log = data.billingLog.find((entry) => String(entry.id) === logId);
+    if (!log) throw new Error("No se encontro esa factura en el historial.");
+    if (log.status !== "ok") throw new Error("Solo se pueden anular facturas emitidas correctamente.");
+    if (log.annulledBy) throw new Error("Esa factura ya tiene una nota de credito.");
+    if (!creditNoteTypeFor(log.invoiceType)) throw new Error(`No se puede anular un comprobante de tipo "${log.invoiceType || "?"}".`);
+    if (Array.isArray(log.partials) && log.partials.length > 1) {
+      throw new Error("Esa factura se emitio en varios comprobantes: hay que anularlos de a uno desde TusFacturas.");
+    }
+    const cliente = (data.clients || []).find((c) => String(c.id) === String(log.clientId));
+    if (!cliente) throw new Error("No se encontro el cliente de la factura.");
+
+    const result = await emitCreditNote(log, cliente, cfg, {
+      motivo: String(body.motivo || "").trim(),
+      fecha: String(body.fecha || "").trim() || undefined,
+      comprobanteFecha: String(body.comprobanteFecha || "").trim() || undefined
+    });
+
+    const entry = {
+      id: `NC-${Date.now()}-${log.clientId}`,
+      clientId: log.clientId,
+      clientName: log.clientName || log.clientId,
+      invoiceType: result.tipo || creditNoteTypeFor(log.invoiceType),
+      from: log.from,
+      to: log.to,
+      total: Number(log.total || 0),
+      neto: Number(log.neto || 0),
+      iva: Number(log.iva || 0),
+      orders: 0,
+      orderIds: [],
+      creditNoteFor: log.id,
+      creditNoteForNumero: log.numero || "",
+      motivo: String(body.motivo || "").trim(),
+      emittedAt: new Date().toISOString(),
+      emittedBy: (req.user && (req.user.username || req.user.id)) || ""
+    };
+    if (!result.ok) {
+      entry.status = "error";
+      entry.detail = (result.errors || ["TusFacturas rechazo la nota de credito"]).join(" | ");
+      data.billingLog.push(entry);
+      await client_.query("UPDATE app_state SET data = $1, updated_at = now(), updated_by = 'nota-credito' WHERE id = 'main'", [data]);
+      await client_.query("COMMIT");
+      return res.status(502).json({ error: entry.detail, entry });
+    }
+    entry.status = "nota_credito";
+    entry.cae = result.cae;
+    entry.numero = result.numero;
+    entry.pdf = result.pdf;
+    entry.detail = result.rta;
+    entry.comprobanteFecha = result.fecha;
+    data.billingLog.push(entry);
+    log.annulledBy = entry.id;
+    log.annulledAt = entry.emittedAt;
+    log.annulledNumero = entry.numero;
+    await client_.query("UPDATE app_state SET data = $1, updated_at = now(), updated_by = 'nota-credito' WHERE id = 'main'", [data]);
+    await client_.query("COMMIT");
+    res.json({ ok: true, entry });
+  } catch (error) {
+    await client_.query("ROLLBACK").catch(() => {});
+    res.status(502).json({ error: error.message });
+  } finally {
+    client_.release();
   }
 });
 
