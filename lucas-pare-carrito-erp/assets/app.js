@@ -13249,7 +13249,6 @@
         <div class="field"><label>Periodo hasta</label><input type="date" id="mb-hasta" /></div>
         <div class="field"><label>Vencimiento para el pago</label><input type="date" id="mb-venc" value="${escapeAttr(vencDefault)}" /></div>
         <div class="field"><label>Punto de venta</label><select id="mb-pv">${renderPuntoVentaOptions(ui.billingPuntoVenta || ui.billingServerPuntoVenta)}</select></div>
-        <div class="field span-2"><label>User token del PDV (opcional)</label><input id="mb-usertoken" autocomplete="off" placeholder="dejalo vacio: el servidor ya tiene el token de cada PDV" /></div>
         <div class="field"><label>IVA</label><select id="mb-iva"><option value="10.5">10,5%</option><option value="21">21%</option></select></div>
         <div class="field"><label>Monto TOTAL a emitir</label><input id="mb-total" inputmode="decimal" /></div>
         <div class="field span-2"><span class="muted" id="mb-neto-info" style="font-size:12px"></span></div>
@@ -13311,12 +13310,9 @@
         const pvEl = document.getElementById("mb-pv");
         const pv = pvEl ? String(pvEl.value || "").trim() : "";
         const overrides = { fecha, vencimiento: venc, periodoDesde: desde, periodoHasta: hasta, concepto };
-        // El punto de venta queda recordado para la proxima emision manual; el user token de cada
-        // PDV lo resuelve el servidor con TUSFACTURAS_PV<n>_USERTOKEN, no se guarda en el navegador.
+        // El punto de venta queda recordado para la proxima emision manual. El user token no se
+        // pide: lo resuelve el servidor por PDV con TUSFACTURAS_PV<n>_USERTOKEN.
         if (pv) { overrides.puntoVenta = pv; ui.billingPuntoVenta = pv; }
-        const utEl = document.getElementById("mb-usertoken");
-        const ut = utEl ? String(utEl.value || "").trim() : "";
-        if (ut) overrides.usertoken = ut;
         const edited = Math.abs(total - pendingTotal) >= 1;
         if (edited) { overrides.customNeto = Math.round((total / (1 + rate / 100)) * 100) / 100; overrides.customAlicuota = rate; }
         const cli = getClient(clientId);
