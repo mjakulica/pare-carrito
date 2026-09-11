@@ -5,7 +5,7 @@
   const USER_KEY = "lpc_current_user_v1";
   const OPERATIONAL_RESET_VERSION = "20260610-operational-clean-1";
   const BUSINESS_NAME = "Pare Carrito SAS";
-  const APP_VERSION = "v17";
+  const APP_VERSION = "v18";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -3359,7 +3359,7 @@
         return `<tr>
           <td>${escapeHtml(product.name)}<br><span class="muted">${escapeHtml(product.unitType)}</span></td>
           <td class="num">${formatNumber(sug.stockReal)}</td>
-          <td><div class="input-with-button"><input data-stock-count="${product.id}" inputmode="decimal" placeholder="real" value="${countToday ? formatAmountInput(countToday.qty) : ""}" /><button class="btn small primary" type="button" data-stock-save="${product.id}">Guardar</button></div>${countToday ? `<span class="muted">Contado hoy</span>` : ""}</td>
+          <td><div class="input-with-button"><input data-stock-count="${product.id}" inputmode="decimal" placeholder="real" value="${countToday ? formatAmountInput(countToday.qty) : ""}" /><button class="btn small primary" type="button" data-stock-save="${product.id}">Guardar</button></div>${countToday ? `<span class="muted">Contado hoy ${escapeHtml(formatClockHM(countToday.createdAt))}${(() => { const v = stockCountWindow(countToday); return v ? " · " + v.etiqueta : " · no descuenta compras"; })()}</span>` : ""}</td>
           <td class="num">${formatNumber(sug.demand)}</td>
           <td><label style="display:inline-flex;gap:6px;align-items:center"><input type="checkbox" data-stock-retail="${product.id}" ${sug.retailOnly ? "checked" : ""} style="width:auto;min-height:auto" />por menor hoy</label></td>
           <td>${parentCell}</td>
@@ -5533,6 +5533,57 @@
     return getProductPurchaseShortages(todayISO()).filter((item) => item.shortageQuantity > 0);
   }
 
+  // ===== El stock contado descuenta lo que hay que comprar =====
+  // El conteo de la manana temprano (05:00 a 06:30) es lo que quedo para el dia que arranca, asi
+  // que tapa la falta de HOY. El conteo de la tarde (09:00 a 18:00) es lo que sobro despues del
+  // reparto, asi que tapa la falta de MANANA. Fuera de esas dos ventanas el conteo es de cierre y
+  // no descuenta nada.
+  const STOCK_MANANA = { desde: 5 * 60, hasta: 6 * 60 + 30, etiqueta: "descuenta de hoy" };
+  const STOCK_TARDE = { desde: 9 * 60, hasta: 18 * 60, etiqueta: "descuenta de manana" };
+
+  function stockCountMinutes(movement) {
+    if (!movement || !movement.createdAt) return null;
+    const fecha = new Date(movement.createdAt);
+    if (isNaN(fecha.getTime())) return null;
+    return fecha.getHours() * 60 + fecha.getMinutes();
+  }
+
+  function stockCountWindow(movement) {
+    const minutos = stockCountMinutes(movement);
+    if (minutos == null) return null;
+    if (minutos >= STOCK_MANANA.desde && minutos <= STOCK_MANANA.hasta) return STOCK_MANANA;
+    if (minutos >= STOCK_TARDE.desde && minutos <= STOCK_TARDE.hasta) return STOCK_TARDE;
+    return null;
+  }
+
+  function stockCountsInWindow(dateISO, ventana) {
+    const out = {};
+    (state.stockMovements || [])
+      .filter((movement) => movement && movement.type === "conteo" && movement.date === dateISO)
+      .forEach((movement) => {
+        const minutos = stockCountMinutes(movement);
+        if (minutos == null || minutos < ventana.desde || minutos > ventana.hasta) return;
+        out[movement.productId] = Number(movement.qty || 0);
+      });
+    return out;
+  }
+
+  // Stock contado que cubre la demanda de una fecha. Si hay conteo de esa manana, ese manda sobre
+  // el de la tarde anterior: es mas nuevo.
+  function stockCoverageForDate(dateISO) {
+    const cover = Object.assign(
+      stockCountsInWindow(addDaysISO(dateISO, -1), STOCK_TARDE),
+      stockCountsInWindow(dateISO, STOCK_MANANA)
+    );
+    // Un bulto contado tambien tapa la falta del producto por menor, igual que una compra.
+    (state.productRelations || []).forEach((relation) => {
+      const bultos = Number(cover[relation.wholesaleProductId] || 0);
+      const factor = Number(relation.retailPerWholesale || 0);
+      if (bultos > 0 && factor > 0) cover[relation.retailProductId] = (cover[relation.retailProductId] || 0) + bultos * factor;
+    });
+    return cover;
+  }
+
   function getPurchasedQuantities(date) {
     const purchased = {};
     state.purchases
@@ -5577,6 +5628,11 @@
 
   function getProductPurchaseShortages(date) {
     const remaining = getPurchasedQuantities(date);
+    // Lo contado en el deposito ya esta: no hay que volver a comprarlo.
+    const stock = stockCoverageForDate(date);
+    Object.keys(stock).forEach((productId) => {
+      remaining[productId] = Number(remaining[productId] || 0) + Number(stock[productId] || 0);
+    });
     return Object.values(getOrderProductGroups(date)).map((group) => {
       const available = Number(remaining[group.productId] || 0);
       const purchasedQuantity = Math.min(available, Number(group.quantity || 0));
@@ -8615,7 +8671,11 @@
       const elegido = providerSelect.dataset.touched === "1" ? providerSelect.value : "";
       const lista = product ? providersSellingProduct(product.id) : activeProviders();
       const ultimo = product ? lastProviderForProduct(product.id) : "";
-      providerSelect.innerHTML = lista.map((provider) => `<option value="${escapeAttr(provider.id)}">${escapeHtml(provider.name)}</option>`).join("");
+      // Sin ultimo proveedor no se adivina: se deja en blanco. Si no, el navegador marcaba el
+      // primero de la lista y el producto terminaba cargado a un proveedor que nunca lo vendio
+      // (y ademas se le sumaba a sus "productos que vende").
+      const vacia = ultimo ? "" : `<option value="">(elegir proveedor)</option>`;
+      providerSelect.innerHTML = vacia + lista.map((provider) => `<option value="${escapeAttr(provider.id)}">${escapeHtml(provider.name)}</option>`).join("");
       const aElegir = lista.some((provider) => provider.id === elegido) ? elegido : ultimo;
       if (aElegir) providerSelect.value = aElegir;
     }
@@ -8999,10 +9059,12 @@
   // proveedor y forma de pago para no dejar la caja con un movimiento por producto.
   function registerMultiProviderPurchase(options) {
     const items = options.items || [];
-    const sinProveedor = items.filter((item) => !getProvider(item.lineProviderId));
+    // Para cuenta corriente el proveedor es obligatorio (alguien tiene que quedar debiendo). En
+    // efectivo puede quedar sin proveedor: es un egreso de caja y listo.
+    const sinProveedor = items.filter((item) => item.cuentaCorriente && !getProvider(item.lineProviderId));
     if (sinProveedor.length) {
-      alert("Estos productos no tienen proveedor: " + sinProveedor.map((item) => item.productName).join(", ")
-        + ". Elegilos en la casilla C.C de cada linea o cargalos con un proveedor puntual.");
+      alert("Elegi el proveedor de: " + sinProveedor.map((item) => item.productName).join(", ")
+        + ". Los productos en cuenta corriente tienen que tener proveedor.");
       return null;
     }
     const grupos = new Map();
@@ -9013,7 +9075,7 @@
     });
     const creadas = [];
     grupos.forEach((grupo) => {
-      const provider = getProvider(grupo.providerId);
+      const provider = grupo.providerId ? getProvider(grupo.providerId) : null;
       const groupItems = grupo.items.map((item) => ({
         productId: item.productId,
         productName: item.productName,
@@ -9029,8 +9091,8 @@
         createdAt: new Date().toISOString(),
         date: options.date,
         expenseType: "purchase",
-        providerId: provider.id,
-        providerName: provider.name,
+        providerId: provider ? provider.id : "",
+        providerName: provider ? provider.name : "",
         productId: groupItems.length === 1 ? groupItems[0].productId : "",
         productName: groupItems.length === 1 ? groupItems[0].productName : "",
         description: options.description || "",
@@ -9048,12 +9110,12 @@
       };
       state.purchases.push(purchase);
       recordStockPurchaseMovements(purchase);
-      rememberProviderProducts(provider.id, groupItems);
+      if (provider) rememberProviderProducts(provider.id, groupItems);
       const priceIncreaseNotices = collectPriceIncreaseCandidates(groupItems, purchase.date);
       updateProductCostsFromPurchase(groupItems, provider);
       updateOrdersWithNewPrices(purchase.date, groupItems);
       sendPriceIncreaseNotices(priceIncreaseNotices);
-      if (grupo.cuentaCorriente) {
+      if (grupo.cuentaCorriente && provider) {
         addProviderLedgerEntry({
           providerId: provider.id,
           date: purchase.date,
