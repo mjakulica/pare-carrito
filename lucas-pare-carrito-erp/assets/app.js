@@ -5,7 +5,7 @@
   const USER_KEY = "lpc_current_user_v1";
   const OPERATIONAL_RESET_VERSION = "20260610-operational-clean-1";
   const BUSINESS_NAME = "Pare Carrito SAS";
-  const APP_VERSION = "v19";
+  const APP_VERSION = "v20";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -3164,7 +3164,7 @@
         unit = p ? p.unitType : "";
       }
       const u = getUser(m.userId);
-      rows.push({ date: m.date, name, qty: Number(m.qty || 0), unit, user: u ? u.name : (m.userId || ""), createdAt: m.createdAt || "" });
+      rows.push({ date: m.date, name, qty: Number(m.qty || 0), unit, userId: m.userId || "", user: u ? u.name : (m.userId || ""), createdAt: m.createdAt || "" });
     });
     rows.sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.createdAt).localeCompare(String(a.createdAt)) || String(a.name).localeCompare(String(b.name)));
     return rows;
@@ -3359,7 +3359,7 @@
         return `<tr>
           <td>${escapeHtml(product.name)}<br><span class="muted">${escapeHtml(product.unitType)}</span></td>
           <td class="num">${formatNumber(sug.stockReal)}</td>
-          <td><div class="input-with-button"><input data-stock-count="${product.id}" inputmode="decimal" placeholder="real" value="${countToday ? formatAmountInput(countToday.qty) : ""}" /><button class="btn small primary" type="button" data-stock-save="${product.id}">Guardar</button></div>${countToday ? `<span class="muted">${escapeHtml(stockCountAuthorLabel(countToday))}</span>` : ""}</td>
+          <td><div class="input-with-button"><input data-stock-count="${product.id}" inputmode="decimal" placeholder="real" value="${countToday ? formatAmountInput(countToday.qty) : ""}" /><button class="btn small primary" type="button" data-stock-save="${product.id}">Guardar</button></div></td>
           <td class="num">${formatNumber(sug.demand)}</td>
           <td><label style="display:inline-flex;gap:6px;align-items:center"><input type="checkbox" data-stock-retail="${product.id}" ${sug.retailOnly ? "checked" : ""} style="width:auto;min-height:auto" />por menor hoy</label></td>
           <td>${parentCell}</td>
@@ -3372,7 +3372,7 @@
     const mermaRows = getStockMermaSummary(from, to).map((row) => `<tr><td>${escapeHtml(row.productName)}</td><td class="num">${formatNumber(row.units)} ${escapeHtml(row.unitType)}</td><td class="num">${formatNumber(row.kg)} kg</td></tr>`).join("");
     const logFrom = ui.stockLogFrom || addDaysISO(todayISO(), -29);
     const logTo = ui.stockLogTo || todayISO();
-    const logRows = getStockCountLog(logFrom, logTo).map((row) => `<tr><td>${escapeHtml(formatDate(row.date))}</td><td>${escapeHtml(row.name)}</td><td class="num">${formatNumber(row.qty)} ${escapeHtml(row.unit)}</td><td>${escapeHtml(row.user)}</td></tr>`).join("");
+    const logRows = getStockCountLog(logFrom, logTo).map((row) => `<tr><td>${escapeHtml(formatDate(row.date))}</td><td>${escapeHtml(row.name)}</td><td class="num">${formatNumber(row.qty)} ${escapeHtml(row.unit)}</td><td>${escapeHtml(stockCountAuthorLabel({ userId: row.userId, createdAt: row.createdAt }))}</td></tr>`).join("");
     afterRender.push(bindStock);
     return pageShell(
       "Stock",
@@ -5566,7 +5566,7 @@
     const fecha = movement.createdAt ? new Date(movement.createdAt) : null;
     const hora = fecha && !isNaN(fecha.getTime()) ? fecha.getHours() + ":" + String(fecha.getMinutes()).padStart(2, "0") : "";
     const user = movement.userId ? getUser(movement.userId) : null;
-    const quien = user ? user.name : "";
+    const quien = user ? user.name : String(movement.userId || "");
     return [quien, hora].filter(Boolean).join(" - ");
   }
 
