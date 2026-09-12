@@ -5,7 +5,7 @@
   const USER_KEY = "lpc_current_user_v1";
   const OPERATIONAL_RESET_VERSION = "20260610-operational-clean-1";
   const BUSINESS_NAME = "Pare Carrito SAS";
-  const APP_VERSION = "v21";
+  const APP_VERSION = "v22";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -12379,6 +12379,13 @@
 
   function renderEmployees() {
     const employees = activeEmployees();
+    const empLogFrom = ui.employeeLogFrom || addDaysISO(todayISO(), -29);
+    const empLogTo = ui.employeeLogTo || todayISO();
+    ui.employeeLogFrom = empLogFrom; ui.employeeLogTo = empLogTo;
+    const empLogUserId = employees.some((employee) => employee.id === ui.employeeLogUserId)
+      ? ui.employeeLogUserId
+      : (employees[0] ? employees[0].id : "");
+    ui.employeeLogUserId = empLogUserId;
     const ccAdminLimit = Number(ui.cashClosingAdminLimit) || 30;
     const defaultEmployeeCashBox = getDefaultOutgoingCashBoxId();
     const employeeRows = employees.map((employee) => {
@@ -12446,6 +12453,16 @@
             </table>
           </div>
         </div>
+        <div class="panel">
+          <div class="page-actions" style="justify-content:space-between"><h2 class="page-title" style="font-size:18px">Movimientos del empleado</h2></div>
+          <p class="muted">Gastos para reintegro, otros gastos, ingresos de efectivo y pagos.</p>
+          <div class="form-grid" style="margin-top:8px">
+            <div class="field span-2"><label>Empleado</label><select id="emp-log-user">${employees.map((employee) => `<option value="${employee.id}" ${employee.id === empLogUserId ? "selected" : ""}>${escapeHtml(employee.name)}</option>`).join("")}</select></div>
+            <div class="field"><label>Desde</label><input type="date" id="emp-log-from" value="${escapeAttr(empLogFrom)}" /></div>
+            <div class="field"><label>Hasta</label><input type="date" id="emp-log-to" value="${escapeAttr(empLogTo)}" /></div>
+          </div>
+          <div style="margin-top:10px">${renderEmployeeMovementTable(empLogUserId, empLogFrom, empLogTo)}</div>
+        </div>
         <form id="employee-payment-form" class="panel">
           <h2 class="page-title" style="font-size:18px">Registrar pago semanal</h2>
           <div class="form-grid" style="margin-top:10px">
@@ -12503,6 +12520,7 @@
   }
 
   function bindEmployees() {
+    bindEmployeeMovementLog();
     const ccAdminLimitEl = document.getElementById("cc-admin-limit");
     if (ccAdminLimitEl) ccAdminLimitEl.addEventListener("change", () => { ui.cashClosingAdminLimit = Number(ccAdminLimitEl.value) || 30; render(); });
     document.querySelectorAll("[data-add-employee]").forEach((button) => button.addEventListener("click", () => openEmployeeForm()));
@@ -12637,8 +12655,96 @@
     return movement;
   }
 
+  // ===== Log de movimientos de un empleado =====
+  // Todo lo que paso por su caja (reintegros, gastos, ingresos de efectivo, cobros) mas los pagos
+  // semanales que se le hicieron desde otra caja. Es el detalle que respalda el saldo de su caja.
+  const EMPLOYEE_MOVEMENT_LABELS = {
+    employee_reimbursement: "Gasto para reintegro",
+    employee_payment: "Pago semanal",
+    cash_movement_in: "Ingreso de efectivo",
+    cash_movement_out: "Entrega de efectivo",
+    expense: "Gasto",
+    purchase: "Compra",
+    payment: "Cobro a cliente",
+    provider_return: "Devolucion de proveedor",
+    apertura: "Saldo anterior"
+  };
+
+  function employeeMovementLabel(type) {
+    return EMPLOYEE_MOVEMENT_LABELS[String(type || "")] || String(type || "Movimiento");
+  }
+
+  function getEmployeeMovementLog(userId, from, to) {
+    if (!userId) return [];
+    const cashBoxId = getUserCashBoxId(userId);
+    const rows = [];
+    const vistos = new Set();
+    (state.caja || [])
+      .filter((entry) => entry && entry.cashBoxId === cashBoxId && isDateInRange(entry.date, from, to))
+      .forEach((entry) => {
+        if (entry.relatedEntityId) vistos.add(String(entry.relatedEntityId));
+        rows.push({
+          date: entry.date,
+          timestamp: entry.timestamp || "",
+          tipo: employeeMovementLabel(entry.type),
+          concepto: entry.concept || "",
+          notas: entry.notes || "",
+          ingreso: Number(entry.amountIngreso || 0),
+          egreso: Number(entry.amountEgreso || 0),
+          quien: entry.recordedBy || ""
+        });
+      });
+    // Pagos semanales hechos desde otra caja: no pasan por la del empleado pero son suyos.
+    (state.employeePayments || [])
+      .filter((payment) => payment && payment.userId === userId && isDateInRange(payment.date, from, to) && !vistos.has(String(payment.id)))
+      .forEach((payment) => rows.push({
+        date: payment.date,
+        timestamp: payment.timestamp || "",
+        tipo: "Pago semanal",
+        concepto: "Pago de sueldo" + (payment.weekStart ? " (semana del " + formatDate(payment.weekStart) + ")" : ""),
+        notas: payment.notes || "",
+        ingreso: 0,
+        egreso: 0,
+        cobro: Number(payment.amount || 0),
+        quien: payment.recordedBy || ""
+      }));
+    return rows.sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.timestamp).localeCompare(String(a.timestamp)));
+  }
+
+  function renderEmployeeMovementTable(userId, from, to) {
+    const rows = getEmployeeMovementLog(userId, from, to);
+    if (!rows.length) return `<div class="empty compact">Sin movimientos en el rango.</div>`;
+    const totalIn = rows.reduce((sum, row) => sum + row.ingreso, 0);
+    const totalOut = rows.reduce((sum, row) => sum + row.egreso, 0);
+    const totalCobro = rows.reduce((sum, row) => sum + Number(row.cobro || 0), 0);
+    return `<div class="table-wrap"><table>
+      <thead><tr><th>Fecha</th><th>Tipo</th><th>Detalle</th><th class="num">Entra</th><th class="num">Sale</th><th>Cargado por</th></tr></thead>
+      <tbody>${rows.map((row) => `<tr>
+        <td>${formatDate(row.date)}${row.timestamp ? `<br><span class="muted">${escapeHtml(formatClockHM(row.timestamp))}</span>` : ""}</td>
+        <td>${escapeHtml(row.tipo)}</td>
+        <td>${escapeHtml(row.concepto)}${row.notas ? `<br><span class="muted">${escapeHtml(row.notas)}</span>` : ""}${row.cobro ? `<br><span class="muted">${formatMoney(row.cobro)} cobrados fuera de su caja</span>` : ""}</td>
+        <td class="num">${row.ingreso ? formatMoney(row.ingreso) : "-"}</td>
+        <td class="num">${row.egreso ? formatMoney(row.egreso) : "-"}</td>
+        <td>${escapeHtml(row.quien)}</td>
+      </tr>`).join("")}</tbody>
+      <tfoot><tr><th colspan="3">Totales${totalCobro ? " (ademas " + formatMoney(totalCobro) + " de sueldo)" : ""}</th><th class="num">${formatMoney(totalIn)}</th><th class="num">${formatMoney(totalOut)}</th><th></th></tr></tfoot>
+    </table></div>`;
+  }
+
+  function bindEmployeeMovementLog() {
+    const from = document.getElementById("emp-log-from");
+    const to = document.getElementById("emp-log-to");
+    const user = document.getElementById("emp-log-user");
+    if (from) from.addEventListener("change", () => { ui.employeeLogFrom = from.value || addDaysISO(todayISO(), -29); render(); });
+    if (to) to.addEventListener("change", () => { ui.employeeLogTo = to.value || todayISO(); render(); });
+    if (user) user.addEventListener("change", () => { ui.employeeLogUserId = user.value; render(); });
+  }
+
   function renderAttendance() {
     const summary = getWeeklyAttendanceSummary(currentUser.id);
+    const empLogFrom = ui.employeeLogFrom || addDaysISO(todayISO(), -29);
+    const empLogTo = ui.employeeLogTo || todayISO();
+    ui.employeeLogFrom = empLogFrom; ui.employeeLogTo = empLogTo;
     const todayEntry = getAttendanceEntry(currentUser.id, todayISO());
     const ccToday = todayISO();
     const ccCloseToday = getCashClosingForDate(currentUser.id, ccToday);
@@ -12746,6 +12852,15 @@
         <div class="page-actions" style="margin-top:12px"><button class="btn primary" type="button" id="cc-save">Guardar cierre de caja</button></div>
       </div>
       <div class="panel" style="margin-top:14px">
+        <div class="page-actions" style="justify-content:space-between"><h2 class="page-title" style="font-size:18px">Mis movimientos</h2></div>
+        <p class="muted">Gastos para reintegro, ingresos de efectivo y todo lo que paso por tu caja.</p>
+        <div class="form-grid" style="margin-top:8px">
+          <div class="field"><label>Desde</label><input type="date" id="emp-log-from" value="${escapeAttr(empLogFrom)}" /></div>
+          <div class="field"><label>Hasta</label><input type="date" id="emp-log-to" value="${escapeAttr(empLogTo)}" /></div>
+        </div>
+        <div style="margin-top:10px">${renderEmployeeMovementTable(currentUser.id, empLogFrom, empLogTo)}</div>
+      </div>
+      <div class="panel" style="margin-top:14px">
         <div class="page-actions" style="justify-content:space-between"><h2 class="page-title" style="font-size:18px">Últimos cierres de caja</h2><label style="display:inline-flex;gap:6px;align-items:center;font-size:13px">Mostrar <select id="cc-limit">${[30, 60, 120, 100000].map((n) => `<option value="${n}" ${ccLimit === n ? "selected" : ""}>${n >= 100000 ? "Todos" : n}</option>`).join("")}</select></label></div>
         <div style="margin-top:8px">${renderCashClosingHistory([currentUser.id], ccLimit, false)}</div>
       </div>
@@ -12763,6 +12878,7 @@
   }
 
   function bindAttendance() {
+    bindEmployeeMovementLog();
     // Ingreso de efectivo: el detalle solo hace falta cuando no vino de un usuario del sistema.
     const intakeForm = document.getElementById("employee-cash-intake-form");
     if (intakeForm) {
