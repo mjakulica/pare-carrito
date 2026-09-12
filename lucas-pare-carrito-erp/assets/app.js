@@ -5789,7 +5789,7 @@
   function getOrderInvoiceLog(orderId) {
     if (!orderId) return null;
     return (state.billingLog || [])
-      .filter((log) => log.status === "ok" && (log.numero || log.pdf) && getBillingLogOrderIds(log).indexOf(orderId) !== -1)
+      .filter((log) => log.status === "ok" && !log.annulledBy && (log.numero || log.pdf) && getBillingLogOrderIds(log).indexOf(orderId) !== -1)
       .pop() || null;
   }
 
@@ -13044,7 +13044,7 @@
   function getBillingPendingForClient(client, from, to) {
     let lastCut = "";
     for (const log of state.billingLog || []) {
-      if (log.clientId === client.id && ["ok", "simulada"].includes(log.status) && log.to > lastCut) lastCut = log.to;
+      if (log.clientId === client.id && ["ok", "simulada"].includes(log.status) && !log.annulledBy && log.to > lastCut) lastCut = log.to;
     }
     const fromDate = from || (lastCut ? addDaysISO(lastCut, 1) : todayISO().slice(0, 8) + "01");
     const toDate = to || todayISO();
@@ -13299,7 +13299,6 @@
         <div class="field"><label>Periodo hasta</label><input type="date" id="mb-hasta" /></div>
         <div class="field"><label>Vencimiento para el pago</label><input type="date" id="mb-venc" value="${escapeAttr(vencDefault)}" /></div>
         <div class="field"><label>Punto de venta</label><select id="mb-pv">${renderPuntoVentaOptions(ui.billingPuntoVenta || ui.billingServerPuntoVenta)}</select></div>
-        <div class="field span-2"><label>User token del PDV (opcional)</label><input id="mb-usertoken" autocomplete="off" placeholder="dejalo vacio: el servidor ya tiene el token de cada PDV" /></div>
         <div class="field"><label>IVA</label><select id="mb-iva"><option value="10.5">10,5%</option><option value="21">21%</option></select></div>
         <div class="field"><label>Monto TOTAL a emitir</label><input id="mb-total" inputmode="decimal" /></div>
         <div class="field span-2"><span class="muted" id="mb-neto-info" style="font-size:12px"></span></div>
@@ -13361,12 +13360,9 @@
         const pvEl = document.getElementById("mb-pv");
         const pv = pvEl ? String(pvEl.value || "").trim() : "";
         const overrides = { fecha, vencimiento: venc, periodoDesde: desde, periodoHasta: hasta, concepto };
-        // El punto de venta queda recordado para la proxima emision manual; el user token de cada
-        // PDV lo resuelve el servidor con TUSFACTURAS_PV<n>_USERTOKEN, no se guarda en el navegador.
+        // El punto de venta queda recordado para la proxima emision manual. El user token no se
+        // pide: lo resuelve el servidor por PDV con TUSFACTURAS_PV<n>_USERTOKEN.
         if (pv) { overrides.puntoVenta = pv; ui.billingPuntoVenta = pv; }
-        const utEl = document.getElementById("mb-usertoken");
-        const ut = utEl ? String(utEl.value || "").trim() : "";
-        if (ut) overrides.usertoken = ut;
         const edited = Math.abs(total - pendingTotal) >= 1;
         if (edited) { overrides.customNeto = Math.round((total / (1 + rate / 100)) * 100) / 100; overrides.customAlicuota = rate; }
         const cli = getClient(clientId);
@@ -13404,7 +13400,7 @@
     const errors = [];
     const seenError = new Set();
     (state.billingLog || []).slice().reverse().forEach((log) => {
-      if (log.status !== "error") return;
+      if (log.status !== "error" || log.creditNoteFor) return;
       const key = String(log.clientId) + "|" + String(log.from || "") + "|" + String(log.to || "");
       if (seenError.has(key)) return;
       seenError.add(key);
@@ -13467,6 +13463,69 @@
     </div>`;
   }
 
+  function billingLogIsAnnulled(log) {
+    return !!(log && log.annulledBy);
+  }
+
+  function billingLogCanBeAnnulled(log) {
+    return !!(log && log.status === "ok" && log.numero && !log.annulledBy
+      && ["Factura A", "Factura B", "Factura C"].includes(String(log.invoiceType || ""))
+      && !(Array.isArray(log.partials) && log.partials.length > 1));
+  }
+
+  // Nota de credito: anula una factura ya emitida. La emite el servidor contra TusFacturas
+  // citando el comprobante original, que es lo que exige AFIP.
+  function openCreditNoteModal(logId) {
+    const log = (state.billingLog || []).find((entry) => entry.id === logId);
+    if (!log) return alert("No se encontro esa factura.");
+    if (!billingLogCanBeAnnulled(log)) {
+      if (log.annulledBy) return alert("Esa factura ya tiene una nota de credito.");
+      return alert("Esa factura no se puede anular desde aca: revisela en TusFacturas.");
+    }
+    const facturaFecha = String(log.comprobanteFecha || log.to || "").slice(0, 10);
+    const body = `
+      <div class="alert" style="margin-bottom:12px">Se va a emitir una <strong>${escapeHtml(String(log.invoiceType || "").replace("Factura", "Nota de credito"))}</strong> que anula la ${escapeHtml(log.invoiceType || "")} <strong>${escapeHtml(log.numero || "")}</strong> de ${escapeHtml(log.clientName || log.clientId)} por ${formatMoney(log.total)}. Es un comprobante real ante AFIP y no se puede deshacer.</div>
+      <div class="form-grid">
+        <div class="field"><label>Fecha de la nota</label><input type="date" id="nc-fecha" value="${escapeAttr(todayISO())}" /></div>
+        <div class="field"><label>Fecha de la factura que anula</label><input type="date" id="nc-factura-fecha" value="${escapeAttr(facturaFecha)}" /></div>
+        <div class="field span-2"><label>Motivo</label><input id="nc-motivo" placeholder="Anulacion por error de facturacion" value="${escapeAttr("Anulacion de " + (log.invoiceType || "") + " " + (log.numero || ""))}" /></div>
+      </div>
+      <p class="muted" style="font-size:12px;margin-top:6px">La fecha de la factura tiene que ser la que figura en el comprobante original: AFIP rechaza la nota si no coincide.</p>
+      <div class="page-actions" style="justify-content:flex-end;gap:8px;margin-top:12px"><button class="btn ghost" type="button" data-close-modal>Cancelar</button><button class="btn danger" type="button" id="nc-emit">Emitir nota de credito</button></div>
+    `;
+    showModal("Anular factura " + (log.numero || ""), body, () => {
+      const button = document.getElementById("nc-emit");
+      if (!button) return;
+      button.addEventListener("click", async () => {
+        const config = getCloudSyncConfig();
+        if (!cloudSyncReady(config)) return alert("Servidor no configurado.");
+        const motivo = String(document.getElementById("nc-motivo").value || "").trim();
+        const fecha = document.getElementById("nc-fecha").value || todayISO();
+        const comprobanteFecha = document.getElementById("nc-factura-fecha").value || facturaFecha;
+        if (!comprobanteFecha) return alert("Indique la fecha de la factura que se anula.");
+        if (!confirm("Emitir la nota de credito que anula la " + (log.invoiceType || "") + " " + (log.numero || "") + " por " + formatMoney(log.total) + "?\nEs definitivo.")) return;
+        button.disabled = true;
+        button.textContent = "Emitiendo...";
+        try {
+          const response = await cloudRequest(config, "/billing/credit-note", {
+            method: "POST",
+            body: JSON.stringify({ logId: log.id, motivo, fecha, comprobanteFecha })
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(payload.error || "HTTP " + response.status);
+          alert("Nota de credito emitida: " + ((payload.entry && payload.entry.numero) || ""));
+          closeModal();
+          await cloudPull(false);
+          render();
+        } catch (error) {
+          alert("No se pudo emitir la nota de credito: " + error.message);
+          button.disabled = false;
+          button.textContent = "Emitir nota de credito";
+        }
+      });
+    });
+  }
+
   function renderFacturacion() {
     const today = todayISO();
     const defaultFrom = getMonthStartISO(today);
@@ -13509,8 +13568,12 @@
         <td>${escapeHtml(log.clientName || log.clientId)}</td>
         <td>${formatDate(log.from)} - ${formatDate(log.to)}</td>
         <td class="num">${formatMoney(log.total)}</td>
-        <td>${log.status === "ok" ? `<span class="pill green">Emitida</span>` : log.status === "simulada" ? `<span class="pill amber">Simulada</span>` : `<span class="pill red">Error</span>`}</td>
-        <td>${log.cae ? "CAE " + escapeHtml(log.cae) + (log.numero ? ` - <button class="btn small ghost" type="button" data-billing-pdf data-pdf-inv="${escapeAttr(log.invoiceType || "")}" data-pdf-num="${escapeAttr(log.numero)}">PDF</button>` : (log.pdf ? ` - <a href="${escapeAttr(log.pdf)}" target="_blank" rel="noopener">PDF</a>` : "")) : escapeHtml(log.detail || "")}</td>
+        <td>${log.status === "nota_credito" ? `<span class="pill blue">Nota de credito</span>` : log.status === "ok" ? (billingLogIsAnnulled(log) ? `<span class="pill amber">Anulada</span>` : `<span class="pill green">Emitida</span>`) : log.status === "simulada" ? `<span class="pill amber">Simulada</span>` : `<span class="pill red">Error</span>`}</td>
+        <td>${log.cae ? "CAE " + escapeHtml(log.cae) + (log.numero ? ` - <button class="btn small ghost" type="button" data-billing-pdf data-pdf-inv="${escapeAttr(log.invoiceType || "")}" data-pdf-num="${escapeAttr(log.numero)}">PDF</button>` : (log.pdf ? ` - <a href="${escapeAttr(log.pdf)}" target="_blank" rel="noopener">PDF</a>` : "")) : escapeHtml(log.detail || "")}
+          ${log.creditNoteForNumero ? `<br><span class="muted">Anula ${escapeHtml(log.creditNoteForNumero)}</span>` : ""}
+          ${billingLogIsAnnulled(log) ? `<br><span class="muted">Anulada por ${escapeHtml(log.annulledNumero || "nota de credito")}</span>` : ""}
+        </td>
+        <td class="page-actions">${["manager", "admin", "contador"].includes(currentUser.role) && billingLogCanBeAnnulled(log) ? `<button class="btn small danger" type="button" data-credit-note="${escapeAttr(log.id)}" title="Emitir nota de credito">Anular</button>` : ""}</td>
       </tr>
     `).join("");
     afterRender.push(() => {
@@ -13582,6 +13645,7 @@
         render();
       }));
       document.querySelectorAll("[data-billing-pdf]").forEach((button) => button.addEventListener("click", () => abrirFacturaPdf(button.dataset.pdfInv, button.dataset.pdfNum)));
+      document.querySelectorAll("[data-credit-note]").forEach((button) => button.addEventListener("click", () => openCreditNoteModal(button.dataset.creditNote)));
       document.querySelectorAll("[data-billing-pending]").forEach((button) => button.addEventListener("click", () => openBillingPendingModal(button.dataset.billingPending)));
       const logLimitSel = document.getElementById("billing-log-limit");
       if (logLimitSel) logLimitSel.addEventListener("change", () => { ui.billingLogLimit = Number(logLimitSel.value) || 30; render(); });
@@ -13656,8 +13720,8 @@
         </div>
         <div class="table-wrap" style="margin-top:10px">
           <table>
-            <thead><tr><th>Fecha</th><th>Cliente</th><th>Periodo</th><th>Total</th><th>Estado</th><th>CAE / Detalle</th></tr></thead>
-            <tbody>${logRows || emptyRow(6, "Todavia no se emitieron facturas.")}</tbody>
+            <thead><tr><th>Fecha</th><th>Cliente</th><th>Periodo</th><th>Total</th><th>Estado</th><th>CAE / Detalle</th><th>Acciones</th></tr></thead>
+            <tbody>${logRows || emptyRow(7, "Todavia no se emitieron facturas.")}</tbody>
           </table>
         </div>
       </div>
