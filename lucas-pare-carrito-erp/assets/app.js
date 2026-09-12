@@ -5,7 +5,7 @@
   const USER_KEY = "lpc_current_user_v1";
   const OPERATIONAL_RESET_VERSION = "20260610-operational-clean-1";
   const BUSINESS_NAME = "Pare Carrito SAS";
-  const APP_VERSION = "v20";
+  const APP_VERSION = "v21";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -12560,6 +12560,83 @@
     });
   }
 
+  function cashIntakeManagers() {
+    return (state.users || []).filter((user) => user && user.isActive !== false
+      && ["manager", "admin"].includes(user.role) && user.id !== currentUser.id);
+  }
+
+  // ===== Ingreso de efectivo a la caja del empleado =====
+  // El empleado registra plata que recibio. Si vino de otro usuario (companiero o gerente), sale
+  // de la caja de ese usuario y entra a la propia, igual que un movimiento de caja comun. Si vino
+  // de otro lado, es solo un ingreso a la caja propia con el detalle de donde salio.
+  function registerEmployeeCashIntake(options) {
+    const amount = Number(options.amount || 0);
+    if (amount <= 0) return alert("Ingrese un monto mayor a cero.");
+    const fromUser = options.fromUserId ? getUser(options.fromUserId) : null;
+    const detalle = String(options.detail || "").trim();
+    if (!fromUser && !detalle) return alert("Detalle de donde salio el efectivo.");
+    if (fromUser && fromUser.id === currentUser.id) return alert("Elegi a otra persona: no podes recibir de tu propia caja.");
+    const date = options.date || todayISO();
+    const targetCashBoxId = getUserCashBoxId(currentUser.id);
+    const sourceCashBoxId = fromUser ? getUserCashBoxId(fromUser.id) : "";
+    const origen = fromUser ? fromUser.name : detalle;
+    if (fromUser && amount > getCajaBalance(sourceCashBoxId)
+      && !confirm("La caja de " + fromUser.name + " tiene " + formatMoney(getCajaBalance(sourceCashBoxId))
+        + " y estas registrando " + formatMoney(amount) + ". Le va a quedar saldo negativo. Registrar igual?")) return null;
+
+    const movement = {
+      id: nextDatedId("MOV", state.purchases),
+      createdAt: new Date().toISOString(),
+      date,
+      expenseType: "cash_movement",
+      providerId: "",
+      providerName: "",
+      productId: "",
+      productName: "",
+      description: "Ingreso de efectivo de " + origen,
+      quantity: 1,
+      unitCost: amount,
+      items: [],
+      paymentStatus: "paid",
+      totalCost: amount,
+      cashBoxId: sourceCashBoxId,
+      targetCashBoxId,
+      targetUserId: currentUser.id,
+      targetUserName: currentUser.name,
+      notes: detalle,
+      assignedEmployeeId: currentUser.id,
+      vendorName: "",
+      recordedBy: currentUser.name,
+      userRole: currentUser.role
+    };
+    state.purchases.push(movement);
+    if (fromUser) {
+      addCajaEntry({
+        date,
+        type: "cash_movement_out",
+        concept: "Efectivo entregado a " + currentUser.name,
+        relatedEntityId: movement.id,
+        relatedEntityType: "cash_movement",
+        amountIngreso: 0,
+        amountEgreso: amount,
+        cashBoxId: sourceCashBoxId,
+        notes: detalle
+      });
+    }
+    addCajaEntry({
+      date,
+      type: "cash_movement_in",
+      concept: "Ingreso de efectivo de " + origen,
+      relatedEntityId: movement.id,
+      relatedEntityType: "cash_movement",
+      amountIngreso: amount,
+      amountEgreso: 0,
+      cashBoxId: targetCashBoxId,
+      notes: detalle
+    });
+    return movement;
+  }
+
   function renderAttendance() {
     const summary = getWeeklyAttendanceSummary(currentUser.id);
     const todayEntry = getAttendanceEntry(currentUser.id, todayISO());
@@ -12617,6 +12694,24 @@
           </div>
           <div class="page-actions attendance-form-actions" style="margin-top:12px"><button class="btn primary" type="submit">Guardar horario</button></div>
         </form>
+        <form id="employee-cash-intake-form" class="panel">
+          <h2 class="page-title" style="font-size:18px">Ingreso de efectivo</h2>
+          <p class="muted" style="font-size:12px">Plata que recibiste. Si te la dio un companiero o el gerente, se le descuenta de su caja.</p>
+          <div class="form-grid" style="margin-top:10px">
+            <div class="field"><label>Fecha</label><input type="date" id="cash-intake-date" value="${todayISO()}" /></div>
+            <div class="field"><label>Monto</label><input id="cash-intake-amount" inputmode="decimal" placeholder="0" /></div>
+            <div class="field span-2">
+              <label>Recibido de</label>
+              <select id="cash-intake-from">
+                ${activeEmployees().filter((employee) => employee.id !== currentUser.id).length ? `<optgroup label="Otro usuario">${activeEmployees().filter((employee) => employee.id !== currentUser.id).map((employee) => `<option value="${escapeAttr(employee.id)}">${escapeHtml(employee.name)}</option>`).join("")}</optgroup>` : ""}
+                ${cashIntakeManagers().length ? `<optgroup label="Gerencia">${cashIntakeManagers().map((user) => `<option value="${escapeAttr(user.id)}">${escapeHtml(user.name)}</option>`).join("")}</optgroup>` : ""}
+                <option value="otro">Otro (detallar)</option>
+              </select>
+            </div>
+            <div class="field span-2" id="cash-intake-detail-wrap" style="display:none"><label>De donde salio</label><input id="cash-intake-detail" placeholder="Cliente, banco, caja chica..." /></div>
+          </div>
+          <div class="page-actions" style="margin-top:12px"><button class="btn primary" type="submit">Registrar ingreso</button></div>
+        </form>
         <form id="employee-reimbursement-form" class="panel">
           <h2 class="page-title" style="font-size:18px">Gastos para reintegro</h2>
           <div class="form-grid" style="margin-top:10px">
@@ -12668,6 +12763,30 @@
   }
 
   function bindAttendance() {
+    // Ingreso de efectivo: el detalle solo hace falta cuando no vino de un usuario del sistema.
+    const intakeForm = document.getElementById("employee-cash-intake-form");
+    if (intakeForm) {
+      const fromSel = document.getElementById("cash-intake-from");
+      const detailWrap = document.getElementById("cash-intake-detail-wrap");
+      const syncDetail = () => { if (detailWrap) detailWrap.style.display = fromSel.value === "otro" ? "" : "none"; };
+      fromSel.addEventListener("change", syncDetail);
+      syncDetail();
+      intakeForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const esOtro = fromSel.value === "otro";
+        const creado = registerEmployeeCashIntake({
+          date: document.getElementById("cash-intake-date").value || todayISO(),
+          amount: parseAmount(document.getElementById("cash-intake-amount").value),
+          fromUserId: esOtro ? "" : fromSel.value,
+          detail: esOtro ? document.getElementById("cash-intake-detail").value : ""
+        });
+        if (!creado) return;
+        saveState();
+        alert("Ingreso de efectivo registrado.");
+        render();
+      });
+    }
+
     document.getElementById("attendance-form").addEventListener("submit", (event) => {
       event.preventDefault();
       upsertAttendance({
