@@ -5,7 +5,7 @@
   const USER_KEY = "lpc_current_user_v1";
   const OPERATIONAL_RESET_VERSION = "20260610-operational-clean-1";
   const BUSINESS_NAME = "Pare Carrito SAS";
-  const APP_VERSION = "v22";
+  const APP_VERSION = "v23";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -1385,6 +1385,17 @@
     return count;
   }
 
+  // Estado que va a quedar sincronizado si el patch que esta viajando llega bien. Se guarda al
+  // armar el patch, NO al recibir la respuesta: entre que sale el pedido y vuelve, el usuario
+  // sigue cargando, y tomar el estado de ese momento daba por subido algo que nunca se envio.
+  const patchSyncedStates = new Map();
+  let patchFlightInProgress = false;
+
+  function rememberPatchSyncedState(operationId, snapshot) {
+    patchSyncedStates.clear();
+    if (operationId) patchSyncedStates.set(operationId, snapshot);
+  }
+
   function queueCurrentStatePatch() {
     const config = getCloudSyncConfig();
     if (!config.lastSync || !lastSyncedState) return false;
@@ -1395,13 +1406,15 @@
     }
     const patch = buildStatePatch(pendingPatchBaseState, state);
     if (!patchHasChanges(patch)) return false;
+    const operationId = "op-" + Date.now() + "-" + Math.random().toString(36).slice(2, 10);
     savePatchQueue([{
-      operationId: "op-" + Date.now() + "-" + Math.random().toString(36).slice(2, 10),
+      operationId,
       operationType: "patch",
       baseUpdatedAt: pendingPatchBaseUpdatedAt || config.lastSync,
       patch,
       createdAt: new Date().toISOString()
     }]);
+    rememberPatchSyncedState(operationId, cloneSyncState(state));
     ui.syncStatus = navigator.onLine === false ? "Cambios pendientes sin conexión" : "Cambios pendientes por sincronizar";
     return true;
   }
@@ -1543,7 +1556,16 @@
       schedulePatchFlush(5000);
       return false;
     }
+    // Un solo envio a la vez: con el reintento cada 5s mas el debounce de 500ms se podian
+    // superponer dos POST con la misma base y el segundo volvia en conflicto.
+    if (patchFlightInProgress) {
+      schedulePatchFlush(1500);
+      return false;
+    }
     const op = queue[0];
+    const sentOperationId = op.operationId;
+    const sentState = patchSyncedStates.get(sentOperationId) || null;
+    patchFlightInProgress = true;
     try {
       ui.syncStatus = "Sincronizando cambios pendientes...";
       // keepalive: le pide al navegador que COMPLETE el envio aunque la pagina se congele,
@@ -1570,13 +1592,32 @@
       }
       if (!response.ok) throw new Error("HTTP " + response.status + (await readCloudErrorDetail(response)));
       const payload = await response.json();
-      savePatchQueue([]);
-      pendingPatchBaseState = null;
-      pendingPatchBaseUpdatedAt = "";
       config.lastSync = payload.updatedAt || new Date().toISOString();
       config.lastError = "";
       saveCloudSyncConfig(config);
-      lastSyncedState = cloneSyncState(state);
+      // Lo que quedo subido es el estado de cuando se armo el patch, no el de ahora: si mientras
+      // viajaba se cargaron pedidos nuevos, esos NO estan en el servidor.
+      lastSyncedState = sentState || cloneSyncState(state);
+      // Si entro un patch nuevo durante el viaje, la cola NO se vacia: se vuelve a armar sobre la
+      // base que quedo en el servidor y se reintenta. Antes se borraba y esos cambios se perdian
+      // (el sistema los daba por subidos y la siguiente descarga los borraba de la pantalla).
+      const encolado = loadPatchQueue()[0];
+      const mismoOp = !encolado || encolado.operationId === sentOperationId;
+      savePatchQueue([]);
+      pendingPatchBaseState = null;
+      pendingPatchBaseUpdatedAt = "";
+      patchSyncedStates.delete(sentOperationId);
+      if (!mismoOp) {
+        pendingPatchBaseState = lastSyncedState;
+        pendingPatchBaseUpdatedAt = config.lastSync;
+        if (queueCurrentStatePatch()) {
+          ui.syncStatus = "Cambios pendientes por sincronizar";
+          schedulePatchFlush(600);
+          return true;
+        }
+        pendingPatchBaseState = null;
+        pendingPatchBaseUpdatedAt = "";
+      }
       ui.syncStatus = "Guardado";
       if (manual) alert("Cambios pendientes sincronizados.");
       return true;
@@ -1588,6 +1629,8 @@
       schedulePatchFlush(5000);
       if (manual) alert("No se pudo sincronizar todavía: " + error.message);
       return false;
+    } finally {
+      patchFlightInProgress = false;
     }
   }
 
@@ -2011,6 +2054,22 @@
     }
   }
 
+  // Red de seguridad de la descarga: pedidos que estan en este dispositivo, entran en la ventana
+  // que sirvio el servidor y NO vienen en la bajada. Si existen, algo no se subio: reemplazar el
+  // estado los borraria de la pantalla sin que nadie se entere.
+  function localOrdersMissingFromRemote(localState, remoteData, windowInfo) {
+    const locales = Array.isArray(localState && localState.orders) ? localState.orders : [];
+    if (!locales.length) return [];
+    const remotos = new Set((Array.isArray(remoteData && remoteData.orders) ? remoteData.orders : [])
+      .map((order) => String(order && order.id || "")));
+    // Fuera de la ventana el servidor recorta a proposito: eso no es perdida.
+    const corte = (windowInfo && windowInfo.cutoffs && windowInfo.cutoffs.orders) || "";
+    return locales.filter((order) => {
+      if (!order || !order.id || remotos.has(String(order.id))) return false;
+      return !corte || String(order.date || "") >= corte;
+    });
+  }
+
   async function cloudPull(manual, isLogin) {
     const config = getCloudSyncConfig();
     if (!canReadCloudState()) {
@@ -2101,17 +2160,29 @@
       const backupIndexBeforeOverwrite = 0; // backupLocalState inserts at index 0
       const localOrdersBefore = Array.isArray(state.orders) ? state.orders.length : 0;
       const remoteState = normalizeLoadedState({ ...seedState(), ...payload.data }, seedState());
-      state = localUnsyncedChanges
+      // Aunque el sistema crea que esta todo sincronizado, si hay pedidos locales dentro de la
+      // ventana que el servidor no tiene, se fusiona en vez de reemplazar y se avisa. Es la red
+      // que evita que una subida fallida termine borrando pedidos de la pantalla.
+      const huerfanos = localOrdersMissingFromRemote(state, payload.data, payload.window);
+      const debeFusionar = localUnsyncedChanges || huerfanos.length > 0;
+      if (huerfanos.length && !localUnsyncedChanges) {
+        const aviso = huerfanos.length + " pedido(s) de este dispositivo no estaban en el servidor ("
+          + huerfanos.slice(0, 5).map((order) => order.id).join(", ")
+          + (huerfanos.length > 5 ? "..." : "") + "). Se conservaron y se vuelven a subir.";
+        ui.syncWarning = aviso;
+        console.warn("Sincronización: " + aviso);
+      }
+      state = debeFusionar
         ? normalizeLoadedState({ ...seedState(), ...mergeCloudStates(remoteState, state) }, seedState())
         : remoteState;
       writeLocalStateSnapshot(state, "No se pudo guardar la descarga de nube en localStorage.");
       config.lastSync = remoteUpdated || new Date().toISOString();
       config.lastError = "";
       saveCloudSyncConfig(config);
-      lastSyncedState = localUnsyncedChanges ? cloneSyncState(remoteState) : cloneSyncState(state);
+      lastSyncedState = debeFusionar ? cloneSyncState(remoteState) : cloneSyncState(state);
       let clearedQueueCount = 0;
       let requeuedMergedPatch = false;
-      if (localUnsyncedChanges) {
+      if (debeFusionar) {
         clearedQueueCount = loadPatchQueue().length;
         savePatchQueue([]);
         pendingPatchBaseState = lastSyncedState;
