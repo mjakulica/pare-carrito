@@ -4157,3 +4157,14 @@ tr:last-child td {
 .billing-warning ul {
   font-size: 13px;
 }
+
+/* Boton "+" para agregar al pedido el producto escrito, debajo del buscador. */
+.order-search-add {
+  margin-top: 6px;
+}
+.order-search-add .btn {
+  min-width: 44px;
+  font-size: 18px;
+  line-height: 1;
+  padding: 6px 12px;
+}

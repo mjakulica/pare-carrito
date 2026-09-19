@@ -5,7 +5,7 @@
   const USER_KEY = "lpc_current_user_v1";
   const OPERATIONAL_RESET_VERSION = "20260610-operational-clean-1";
   const BUSINESS_NAME = "Pare Carrito SAS";
-  const APP_VERSION = "v23";
+  const APP_VERSION = "v24";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -4386,6 +4386,7 @@
         <input type="hidden" id="order-client" value="${escapeAttr(client ? client.id : "")}" />
         <datalist id="order-client-options">
           ${clients.map((item) => `<option value="${escapeAttr(item.id + " - " + item.name)}"></option>`).join("")}
+          ${datalistOptionsSinTildes(clients.map((item) => item.id + " - " + item.name))}
         </datalist>`;
     const categoryMatches = (product) => {
       if (!selectedCategories.length) return true;
@@ -4451,7 +4452,8 @@
                 </div>
                 <button class="btn small ghost" id="clear-order-search" type="button">X</button>
               </div>
-              <datalist id="order-product-options">${activeProducts().map((product) => `<option value="${escapeAttr(product.name)}"></option>`).join("")}${orderSearchAliasOptions(ui.selectedClientId)}</datalist>
+              <div class="order-search-add"><button class="btn small primary" id="order-add-typed" type="button" title="Agregar al pedido el producto escrito">+</button></div>
+              <datalist id="order-product-options">${activeProducts().map((product) => `<option value="${escapeAttr(product.name)}"></option>`).join("")}${datalistOptionsSinTildes(activeProducts().map((product) => product.name))}${orderSearchAliasOptions(ui.selectedClientId)}</datalist>
             </div>
             <div class="field order-quick-note-field">
               <label>Nota</label>
@@ -4890,10 +4892,10 @@
       }
       recalc();
     });
-    document.getElementById("add-order-products").addEventListener("click", () => {
+    const agregarProductoEscrito = () => {
       const quickQty = document.getElementById("order-quick-qty");
       const quickNote = document.getElementById("order-quick-note");
-      const typedProduct = findProductByInput(searchInput.value);
+      const typedProduct = resolveOrderSearchProduct(searchInput.value, clientSelect.value);
       const quantity = quickQty ? parseAmount(quickQty.value) : 0;
       if (typedProduct && quantity > 0) {
         const client = getClient(clientSelect.value);
@@ -4917,6 +4919,16 @@
       if (quickNote) quickNote.value = "";
       applyOrderFilters();
       recalc();
+    };
+    document.getElementById("add-order-products").addEventListener("click", agregarProductoEscrito);
+    const addTypedButton = document.getElementById("order-add-typed");
+    if (addTypedButton) addTypedButton.addEventListener("click", agregarProductoEscrito);
+    // Al elegir un producto del desplegable, el cursor pasa solo a la cantidad.
+    searchInput.addEventListener("change", () => {
+      const elegido = resolveOrderSearchProduct(searchInput.value, clientSelect.value);
+      if (!elegido) return;
+      const quickQty = document.getElementById("order-quick-qty");
+      if (quickQty) { quickQty.focus(); quickQty.select(); }
     });
     const aliasButton = document.getElementById("open-order-aliases");
     if (aliasButton) aliasButton.addEventListener("click", () => openOrderAliasesModal(clientSelect.value));
@@ -17960,7 +17972,9 @@
   // Abreviaturas de unidad que se escriben con punto ("3 doc. naranjas", "1 un. de ajo"). El punto
   // se saca ANTES de partir por oraciones: si no, "3 doc. naranjas" se partia en "3 doc" y
   // "naranjas", y salia un producto fantasma con la cantidad del otro.
-  const UNIT_ABBREVIATIONS = /\b(docs?|doc|dc|dna|dnas|unid|uni|un|u|kgs?|kg|k|grs?|gr|caj|cjs?|cj|bls?|jls?|atad|band|maple)\.(?=\s|$)/gi;
+  // Ojo con el \b: entre un numero y una letra NO hay borde de palabra, asi que "4doc." no
+  // entraba y la linea se seguia partiendo. Se mira el caracter anterior a mano.
+  const UNIT_ABBREVIATIONS = /(^|[^a-z\u00e0-\u017f])(docs?|doc|dc|dna|dnas|unid|uni|un|u|kgs?|kg|k|grs?|gr|caj|cjs?|cj|bls?|jls?|atad|band|maple)\.(?=\s|$)/gi;
 
   // "3 y media" / "1 y medio" tienen que resolverse antes de partir la linea por la "y", si no
   // queda "3" por un lado y "media" suelto por el otro.
@@ -17969,7 +17983,7 @@
   function expandWhatsappOrderLines(text) {
     const rawLines = String(text || "").split(/\r?\n/)
       .map((line) => String(line || "")
-        .replace(UNIT_ABBREVIATIONS, "$1")
+        .replace(UNIT_ABBREVIATIONS, "$1$2")
         .replace(HALF_SUFFIX, (mm, n) => (parseFloat(String(n).replace(",", ".")) + 0.5).toString().replace(".", ","))
         .trim())
       .filter(Boolean);
@@ -18321,7 +18335,11 @@
         const match = matchProductForParsedLine(candidateName, unitType, clientId);
         if (!match || !match.product || match.product.id !== fullMatch.product.id) continue;
         const restTokens = cleanTokens.slice(index);
-        const restAllInName = restTokens.every((word) => productText.includes(word));
+        // Se compara en singular: "lechugas repolladas" contra "Lechuga Repollada" difiere solo
+        // en la "s" y no es una aclaracion del cliente, es el nombre del producto.
+        const productSingular = singularizeParsedProductText(productText);
+        const restAllInName = restTokens.every((word) => productText.includes(word)
+          || productSingular.includes(singularizeParsedProductText(word)));
         if (restAllInName) continue; // las palabras restantes son parte del nombre: no pelar
         return { name: candidateName, note: cleanupParsedProductNote(noteFromRest((rawNameTokens || []).slice(index), fullMatch.product)) };
       }
@@ -18473,6 +18491,18 @@
       if (exactUnitProduct) return exactUnitProduct;
       const wholesaleProduct = findByBaseAndUnits(["jaula", "cajon", "bolsa"]);
       if (wholesaleProduct) return wholesaleProduct;
+      // El bulto suele venderse con el nombre corto ("Tomate Cajon") aunque el cliente pida la
+      // variedad ("1/2 cajon de tomate perita"). Se prueba sacando calificativos de la derecha;
+      // si no, terminaba cayendo en el producto por kilo con la unidad cambiada.
+      const palabras = nameSearch.split(" ").filter(Boolean);
+      for (let corte = palabras.length - 1; corte >= 1; corte -= 1) {
+        const base = palabras.slice(0, corte).join(" ");
+        const porBase = products.find((product) => {
+          const productBase = singularizeParsedProductText(stripTrailingProductUnitWords(normalizeText(product.name)));
+          return normalizeText(product.unitType) === cleanUnit && parsedBaseEquivalent(productBase, base);
+        });
+        if (porBase) return porBase;
+      }
     }
     if ((cleanName === "tomate" || cleanName === "tomates") && cleanUnit === "kg") {
       return findByWords(["tomate", "perita"], ["kg"]) || findByWords(["tomate"], ["kg"]);
@@ -18694,6 +18724,19 @@
   }
 
   // Los alias tambien aparecen en el desplegable del buscador, mostrando a que producto llevan.
+  // El <datalist> del navegador filtra por coincidencia literal y distingue acentos: escribiendo
+  // "limon" no aparece "Limón". Se agrega una opcion espejo sin tildes para los que las tienen;
+  // al elegirla queda el texto sin acento, que los buscadores resuelven igual.
+  function datalistOptionsSinTildes(valores) {
+    const vistos = new Set(valores.map((valor) => String(valor).toLowerCase()));
+    return valores.map((valor) => {
+      const plano = String(valor).normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      if (plano === String(valor) || vistos.has(plano.toLowerCase())) return "";
+      vistos.add(plano.toLowerCase());
+      return `<option value="${escapeAttr(plano)}">${escapeHtml(valor)}</option>`;
+    }).join("");
+  }
+
   function orderSearchAliasOptions(clientId) {
     const vistos = new Set(activeProducts().map((product) => normalizeText(product.name)));
     const opciones = [];
@@ -19452,11 +19495,13 @@
   }
 
   function findClientByInput(value) {
-    const clean = String(value || "").trim().toLowerCase();
-    if (!clean) return null;
+    const crudo = String(value || "").trim().toLowerCase();
+    if (!crudo) return null;
+    // Se compara sin tildes en los dos sentidos: "Estacion" encuentra "Estación" y al reves.
+    const clean = normalizeText(crudo) || crudo;
     return activeClients().find((client) => {
-      const id = String(client.id || "").toLowerCase();
-      const name = String(client.name || "").toLowerCase();
+      const id = normalizeText(String(client.id || "")) || String(client.id || "").toLowerCase();
+      const name = normalizeText(String(client.name || ""));
       const label = `${id} - ${name}`;
       return id === clean || name === clean || label === clean || clean.startsWith(id + " - ") || name.includes(clean);
     }) || null;
@@ -19465,7 +19510,24 @@
   function findProductByInput(value) {
     const clean = String(value || "").trim().toLowerCase();
     if (!clean) return null;
-    return state.products.find((product) => product.id.toLowerCase() === clean || product.name.toLowerCase() === clean) || null;
+    const exacto = state.products.find((product) => product.id.toLowerCase() === clean || product.name.toLowerCase() === clean);
+    if (exacto) return exacto;
+    // Sin tildes: lo que se escribe a mano casi nunca las lleva, y el desplegable del navegador
+    // tampoco las ignora, asi que el texto puede venir con o sin acento.
+    const normal = normalizeText(clean);
+    if (!normal) return null;
+    return state.products.find((product) => normalizeText(product.name) === normal) || null;
+  }
+
+  // El buscador de Nuevo pedido acepta tambien los alias ("coreano" por "Calabaza"): sin esto se
+  // escribia el alias en el buscador y el boton de agregar no encontraba nada.
+  function resolveOrderSearchProduct(value, clientId) {
+    const directo = findProductByInput(value);
+    if (directo) return directo;
+    const texto = String(value || "").trim();
+    if (!texto) return null;
+    const match = matchProductForParsedLine(texto, "", clientId);
+    return match && match.product ? match.product : null;
   }
 
   function getProviderFavoriteProducts(providerId) {
