@@ -5,7 +5,7 @@
   const USER_KEY = "lpc_current_user_v1";
   const OPERATIONAL_RESET_VERSION = "20260610-operational-clean-1";
   const BUSINESS_NAME = "Pare Carrito SAS";
-  const APP_VERSION = "v25";
+  const APP_VERSION = "v26";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -4940,11 +4940,8 @@
     const parseButton = document.getElementById("parse-whatsapp-order");
     if (parseButton) parseButton.addEventListener("click", () => {
       ui.pendingWhatsappText = String(pasteInput.value || "").trim();
-      const detectedClient = detectClientFromOrderText(pasteInput.value);
-      if (detectedClient && detectedClient.id !== clientSelect.value) {
-        applySelectedClient(detectedClient.id, false);
-        if (clientSearch) clientSearch.value = detectedClient.id + " - " + detectedClient.name;
-      }
+      // El cliente NO se cambia por el texto pegado: manda el que esta elegido en la pantalla.
+      // Antes se detectaba por la primera linea y pisaba la seleccion.
       const parsed = parseWhatsappOrder(pasteInput.value, clientSelect.value);
       applyParsedOrderToRows(parsed, searchInput, warningBox);
       if (parsed.unmatched.length && ["manager", "admin"].includes(currentUser.role)) {
@@ -17980,13 +17977,15 @@
 
   // "3 y media" / "1 y medio" tienen que resolverse antes de partir la linea por la "y", si no
   // queda "3" por un lado y "media" suelto por el otro.
-  const HALF_SUFFIX = /(\d+(?:[.,]\d+)?)\s+y\s+medi[oa]\b/gi;
+  const HALF_SUFFIX = /(\d+(?:[.,]\d+)?)\s*(kgs?|kilos?|kilo|k|grs?|gramos|gr|docenas?|doc|dc|atados?|atado|bolsas?|bolsa|cajones?|cajon|jaulas?|jaula|maples?|maple|bandejas?|bandeja|unidades?|unidad|uni|un)?\s+y\s+medi[oa]\b/gi;
 
   function expandWhatsappOrderLines(text) {
     const rawLines = String(text || "").split(/\r?\n/)
       .map((line) => String(line || "")
         .replace(UNIT_ABBREVIATIONS, "$1$2")
-        .replace(HALF_SUFFIX, (mm, n) => (parseFloat(String(n).replace(",", ".")) + 0.5).toString().replace(".", ","))
+        // La unidad puede venir pegada al numero ("1k y medio"): sin contemplarla, el "y medio"
+        // no se resolvia, la linea se partia por la "y" y salian dos productos.
+        .replace(HALF_SUFFIX, (mm, n, u) => (parseFloat(String(n).replace(",", ".")) + 0.5).toString().replace(".", ",") + (u ? " " + u : ""))
         .trim())
       .filter(Boolean);
     const expanded = [];
@@ -19502,16 +19501,39 @@
   }
 
   function findClientByInput(value) {
-    const crudo = String(value || "").trim().toLowerCase();
+    const crudo = String(value || "").trim();
     if (!crudo) return null;
     // Se compara sin tildes en los dos sentidos: "Estacion" encuentra "Estación" y al reves.
-    const clean = normalizeText(crudo) || crudo;
-    return activeClients().find((client) => {
-      const id = normalizeText(String(client.id || "")) || String(client.id || "").toLowerCase();
-      const name = normalizeText(String(client.name || ""));
-      const label = `${id} - ${name}`;
-      return id === clean || name === clean || label === clean || clean.startsWith(id + " - ") || name.includes(clean);
-    }) || null;
+    const clean = normalizeText(crudo);
+    if (!clean) return null;
+    const lista = activeClients();
+    const idDe = (client) => String(client.id || "").trim();
+    const normId = (client) => normalizeText(idDe(client));
+    const normNombre = (client) => normalizeText(client.name || "");
+    const soloNumero = /^\d+$/.test(crudo);
+    // Numero suelto: es el codigo de cliente, con o sin los ceros de adelante ("15" es el 015).
+    if (soloNumero) {
+      const numero = parseInt(crudo, 10);
+      const porId = lista.find((client) => normId(client) === clean || parseInt(idDe(client), 10) === numero);
+      if (porId) return porId;
+    }
+    // Etiqueta completa del desplegable, "015 - Villa Vicuña".
+    const porEtiqueta = lista.find((client) => normalizeText(idDe(client) + " " + (client.name || "")) === clean);
+    if (porEtiqueta) return porEtiqueta;
+    const porPrefijo = lista.find((client) => normId(client) && clean.startsWith(normId(client) + " "));
+    if (porPrefijo) return porPrefijo;
+    // "15 - Villa Vicuña" escrito a mano: el numero de adelante tambien vale sin los ceros.
+    const conNumero = /^(\d+)\s/.exec(clean);
+    if (conNumero) {
+      const numero = parseInt(conNumero[1], 10);
+      const porNumero = lista.find((client) => parseInt(idDe(client), 10) === numero);
+      if (porNumero) return porNumero;
+    }
+    const porNombre = lista.find((client) => normNombre(client) === clean);
+    if (porNombre) return porNombre;
+    // Un numero NO se busca dentro del nombre: escribir "21" llevaba a "Paula Juramento 1421".
+    if (soloNumero) return null;
+    return lista.find((client) => normNombre(client).includes(clean)) || null;
   }
 
   function findProductByInput(value) {
