@@ -5,7 +5,7 @@
   const USER_KEY = "lpc_current_user_v1";
   const OPERATIONAL_RESET_VERSION = "20260610-operational-clean-1";
   const BUSINESS_NAME = "Pare Carrito SAS";
-  const APP_VERSION = "v26";
+  const APP_VERSION = "v27";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -2103,6 +2103,11 @@
       // serian varios MB cada vez que alguien cambia algo. Se refresca al volver a la vista rapida.
       if (!manual && modo !== "rapida") return;
       const query = modo === "full" ? "?window=full" : modo === "parcial" ? "?days=" + PARTIAL_HISTORY_DAYS : "";
+      // Aviso visible mientras baja el estado. En el celular la primera descarga despues de abrir
+      // la app puede tardar bastante (es todo el estado de la ventana) y sin esto las paginas se
+      // ven vacias sin explicacion, como si no hubiera pedidos.
+      ui.syncDownloading = true;
+      render();
       const response = await cloudRequest(config, "/state" + query, { method: "GET" });
       if (response.status === 404) {
         if (manual) alert("Todavia no hay datos en la nube. Use Subir datos ahora desde el dispositivo principal.");
@@ -2220,6 +2225,11 @@
       saveCloudSyncConfig(errorConfig);
       console.warn("Sincronización: " + error.message);
       if (manual) alert("No se pudo descargar de la nube: " + error.message);
+    } finally {
+      if (ui.syncDownloading) {
+        ui.syncDownloading = false;
+        render();
+      }
     }
   }
 
@@ -2859,8 +2869,13 @@
   }
 
   function renderSyncBanners() {
-    if (!localPersistRole()) return "";
-    let html = "";
+    // El aviso de descarga se muestra en todos los roles: es la unica senal de que las pantallas
+    // estan vacias porque todavia estan bajando los datos.
+    const bajando = ui.syncDownloading
+      ? `<div class="alert" style="margin-bottom:14px"><strong>Sincronizando:</strong> descargando datos del servidor...</div>`
+      : "";
+    if (!localPersistRole()) return bajando;
+    let html = bajando;
     if (ui.syncWarning) {
       html += `<div class="alert" style="margin-bottom:14px"><strong>Atencion sincronizacion:</strong> ${escapeHtml(ui.syncWarning)}</div>`;
     }
@@ -4453,7 +4468,7 @@
                 <button class="btn small ghost" id="clear-order-search" type="button">X</button>
               </div>
               <div class="order-search-add"><button class="btn small primary" id="order-add-typed" type="button" title="Agregar al pedido el producto escrito">+</button></div>
-              <datalist id="order-product-options">${activeProducts().map((product) => `<option value="${escapeAttr(product.name)}"></option>`).join("")}${datalistOptionsSinTildes(activeProducts().map((product) => product.name))}${orderSearchAliasOptions(ui.selectedClientId)}</datalist>
+              <datalist id="order-product-options">${ordenarOpcionesPorTexto(activeProductsByName().map((product) => `<option value="${escapeAttr(product.name)}"></option>`).join("") + datalistOptionsSinTildes(activeProductsByName().map((product) => product.name)) + orderSearchAliasOptions(ui.selectedClientId))}</datalist>
             </div>
             <div class="field order-quick-note-field">
               <label>Nota</label>
@@ -6131,8 +6146,8 @@
     const relations = state.productRelations || [];
     const retailUnits = getRetailUnitNames();
     const wholesaleUnits = getWholesaleUnitNames();
-    const retailProducts = activeProducts().filter((product) => retailUnits.includes(product.unitType));
-    const wholesaleProducts = activeProducts().filter((product) => wholesaleUnits.includes(product.unitType));
+    const retailProducts = activeProductsByName().filter((product) => retailUnits.includes(product.unitType));
+    const wholesaleProducts = activeProductsByName().filter((product) => wholesaleUnits.includes(product.unitType));
     const rows = relations.map((relation, index) => {
       const retail = getProduct(relation.retailProductId);
       const wholesale = getProduct(relation.wholesaleProductId);
@@ -6329,8 +6344,8 @@
       <div class="panel" style="margin-top:14px">
         <h2 class="page-title" style="font-size:18px">Relaciones de costo</h2>
         <div class="form-grid" style="margin-top:10px">
-          <div class="field"><label>Producto origen</label><select id="relation-source">${activeProducts().map((product) => `<option value="${product.id}">${escapeHtml(product.name)}</option>`).join("")}</select></div>
-          <div class="field"><label>Producto destino</label><select id="relation-target">${activeProducts().map((product) => `<option value="${product.id}">${escapeHtml(product.name)}</option>`).join("")}</select></div>
+          <div class="field"><label>Producto origen</label><select id="relation-source">${activeProductsByName().map((product) => `<option value="${product.id}">${escapeHtml(product.name)}</option>`).join("")}</select></div>
+          <div class="field"><label>Producto destino</label><select id="relation-target">${activeProductsByName().map((product) => `<option value="${product.id}">${escapeHtml(product.name)}</option>`).join("")}</select></div>
           <div class="field"><label>Dividir por</label><input id="relation-divisor" inputmode="decimal" placeholder="1" /></div>
           <div class="field"><label>Multiplicar por</label><input id="relation-multiplier" inputmode="decimal" placeholder="1" /></div>
           <div class="field"><label>Margen %</label><input id="relation-margin" inputmode="decimal" placeholder="25" /></div>
@@ -8844,7 +8859,7 @@
 
   function purchaseSelectableProducts() {
     const pid = currentProviderId();
-    if (!pid) return activeProducts();
+    if (!pid) return activeProductsByName();
     const prov = getProvider(pid);
     const supplied = new Set(prov && Array.isArray(prov.productsSupplied) ? prov.productsSupplied : []);
     const mine = activeProducts().filter((p) => supplied.has(p.id));
@@ -12408,7 +12423,7 @@
       </div>
       ${!isAllProviders && selectedProvider ? `<div class="panel" style="margin-bottom:14px">
         <h2 class="page-title" style="font-size:18px">Productos que vende ${escapeHtml(selectedProvider.name)}</h2>
-        ${(currentUser && roleFlag(currentUser.role, "editarProveedores")) ? `<input id="prov-products-filter" placeholder="Filtrar productos..." autocomplete="off" style="margin:6px 0" /><div id="prov-products-grid" class="check-grid">${activeProducts().map((p) => `<label class="check-item" data-check-name="${escapeAttr(normalizeText(p.name))}"><input type="checkbox" data-prov-product value="${p.id}" ${(selectedProvider.productsSupplied || []).includes(p.id) ? "checked" : ""} /><span>${escapeHtml(p.name)} - ${escapeHtml(p.unitType)}</span></label>`).join("")}</div>` : `<ul class="divide-print-list">${(selectedProvider.productsSupplied || []).map((pid) => { const p = getProduct(pid); return p ? `<li>${escapeHtml(p.name)} - ${escapeHtml(p.unitType)}</li>` : ""; }).join("") || "<li class='muted'>Sin productos cargados.</li>"}</ul>`}
+        ${(currentUser && roleFlag(currentUser.role, "editarProveedores")) ? `<input id="prov-products-filter" placeholder="Filtrar productos..." autocomplete="off" style="margin:6px 0" /><div id="prov-products-grid" class="check-grid">${activeProductsByName().map((p) => `<label class="check-item" data-check-name="${escapeAttr(normalizeText(p.name))}"><input type="checkbox" data-prov-product value="${p.id}" ${(selectedProvider.productsSupplied || []).includes(p.id) ? "checked" : ""} /><span>${escapeHtml(p.name)} - ${escapeHtml(p.unitType)}</span></label>`).join("")}</div>` : `<ul class="divide-print-list">${(selectedProvider.productsSupplied || []).map((pid) => { const p = getProduct(pid); return p ? `<li>${escapeHtml(p.name)} - ${escapeHtml(p.unitType)}</li>` : ""; }).join("") || "<li class='muted'>Sin productos cargados.</li>"}</ul>`}
       </div>` : ""}
       ${!isAllProviders && selectedProvider && ["manager", "admin", "employee"].includes(currentUser.role) ? `<div class="panel" style="margin-bottom:14px">
         <h2 class="page-title" style="font-size:18px">Precios de ${escapeHtml(selectedProvider.name)} (lo que vende)</h2>
@@ -16348,7 +16363,7 @@
           </div>
           <div class="field span-4">
             <label>Producto</label>
-            <select id="alias-product-select">${activeProducts().map((product) => `<option value="${product.id}">${escapeHtml(product.name)}</option>`).join("")}</select>
+            <select id="alias-product-select">${activeProductsByName().map((product) => `<option value="${product.id}">${escapeHtml(product.name)}</option>`).join("")}</select>
           </div>
         </div>
         <div class="note-grid">
@@ -16452,7 +16467,7 @@
             <button class="btn icon danger unmatched-alias-remove" type="button" data-remove-unmatched-alias title="Eliminar">X</button>
           </div>
           <input type="hidden" data-unmatched-alias-name value="${escapeAttr(aliasName)}" />
-          <div class="field span-2"><label>Producto existente</label><select data-unmatched-product><option value="">No vincular</option>${activeProducts().map((product) => `<option value="${product.id}">${escapeHtml(product.name)}</option>`).join("")}</select></div>
+          <div class="field span-2"><label>Producto existente</label><select data-unmatched-product><option value="">No vincular</option>${activeProductsByName().map((product) => `<option value="${product.id}">${escapeHtml(product.name)}</option>`).join("")}</select></div>
           <label class="field" style="display:flex;align-items:center;gap:8px;grid-template-columns:auto 1fr">
             <input type="checkbox" data-unmatched-general style="width:auto;min-height:auto" />
             <span>Alias general</span>
@@ -16627,7 +16642,7 @@
             <span class="muted" id="provider-products-count"></span>
           </div>
           <div id="provider-products" class="check-grid">
-            ${activeProducts().map((product) => `<label class="check-item" data-check-name="${escapeAttr(normalizeText(product.name))}"><input type="checkbox" value="${product.id}" ${selectedProducts.has(product.id) ? "checked" : ""} /><span>${escapeHtml(product.name)} - ${escapeHtml(product.unitType)}</span></label>`).join("")}
+            ${activeProductsByName().map((product) => `<label class="check-item" data-check-name="${escapeAttr(normalizeText(product.name))}"><input type="checkbox" value="${product.id}" ${selectedProducts.has(product.id) ? "checked" : ""} /><span>${escapeHtml(product.name)} - ${escapeHtml(product.unitType)}</span></label>`).join("")}
           </div>
         </div>
         <div class="field span-4"><label>Notas</label><textarea id="provider-notes">${escapeHtml(provider ? provider.notes || "" : "")}</textarea></div>
@@ -16750,7 +16765,7 @@
         </div>
         <div class="grid">${itemRows}</div>
         <div class="grid" id="order-add-rows"></div>
-        <datalist id="order-add-prod-list">${activeProducts().map((p) => `<option value="${escapeAttr(p.name)}"></option>`).join("")}</datalist>
+        <datalist id="order-add-prod-list">${activeProductsByName().map((p) => `<option value="${escapeAttr(p.name)}"></option>`).join("")}</datalist>
         <div class="page-actions"><button class="btn small yellow" type="button" id="order-add-product-btn">Agregar producto</button></div>
       </form>
       `,
@@ -18205,6 +18220,10 @@
       .replace(/\bkilos?\s+de\b/gi, "kg de")
       .replace(/\bkgs?\s+de\b/gi, "kg de")
       .replace(/\bbolsas?\s+de\b/gi, "bolsa de")
+      // "2A de rucula", "1/2 A de verdeo", "1A grande de zanahoria": la "a" suelta pegada a una
+      // cantidad es la abreviatura de atado. Sin esto quedaba como parte del nombre ("a rucula")
+      // y el producto matcheaba por la inicial (Albahaca) dejando el verdadero nombre como nota.
+      .replace(/(\d+(?:[,.]\d+)?(?:\/\d+(?:[,.]\d+)?)?)\s+a\s+(?=[a-zA-Z\u00c0-\u017f])/gi, "$1 atado ")
       // "cebolla blanca" -> "cebolla" (blanca es la variedad por defecto; no debe quedar como nota)
       .replace(/\bcebollas?\s+blanc[ao]s?\b/gi, "cebolla")
       // "cebolla de verdeo" / "cebolla verdeo" siempre es Verdeo. "cebolla verde" a secas tambien,
@@ -18359,6 +18378,15 @@
       const match = matchProductForParsedLine(candidateName, unitType, clientId);
       if (!match || !match.product) continue;
       return { name: candidateName, note: cleanupParsedProductNote(noteFromRest((rawNameTokens || []).slice(index), match.product)) };
+    }
+    // Tampoco matchea ningun prefijo: probar sufijos, porque el calificativo puede venir ANTES
+    // del producto ("1 atado grande de zanahoria" -> Zanahoria con nota "grande").
+    for (let index = 1; index < cleanTokens.length; index += 1) {
+      const candidateName = cleanTokens.slice(index).join(" ").trim();
+      if (!candidateName) continue;
+      const match = matchProductForParsedLine(candidateName, unitType, clientId);
+      if (!match || !match.product) continue;
+      return { name: candidateName, note: cleanupParsedProductNote(noteFromRest((rawNameTokens || []).slice(0, index), match.product)) };
     }
     return { name: fullName, note: "" };
   }
@@ -18733,6 +18761,23 @@
   // El <datalist> del navegador filtra por coincidencia literal y distingue acentos: escribiendo
   // "limon" no aparece "Limón". Se agrega una opcion espejo sin tildes para los que las tienen;
   // al elegirla queda el texto sin acento, que los buscadores resuelven igual.
+  // Ordena alfabeticamente un bloque de <option> ya armado (por el texto que ve el usuario, o por
+  // el value si la opcion no tiene texto). Se usa en los datalist que mezclan nombres, versiones
+  // sin tildes y alias: sin esto cada grupo quedaba ordenado por su cuenta.
+  function ordenarOpcionesPorTexto(html) {
+    const partes = String(html || "").split("</option>").filter((parte) => parte.trim());
+    return partes
+      .map((parte) => {
+        const texto = />([^<]*)$/.exec(parte);
+        const valor = /value="([^"]*)"/.exec(parte);
+        const clave = (texto && texto[1].trim()) || (valor && valor[1]) || "";
+        return { html: parte + "</option>", clave: normalizeText(clave) };
+      })
+      .sort((a, b) => a.clave.localeCompare(b.clave))
+      .map((entry) => entry.html)
+      .join("");
+  }
+
   function datalistOptionsSinTildes(valores) {
     const vistos = new Set(valores.map((valor) => String(valor).toLowerCase()));
     return valores.map((valor) => {
@@ -20337,6 +20382,13 @@
 
   function activeProducts() {
     return state.products.filter((product) => product && product.isActive !== false);
+  }
+
+  // Todas las listas de productos que ve el usuario (selects, datalists, grillas de tildar) van en
+  // orden alfabetico. activeProducts() se deja en el orden del estado porque el matcher del parser
+  // y la pagina Productos dependen de ese orden.
+  function activeProductsByName() {
+    return activeProducts().slice().sort((a, b) => normalizeText(a.name).localeCompare(normalizeText(b.name)));
   }
 
   function activeVehicles() {
