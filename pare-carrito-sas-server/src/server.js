@@ -725,6 +725,34 @@ function patchKeyForItem(key, item) {
   return String(item.id || "");
 }
 
+// Pedidos y compras viejos viajan a los dispositivos SIN productos (vista rapida). Si el
+// dispositivo modifica uno de esos (mover fotos al servidor, borrar fotos viejas, etc.) sube la
+// copia vacia, y antes el servidor la guardaba encima de la completa: se perdian los productos
+// para siempre (pedidos "sin productos" aun con el historial completo cargado). Una copia sin
+// items nunca pisa los items guardados si viene marcada como recortada o si el pedido tiene
+// importe (un pedido real sin productos no tiene total).
+const ITEM_COLLECTIONS = new Set(["orders", "purchases"]);
+function keepStoredItems(key, incoming, stored) {
+  if (!ITEM_COLLECTIONS.has(key) || !incoming || !stored) return incoming;
+  const vacio = !Array.isArray(incoming.items) || incoming.items.length === 0;
+  const guardados = Array.isArray(stored.items) ? stored.items : [];
+  const out = { ...incoming };
+  delete out.__itemsStripped;
+  delete out.itemsCount;
+  if (!vacio || !guardados.length) return out;
+  const recortado = !!incoming.__itemsStripped || Number(incoming.itemsCount || 0) > 0;
+  const conImporte = Math.abs(Number(incoming.totalAmount != null ? incoming.totalAmount : incoming.totalCost) || 0) > 0.001;
+  if (!recortado && !conImporte) return out;
+  out.items = guardados;
+  // Los totales tambien vuelven a los guardados si la copia vacia los dejo en cero.
+  if (!conImporte) {
+    ["subtotalAmount", "ivaAmount", "totalAmount", "totalCost"].forEach((campo) => {
+      if (stored[campo] !== undefined) out[campo] = stored[campo];
+    });
+  }
+  return out;
+}
+
 function applyArrayPatch(target, key, changes) {
   const current = Array.isArray(target[key]) ? target[key] : [];
   const map = new Map();
@@ -751,7 +779,7 @@ function applyArrayPatch(target, key, changes) {
     // o un item borrado que "reaparece").
     const existing = map.get(id);
     if (existing && existing.updatedAt && item && item.updatedAt && String(item.updatedAt) < String(existing.updatedAt)) return;
-    map.set(id, item);
+    map.set(id, existing ? keepStoredItems(key, item, existing) : keepStoredItems(key, item, null));
   });
   target[key] = Array.from(map.values());
 }
@@ -1029,12 +1057,15 @@ function mergeWindowedState(stored, incoming) {
     const storedById = new Map(storedRows.map((row) => [row && row.id, row]));
     // Los items que el cliente no recibio se recuperan de lo guardado.
     const restored = incomingRows.map((row) => {
-      if (!row || !row.__itemsStripped) return row;
+      if (!row) return row;
       const previous = storedById.get(row.id);
-      const merged = { ...row, items: previous && Array.isArray(previous.items) ? previous.items : [] };
-      delete merged.__itemsStripped;
-      delete merged.itemsCount;
-      return merged;
+      if (row.__itemsStripped) {
+        const merged = { ...row, items: previous && Array.isArray(previous.items) ? previous.items : [] };
+        delete merged.__itemsStripped;
+        delete merged.itemsCount;
+        return merged;
+      }
+      return previous ? keepStoredItems(key, row, previous) : row;
     });
     const kept = storedRows.filter((row) => row && row.id && !incomingIds.has(row.id));
     next[key] = kept.concat(restored);
