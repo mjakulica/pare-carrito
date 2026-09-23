@@ -5,7 +5,7 @@
   const USER_KEY = "lpc_current_user_v1";
   const OPERATIONAL_RESET_VERSION = "20260610-operational-clean-1";
   const BUSINESS_NAME = "Pare Carrito SAS";
-  const APP_VERSION = "v30";
+  const APP_VERSION = "v31";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -5149,9 +5149,12 @@
       row.style.display = "";
     });
     if (!warningBox) return;
-    if (parsed.unmatched.length) {
+    const avisos = [];
+    if (parsed.unmatched.length) avisos.push("No se encontraron estos productos: " + parsed.unmatched.join(", "));
+    (parsed.warnings || []).forEach((aviso) => avisos.push("Pedido en unidades -> " + aviso));
+    if (avisos.length) {
       warningBox.style.display = "block";
-      warningBox.textContent = "No se encontraron estos productos: " + parsed.unmatched.join(", ");
+      warningBox.innerHTML = avisos.map((aviso) => `<div>${escapeHtml(aviso)}</div>`).join("");
     } else {
       warningBox.style.display = "none";
       warningBox.textContent = "";
@@ -6365,6 +6368,12 @@
       `
       <div class="panel">
         ${marginLegendHtml()}
+        <div class="price-search-bar">
+          <input id="price-search" list="price-search-options" placeholder="Buscar producto e ir a su linea..." autocomplete="off" />
+          <datalist id="price-search-options">${ordenarOpcionesPorTexto(activeProductsByName().map((product) => `<option value="${escapeAttr(product.name)}"></option>`).join("") + datalistOptionsSinTildes(activeProductsByName().map((product) => product.name)))}</datalist>
+          <button class="btn small primary" type="button" id="price-search-go">Ir</button>
+          <span class="muted" id="price-search-msg"></span>
+        </div>
         <div class="table-wrap">
           <table class="prices-table">
             <thead><tr><th>Producto</th><th>Costo</th><th>Precio mercado</th><th>Margen %</th><th>Precio lista</th><th>Sección</th><th>Auto</th></tr></thead>
@@ -6424,6 +6433,33 @@
       MARGIN_BANDS.forEach((band) => cell.classList.remove(band.cls));
       cell.classList.add(marginBandClass(parseAmount(row.querySelector("[data-margin-pct]").value)));
     };
+    // Buscador: lleva a la linea del producto (sin tildes y tambien por alias), la resalta y deja
+    // el cursor en el costo. No filtra la tabla, asi no se pierde lo que ya se escribio en otras filas.
+    const priceSearch = document.getElementById("price-search");
+    const priceSearchMsg = document.getElementById("price-search-msg");
+    const irAlProducto = () => {
+      if (!priceSearch || !priceSearch.value.trim()) return;
+      const product = findProductByInput(priceSearch.value) || resolveOrderSearchProduct(priceSearch.value, "");
+      const row = product ? document.querySelector(`[data-price-row="${cssEscape(product.id)}"]`) : null;
+      if (!row) {
+        if (priceSearchMsg) priceSearchMsg.textContent = "No encontre ese producto en la lista.";
+        return;
+      }
+      if (priceSearchMsg) priceSearchMsg.textContent = "";
+      row.scrollIntoView({ behavior: "smooth", block: "center" });
+      row.classList.remove("price-row-flash");
+      void row.offsetWidth;
+      row.classList.add("price-row-flash");
+      const costo = row.querySelector("[data-cost]");
+      if (costo) setTimeout(() => { costo.focus({ preventScroll: true }); costo.select(); }, 350);
+      priceSearch.value = "";
+    };
+    if (priceSearch) {
+      priceSearch.addEventListener("change", irAlProducto);
+      priceSearch.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); irAlProducto(); } });
+    }
+    const priceSearchGo = document.getElementById("price-search-go");
+    if (priceSearchGo) priceSearchGo.addEventListener("click", irAlProducto);
     document.querySelectorAll("[data-cost],[data-sale-price],[data-market-price],[data-margin-pct]").forEach((input) => {
       input.addEventListener("input", () => recalcRow(input.closest("[data-price-row]"), input));
       input.addEventListener("change", () => recalcRow(input.closest("[data-price-row]"), input));
@@ -16629,6 +16665,7 @@
         <div class="field"><label>Categoria</label><select id="product-category">${getProductCategories().map((category) => `<option value="${category}" ${product && product.category === category ? "selected" : ""}>${category}</option>`).join("")}</select></div>
         <div class="field"><label>Unidad</label><select id="product-unit">${unitOptions(product ? product.unitType : "kg")}</select></div>
         <div class="field"><label>Tipo IVA</label><select id="product-iva">${IVA_OPTIONS.map((item) => `<option value="${item.value}" ${(!product && item.value === "10.5") || (product && (product.ivaType || "10.5") === item.value) ? "selected" : ""}>${escapeHtml(item.label)}</option>`).join("")}</select></div>
+        <div class="field"><label>Peso aprox. por unidad (kg)</label><input id="product-piece-weight" inputmode="decimal" value="${escapeAttr(product && Number(product.pieceWeightKg) > 0 ? formatAmountInput(product.pieceWeightKg) : "")}" placeholder="${escapeAttr(product && defaultPieceWeightKg(product) ? formatAmountInput(defaultPieceWeightKg(product)) + " (estimado)" : "Solo productos por kg")}" /></div>
         <label class="field" style="display:flex;align-items:center;gap:8px;grid-template-columns:auto 1fr">
           <input type="checkbox" id="product-unit-weight" style="width:auto;min-height:auto" ${product && product.allowUnitWeight ? "checked" : ""} />
           <span>Unidades</span>
@@ -16679,6 +16716,7 @@
             category: document.getElementById("product-category").value,
             unitType: document.getElementById("product-unit").value,
             ivaType: document.getElementById("product-iva").value,
+            pieceWeightKg: parseAmount((document.getElementById("product-piece-weight") || {}).value || "") || 0,
             allowUnitWeight: document.getElementById("product-unit-weight").checked,
             showInVehicleTotals: document.getElementById("product-show-vehicle").checked,
             baseCost: parseAmount(document.getElementById("product-cost").value),
@@ -18146,9 +18184,56 @@
       .sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
   }
 
+  // Peso aproximado de UNA pieza, para los productos que se venden por kg cuando el cliente pide
+  // "unidades" ("4 unidades kiwi"). Se usa el cargado en el producto; si no hay, un estimado por
+  // nombre. Es solo para arrancar: la nota "4 unidades" le dice a quien arma que mande 4 piezas.
+  const DEFAULT_PIECE_WEIGHTS_KG = [
+    ["kiwi", 0.1], ["limon", 0.12], ["mandarina", 0.12], ["naranja", 0.2], ["pomelo", 0.35],
+    ["manzana", 0.2], ["pera", 0.2], ["durazno", 0.15], ["ciruela", 0.06], ["banana", 0.18],
+    ["palta", 0.25], ["mango", 0.35], ["tomate", 0.15], ["morron", 0.2], ["pimiento", 0.2],
+    ["papa", 0.2], ["batata", 0.3], ["cebolla", 0.15], ["zanahoria", 0.1], ["remolacha", 0.2],
+    ["pepino", 0.3], ["berenjena", 0.3], ["zapallito", 0.2], ["zukini", 0.3], ["zucchini", 0.3],
+    ["choclo", 0.3], ["anana", 1.5], ["melon", 1.5], ["sandia", 6], ["zapallo", 2.5],
+    ["repollo", 1.2], ["coliflor", 1], ["brocoli", 0.5], ["lechuga", 0.35], ["ajo", 0.05], ["jengibre", 0.1]
+  ];
+
+  function defaultPieceWeightKg(product) {
+    if (!product || String(product.unitType || "").toLowerCase() !== "kg") return 0;
+    const name = normalizeText(product.name);
+    const hit = DEFAULT_PIECE_WEIGHTS_KG.find(([word]) => new RegExp("\\b" + word).test(name));
+    return hit ? hit[1] : 0;
+  }
+
+  function pieceWeightKg(product) {
+    if (product && Number(product.pieceWeightKg) > 0) return Number(product.pieceWeightKg);
+    return defaultPieceWeightKg(product);
+  }
+
+  // "4 unidades kiwi", "4 u de kiwi", "kiwi 4 unid": el cliente dijo piezas, no kilos.
+  // "un"/"u" sueltos solo cuentan pegados a un numero ("un kilo de papa" es un articulo).
+  const EXPLICIT_UNITS_RE = /(\d\s*(unidades|unidad|unids?|uni|un|u)(?![a-z\u00e0-\u017f]))|(^|[^a-z\u00e0-\u017f])(unidades|unidad)(?![a-z\u00e0-\u017f])/i;
+  const EXPLICIT_WEIGHT_RE = /(\d\s*(kgs?|kilos?|k|grs?|gramos)(?![a-z\u00e0-\u017f]))|(^|[^a-z\u00e0-\u017f])(kilos?|kilo|kg|kgs|gramos)(?![a-z\u00e0-\u017f])/i;
+
+  // Si la linea pide unidades de un producto que se vende por kg, se pasa a kg con el peso por
+  // unidad y se deja la nota "4 unidades". Antes quedaba "4" en un producto por kg: 4 kg.
+  function convertExplicitUnitsToKg(line, product, quantity, unitType, note) {
+    if (!product || String(product.unitType || "").toLowerCase() !== "kg") return null;
+    const plano = normalizeText(line);
+    if (!EXPLICIT_UNITS_RE.test(plano) || EXPLICIT_WEIGHT_RE.test(plano)) return null;
+    const unidades = Number(quantity || 0);
+    if (!(unidades > 0)) return null;
+    const peso = pieceWeightKg(product);
+    const etiqueta = formatNumber(unidades).replace(/,0$/, "") + (unidades === 1 ? " unidad" : " unidades");
+    const nuevaNota = [etiqueta, note].filter(Boolean).join(" - ");
+    if (!(peso > 0)) return { quantity: unidades, unitType: "kg", note: nuevaNota, warning: product.name + ": pidieron " + etiqueta + " y se vende por kg. Cargale el peso por unidad en Productos o corregi la cantidad." };
+    const kg = Math.max(0.05, Math.round(unidades * peso * 20) / 20);
+    return { quantity: kg, unitType: "kg", note: nuevaNota, warning: product.name + ": " + etiqueta + " = " + formatNumber(kg) + " kg aprox. (" + formatNumber(peso) + " kg c/u" + (Number(product.pieceWeightKg) > 0 ? "" : ", estimado") + ")." };
+  }
+
   function parseWhatsappOrder(text, clientId) {
     const items = [];
     const unmatched = [];
+    const warnings = [];
     expandWhatsappOrderLines(text).forEach((line) => {
       if (shouldIgnoreOrderTextLine(line)) return;
       if (shouldIgnoreDetectedClientLine(line, clientId)) return;
@@ -18163,6 +18248,12 @@
         unmatched.push(line);
         return;
       }
+      const porUnidad = convertExplicitUnitsToKg(line, product, parsed.quantity, parsed.unitType, parsed.note || "");
+      if (porUnidad) {
+        items.push({ product, quantity: porUnidad.quantity, unitType: porUnidad.unitType, note: porUnidad.note });
+        warnings.push(porUnidad.warning);
+        return;
+      }
       items.push({
         product,
         quantity: parsed.quantity,
@@ -18170,7 +18261,7 @@
         note: parsed.note || ""
       });
     });
-    return { items, unmatched };
+    return { items, unmatched, warnings };
   }
 
   // Abreviaturas de unidad que se escriben con punto ("3 doc. naranjas", "1 un. de ajo"). El punto
@@ -18184,9 +18275,20 @@
   // queda "3" por un lado y "media" suelto por el otro.
   const HALF_SUFFIX = /(\d+(?:[.,]\d+)?)\s*(kgs?|kilos?|kilo|k|grs?|gramos|gr|docenas?|doc|dc|atados?|atado|bolsas?|bolsa|cajones?|cajon|jaulas?|jaula|maples?|maple|bandejas?|bandeja|unidades?|unidad|uni|un)?\s+y\s+medi[oa]\b/gi;
 
+  // "un kilo de papa", "una docena de huevos", "una lechuga", "un par de paltas": el articulo es
+  // la cantidad. Sin esto "un" quedaba suelto: la linea caia en cualquier producto ("un kilo de
+  // kiwi" salia Zanahoria) o quedaba "una" como nota. Va antes del "y medio" para que "un kilo y
+  // medio" de 1,5 y no 0,5.
+  function articleQuantityToNumber(line) {
+    return String(line || "")
+      .replace(/(^|[^a-zA-Z\u00c0-\u017f\d])un\s+par\s+de\s+/gi, "$12 ")
+      .replace(/(^|[^a-zA-Z\u00c0-\u017f\d])(un|una)\s+(kilos?|kg|kgs|docenas?|atados?|bolsas?|bolsitas?|cajon(?:es)?|cajas?|jaulas?|maples?|bandejas?|plantas?|ristras?|cabezas?|unidad(?:es)?|cuartos?)(?![a-zA-Z\u00c0-\u017f])/gi, "$11 $3")
+      .replace(/^(\s*[-*\u2022]?\s*)(un|una)\s+(?!poco\b|poquito\b|par\b)(?=[a-zA-Z\u00c0-\u017f])/i, "$11 ");
+  }
+
   function expandWhatsappOrderLines(text) {
     const rawLines = String(text || "").split(/\r?\n/)
-      .map((line) => String(line || "")
+      .map((line) => articleQuantityToNumber(String(line || ""))
         .replace(UNIT_ABBREVIATIONS, "$1$2")
         // La unidad puede venir pegada al numero ("1k y medio"): sin contemplarla, el "y medio"
         // no se resolvia, la linea se partia por la "y" y salian dos productos.
@@ -18402,6 +18504,7 @@
       .replace(/(\d)([a-zA-Z\u00c0-\u017f]+)/g, "$1 $2")
       .replace(/([a-zA-Z\u00c0-\u017f])(\d)/g, "$1 $2")
       .replace(/(\d)\s*\/\s*(\d)/g, "$1/$2")
+      .replace(/^.*$/, (linea) => articleQuantityToNumber(linea))
       .replace(/\bma+p+les?\b/gi, "bandeja")
       .replace(/\briestra\b/gi, "ristra")
       .replace(/\bkilo\s*n?de\b/gi, "kilo de")

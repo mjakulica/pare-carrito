@@ -2847,6 +2847,9 @@ tr:last-child td {
     min-width: 0;
     max-width: 100%;
     overflow-x: hidden;
+    /* clip corta igual lo que sobresale pero no convierte a la pagina en contenedor de scroll:
+       con hidden, las barras "fijas arriba" (buscador de Precios) se iban con la pantalla. */
+    overflow-x: clip;
   }
 
   .topbar {
@@ -4167,4 +4170,35 @@ tr:last-child td {
   font-size: 18px;
   line-height: 1;
   padding: 6px 12px;
+}
+
+/* Buscador de Precios: queda arriba al bajar por la lista y resalta la linea elegida. */
+.price-search-bar {
+  position: sticky;
+  /* debajo de la barra superior, que es fija (64-65 px) */
+  top: 66px;
+  z-index: 3;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 8px 0;
+  margin-bottom: 8px;
+  background: #fff;
+}
+.price-search-bar input {
+  flex: 1;
+  min-width: 180px;
+  max-width: 420px;
+}
+/* al saltar a una fila, que no quede tapada por la barra superior ni por el buscador */
+.prices-table tr[data-price-row] {
+  scroll-margin-top: 140px;
+}
+@keyframes price-row-flash {
+  0%, 60% { background: #fde68a; }
+  100% { background: transparent; }
+}
+.price-row-flash > td {
+  animation: price-row-flash 2.2s ease-out;
 }
