@@ -5,7 +5,7 @@
   const USER_KEY = "lpc_current_user_v1";
   const OPERATIONAL_RESET_VERSION = "20260610-operational-clean-1";
   const BUSINESS_NAME = "Pare Carrito SAS";
-  const APP_VERSION = "v27";
+  const APP_VERSION = "v28";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -1703,6 +1703,13 @@
     }
   }
 
+  // Compras/Gastos se carga a mano en el formulario (el detalle vive en la pantalla, no en el
+  // estado). Mientras haya algo escrito ahi, la descarga automatica NO redibuja: antes, cada vez
+  // que otro dispositivo guardaba algo, la pantalla se rehacia sola y borraba lo que se estaba
+  // cargando (con un proveedor elegido ademas volvia a "Todos" y recargaba la lista).
+  let purchaseFormTouched = false;
+  function markPurchaseFormTouched() { purchaseFormTouched = true; }
+
   let cloudPollTimer = null;
 
   function startCloudAutoSync() {
@@ -2126,6 +2133,8 @@
         const active = document.activeElement;
         const typing = active && ["INPUT", "TEXTAREA", "SELECT"].includes(active.tagName);
         if (typing || ui.modal || cloudPushTimer) return;
+        // Solo frena si el formulario de compras sigue en pantalla con algo cargado a mano.
+        if (purchaseFormTouched && document.getElementById("purchase-items")) return;
       }
       const localUnsyncedChanges = hasLocalUnsyncedPatchChanges();
       if (!manual && !isLogin && localUnsyncedChanges) {
@@ -2285,6 +2294,7 @@
 
   function render() {
     try {
+      purchaseFormTouched = false;
       renderInner();
     } catch (error) {
       // Nunca dejar la pantalla en blanco: si algo falla al dibujar, se muestra el motivo.
@@ -5963,6 +5973,22 @@
     );
   }
 
+  // Dos clientes con el MISMO numero rompen todo lo que busca por numero (remitos, saldos,
+  // pagos): siempre gana el primero de la lista, asi que un pedido del 023 puede salir impreso
+  // con el nombre del otro 023. Se avisa arriba de Clientes para poder corregirlo.
+  function renderDuplicateClientIdsWarning() {
+    const porId = new Map();
+    (state.clients || []).forEach((client) => {
+      const id = String(client.id || "").trim();
+      if (!id) return;
+      porId.set(id, (porId.get(id) || []).concat(client.name || ""));
+    });
+    const repetidos = Array.from(porId.entries()).filter(([, nombres]) => nombres.length > 1);
+    if (!repetidos.length) return "";
+    const detalle = repetidos.map(([id, nombres]) => escapeHtml(id + ": " + nombres.join(" / "))).join("<br>");
+    return `<div class="alert warn" style="margin-bottom:14px"><strong>Numeros de cliente repetidos:</strong> el sistema usa el numero para identificar al cliente, asi que con dos fichas del mismo numero siempre gana la primera y los remitos, pagos y saldos pueden salir con el nombre equivocado. Cambiale el numero a una de estas fichas o desactivala:<div style="margin-top:6px">${detalle}</div></div>`;
+  }
+
   function renderClients() {
     const clients = state.clients.filter((client) => ui.tab === "inactivos" ? !client.isActive : client.isActive).sort(compareClientIds);
     const rows = clients.map((client) => {
@@ -6038,6 +6064,7 @@
       `<button class="btn primary" data-add-client>Agregar cliente</button>`,
       `
       ${renderTabs()}
+      ${renderDuplicateClientIdsWarning()}
       ${pendingPanel}
       <div class="panel">
         <div class="table-wrap">
@@ -8213,6 +8240,7 @@
       recalc();
     };
     itemsContainer.addEventListener("input", (event) => {
+      markPurchaseFormTouched();
       if (event.target.matches("[data-product-filter]")) {
         updatePurchaseProductSelect(event.target.closest("[data-purchase-item-row]"));
       }
@@ -8222,6 +8250,7 @@
       recalc();
     });
     itemsContainer.addEventListener("change", (event) => {
+      markPurchaseFormTouched();
       const row = event.target.closest("[data-purchase-item-row]");
       if (event.target.matches("[data-product-select]")) {
         const product = getProduct(event.target.value);
@@ -8428,6 +8457,7 @@
       });
     }
     if (providerInput) providerInput.addEventListener("change", () => {
+      markPurchaseFormTouched();
       syncCcMode();
       if (kind.value === "provider_return") { refreshReturnSourceOptions(); return; }
       if (["purchase", "product_expense"].includes(kind.value)) cargarProductosDelProveedor();
@@ -10874,7 +10904,17 @@
   }
 
   function renderRemitoPrintSheetForOrder(order, remito) {
-    const client = getClient(remito.clientId || order.clientId);
+    // El cliente sale SIEMPRE del pedido. El remito guarda una copia del cliente del dia en que
+    // se genero: si despues se corrige el cliente del pedido, esa copia queda vieja y el remito se
+    // imprimia con el nombre del cliente anterior (con los precios correctos, que son los del
+    // pedido). Ante cualquier diferencia manda el pedido y se corrige la copia guardada.
+    const clientId = order.clientId || remito.clientId;
+    const client = getClient(clientId);
+    if (remito && client && remito.clientId !== clientId) {
+      remito.clientId = clientId;
+      remito.clientName = client.name;
+      remito.clientAddress = client.address || "";
+    }
     const subtotal = getOrderSubtotal(order);
     const iva = getOrderIva(order) + getOrderShippingIva(order);
     const shipping = getOrderShipping(order);
@@ -10885,7 +10925,7 @@
       <article class="print-sheet remito-sheet" style="font-size:${tplScale("remito")}em">
         <header class="remito-header">
           <div class="remito-left">
-            <div class="remito-number">${escapeHtml(remito.number || remito.clientId + "-")}</div>
+            <div class="remito-number">${escapeHtml(remito.number || clientId + "-")}<span class="remito-client-id">&middot; Cliente ${escapeHtml(clientId)}</span></div>
             <strong>${BUSINESS_NAME}</strong><br>
             Cuit: 30-71794095/0<br>
             Inicio de Act: 10/2022<br>
@@ -10902,7 +10942,7 @@
             <strong>www.parecarrito.com.ar</strong>
           </div>
         </header>
-        <div class="remito-client">${escapeHtml(client ? client.name : remito.clientId)}</div>
+        <div class="remito-client">${escapeHtml(client ? client.name : clientId)}</div>
         <table class="remito-table">
           <thead><tr><th style="width:42px">Cantidad</th><th>Descripcion</th><th class="num" style="width:116px">Precio unitario</th><th class="num" style="width:116px">Precio total</th></tr></thead>
           <tbody>
@@ -20588,7 +20628,11 @@
 
   function getClient(id) {
     if (id === "DEMO") return demoClient();
-    return state.clients.find((client) => client.id === id);
+    const coincidencias = state.clients.filter((client) => client.id === id);
+    if (coincidencias.length < 2) return coincidencias[0];
+    // Con fichas repetidas (un mismo numero cargado dos veces) manda la que esta activa: la copia
+    // vieja queda desactivada y ya no se lleva el nombre en remitos, pagos ni saldos.
+    return coincidencias.find((client) => client.isActive !== false) || coincidencias[0];
   }
 
   function getProduct(id) {
