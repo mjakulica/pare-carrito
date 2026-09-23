@@ -5,7 +5,7 @@
   const USER_KEY = "lpc_current_user_v1";
   const OPERATIONAL_RESET_VERSION = "20260610-operational-clean-1";
   const BUSINESS_NAME = "Pare Carrito SAS";
-  const APP_VERSION = "v32";
+  const APP_VERSION = "v33";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -11613,9 +11613,11 @@
       const toInput = document.getElementById("balance-to");
       if (fromInput) fromInput.addEventListener("change", () => {
         ui.balanceFrom = fromInput.value || "";
+        document.querySelectorAll("[data-balance-range-warning]").forEach((box) => { box.innerHTML = balanceRangeWarningHtml(ui.balanceFrom, ui.balanceTo); });
       });
       if (toInput) toInput.addEventListener("change", () => {
         ui.balanceTo = toInput.value || todayISO();
+        document.querySelectorAll("[data-balance-range-warning]").forEach((box) => { box.innerHTML = balanceRangeWarningHtml(ui.balanceFrom, ui.balanceTo); });
       });
       document.querySelectorAll("[data-balance-range]").forEach((button) => button.addEventListener("click", () => {
         const today = todayISO();
@@ -11649,6 +11651,7 @@
         <div class="form-grid balance-date-grid">
           <div class="field balance-date-field"><label>Desde</label><input type="date" id="balance-from" value="${ui.balanceFrom}" /></div>
           <div class="field balance-date-field"><label>Hasta</label><input type="date" id="balance-to" value="${ui.balanceTo}" /></div>
+          <div class="field span-4" data-balance-range-warning>${balanceRangeWarningHtml(ui.balanceFrom, ui.balanceTo)}</div>
           <div class="field span-4 balance-range-buttons">
             <label>&nbsp;</label>
             <div class="page-actions">
@@ -11719,10 +11722,12 @@
       const toInput = document.getElementById("balance-to");
       if (fromInput) fromInput.addEventListener("change", () => {
         ui.balanceFrom = fromInput.value || "";
+        document.querySelectorAll("[data-balance-range-warning]").forEach((box) => { box.innerHTML = balanceRangeWarningHtml(ui.balanceFrom, ui.balanceTo); });
         render();
       });
       if (toInput) toInput.addEventListener("change", () => {
         ui.balanceTo = toInput.value || todayISO();
+        document.querySelectorAll("[data-balance-range-warning]").forEach((box) => { box.innerHTML = balanceRangeWarningHtml(ui.balanceFrom, ui.balanceTo); });
         render();
       });
       document.querySelectorAll("[data-balance-range]").forEach((button) => button.addEventListener("click", () => {
@@ -11802,6 +11807,7 @@
         <div class="form-grid balance-date-grid">
           <div class="field balance-date-field"><label>Desde</label><input type="date" id="balance-from" value="${ui.balanceFrom}" /></div>
           <div class="field balance-date-field"><label>Hasta</label><input type="date" id="balance-to" value="${ui.balanceTo}" /></div>
+          <div class="field span-4" data-balance-range-warning>${balanceRangeWarningHtml(ui.balanceFrom, ui.balanceTo)}</div>
           <div class="field span-4 balance-range-buttons">
             <label>&nbsp;</label>
             <div class="page-actions">
@@ -17268,6 +17274,13 @@
     openBalanceHistory(entry.clientId);
   }
 
+  // Rango de Saldos al reves (Desde posterior al Hasta, casi siempre un error de ano al tipear la
+  // fecha): ninguna fecha cumple las dos cosas y la lista salia vacia sin decir por que.
+  function balanceRangeWarningHtml(from, to) {
+    if (!from || !to || from <= to) return "";
+    return `<div class="alert warn" style="margin-top:8px"><strong>El rango esta al reves:</strong> el Desde (${formatDate(from)}) es posterior al Hasta (${formatDate(to)}), asi que no puede aparecer ningun movimiento. Revisa el ano de las fechas.</div>`;
+  }
+
   // Si algo falla al armar los movimientos (un dato raro que vino del servidor), se muestra el
   // motivo en vez de dejar la pantalla sin nada: asi se puede saber que registro lo causa.
   function openBalanceHistory(clientId) {
@@ -17277,6 +17290,16 @@
       console.error("Movimientos de " + clientId + ":", error);
       showModal("Movimientos", `<div class="alert warn">No se pudieron mostrar los movimientos del cliente ${escapeHtml(clientId)}: ${escapeHtml(String((error && error.message) || error))}</div>`);
     }
+  }
+
+  // Lista vacia: decir si el cliente tiene movimientos fuera del rango (y entre que fechas), para
+  // que se note si es el rango o si faltan datos (por ejemplo, historial viejo sin cargar).
+  function balanceHistoryEmptyText(clientId) {
+    const todos = (state.saldos || []).filter((entry) => entry.clientId === clientId && entry.date);
+    if (!todos.length) return "Este cliente no tiene movimientos cargados.";
+    const fechas = todos.map((entry) => String(entry.date)).sort();
+    const aviso = historyMode() === "rapida" ? " Si buscas movimientos mas viejos, carga el historial completo." : "";
+    return "Sin movimientos en este rango. El cliente tiene " + todos.length + " movimiento" + (todos.length === 1 ? "" : "s") + " cargado" + (todos.length === 1 ? "" : "s") + " entre el " + formatDate(fechas[0]) + " y el " + formatDate(fechas[fechas.length - 1]) + "." + aviso;
   }
 
   function openBalanceHistoryInner(clientId) {
@@ -17302,10 +17325,11 @@
         ${canAdjustClientBalance() && clientId !== "DEMO" ? `<button class="btn blue" data-adjust-balance type="button">Ajustar saldo</button>` : ""}
         <span class="muted">Rango: ${formatDate(ui.balanceFrom)} - ${formatDate(ui.balanceTo)}</span>
       </div>
+      ${balanceRangeWarningHtml(ui.balanceFrom, ui.balanceTo)}
       <div class="table-wrap">
         <table>
           <thead><tr><th>Fecha</th><th>Tipo</th><th>Descripcion</th><th>Monto</th><th>Saldo</th></tr></thead>
-          <tbody>${rows || emptyRow(5, "Sin movimientos.")}</tbody>
+          <tbody>${rows || emptyRow(5, balanceHistoryEmptyText(clientId))}</tbody>
         </table>
       </div>
       `,
