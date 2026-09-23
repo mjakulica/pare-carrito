@@ -707,6 +707,19 @@ function buildBillingEntry(invoice, emittedAt, periodResult, simulate, cfg) {
   };
 }
 
+// Guarda las entradas nuevas del log SIN pisar el resto del estado. Antes se hacia
+// "UPDATE ... SET data = $1" con la copia leida al empezar la corrida: la corrida tarda (le
+// habla a TusFacturas cliente por cliente, con reintentos) y todo lo que se guardaba mientras
+// tanto (pedidos cargados a las 23 hs, pagos, etc.) se perdia al escribir esa copia vieja.
+// El agregado con jsonb es atomico en Postgres: se suma a lo que haya en ese momento.
+async function appendBillingEntries(pool, entries, updatedBy) {
+  if (!entries.length) return;
+  await pool.query(
+    "UPDATE app_state SET data = jsonb_set(COALESCE(data, '{}'::jsonb), '{billingLog}', COALESCE(data->'billingLog', '[]'::jsonb) || $1::jsonb), updated_at = now(), updated_by = $2 WHERE id = 'main'",
+    [JSON.stringify(entries), updatedBy]
+  );
+}
+
 // Corre la facturacion sobre el estado central, registra resultados en billingLog
 // Retorna { ran, simulate, count, results, lastRunDate }
 async function runBilling({ pool, force = false, simulate = false, onlyClientId = "", onlyClientIds = null, ivaOverrides = null, invoiceOverrides = null, manual = false, fetchImpl = fetch, now = new Date(), lastRunDate = "" }) {
@@ -748,9 +761,7 @@ async function runBilling({ pool, force = false, simulate = false, onlyClientId 
       data.billingLog.push(entry);
       results.push(entry);
     }
-    if (results.length) {
-      await pool.query("UPDATE app_state SET data = $1, updated_at = now(), updated_by = 'facturacion-manual' WHERE id = 'main'", [data]);
-    }
+    await appendBillingEntries(pool, results, "facturacion-manual");
     return { ran: true, simulate, manual: true, count: results.length, results, lastRunDate };
   }
   due = computeDueInvoices(data, art, force);
@@ -811,9 +822,7 @@ async function runBilling({ pool, force = false, simulate = false, onlyClientId 
     newLastRunDate = art.dateISO;
   }
 
-  if (results.length) {
-    await pool.query("UPDATE app_state SET data = $1, updated_at = now(), updated_by = 'facturacion-automatica' WHERE id = 'main'", [data]);
-  }
+  await appendBillingEntries(pool, results, "facturacion-automatica");
   return { ran: true, simulate, count: results.length, results, lastRunDate: newLastRunDate };
 }
 

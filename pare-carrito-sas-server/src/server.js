@@ -370,13 +370,27 @@ app.post("/auth/register", async (req, res) => {
     clientId, linkedClientIds: [clientId], email: client.email, phone: client.phone,
     isActive: false, pendingApproval: true, registeredAt: new Date().toISOString()
   };
-  data.clients.push(client);
-  data.users.push(user);
   const clientDb = await pool.connect();
   try {
     await clientDb.query("BEGIN");
-    await clientDb.query("UPDATE app_state SET data = $1, updated_at = now(), updated_by = 'registro-web' WHERE id = 'main'", [data]);
-    await clientDb.query("INSERT INTO state_history (data, updated_by) VALUES ($1, 'registro-web')", [data]);
+    // Se vuelve a leer el estado BLOQUEADO y se agrega sobre esa version: la copia de arriba solo
+    // sirve para validar. Escribirla entera podia pisar lo que otro dispositivo guardo en el medio.
+    const fresh = await clientDb.query("SELECT data FROM app_state WHERE id = 'main' FOR UPDATE");
+    const current = fresh.rows.length ? fresh.rows[0].data : data;
+    current.clients = Array.isArray(current.clients) ? current.clients : [];
+    current.users = Array.isArray(current.users) ? current.users : [];
+    let freshNum = 1;
+    current.clients.forEach((c) => {
+      const n = Number(c.id);
+      if (Number.isFinite(n) && n >= freshNum) freshNum = n + 1;
+    });
+    client.id = String(freshNum).padStart(3, "0");
+    user.clientId = client.id;
+    user.linkedClientIds = [client.id];
+    current.clients.push(client);
+    current.users.push(user);
+    await clientDb.query("UPDATE app_state SET data = $1, updated_at = now(), updated_by = 'registro-web' WHERE id = 'main'", [current]);
+    await clientDb.query("INSERT INTO state_history (data, updated_by) VALUES ($1, 'registro-web')", [current]);
     await syncUsersFromState(clientDb, { users: [user] });
     await clientDb.query("COMMIT");
   } catch (error) {
@@ -393,7 +407,7 @@ app.post("/auth/register", async (req, res) => {
     sendMail(row.email, "Nuevo registro de cliente pendiente de aprobación",
       `<p>Se registro un nuevo cliente:</p><ul><li>Local: <strong>${client.name}</strong></li><li>Usuario: ${username}</li><li>Zona: ${client.zone}</li><li>Telefono: ${client.phone}</li><li>CUIT: ${client.cuit}</li><li>Factura: ${client.invoiceType}</li></ul><p>Para aprobarlo: ingrese al sistema → página <strong>Usuarios</strong> → activar la cuenta.</p>`);
   }
-  res.status(201).json({ ok: true, pending: true, clientId });
+  res.status(201).json({ ok: true, pending: true, clientId: client.id });
 });
 
 app.post("/clients/activation-email", authenticate, requireRole("manager", "admin"), async (req, res) => {
