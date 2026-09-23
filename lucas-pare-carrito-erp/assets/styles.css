@@ -2074,12 +2074,6 @@ tr:last-child td {
   margin: 6px 0 10px;
 }
 
-/* El numero de cliente va en la misma linea que el numero de remito. */
-.remito-client-id {
-  margin-left: 8px;
-  font-weight: 700;
-}
-
 .remito-left {
   font-size: 10px;
   line-height: 1.45;

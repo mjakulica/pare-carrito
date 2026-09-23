@@ -5,7 +5,7 @@
   const USER_KEY = "lpc_current_user_v1";
   const OPERATIONAL_RESET_VERSION = "20260610-operational-clean-1";
   const BUSINESS_NAME = "Pare Carrito SAS";
-  const APP_VERSION = "v28";
+  const APP_VERSION = "v29";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -10925,7 +10925,7 @@
       <article class="print-sheet remito-sheet" style="font-size:${tplScale("remito")}em">
         <header class="remito-header">
           <div class="remito-left">
-            <div class="remito-number">${escapeHtml(remito.number || clientId + "-")}<span class="remito-client-id">&middot; Cliente ${escapeHtml(clientId)}</span></div>
+            <div class="remito-number">${escapeHtml(clientId + "- " + (remito.number || ""))}</div>
             <strong>${BUSINESS_NAME}</strong><br>
             Cuit: 30-71794095/0<br>
             Inicio de Act: 10/2022<br>
@@ -13818,7 +13818,64 @@
         });
       });
     overdue.sort((a, b) => b.days - a.days);
-    return { errors, overdue, count: errors.length + overdue.length };
+    const { gaps, duplicates } = getBillingGapsAndDuplicates(today);
+    return { errors, overdue, gaps, duplicates, count: errors.length + overdue.length + gaps.length + duplicates.length };
+  }
+
+  // Firma de un pedido para detectar cargas dobles: productos y cantidades, sin el precio (la copia
+  // vieja suele tener los precios de antes de repreciar). Misma regla que usa el servidor.
+  function orderDuplicateSignature(order) {
+    return (order.items || [])
+      .map((it) => String(it.productId || it.productName || "") + ":" + Math.round(Number(it.quantity || 0) * 100) / 100)
+      .sort()
+      .join("|");
+  }
+
+  // Dos cosas que antes no se veian en ningun lado:
+  //  - huecos: dias con pedidos que quedaron ANTES de la ultima factura del cliente sin que ninguna
+  //    factura los cubra (la corrida de esa noche no llego a ese cliente). El aviso de "atrasadas"
+  //    solo miraba despues de la ultima factura, asi que un dia salteado quedaba invisible.
+  //  - pedidos cargados dos veces (mismo cliente, dia, productos y cantidades): se facturan doble.
+  function getBillingGapsAndDuplicates(today) {
+    const cortes = (stateWindow && !stateWindow.full && stateWindow.cutoffs) || {};
+    const desde = [addDaysISO(today, -60), String(cortes.billingLog || ""), String(cortes.orders || "")].sort().pop();
+    const vigentes = (state.billingLog || []).filter((log) => ["ok", "simulada"].includes(log.status) && !log.annulledBy && !log.creditNoteFor);
+    const conError = (state.billingLog || []).filter((log) => log.status === "error");
+    const cubre = (lista, clientId, dia) => lista.some((log) => log.clientId === clientId && String(log.from || "") <= dia && String(log.to || "") >= dia);
+    const pedidos = (state.orders || []).filter((order) => order && order.date >= desde && order.date < today
+      && !["cancelado", "anulado"].includes(order.status));
+    const gaps = [];
+    activeClients()
+      .filter((client) => client.needsInvoice && ["Factura A", "Factura B"].includes(client.invoiceType))
+      .forEach((client) => {
+        const ultimaFactura = vigentes.filter((log) => log.clientId === client.id).reduce((max, log) => (String(log.to || "") > max ? String(log.to) : max), "");
+        if (!ultimaFactura) return;
+        const porDia = new Map();
+        pedidos.filter((order) => order.clientId === client.id && order.date <= ultimaFactura).forEach((order) => {
+          if (cubre(vigentes, client.id, order.date) || cubre(conError, client.id, order.date)) return;
+          const dia = porDia.get(order.date) || { orders: 0, total: 0 };
+          dia.orders += 1;
+          dia.total += Number(order.totalAmount || 0);
+          porDia.set(order.date, dia);
+        });
+        Array.from(porDia.entries()).sort((a, b) => a[0].localeCompare(b[0])).forEach(([date, dia]) => {
+          gaps.push({ clientId: client.id, clientName: client.name, date, orders: dia.orders, total: dia.total });
+        });
+      });
+    const duplicates = [];
+    const vistos = new Map();
+    (state.orders || [])
+      .filter((order) => order && order.date >= desde && !["cancelado", "anulado"].includes(order.status))
+      .forEach((order) => {
+        const firma = orderDuplicateSignature(order);
+        if (!firma) return;
+        const clave = order.clientId + "#" + order.date + "#" + firma;
+        const previo = vistos.get(clave);
+        if (!previo) { vistos.set(clave, order); return; }
+        const client = getClient(order.clientId);
+        duplicates.push({ clientId: order.clientId, clientName: client ? client.name : order.clientId, date: order.date, ids: [previo.id, order.id], totals: [Number(previo.totalAmount || 0), Number(order.totalAmount || 0)] });
+      });
+    return { gaps, duplicates };
   }
 
   function unbilledWarningHtml(options = {}) {
@@ -13831,6 +13888,8 @@
       <strong style="font-size:15px">\u26A0 ${warnings.count} factura${warnings.count === 1 ? "" : "s"} sin emitir</strong>
       ${warnings.errors.length ? `<div class="muted" style="margin-top:6px">Se intentaron emitir y fallaron:</div><ul style="margin:6px 0 0 18px">${errorItems}</ul>` : ""}
       ${warnings.overdue.length ? `<div class="muted" style="margin-top:8px">Acumulan pedidos sin facturar mas alla de su frecuencia:</div><ul style="margin:6px 0 0 18px">${overdueItems}</ul>` : ""}
+      ${warnings.gaps.length ? `<div class="muted" style="margin-top:8px">Dias que quedaron sin factura (la corrida de esa noche no llego a emitirlos). Emitilos con "Emitir manual" poniendo ese dia en Desde y Hasta:</div><ul style="margin:6px 0 0 18px">${warnings.gaps.map((item) => `<li><strong>${escapeHtml(item.clientId)} - ${escapeHtml(item.clientName)}</strong> - ${formatDate(item.date)}: ${item.orders} pedido${item.orders === 1 ? "" : "s"} por ${formatMoney(item.total)}</li>`).join("")}</ul>` : ""}
+      ${warnings.duplicates.length ? `<div class="muted" style="margin-top:8px">Posibles pedidos cargados dos veces (mismos productos y cantidades, mismo dia). Se facturan doble: borra el que sobra antes de emitir:</div><ul style="margin:6px 0 0 18px">${warnings.duplicates.map((item) => `<li><strong>${escapeHtml(item.clientId)} - ${escapeHtml(item.clientName)}</strong> - ${formatDate(item.date)}: ${escapeHtml(item.ids[0])} (${formatMoney(item.totals[0])}) y ${escapeHtml(item.ids[1])} (${formatMoney(item.totals[1])})</li>`).join("")}</ul>` : ""}
       ${compact ? `<div style="margin-top:10px"><button class="btn small yellow" type="button" data-route="facturacion">Ir a Facturacion</button></div>` : ""}
     </div>`;
   }

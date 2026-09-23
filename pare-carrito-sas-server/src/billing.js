@@ -253,10 +253,79 @@ function buildGroupedItems(orders) {
   }));
 }
 
+// Pedidos borrados que todavia figuran en "orders". Pasa cuando un dispositivo que tenia una copia
+// vieja la vuelve a subir despues de que otro la borro: si no se excluyen, se facturan igual.
+function deletedOrderIds(state) {
+  const ids = new Set();
+  const vivos = new Map((state.orders || []).map((o) => [String(o && o.id), o]));
+  for (const del of state.deletedOrders || []) {
+    if (!del || !del.id) continue;
+    const vivo = vivos.get(String(del.id));
+    const tDel = new Date(del.deletedAt || del.updatedAt || 0).getTime();
+    const tVivo = vivo ? new Date(vivo.updatedAt || vivo.createdAt || 0).getTime() : 0;
+    if (!vivo || tDel >= tVivo) ids.add(String(del.id));
+  }
+  return ids;
+}
+
+function billableOrders(state, clientId, from, to) {
+  const borrados = deletedOrderIds(state);
+  return (state.orders || []).filter((o) =>
+    o && o.clientId === clientId && o.date >= from && o.date <= to
+    && !["cancelado", "anulado"].includes(o.status) && !borrados.has(String(o.id)));
+}
+
+// Dos pedidos del mismo cliente, el mismo dia, con los mismos productos y cantidades (el precio
+// no cuenta: la copia vieja suele tener precios de antes de repreciar). Es casi seguro un pedido
+// cargado dos veces; facturarlo duplica el importe ante AFIP, asi que la emision automatica se frena.
+function orderSignature(order) {
+  return (order.items || [])
+    .map((it) => String(it.productId || it.productName || "") + ":" + round2(it.quantity || 0))
+    .sort()
+    .join("|");
+}
+
+function findDuplicateOrders(orders) {
+  const vistos = new Map();
+  const pares = [];
+  for (const order of orders) {
+    const firma = orderSignature(order);
+    if (!firma) continue;
+    const clave = String(order.clientId) + "#" + String(order.date) + "#" + firma;
+    if (vistos.has(clave)) pares.push([vistos.get(clave).id, order.id]);
+    else vistos.set(clave, order);
+  }
+  return pares;
+}
+
+// Un dia esta cubierto si alguna factura vigente (emitida o simulada, sin anular) lo incluye.
+function dayCoveredByInvoice(state, clientId, day) {
+  return (state.billingLog || []).some((log) => log && log.clientId === clientId
+    && ["ok", "simulada"].includes(log.status) && !log.annulledBy && !log.creditNoteFor
+    && String(log.from || "") <= day && String(log.to || "") >= day);
+}
+
+// Un dia que ya fallo queda para emitir a mano desde Facturacion: reintentarlo solo podria
+// duplicar una factura que AFIP si llego a autorizar aunque la respuesta se haya perdido.
+function dayHasBillingError(state, clientId, day) {
+  return (state.billingLog || []).some((log) => log && log.clientId === clientId && log.status === "error"
+    && String(log.from || "") <= day && String(log.to || "") >= day);
+}
+
+function previousDayISO(iso) {
+  const d = new Date(iso + "T12:00:00Z");
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+// Dias sin facturar que la corrida automatica recupera sola (clientes de factura diaria). Si la
+// corrida de una noche no llego a ese cliente (servidor caido a las 23 hs, o un corte por error de
+// otro cliente) el dia quedaba sin facturar para siempre: la noche siguiente solo miraba "hoy".
+const DAILY_CATCHUP_DAYS = 7;
+
 function buildPeriod(state, client, freq, from, to) {
   if (from > to) return null;
-  const orders = (state.orders || []).filter((o) =>
-    o.clientId === client.id && o.date >= from && o.date <= to && !["cancelado", "anulado"].includes(o.status));
+  const orders = billableOrders(state, client.id, from, to);
   const grouped = buildGroupedItems(orders);
   const neto = sumDecimals(grouped.map((it) => it.neto));
   const iva = sumDecimals(grouped.map((it) => it.iva));
@@ -320,15 +389,26 @@ function computeDueInvoices(state, art, force = false) {
     if (!["Factura A", "Factura B"].includes(client.invoiceType)) continue;
     const freq = normalizeFrequency(client.invoiceFrequency);
     const lastCut = lastCutFor(state, client.id);
+    if (freq === "diaria") {
+      // Cada dia es su propia factura. Ademas de hoy se recuperan los ultimos dias que hayan
+      // quedado sin facturar y sin error registrado.
+      let day = art.dateISO;
+      const dias = [];
+      for (let i = 0; i <= DAILY_CATCHUP_DAYS; i += 1) {
+        if (!dayCoveredByInvoice(state, client.id, day) && !dayHasBillingError(state, client.id, day)) dias.push(day);
+        day = previousDayISO(day);
+      }
+      if (!force && art.hour < 23) continue;
+      dias.reverse().forEach((dia) => due.push(buildPeriod(state, client, freq, dia, dia)));
+      continue;
+    }
     if (lastCut >= art.dateISO) continue; // ya facturado hasta hoy
     let trigger = false;
-    if (freq === "diaria") trigger = true;
-    else if (freq === "mensual") trigger = art.isLastDayOfMonth;
+    if (freq === "mensual") trigger = art.isLastDayOfMonth;
     else if (freq === "semanal") trigger = art.weekday === 6 || art.isLastDayOfMonth;
     if (!trigger && !force) continue;
     let from;
-    if (freq === "diaria") from = art.dateISO;
-    else if (lastCut) from = nextDayISO(lastCut);
+    if (lastCut) from = nextDayISO(lastCut);
     else from = firstOfMonth(art.dateISO);
     // corte de fin de mes para semanales: el periodo nunca cruza meses
     if (from < firstOfMonth(art.dateISO)) {
@@ -701,10 +781,16 @@ async function runBilling({ pool, force = false, simulate = false, onlyClientId 
   const results = [];
   const emittedAt = new Date();
   let newLastRunDate = lastRunDate;
+  let secuencia = 0;
 
   for (const invoice of due) {
     let periodResult = { ok: true, results: [] };
-    if (!simulate) {
+    const duplicados = findDuplicateOrders(billableOrders(data, invoice.clientId, invoice.from, invoice.to));
+    if (duplicados.length) {
+      periodResult = { ok: false, results: [{ ok: false, errors: ["No se emitio: posible pedido cargado dos veces ("
+        + duplicados.map((par) => par.join(" y ")).join(", ")
+        + "). Borra el que sobra y emitila a mano desde Facturacion."] }] };
+    } else if (!simulate) {
       try {
         periodResult = await emitPeriodInvoices(invoice, cfg, fetchImpl);
       } catch (error) {
@@ -713,16 +799,15 @@ async function runBilling({ pool, force = false, simulate = false, onlyClientId 
     }
 
     const entry = buildBillingEntry(invoice, emittedAt, periodResult, simulate, cfg);
-    entry.id = `FAC-${Date.now()}-${invoice.clientId}${periodResult.results.length > 1 ? "-M" : ""}`;
+    secuencia += 1;
+    entry.id = `FAC-${Date.now()}-${invoice.clientId}-${secuencia}${periodResult.results.length > 1 ? "-M" : ""}`;
     data.billingLog.push(entry);
     results.push(entry);
 
-    // BILL-006: si falla un periodo, detenemos el batch para evitar estado inconsistente.
-    if (!simulate && !periodResult.ok) {
-      break;
-    }
-
-    // Actualizamos la fecha de ultima ejecucion solo si se proceso al menos un periodo correctamente.
+    // Un error de UN cliente ya no corta la corrida. Antes se hacia "break" aca: si fallaba uno,
+    // todos los que venian despues en la lista se quedaban sin factura esa noche y sin ningun
+    // registro, por eso las que faltaban no aparecian en ningun lado. El corte que evita estados
+    // inconsistentes es por periodo (las tandas de un mismo periodo, en emitPeriodInvoices).
     newLastRunDate = art.dateISO;
   }
 
@@ -908,6 +993,8 @@ async function regeneratePdf(cfg, { tipo, operacion, numeroCompleto, puntoVenta,
 
 module.exports = {
   billingConfig,
+  findDuplicateOrders,
+  deletedOrderIds,
   buildCreditNotePayload,
   emitCreditNote,
   creditNoteTypeFor,
