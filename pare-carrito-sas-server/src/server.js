@@ -756,6 +756,39 @@ function applyArrayPatch(target, key, changes) {
   target[key] = Array.from(map.values());
 }
 
+// Los ajustes manuales de saldo de clientes los hace SOLO el gerente. La app ya esconde el boton
+// para los demas roles; esto lo hace valer tambien en el servidor: si otro rol manda un ajuste
+// nuevo, cambia uno existente o lo borra, se ignora y queda lo que habia.
+const MANUAL_BALANCE_ADJUSTMENT = "ajuste_manual";
+function protectManualBalanceAdjustments(beforeData, nextData, role) {
+  if (role === "manager" || !nextData) return nextData;
+  const esAjuste = (entry) => !!entry && entry.relatedEntityType === MANUAL_BALANCE_ADJUSTMENT;
+  const antes = new Map((Array.isArray(beforeData && beforeData.saldos) ? beforeData.saldos : [])
+    .filter(esAjuste).map((entry) => [String(entry.id), entry]));
+  const despues = Array.isArray(nextData.saldos) ? nextData.saldos : [];
+  let cambio = false;
+  const saldos = [];
+  despues.forEach((entry) => {
+    if (!esAjuste(entry)) {
+      // Tampoco se puede disfrazar un ajuste existente cambiandole el tipo.
+      if (entry && antes.has(String(entry.id))) { cambio = true; return; }
+      saldos.push(entry);
+      return;
+    }
+    const original = antes.get(String(entry.id));
+    if (!original) { cambio = true; return; }
+    if (JSON.stringify(original) !== JSON.stringify(entry)) cambio = true;
+    saldos.push(original);
+  });
+  const presentes = new Set(saldos.filter(esAjuste).map((entry) => String(entry.id)));
+  antes.forEach((entry, id) => {
+    if (!presentes.has(id)) { saldos.push(entry); cambio = true; }
+  });
+  if (cambio) console.warn("Ajuste de saldo ignorado: solo el gerente puede ajustar saldos (rol " + role + ").");
+  nextData.saldos = saldos;
+  return nextData;
+}
+
 function applyStatePatch(data, patch) {
   const next = stripHistoryFromState(data || {});
   const arrays = patch && patch.arrays && typeof patch.arrays === "object" ? patch.arrays : {};
@@ -1098,7 +1131,7 @@ app.put("/state", authenticate, requireRole(...SYNC_ROLES), async (req, res) => 
     }
     await upsertProductHistoryState(clientDb, body.data, req.user.username);
     // El cliente pudo haber descargado solo una ventana: se preserva el historial que no tiene.
-    const cleanData = stripHistoryFromState(mergeWindowedState(beforeData, body.data));
+    const cleanData = protectManualBalanceAdjustments(beforeData, stripHistoryFromState(mergeWindowedState(beforeData, body.data)), req.user.role);
     const saved = await clientDb.query(
       `INSERT INTO app_state (id, data, updated_at, updated_by) VALUES ('main', $1, now(), $2)
        ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, updated_at = EXCLUDED.updated_at, updated_by = EXCLUDED.updated_by
@@ -1165,7 +1198,7 @@ app.post("/state/patch", authenticate, requireRole(...PATCH_SYNC_ROLES), async (
       }
     }
     const beforeData = current.rows[0].data || {};
-    const nextData = applyStatePatch(beforeData, body.patch);
+    const nextData = protectManualBalanceAdjustments(beforeData, applyStatePatch(beforeData, body.patch), req.user.role);
     const saved = await clientDb.query(
       "UPDATE app_state SET data = $1, updated_at = now(), updated_by = $2 WHERE id = 'main' RETURNING updated_at",
       [nextData, req.user.username]

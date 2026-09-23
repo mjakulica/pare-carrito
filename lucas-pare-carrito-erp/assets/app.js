@@ -5,7 +5,7 @@
   const USER_KEY = "lpc_current_user_v1";
   const OPERATIONAL_RESET_VERSION = "20260610-operational-clean-1";
   const BUSINESS_NAME = "Pare Carrito SAS";
-  const APP_VERSION = "v29";
+  const APP_VERSION = "v30";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -4450,7 +4450,7 @@
           <div class="form-grid order-form-grid">
             <div class="field order-client-field">
               <label>Cliente</label>
-              <div class="input-with-button">${clientSelectorMarkup}<button class="btn small ghost" id="clear-order-client" type="button">X</button></div>
+              <div class="input-with-button">${clientSelectorMarkup}<button class="btn small ghost" id="clear-order-client" type="button">X</button>${!isCustomerOrder && client && canEditClientFavorites() ? `<button class="btn small ghost" id="order-client-favorites" type="button" title="Editar favoritos de este cliente">&#9733;</button>` : ""}</div>
             </div>
             <div class="field order-date-field">
               <label>Fecha</label>
@@ -4760,6 +4760,8 @@
         render();
       });
     });
+    const orderFavoritesButton = document.getElementById("order-client-favorites");
+    if (orderFavoritesButton) orderFavoritesButton.addEventListener("click", () => openClientFavoritesModal(ui.selectedClientId));
     const clearClientButton = document.getElementById("clear-order-client");
     if (clearClientButton) clearClientButton.addEventListener("click", () => {
       const clientSearch = document.getElementById("order-client-search");
@@ -6007,6 +6009,7 @@
           <td class="num">${formatMoney(balance)}</td>
           <td class="page-actions">
             <button class="btn small ghost" data-edit-client="${client.id}">Editar</button>
+            ${canEditClientFavorites() ? `<button class="btn small ghost" data-client-favorites="${escapeAttr(client.id)}">Favoritos</button>` : ""}
             <button class="btn small ${client.isActive ? "danger" : "primary"}" data-toggle-client="${client.id}">${client.isActive ? "Desactivar" : "Activar"}</button>
           </td>
         </tr>
@@ -6016,6 +6019,7 @@
     afterRender.push(() => {
       bindTabs();
       document.querySelectorAll("[data-edit-client]").forEach((button) => button.addEventListener("click", () => openClientForm(button.dataset.editClient)));
+      document.querySelectorAll("[data-client-favorites]").forEach((button) => button.addEventListener("click", () => openClientFavoritesModal(button.dataset.clientFavorites)));
       document.querySelectorAll("[data-toggle-client]").forEach((button) => button.addEventListener("click", () => {
         const client = getClient(button.dataset.toggleClient);
         if (!client) return;
@@ -11564,7 +11568,7 @@
           <td class="num">${formatMoney(item.balance)}${groupLine}</td>
           <td class="num">${client && shouldApplyInvoiceVat(client) ? formatMoney(getClientAccumulatedIva(item.clientId)) : "-"}</td>
           <td>${escapeHtml(client ? paymentTypeLabel(client.paymentType) : "")}</td>
-          <td><button class="btn small ghost" data-show-balance="${item.clientId}">Ver movimientos</button></td>
+          <td><button class="btn small ghost" data-show-balance="${item.clientId}">Ver movimientos</button>${canAdjustClientBalance() && item.clientId !== "DEMO" ? ` <button class="btn small ghost" data-adjust-balance-client="${escapeAttr(item.clientId)}">Ajustar</button>` : ""}</td>
         </tr>
       `;
     }).join("");
@@ -11597,6 +11601,7 @@
         render();
       }));
       document.querySelectorAll("[data-show-balance]").forEach((button) => button.addEventListener("click", () => openBalanceHistory(button.dataset.showBalance)));
+      document.querySelectorAll("[data-adjust-balance-client]").forEach((button) => button.addEventListener("click", () => openBalanceAdjustModal(button.dataset.adjustBalanceClient)));
       document.querySelectorAll("[data-print-order-remito]").forEach((button) => button.addEventListener("click", () => printOrderRemitoDirect(button.dataset.printOrderRemito)));
     });
     return pageShell(
@@ -17143,6 +17148,88 @@
     );
   }
 
+  // Solo el gerente ajusta saldos a mano (el servidor tambien lo valida).
+  function canAdjustClientBalance() {
+    return !!currentUser && currentUser.role === "manager";
+  }
+
+  function isManualBalanceAdjustment(entry) {
+    return !!entry && entry.relatedEntityType === "ajuste_manual";
+  }
+
+  function pushManualBalanceAdjustment(clientId, amount, date, description, extra) {
+    addSaldoEntry({ clientId, type: "ajuste", description, amount, date, relatedEntityType: "ajuste_manual", notes: "Por " + (currentUser ? currentUser.name || currentUser.username || "" : "") });
+    const entry = state.saldos[state.saldos.length - 1];
+    const now = new Date().toISOString();
+    Object.assign(entry, { createdAt: now, updatedAt: now, createdBy: currentUser ? currentUser.id : "" }, extra || {});
+    return entry;
+  }
+
+  function openBalanceAdjustModal(clientId) {
+    const client = getClient(clientId);
+    if (!client || !canAdjustClientBalance()) return;
+    const actual = getClientBalance(client.id);
+    const body = `
+      <form id="balance-adjust-form" class="form-grid">
+        <div class="field span-2"><label>Cliente</label><input value="${escapeAttr(client.id + " - " + client.name)}" disabled /></div>
+        <div class="field"><label>Saldo actual</label><input value="${escapeAttr(formatMoney(actual))}" disabled /></div>
+        <div class="field"><label>Fecha</label><input type="date" id="adj-date" value="${todayISO()}" /></div>
+        <div class="field span-2"><label>Que hacer</label>
+          <select id="adj-mode">
+            <option value="sumar">Sumar al saldo (el cliente debe mas)</option>
+            <option value="restar">Restar del saldo (el cliente debe menos)</option>
+            <option value="fijar">Dejar el saldo en un valor exacto</option>
+          </select>
+        </div>
+        <div class="field"><label id="adj-amount-label">Monto</label><input id="adj-amount" inputmode="decimal" placeholder="0" /></div>
+        <div class="field"><label>Saldo resultante</label><input id="adj-result" value="${escapeAttr(formatMoney(actual))}" disabled /></div>
+        <div class="field span-2"><label>Motivo *</label><input id="adj-reason" placeholder="Ej.: saldo inicial, diferencia acordada, error de carga..." /></div>
+        <div class="field span-2"><button class="btn primary" type="button" id="adj-save">Guardar ajuste</button></div>
+      </form>`;
+    showModal("Ajustar saldo", body, () => {
+      const mode = document.getElementById("adj-mode");
+      const amount = document.getElementById("adj-amount");
+      const result = document.getElementById("adj-result");
+      const label = document.getElementById("adj-amount-label");
+      const movimiento = () => {
+        const valor = parseAmount(amount.value);
+        if (mode.value === "fijar") return valor - actual;
+        return mode.value === "restar" ? -Math.abs(valor) : Math.abs(valor);
+      };
+      const refrescar = () => {
+        label.textContent = mode.value === "fijar" ? "Nuevo saldo" : "Monto";
+        result.value = formatMoney(actual + movimiento());
+      };
+      mode.addEventListener("change", refrescar);
+      amount.addEventListener("input", () => { formatThousandsInputEl(amount); refrescar(); });
+      document.getElementById("adj-save").addEventListener("click", () => {
+        const motivo = document.getElementById("adj-reason").value.trim();
+        const delta = Math.round(movimiento() * 100) / 100;
+        const fecha = document.getElementById("adj-date").value || todayISO();
+        if (!amount.value.trim()) return alert("Ingresa el monto.");
+        if (!motivo) return alert("Ingresa el motivo del ajuste.");
+        if (Math.abs(delta) < 0.005) return alert("El saldo ya es ese: no hay nada que ajustar.");
+        if (!confirm("Ajustar el saldo de " + client.name + " en " + formatMoney(delta) + " (queda en " + formatMoney(actual + delta) + ")?")) return;
+        pushManualBalanceAdjustment(client.id, delta, fecha, "Ajuste manual: " + motivo);
+        saveState();
+        openBalanceHistory(client.id);
+      });
+    });
+  }
+
+  function annulManualBalanceAdjustment(entryId) {
+    if (!canAdjustClientBalance()) return;
+    const entry = (state.saldos || []).find((item) => item.id === entryId);
+    if (!isManualBalanceAdjustment(entry) || entry.annulledAt || entry.annulsId) return;
+    if (!confirm("Anular el ajuste de " + formatMoney(entry.amount) + " (" + (entry.description || "") + ")? Se agrega un movimiento que lo compensa.")) return;
+    const reverso = pushManualBalanceAdjustment(entry.clientId, -Number(entry.amount || 0), todayISO(), "Anulacion de ajuste: " + String(entry.description || "").replace(/^Ajuste manual:\s*/, ""), { annulsId: entry.id });
+    entry.annulledAt = reverso.createdAt;
+    entry.annulledBy = reverso.id;
+    entry.updatedAt = reverso.createdAt;
+    saveState();
+    openBalanceHistory(entry.clientId);
+  }
+
   function openBalanceHistory(clientId) {
     const client = getClient(clientId);
     const movements = getSaldoMovements(clientId, ui.balanceFrom, ui.balanceTo);
@@ -17152,7 +17239,7 @@
         <td>${escapeHtml(entry.type)}</td>
         <td>${entry.relatedEntityType === "order" && getOrder(entry.relatedEntityId) ? renderOrderInlineDetails(getOrder(entry.relatedEntityId), { summary: entry.description }) : escapeHtml(entry.description)}</td>
         <td class="num">${formatMoney(entry.amount)}</td>
-        <td class="num">${formatMoney(entry.balance)}</td>
+        <td class="num">${formatMoney(entry.balance)}${canAdjustClientBalance() && isManualBalanceAdjustment(entry) && !entry.annulledAt && !entry.annulsId ? ` <button class="btn small ghost no-print" type="button" data-annul-adjustment="${escapeAttr(entry.id)}" title="Anular este ajuste">Anular</button>` : ""}${isManualBalanceAdjustment(entry) && entry.annulledAt ? ` <span class="pill amber">Anulado</span>` : ""}</td>
       </tr>
     `).join("");
     showModal(
@@ -17160,6 +17247,7 @@
       `
       <div class="print-controls no-print" style="margin-bottom:10px">
         <button class="btn primary" data-print-balance-history type="button">Exportar PDF / Imprimir</button>
+        ${canAdjustClientBalance() && clientId !== "DEMO" ? `<button class="btn blue" data-adjust-balance type="button">Ajustar saldo</button>` : ""}
         <span class="muted">Rango: ${formatDate(ui.balanceFrom)} - ${formatDate(ui.balanceTo)}</span>
       </div>
       <div class="table-wrap">
@@ -17170,6 +17258,9 @@
       </div>
       `,
       () => {
+        const ajustar = document.querySelector("[data-adjust-balance]");
+        if (ajustar) ajustar.addEventListener("click", () => openBalanceAdjustModal(clientId));
+        document.querySelectorAll("[data-annul-adjustment]").forEach((button) => button.addEventListener("click", () => annulManualBalanceAdjustment(button.dataset.annulAdjustment)));
         document.querySelector("[data-print-balance-history]").addEventListener("click", () => {
           printHtmlDocument(
             "Movimientos - " + (client ? client.name : clientId),
@@ -20774,6 +20865,65 @@
     const key = getPreferenceOrderKey(pref);
     const lastKey = knownLastKey || getClientLastPreferenceKey(clientId);
     return { isLastPurchase: !!key && key === lastKey };
+  }
+
+  function canEditClientFavorites() {
+    return !!currentUser && ["manager", "admin", "employee"].includes(currentUser.role);
+  }
+
+  // Editor de favoritos de un cliente. Los favoritos se arman solos con lo que el cliente pide;
+  // aca se pueden sacar los que ya no compra o agregar otros a mano. Un favorito agregado a mano
+  // no tiene fecha de pedido, asi que nunca figura como "Ultima compra". Si el cliente vuelve a
+  // pedir un producto que se saco, vuelve a quedar como favorito (asi es como se aprenden).
+  function openClientFavoritesModal(clientId) {
+    const client = getClient(clientId);
+    if (!client || !canEditClientFavorites()) return;
+    const actuales = new Set((state.preferences || []).filter((pref) => pref.clientId === client.id).map((pref) => pref.productId));
+    const productos = activeProductsByName();
+    const fila = (product) => `<label class="check-item" data-check-name="${escapeAttr(normalizeText(product.name))}"><input type="checkbox" data-fav-product value="${escapeAttr(product.id)}" ${actuales.has(product.id) ? "checked" : ""} /><span>${escapeHtml(product.name)}</span></label>`;
+    const body = `
+      <p class="muted" style="margin:0 0 8px">Tildados = favoritos de <strong>${escapeHtml(client.id)} - ${escapeHtml(client.name)}</strong> (aparecen primero en Nuevo pedido). Si destildas uno y el cliente lo vuelve a pedir, vuelve a quedar como favorito.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
+        <input id="fav-filter" placeholder="Filtrar productos..." autocomplete="off" style="flex:1;min-width:160px" />
+        <label style="display:inline-flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="fav-only-checked" /> Solo favoritos</label>
+        <span class="muted" id="fav-count"></span>
+      </div>
+      <div id="fav-grid" class="check-grid" style="max-height:52vh;overflow:auto">${productos.map(fila).join("")}</div>
+      <div class="form-actions" style="margin-top:12px"><button class="btn primary" type="button" id="fav-save">Guardar favoritos</button></div>`;
+    showModal("Favoritos del cliente", body, () => {
+      const grid = document.getElementById("fav-grid");
+      const filtro = document.getElementById("fav-filter");
+      const soloTildados = document.getElementById("fav-only-checked");
+      const contador = document.getElementById("fav-count");
+      const aplicarFiltro = () => {
+        const q = normalizeText(filtro.value);
+        let tildados = 0;
+        grid.querySelectorAll(".check-item").forEach((item) => {
+          const box = item.querySelector("input");
+          if (box.checked) tildados += 1;
+          const visible = (!q || item.dataset.checkName.includes(q)) && (!soloTildados.checked || box.checked);
+          item.style.display = visible ? "" : "none";
+        });
+        contador.textContent = tildados + " favorito" + (tildados === 1 ? "" : "s");
+      };
+      filtro.addEventListener("input", aplicarFiltro);
+      soloTildados.addEventListener("change", aplicarFiltro);
+      grid.addEventListener("change", aplicarFiltro);
+      aplicarFiltro();
+      filtro.focus();
+      document.getElementById("fav-save").addEventListener("click", () => {
+        const elegidos = new Set(Array.from(grid.querySelectorAll("[data-fav-product]:checked")).map((box) => box.value));
+        state.preferences = (state.preferences || []).filter((pref) => pref.clientId !== client.id || elegidos.has(pref.productId));
+        elegidos.forEach((productId) => {
+          if (getPreference(client.id, productId)) return;
+          const product = getProduct(productId);
+          if (!product) return;
+          state.preferences.push({ clientId: client.id, productId, preferredUnitType: product.unitType, lastQuantity: 0, firstOrderedAt: "", lastOrderedAt: "", lastOrderKey: "", purchaseCount: 0, manual: true, updatedAt: new Date().toISOString() });
+        });
+        saveState();
+        closeModal();
+      });
+    }, { className: "wide" });
   }
 
   function upsertPreference(clientId, productId, preferredUnitType, lastQuantity, orderKey) {
