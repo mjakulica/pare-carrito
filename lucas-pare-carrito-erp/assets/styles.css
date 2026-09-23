@@ -1935,7 +1935,9 @@ tr:last-child td {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 20;
+  /* Por encima de la barra superior (100) y del menu lateral (140): con 20 la barra tapaba el
+     titulo y el boton Cerrar de todos los modales. */
+  z-index: 200;
   background: rgba(14, 23, 36, 0.52);
   display: grid;
   place-items: start center;
@@ -4201,4 +4203,20 @@ tr:last-child td {
 }
 .price-row-flash > td {
   animation: price-row-flash 2.2s ease-out;
+}
+
+/* Botones de arriba de un modal (Exportar / Ajustar saldo): en celular bajan de linea en vez de
+   quedar cortados. */
+.modal .print-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+@media (max-width: 760px) {
+  .modal .print-controls .btn {
+    flex: 1 1 auto;
+    min-height: 44px;
+    padding: 8px 12px;
+  }
 }
