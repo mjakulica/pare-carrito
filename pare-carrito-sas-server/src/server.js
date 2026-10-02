@@ -753,6 +753,125 @@ function keepStoredItems(key, incoming, stored) {
   return out;
 }
 
+// ---- Sincronizacion por producto dentro de cada pedido ----
+// Antes se comparaba el pedido ENTERO: si dos dispositivos tocaban el mismo pedido a la vez (por
+// ejemplo uno corrige el peso en Unidades y otro registra una compra que reprecia los pedidos del
+// dia), ganaba la copia mas nueva completa y el otro cambio se perdia. Ahora cada producto del
+// pedido lleva la hora de su ultimo cambio de cantidad (_tq), de precio (_tp) y del resto (_to), y
+// al juntar dos copias se toma cada dato de la copia que lo cambio mas tarde. Los productos que
+// se sacan del pedido dejan constancia en order.removedItems para no reaparecer.
+const ITEM_OTHER_FIELDS = ["productId", "productName", "unitType", "note", "ivaRate", "assignedToType", "assignedToId", "unitAdjusted"];
+function itemOtherSignature(item) {
+  return ITEM_OTHER_FIELDS.map((key) => String(item[key] == null ? "" : item[key])).join("|");
+}
+// Sella las horas de cambio comparando con lo que el item tenia la ultima vez. Se llama desde el
+// punto unico por el que pasan todas las modificaciones de un pedido. "base" es la ultima version
+// del pedido que se sincronizo: sirve para los pedidos de antes de este cambio, que no tienen
+// guardado contra que comparar.
+function stampOrderItemChanges(order, nowIso, base) {
+  if (!order || !Array.isArray(order.items)) return;
+  const now = nowIso || new Date().toISOString();
+  const delBase = new Map(((base && base.items) || []).filter((item) => item && item.id).map((item) => [item.id, item]));
+  const previos = Array.isArray(order._itemIds) ? order._itemIds : (base ? Array.from(delBase.keys()) : null);
+  order.items.forEach((item) => {
+    if (!item) return;
+    const q = Number(item.quantity || 0);
+    const p = Number(item.unitPrice || 0);
+    const o = itemOtherSignature(item);
+    if (item._q === undefined) {
+      const antes = delBase.get(item.id);
+      if (antes) {
+        if (Number(antes.quantity || 0) !== q) item._tq = now;
+        if (Number(antes.unitPrice || 0) !== p) item._tp = now;
+        if (itemOtherSignature(antes) !== o) item._to = now;
+      } else if (!previos || previos.indexOf(item.id) === -1) {
+        // Producto nuevo en el pedido (o pedido nuevo): cuenta como recien agregado.
+        item._tq = now; item._tp = now; item._to = now;
+      }
+    } else {
+      if (item._q !== q) item._tq = now;
+      if (item._p !== p) item._tp = now;
+      if (item._o !== o) item._to = now;
+    }
+    item._q = q; item._p = p; item._o = o;
+  });
+  const actuales = new Set(order.items.map((item) => item && item.id).filter(Boolean));
+  if (previos) {
+    previos.forEach((id) => {
+      if (!actuales.has(id)) {
+        order.removedItems = order.removedItems || {};
+        order.removedItems[id] = now;
+      }
+    });
+  }
+  // Si un item vuelve (se agrego de nuevo con el mismo id) deja de estar quitado.
+  if (order.removedItems) Object.keys(order.removedItems).forEach((id) => { if (actuales.has(id)) delete order.removedItems[id]; });
+  order._itemIds = Array.from(actuales);
+}
+function itemStampTime(item) {
+  return [item._tq, item._tp, item._to].map((t) => String(t || "")).sort().pop() || "";
+}
+function mergeItemCopies(a, b) {
+  // b es la copia del pedido mas nuevo: ante empate (o sin horas) gana b.
+  const pick = (campo) => (String(a[campo] || "") > String(b[campo] || "") ? a : b);
+  const fq = pick("_tq"), fp = pick("_tp"), fo = pick("_to");
+  const out = { ...b };
+  ITEM_OTHER_FIELDS.forEach((key) => { if (fo[key] !== undefined) out[key] = fo[key]; else delete out[key]; });
+  out._to = fo._to; out._o = fo._o;
+  out.quantity = fq.quantity; out._tq = fq._tq; out._q = fq._q;
+  out.unitAdjusted = fq.unitAdjusted !== undefined ? fq.unitAdjusted : out.unitAdjusted;
+  out.unitPrice = fp.unitPrice; out._tp = fp._tp; out._p = fp._p;
+  if (fq !== b || fp !== b) {
+    out.subtotal = Number(out.quantity || 0) * Number(out.unitPrice || 0);
+    out.ivaAmount = out.subtotal * (Number(out.ivaRate || 0) / 100);
+    out.totalWithIva = out.subtotal + out.ivaAmount;
+  }
+  return out;
+}
+// Junta dos copias del mismo pedido producto por producto. Devuelve null si ninguna copia tiene
+// horas por producto (pedidos de antes de este cambio): ahi sigue mandando la copia mas nueva.
+function mergeOrderCopies(a, b) {
+  if (!a || !b) return null;
+  const sellado = (order) => (order.items || []).some((item) => item && (item._tq || item._tp || item._to)) || !!(order.removedItems && Object.keys(order.removedItems).length);
+  if (!sellado(a) && !sellado(b)) return null;
+  const nuevo = String(b.updatedAt || "") >= String(a.updatedAt || "") ? b : a;
+  const viejo = nuevo === b ? a : b;
+  const quitados = { ...(viejo.removedItems || {}) };
+  Object.keys(nuevo.removedItems || {}).forEach((id) => { if (String(nuevo.removedItems[id]) > String(quitados[id] || "")) quitados[id] = nuevo.removedItems[id]; });
+  const delViejo = new Map((viejo.items || []).filter((item) => item && item.id).map((item) => [item.id, item]));
+  const items = [];
+  const vistos = new Set();
+  (nuevo.items || []).forEach((item) => {
+    if (!item || !item.id) { if (item) items.push(item); return; }
+    vistos.add(item.id);
+    const otro = delViejo.get(item.id);
+    const junto = otro ? mergeItemCopies(otro, item) : item;
+    if (quitados[item.id] && String(quitados[item.id]) >= itemStampTime(junto)) return;
+    items.push(junto);
+  });
+  (viejo.items || []).forEach((item) => {
+    if (!item || !item.id || vistos.has(item.id)) return;
+    // Solo en la copia vieja: si tiene hora propia y nadie lo quito despues, lo agrego otro
+    // dispositivo y se conserva. Sin hora (pedido anterior a este cambio) manda la copia nueva.
+    const t = itemStampTime(item);
+    if (!t) return;
+    if (quitados[item.id] && String(quitados[item.id]) >= t) return;
+    items.push(item);
+  });
+  Object.keys(quitados).forEach((id) => { if (items.some((item) => item && item.id === id)) delete quitados[id]; });
+  const out = { ...nuevo, items, updatedAt: [a.updatedAt, b.updatedAt].map((t) => String(t || "")).sort().pop() };
+  if (Object.keys(quitados).length) out.removedItems = quitados; else delete out.removedItems;
+  out._itemIds = items.map((item) => item && item.id).filter(Boolean);
+  // Totales a partir de los productos juntados (el envio y su IVA se toman de la copia nueva).
+  const ivaItemsNuevo = (nuevo.items || []).reduce((s, item) => s + Number((item && item.ivaAmount) || 0), 0);
+  const ivaEnvio = Math.max(0, Number(nuevo.ivaAmount || 0) - ivaItemsNuevo);
+  const envio = Math.max(0, Number(nuevo.shippingFee || 0) || 0);
+  out.subtotalAmount = items.reduce((s, item) => s + Number((item && item.subtotal) || 0), 0);
+  out.ivaAmount = items.reduce((s, item) => s + Number((item && item.ivaAmount) || 0), 0) + ivaEnvio;
+  out.totalAmount = out.subtotalAmount + out.ivaAmount + envio;
+  return out;
+}
+
 function applyArrayPatch(target, key, changes) {
   const current = Array.isArray(target[key]) ? target[key] : [];
   const map = new Map();
@@ -778,6 +897,14 @@ function applyArrayPatch(target, key, changes) {
     // desactualizados revierta cambios ya confirmados (ej. precios actualizados por una compra
     // o un item borrado que "reaparece").
     const existing = map.get(id);
+    if (key === "orders" && existing && item) {
+      const junto = mergeOrderCopies(existing, keepStoredItems(key, item, existing));
+      if (junto) {
+        map.set(id, junto);
+        if (Math.abs(Number(junto.totalAmount || 0) - Number(item.totalAmount || 0)) > 0.004) mergedOrderTotals.set(String(junto.id), junto);
+        return;
+      }
+    }
     if (existing && existing.updatedAt && item && item.updatedAt && String(item.updatedAt) < String(existing.updatedAt)) return;
     map.set(id, existing ? keepStoredItems(key, item, existing) : keepStoredItems(key, item, null));
   });
@@ -817,7 +944,11 @@ function protectManualBalanceAdjustments(beforeData, nextData, role) {
   return nextData;
 }
 
+// Pedidos cuyo total quedo distinto al juntar copias: su movimiento de saldo se alinea al final.
+let mergedOrderTotals = new Map();
+
 function applyStatePatch(data, patch) {
+  mergedOrderTotals = new Map();
   const next = stripHistoryFromState(data || {});
   const arrays = patch && patch.arrays && typeof patch.arrays === "object" ? patch.arrays : {};
   ARRAY_PATCH_KEYS.forEach((key) => {
@@ -833,6 +964,13 @@ function applyStatePatch(data, patch) {
   Object.keys(scalars).forEach((key) => {
     if (!HISTORY_KEYS.includes(key)) next[key] = scalars[key];
   });
+  // El saldo de un pedido es su total: si el total cambio al juntar copias, se alinea.
+  if (mergedOrderTotals.size && Array.isArray(next.saldos)) {
+    next.saldos = next.saldos.map((entry) => {
+      const order = entry && entry.relatedEntityType === "order" && entry.type === "pedido" ? mergedOrderTotals.get(String(entry.relatedEntityId)) : null;
+      return order ? { ...entry, amount: Number(order.totalAmount || 0) } : entry;
+    });
+  }
   return next;
 }
 
@@ -1222,7 +1360,12 @@ app.post("/state/patch", authenticate, requireRole(...PATCH_SYNC_ROLES), async (
     }
     const storedIso = current.rows[0].updated_at.toISOString();
     if (storedIso !== String(body.baseUpdatedAt)) {
-      const allowEmployeeMerge = req.user.role === "employee" && canApplyStaleEmployeePatch(body.patch);
+      // Un parche que solo agrega o modifica registros (sin borrar, sin precios ni configuracion) se
+      // aplica sobre una version mas nueva para cualquier rol: cada registro gana por fecha y los
+      // pedidos se juntan producto por producto. Antes solo los empleados podian; el gerente/admin
+      // recibia conflicto, el dispositivo bajaba TODO el estado para fusionar y reintentaba (lento en
+      // el celular, y a veces habia que repetir el cambio).
+      const allowEmployeeMerge = canApplyStaleEmployeePatch(body.patch);
       if (!allowEmployeeMerge) {
         await clientDb.query("ROLLBACK");
         return res.status(409).json({ error: "conflicto: el servidor tiene una version mas nueva", updatedAt: storedIso });

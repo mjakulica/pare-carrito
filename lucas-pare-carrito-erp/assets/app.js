@@ -5,7 +5,7 @@
   const USER_KEY = "lpc_current_user_v1";
   const OPERATIONAL_RESET_VERSION = "20260610-operational-clean-1";
   const BUSINESS_NAME = "Pare Carrito SAS";
-  const APP_VERSION = "v34";
+  const APP_VERSION = "v35";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -1939,6 +1939,15 @@
     };
     const byId = (item) => String(item.id);
     merged.orders = unionByKeyPreferNewest(remote.orders, local.orders, byId, "updatedAt");
+    // Pedidos que estan en las dos copias: se juntan producto por producto.
+    const remotosPorId = new Map((remote.orders || []).filter(Boolean).map((order) => [String(order.id), order]));
+    const localesPorId = new Map((local.orders || []).filter(Boolean).map((order) => [String(order.id), order]));
+    merged.orders = (merged.orders || []).map((order) => {
+      const r = order && remotosPorId.get(String(order.id));
+      const l = order && localesPorId.get(String(order.id));
+      if (!r || !l || r === l) return order;
+      return mergeOrderCopies(r, l) || order;
+    });
     // La copia local de un pedido viejo puede venir sin productos (la vista rapida los recorta).
     // Si esa copia gana por fecha, los productos se toman de la otra: nunca se queda la vacia.
     const conItems = new Map();
@@ -8835,12 +8844,31 @@
     row.classList.toggle("pl-norel", !isRel);
     const relField = row.querySelector("[data-relation-field]");
     if (relField) relField.style.display = isRel ? "" : "none";
-    // El costo unitario arranca con el ultimo costo conocido del producto (antes habia que
-    // apretar un boton "ultimo" para traerlo). Si ya hay algo escrito, no se pisa.
+    // El costo unitario arranca con el ultimo costo conocido del producto, pero SOLO al elegir el
+    // producto. Antes se completaba en cada recalculo si el campo estaba vacio: al borrar el ultimo
+    // digito para escribir otro precio, el numero viejo reaparecia entero. Si al salir del campo
+    // queda vacio, ahi si vuelve el ultimo costo (para que la linea no quede en $0).
     const storedCost = product ? getStoredProductCost(product.id) : 0;
     const costInput = row.querySelector("[data-item-cost]");
-    if (costInput && product && storedCost > 0 && !String(costInput.value || "").trim()) {
-      costInput.value = formatAmountInput(storedCost);
+    if (costInput) {
+      costInput.placeholder = product && storedCost > 0 ? formatAmountInput(storedCost) : "0";
+      if (product && costInput.dataset.prefilledFor !== product.id) {
+        costInput.dataset.prefilledFor = product.id;
+        if (storedCost > 0 && !String(costInput.value || "").trim()) costInput.value = formatAmountInput(storedCost);
+      }
+      if (!costInput.dataset.blurRestore) {
+        costInput.dataset.blurRestore = "1";
+        costInput.addEventListener("blur", () => {
+          if (String(costInput.value || "").trim()) return;
+          const sel = row.querySelector("[data-product-select]");
+          const prod = sel && sel.value ? getProduct(sel.value) : null;
+          const ultimo = prod ? getStoredProductCost(prod.id) : 0;
+          if (ultimo > 0) {
+            costInput.value = formatAmountInput(ultimo);
+            costInput.dispatchEvent(new Event("input", { bubbles: true }));
+          }
+        });
+      }
     }
     // Proveedores que venden ESTE producto, con el ultimo al que se le compro preseleccionado.
     // Solo se usa cuando la compra se carga con el proveedor en "Todos".
@@ -12941,7 +12969,9 @@
     const empLogTo = ui.employeeLogTo || todayISO();
     ui.employeeLogFrom = empLogFrom; ui.employeeLogTo = empLogTo;
     const todayEntry = getAttendanceEntry(currentUser.id, todayISO());
-    const ccToday = todayISO();
+    // Fecha del cierre de caja: hoy por defecto, pero se puede cargar el de un dia anterior.
+    if (!ui.ccDate || ui.ccDate > todayISO()) ui.ccDate = todayISO();
+    const ccToday = ui.ccDate;
     const ccCloseToday = getCashClosingForDate(currentUser.id, ccToday);
     const ccPaidSet = employeePaidOrderIdsToday(currentUser.id, ccToday);
     if (ui.ccCheckedDate !== ccToday) { ui.ccCheckedDate = ccToday; ui.ccChecked = ccCloseToday ? (ccCloseToday.orderIds || []).slice() : Array.from(ccPaidSet); }
@@ -13035,10 +13065,15 @@
       </form>
       <div class="panel" style="margin-top:14px">
         <h2 class="page-title" style="font-size:18px">Cierre de caja</h2>
-        <p class="muted">Marca los pedidos que cobraste hoy en efectivo. Los que ya tienen pago registrado vienen tildados.</p>
-        <div id="cc-orders" style="margin-top:8px">${ccOrderRows || `<div class="empty compact">No hay pedidos para hoy.</div>`}</div>
+        <div class="form-grid" style="margin:6px 0">
+          <div class="field"><label>Fecha del cierre</label><input type="date" id="cc-date" value="${escapeAttr(ccToday)}" max="${todayISO()}" /></div>
+          <div class="field span-3" style="align-self:end">${ccCloseToday ? `<span class="pill green">Ya hay un cierre guardado para el ${formatDate(ccToday)}: al guardar se reemplaza</span>` : ""}</div>
+        </div>
+        ${employeeMissingClosingsHtml(currentUser.id)}
+        <p class="muted">Marca los pedidos que cobraste ${ccToday === todayISO() ? "hoy" : "el " + formatDate(ccToday)} en efectivo. Los que ya tienen pago registrado vienen tildados.</p>
+        <div id="cc-orders" style="margin-top:8px">${ccOrderRows || `<div class="empty compact">No hay pedidos para ${ccToday === todayISO() ? "hoy" : "el " + formatDate(ccToday)}.</div>`}</div>
         <div class="form-grid" style="margin-top:12px">
-          <div class="field span-2"><label>Hoy cobré en efectivo</label><input id="cc-collected" inputmode="decimal" value="${formatAmountInput(ccDefCollected)}" /></div>
+          <div class="field span-2"><label>${ccToday === todayISO() ? "Hoy cobré" : "Ese día cobré"} en efectivo</label><input id="cc-collected" inputmode="decimal" value="${formatAmountInput(ccDefCollected)}" /></div>
           <div class="field span-2"><label>Diferencia de cobro</label><input id="cc-collect-diff" disabled /></div>
           <div class="field span-2"><label>Mi caja al cierre del día es</label><input id="cc-cash" inputmode="decimal" value="${formatAmountInput(ccDefCash)}" /></div>
           <div class="field span-2"><label>Diferencia de caja</label><input id="cc-cash-diff" disabled /></div>
@@ -13157,13 +13192,23 @@
     let collectedTouched = false;
     let cashTouched = false;
     const getChecked = () => Array.from(ordersWrap.querySelectorAll("[data-cc-order]")).filter((c) => c.checked);
-    const syncChecked = () => { ui.ccChecked = getChecked().map((c) => c.dataset.ccOrder); ui.ccCheckedDate = todayISO(); };
+    const ccDate = ui.ccDate || todayISO();
+    const syncChecked = () => { ui.ccChecked = getChecked().map((c) => c.dataset.ccOrder); ui.ccCheckedDate = ccDate; };
+    const ccDateInp = document.getElementById("cc-date");
+    if (ccDateInp) ccDateInp.addEventListener("change", () => {
+      ui.ccDate = ccDateInp.value && ccDateInp.value <= todayISO() ? ccDateInp.value : todayISO();
+      ui.ccChecked = null; ui.ccCheckedDate = null;
+      render();
+    });
+    document.querySelectorAll("[data-cc-missing]").forEach((btn) => btn.addEventListener("click", () => {
+      ui.ccDate = btn.dataset.ccMissing; ui.ccChecked = null; ui.ccCheckedDate = null; render();
+    }));
     const recompute = (updateDefaults) => {
       const expectedCollected = getChecked().reduce((sm, c) => sm + Number(c.dataset.ccTotal || 0), 0);
       if (updateDefaults && !collectedTouched) collectedInp.value = formatAmountInput(expectedCollected);
       const collected = parseAmount(collectedInp.value);
       collectDiffInp.value = formatMoney(collected - expectedCollected);
-      const expectedCash = expectedEmployeeCash(currentUser.id, collected, todayISO());
+      const expectedCash = expectedEmployeeCash(currentUser.id, collected, ccDate);
       if (updateDefaults && !cashTouched) cashInp.value = formatAmountInput(expectedCash);
       const cash = parseAmount(cashInp.value);
       cashDiffInp.value = formatMoney(cash - expectedCash);
@@ -13186,9 +13231,15 @@
     const saveBtn = document.getElementById("cc-save");
     if (saveBtn) saveBtn.addEventListener("click", () => {
       const orderIds = getChecked().map((c) => c.dataset.ccOrder);
-      recordCashClosing({ userId: currentUser.id, orderIds, actualCollected: parseAmount(collectedInp.value), actualCash: parseAmount(cashInp.value) });
-      ui.ccChecked = null; ui.ccCheckedDate = null;
-      alert("Cierre de caja guardado. Tu caja quedó ajustada al monto ingresado.");
+      try {
+        recordCashClosing({ userId: currentUser.id, date: ccDate, orderIds, actualCollected: parseAmount(collectedInp.value), actualCash: parseAmount(cashInp.value) });
+      } catch (error) {
+        console.error("Cierre de caja:", error);
+        alert("No se pudo guardar el cierre de caja: " + ((error && error.message) || error));
+        return;
+      }
+      ui.ccChecked = null; ui.ccCheckedDate = null; ui.ccDate = todayISO();
+      alert("Cierre de caja del " + formatDate(ccDate) + " guardado. Tu caja quedó ajustada al monto ingresado.");
       render();
     });
     const ccLimit = document.getElementById("cc-limit");
@@ -18079,7 +18130,7 @@
   }
   function recordCashClosing(opts) {
     const userId = opts.userId;
-    const d = todayISO();
+    const d = opts.date && opts.date <= todayISO() ? opts.date : todayISO();
     const user = getUser(userId);
     const orderIds = Array.isArray(opts.orderIds) ? opts.orderIds : [];
     const expectedCollected = orderIds.reduce((s, id) => { const o = getOrder(id); return s + (o ? Number(o.totalAmount || 0) : 0); }, 0);
@@ -18089,16 +18140,40 @@
     const actualCash = Number(opts.actualCash || 0);
     const cashDiff = Math.round((actualCash - expectedCash) * 100) / 100;
     const box = getUserCashBoxId(userId);
-    const adj = Math.round((actualCash - getCajaBalance(box)) * 100) / 100;
+    // Saldo de la caja al final de ESE dia (para un cierre atrasado no sirve el saldo de hoy).
+    const saldoAlCierre = d === todayISO() ? getCajaBalance(box) : cashBoxBalanceBefore(box, addDaysISO(d, 1));
+    const adj = Math.round((actualCash - saldoAlCierre) * 100) / 100;
     if (Math.abs(adj) > 0.009) {
       addCajaEntry({ date: d, type: "cash_adjustment", concept: "Ajuste por cierre de caja", cashBoxId: box, amountIngreso: adj > 0 ? adj : 0, amountEgreso: adj < 0 ? -adj : 0, notes: "Cierre de caja - " + (user ? user.name : "") });
+      // Cierre atrasado: si ya hay un cierre posterior, ese dia la caja ya quedo fijada. El ajuste
+      // de este dia se compensa en la fecha de ese cierre para no desarmarlo.
+      const siguiente = getCashClosings().filter((c) => c.userId === userId && c.date > d).sort((a, b) => String(a.date).localeCompare(String(b.date)))[0];
+      if (siguiente) {
+        addCajaEntry({ date: siguiente.date, type: "cash_adjustment", concept: "Compensacion por cierre atrasado del " + formatDate(d), cashBoxId: box, amountIngreso: adj < 0 ? -adj : 0, amountEgreso: adj > 0 ? adj : 0, notes: "Cierre de caja - " + (user ? user.name : "") });
+      }
     }
     const existing = getCashClosingForDate(userId, d);
-    const rec = { id: existing ? existing.id : nextDatedId("CIE", getCashClosings()), userId, userName: user ? user.name : "", date: d, expectedCollected, actualCollected, collectDiff, expectedCash, actualCash, cashDiff, orderIds, createdAt: new Date().toISOString() };
+    const ahora = new Date().toISOString();
+    const rec = { id: existing ? existing.id : nextDatedId("CIE", getCashClosings()), userId, userName: user ? user.name : "", date: d, expectedCollected, actualCollected, collectDiff, expectedCash, actualCash, cashDiff, orderIds, createdAt: existing && existing.createdAt ? existing.createdAt : ahora, updatedAt: ahora, late: d !== todayISO() };
     if (existing) Object.assign(existing, rec); else getCashClosings().push(rec);
     saveState();
     return rec;
   }
+  // Dias de los ultimos 14 en que el empleado trabajo (horario cargado como presente) pero no hay
+  // cierre de caja. Se muestran como botones para cargarlos.
+  function employeeMissingClosingsHtml(userId) {
+    const hoy = todayISO();
+    const desde = addDaysISO(hoy, -14);
+    const conCierre = new Set(getCashClosings().filter((c) => c.userId === userId).map((c) => c.date));
+    const faltan = (state.attendance || [])
+      .filter((a) => a.userId === userId && a.present && a.date >= desde && a.date < hoy && !conCierre.has(a.date))
+      .map((a) => a.date)
+      .filter((fecha, i, lista) => lista.indexOf(fecha) === i)
+      .sort();
+    if (!faltan.length) return "";
+    return `<div class="alert warn" style="margin:6px 0">Dias trabajados sin cierre de caja: ${faltan.map((f) => `<button class="btn small ghost" type="button" data-cc-missing="${escapeAttr(f)}">${formatDate(f)}</button>`).join(" ")}</div>`;
+  }
+
   function renderCashClosingHistory(userIds, limit, showUser) {
     const ids = new Set(userIds);
     const list = getCashClosings().filter((c) => ids.has(c.userId)).sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.createdAt || "").localeCompare(String(a.createdAt || ""))).slice(0, limit);
@@ -21129,6 +21204,125 @@
   // merge de sincronizacion sepa cual es la version mas nueva. Sin esto, cambios como borrar un
   // item en Unidades o actualizar precios tras una compra quedaban "empatados" y una copia vieja
   // de otro dispositivo los revertia (item que reaparece / remito con precios viejos).
+  // ---- Sincronizacion por producto dentro de cada pedido ----
+  // Antes se comparaba el pedido ENTERO: si dos dispositivos tocaban el mismo pedido a la vez (por
+  // ejemplo uno corrige el peso en Unidades y otro registra una compra que reprecia los pedidos del
+  // dia), ganaba la copia mas nueva completa y el otro cambio se perdia. Ahora cada producto del
+  // pedido lleva la hora de su ultimo cambio de cantidad (_tq), de precio (_tp) y del resto (_to), y
+  // al juntar dos copias se toma cada dato de la copia que lo cambio mas tarde. Los productos que
+  // se sacan del pedido dejan constancia en order.removedItems para no reaparecer.
+  const ITEM_OTHER_FIELDS = ["productId", "productName", "unitType", "note", "ivaRate", "assignedToType", "assignedToId", "unitAdjusted"];
+  function itemOtherSignature(item) {
+    return ITEM_OTHER_FIELDS.map((key) => String(item[key] == null ? "" : item[key])).join("|");
+  }
+  // Sella las horas de cambio comparando con lo que el item tenia la ultima vez. Se llama desde el
+  // punto unico por el que pasan todas las modificaciones de un pedido. "base" es la ultima version
+  // del pedido que se sincronizo: sirve para los pedidos de antes de este cambio, que no tienen
+  // guardado contra que comparar.
+  function stampOrderItemChanges(order, nowIso, base) {
+    if (!order || !Array.isArray(order.items)) return;
+    const now = nowIso || new Date().toISOString();
+    const delBase = new Map(((base && base.items) || []).filter((item) => item && item.id).map((item) => [item.id, item]));
+    const previos = Array.isArray(order._itemIds) ? order._itemIds : (base ? Array.from(delBase.keys()) : null);
+    order.items.forEach((item) => {
+      if (!item) return;
+      const q = Number(item.quantity || 0);
+      const p = Number(item.unitPrice || 0);
+      const o = itemOtherSignature(item);
+      if (item._q === undefined) {
+        const antes = delBase.get(item.id);
+        if (antes) {
+          if (Number(antes.quantity || 0) !== q) item._tq = now;
+          if (Number(antes.unitPrice || 0) !== p) item._tp = now;
+          if (itemOtherSignature(antes) !== o) item._to = now;
+        } else if (!previos || previos.indexOf(item.id) === -1) {
+          // Producto nuevo en el pedido (o pedido nuevo): cuenta como recien agregado.
+          item._tq = now; item._tp = now; item._to = now;
+        }
+      } else {
+        if (item._q !== q) item._tq = now;
+        if (item._p !== p) item._tp = now;
+        if (item._o !== o) item._to = now;
+      }
+      item._q = q; item._p = p; item._o = o;
+    });
+    const actuales = new Set(order.items.map((item) => item && item.id).filter(Boolean));
+    if (previos) {
+      previos.forEach((id) => {
+        if (!actuales.has(id)) {
+          order.removedItems = order.removedItems || {};
+          order.removedItems[id] = now;
+        }
+      });
+    }
+    // Si un item vuelve (se agrego de nuevo con el mismo id) deja de estar quitado.
+    if (order.removedItems) Object.keys(order.removedItems).forEach((id) => { if (actuales.has(id)) delete order.removedItems[id]; });
+    order._itemIds = Array.from(actuales);
+  }
+  function itemStampTime(item) {
+    return [item._tq, item._tp, item._to].map((t) => String(t || "")).sort().pop() || "";
+  }
+  function mergeItemCopies(a, b) {
+    // b es la copia del pedido mas nuevo: ante empate (o sin horas) gana b.
+    const pick = (campo) => (String(a[campo] || "") > String(b[campo] || "") ? a : b);
+    const fq = pick("_tq"), fp = pick("_tp"), fo = pick("_to");
+    const out = { ...b };
+    ITEM_OTHER_FIELDS.forEach((key) => { if (fo[key] !== undefined) out[key] = fo[key]; else delete out[key]; });
+    out._to = fo._to; out._o = fo._o;
+    out.quantity = fq.quantity; out._tq = fq._tq; out._q = fq._q;
+    out.unitAdjusted = fq.unitAdjusted !== undefined ? fq.unitAdjusted : out.unitAdjusted;
+    out.unitPrice = fp.unitPrice; out._tp = fp._tp; out._p = fp._p;
+    if (fq !== b || fp !== b) {
+      out.subtotal = Number(out.quantity || 0) * Number(out.unitPrice || 0);
+      out.ivaAmount = out.subtotal * (Number(out.ivaRate || 0) / 100);
+      out.totalWithIva = out.subtotal + out.ivaAmount;
+    }
+    return out;
+  }
+  // Junta dos copias del mismo pedido producto por producto. Devuelve null si ninguna copia tiene
+  // horas por producto (pedidos de antes de este cambio): ahi sigue mandando la copia mas nueva.
+  function mergeOrderCopies(a, b) {
+    if (!a || !b) return null;
+    const sellado = (order) => (order.items || []).some((item) => item && (item._tq || item._tp || item._to)) || !!(order.removedItems && Object.keys(order.removedItems).length);
+    if (!sellado(a) && !sellado(b)) return null;
+    const nuevo = String(b.updatedAt || "") >= String(a.updatedAt || "") ? b : a;
+    const viejo = nuevo === b ? a : b;
+    const quitados = { ...(viejo.removedItems || {}) };
+    Object.keys(nuevo.removedItems || {}).forEach((id) => { if (String(nuevo.removedItems[id]) > String(quitados[id] || "")) quitados[id] = nuevo.removedItems[id]; });
+    const delViejo = new Map((viejo.items || []).filter((item) => item && item.id).map((item) => [item.id, item]));
+    const items = [];
+    const vistos = new Set();
+    (nuevo.items || []).forEach((item) => {
+      if (!item || !item.id) { if (item) items.push(item); return; }
+      vistos.add(item.id);
+      const otro = delViejo.get(item.id);
+      const junto = otro ? mergeItemCopies(otro, item) : item;
+      if (quitados[item.id] && String(quitados[item.id]) >= itemStampTime(junto)) return;
+      items.push(junto);
+    });
+    (viejo.items || []).forEach((item) => {
+      if (!item || !item.id || vistos.has(item.id)) return;
+      // Solo en la copia vieja: si tiene hora propia y nadie lo quito despues, lo agrego otro
+      // dispositivo y se conserva. Sin hora (pedido anterior a este cambio) manda la copia nueva.
+      const t = itemStampTime(item);
+      if (!t) return;
+      if (quitados[item.id] && String(quitados[item.id]) >= t) return;
+      items.push(item);
+    });
+    Object.keys(quitados).forEach((id) => { if (items.some((item) => item && item.id === id)) delete quitados[id]; });
+    const out = { ...nuevo, items, updatedAt: [a.updatedAt, b.updatedAt].map((t) => String(t || "")).sort().pop() };
+    if (Object.keys(quitados).length) out.removedItems = quitados; else delete out.removedItems;
+    out._itemIds = items.map((item) => item && item.id).filter(Boolean);
+    // Totales a partir de los productos juntados (el envio y su IVA se toman de la copia nueva).
+    const ivaItemsNuevo = (nuevo.items || []).reduce((s, item) => s + Number((item && item.ivaAmount) || 0), 0);
+    const ivaEnvio = Math.max(0, Number(nuevo.ivaAmount || 0) - ivaItemsNuevo);
+    const envio = Math.max(0, Number(nuevo.shippingFee || 0) || 0);
+    out.subtotalAmount = items.reduce((s, item) => s + Number((item && item.subtotal) || 0), 0);
+    out.ivaAmount = items.reduce((s, item) => s + Number((item && item.ivaAmount) || 0), 0) + ivaEnvio;
+    out.totalAmount = out.subtotalAmount + out.ivaAmount + envio;
+    return out;
+  }
+
   function recalcOrderTotals(order) {
     order.subtotalAmount = order.items.reduce((sum, item) => sum + Number(item.subtotal || 0), 0);
     const itemsIva = order.items.reduce((sum, item) => sum + Number(item.ivaAmount || 0), 0);
@@ -21138,6 +21332,8 @@
     order.ivaAmount = itemsIva + shippingIva;
     order.totalAmount = order.subtotalAmount + order.ivaAmount + shipping;
     order.updatedAt = new Date().toISOString();
+    const sincronizado = lastSyncedState && Array.isArray(lastSyncedState.orders) ? lastSyncedState.orders.find((o) => o && o.id === order.id) : null;
+    stampOrderItemChanges(order, order.updatedAt, sincronizado);
   }
 
   function updateOrderAccounting(order) {
