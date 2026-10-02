@@ -1354,7 +1354,10 @@ app.post("/state/patch", authenticate, requireRole(...PATCH_SYNC_ROLES), async (
       await clientDb.query("ROLLBACK");
       return res.status(404).json({ error: "Sin datos guardados todavía." });
     }
-    if (body.baseUpdatedAt === undefined || body.baseUpdatedAt === null) {
+    // Sin version base (el navegador todavia no bajo el estado): se acepta igual si solo agrega o
+    // modifica registros (horarios, cierres de caja, pedidos, pagos...). Antes se rechazaba y el
+    // cierre de caja quedaba solo en ese navegador.
+    if ((body.baseUpdatedAt === undefined || body.baseUpdatedAt === null) && !canApplyStaleEmployeePatch(body.patch)) {
       await clientDb.query("ROLLBACK");
       return res.status(409).json({ error: "conflicto: operación sin version base. Descargue primero.", updatedAt: current.rows[0].updated_at.toISOString() });
     }

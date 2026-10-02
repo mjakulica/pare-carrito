@@ -5,7 +5,7 @@
   const USER_KEY = "lpc_current_user_v1";
   const OPERATIONAL_RESET_VERSION = "20260610-operational-clean-1";
   const BUSINESS_NAME = "Pare Carrito SAS";
-  const APP_VERSION = "v35";
+  const APP_VERSION = "v36";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -461,6 +461,7 @@
   }
 
   window.addEventListener("DOMContentLoaded", () => {
+    captureSessionBootIds();
     // La pantalla se dibuja PRIMERO, con los datos que ya tiene el dispositivo, y la descarga va
     // despues en segundo plano (al terminar vuelve a dibujar sola). Antes se esperaba la descarga
     // ANTES de dibujar: si tardaba o se colgaba, la pantalla quedaba en blanco sin explicacion.
@@ -1396,8 +1397,45 @@
     if (operationId) patchSyncedStates.set(operationId, snapshot);
   }
 
+  // Registros que se pueden mandar aunque el navegador no tenga la ultima version del servidor:
+  // solo se agregan o modifican (nunca se borra) y el servidor junta cada uno por fecha.
+  const SESSION_SAFE_KEYS = [
+    "orders", "remitos", "saldos", "purchases", "payments", "caja",
+    "providerLedger", "providerPayments", "clientTransfers", "vendorLedger",
+    "attendance", "employeePayments", "employeeReimbursements", "performanceAdjustments",
+    "replacements", "stockMovements", "cashClosings"
+  ];
+  const SESSION_START_ISO = new Date().toISOString();
+  let sessionBootIds = null;
+  // Ids que ya estaban al abrir el sistema: lo que no esta aca se creo en esta sesion.
+  function captureSessionBootIds() {
+    if (sessionBootIds) return;
+    sessionBootIds = new Map(SESSION_SAFE_KEYS.map((key) => [key, new Set((Array.isArray(state[key]) ? state[key] : []).map((row) => String((row && row.id) || "")))]));
+  }
+
+  // Sin version base (la descarga del servidor todavia no termino o fallo: tipico al abrir el
+  // celular) antes no se mandaba NADA: se intentaba subir el estado completo, que a los empleados
+  // no se les permite, y el horario o el cierre de caja quedaba solo en ese navegador aunque
+  // dijera "guardado". Ahora se mandan igual los registros creados o modificados en esta sesion.
+  function queueSessionRecordsPatch() {
+    captureSessionBootIds();
+    const arrays = {};
+    SESSION_SAFE_KEYS.forEach((key) => {
+      const boot = sessionBootIds.get(key) || new Set();
+      const rows = (Array.isArray(state[key]) ? state[key] : []).filter((row) => row && row.id
+        && (!boot.has(String(row.id)) || String(row.updatedAt || row.timestamp || "") >= SESSION_START_ISO));
+      if (rows.length) arrays[key] = { upsert: JSON.parse(JSON.stringify(rows)) };
+    });
+    if (!Object.keys(arrays).length) return false;
+    const operationId = "op-" + Date.now() + "-" + Math.random().toString(36).slice(2, 10);
+    savePatchQueue([{ operationId, operationType: "patch", baseUpdatedAt: null, sessionOnly: true, patch: { arrays }, createdAt: new Date().toISOString() }]);
+    ui.syncStatus = navigator.onLine === false ? "Cambios pendientes sin conexión" : "Cambios pendientes por sincronizar";
+    return true;
+  }
+
   function queueCurrentStatePatch() {
     const config = getCloudSyncConfig();
+    if (!lastSyncedState && config.url && (config.lastSync || !canWriteFullCloudSync())) return queueSessionRecordsPatch();
     if (!config.lastSync || !lastSyncedState) return false;
     if (!pendingPatchBaseState) {
       const existing = loadPatchQueue()[0];
@@ -1591,6 +1629,17 @@
         return false;
       }
       if (!response.ok) throw new Error("HTTP " + response.status + (await readCloudErrorDetail(response)));
+      if (op.sessionOnly && response.ok) {
+        // Quedo guardado en el servidor, pero este navegador sigue sin su version: no se marca como
+        // sincronizado (eso haria saltear la descarga). Se baja el estado para quedar al dia.
+        savePatchQueue(loadPatchQueue().filter((entry) => entry.operationId !== sentOperationId));
+        patchSyncedStates.delete(sentOperationId);
+        config.lastError = "";
+        saveCloudSyncConfig(config);
+        ui.syncStatus = "Guardado";
+        setTimeout(() => { cloudPull(false, true).catch(() => {}); }, 500);
+        return true;
+      }
       const payload = await response.json();
       config.lastSync = payload.updatedAt || new Date().toISOString();
       config.lastError = "";
@@ -22037,10 +22086,19 @@
     return "largo";
   }
 
+  // El numero correlativo se calcula con lo que tiene ESTE navegador: si dos equipos cargan algo
+  // casi a la vez sin haber bajado lo del otro, salia el mismo id (ej. ATT-20261002-005) y en el
+  // servidor el segundo pisaba al primero (horarios, cierres o pedidos que desaparecian). Se agrega
+  // un sufijo al azar para que nunca coincidan; el formato visible sigue igual.
   function nextDatedId(prefix, collection) {
     const date = todayISO().replaceAll("-", "");
     const samePrefix = collection.filter((item) => String(item.id || "").startsWith(prefix + "-" + date)).length + 1;
-    return prefix + "-" + date + "-" + String(samePrefix).padStart(3, "0");
+    const base = prefix + "-" + date + "-" + String(samePrefix).padStart(3, "0");
+    let id;
+    do {
+      id = base + "-" + Math.random().toString(36).slice(2, 5).toUpperCase();
+    } while (collection.some((item) => item && item.id === id));
+    return id;
   }
 
   function nextProviderId() {
