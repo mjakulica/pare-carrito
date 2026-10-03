@@ -140,6 +140,19 @@ a {
   font-weight: 800;
 }
 
+/* Version del sistema junto al nombre: sirve para confirmar que el navegador tiene la ultima. */
+.brand-version {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  font-size: 11px;
+  font-weight: 700;
+  vertical-align: middle;
+  letter-spacing: 0.02em;
+}
+
 .brand-subtitle {
   margin-top: 4px;
   color: rgba(234, 246, 240, 0.72);
