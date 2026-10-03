@@ -1387,7 +1387,10 @@ app.post("/state/patch", authenticate, requireRole(...PATCH_SYNC_ROLES), async (
     await syncUsersFromState(clientDb, nextData);
     await clientDb.query("COMMIT");
     syncSheetsFromStateDiff(beforeData, nextData);
-    res.json({ ok: true, updatedAt: saved.rows[0].updated_at.toISOString() });
+    // staleBase: el parche se aplico sobre una version mas nueva que la que tenia el equipo. El
+    // equipo NO queda al dia: tiene que bajar el estado (si se marcara al dia, nunca recibiria lo
+    // que cargaron los demas).
+    res.json({ ok: true, updatedAt: saved.rows[0].updated_at.toISOString(), staleBase: storedIso !== String(body.baseUpdatedAt) });
   } catch (error) {
     await clientDb.query("ROLLBACK").catch(() => {});
     console.error("POST /state/patch:", error);
