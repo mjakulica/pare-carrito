@@ -1,0 +1,119 @@
+# Pruebas y deploy automatico de Pare Carrito SAS.
+#
+# - En cada push y en cada pull request: corre las pruebas.
+# - Cuando el cambio llega a master y las pruebas pasan: se conecta al VPS por SSH y dispara
+#   ci-deploy.sh (la clave solo puede correr ese script). Si algo falla, no se despliega.
+#
+# Secretos que tiene que tener el repo (Settings -> Secrets and variables -> Actions):
+#   VPS_HOST         IP o dominio del VPS
+#   VPS_SSH_KEY      clave PRIVADA de deploy (la publica va en /root/.ssh/authorized_keys del VPS)
+#   VPS_KNOWN_HOSTS  salida de `ssh-keyscan -t ed25519 <VPS_HOST>`, para no conectarse a un impostor
+# Ver "Deploy automatico" en pare-carrito-sas-server/README.md.
+
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+# Un push nuevo cancela las pruebas viejas de esa rama, salvo en master: ahi un run puede estar
+# desplegando y no se corta.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
+jobs:
+  pruebas:
+    name: Pruebas
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      db:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: parecarrito
+          POSTGRES_PASSWORD: parecarrito
+          POSTGRES_DB: parecarrito
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U parecarrito -d parecarrito"
+          --health-interval 5s --health-timeout 3s --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Sintaxis de todo el JavaScript (web, API y bot)
+        run: |
+          set -e
+          archivos=$(git ls-files 'lucas-pare-carrito-erp/*.js' 'pare-carrito-sas-server/*.js' 'whatsapp-bot/*.js')
+          for f in $archivos; do node --check "$f"; done
+          echo "OK: $(echo "$archivos" | wc -l) archivos"
+
+      - name: Version de la web coherente (app.js, version.json e index.html)
+        run: |
+          set -e
+          app=$(grep -oE 'const APP_VERSION = "v[0-9]+"' lucas-pare-carrito-erp/assets/app.js | grep -oE 'v[0-9]+')
+          json=$(node -p 'require("./lucas-pare-carrito-erp/version.json").version')
+          echo "app.js=$app version.json=$json"
+          if [ "$app" != "$json" ]; then
+            echo "::error::APP_VERSION ($app) y version.json ($json) no coinciden: los dispositivos se actualizarian en loop."
+            exit 1
+          fi
+          if ! grep -q "app.js?v=[0-9]*-$app\"" lucas-pare-carrito-erp/index.html; then
+            echo "::error::index.html no carga app.js?v=...-$app: los navegadores podrian quedarse con el app.js viejo."
+            exit 1
+          fi
+          node -e 'JSON.parse(require("fs").readFileSync("lucas-pare-carrito-erp/manifest.json","utf8"))'
+
+      - name: Scripts de deploy
+        run: bash -n deploy.sh && bash -n ci-deploy.sh
+
+      - name: Dependencias de la API
+        working-directory: pare-carrito-sas-server
+        run: npm ci --no-audit --no-fund
+
+      - name: Prueba de la API contra una base vacia
+        working-directory: pare-carrito-sas-server
+        env:
+          DATABASE_URL: postgres://parecarrito:parecarrito@localhost:5432/parecarrito
+          JWT_SECRET: prueba-de-ci-no-es-un-secreto-real-0123456789
+        run: node test/smoke.js
+
+      - name: Build de las imagenes Docker (API y bot)
+        run: |
+          docker build -q -t prueba-api pare-carrito-sas-server
+          docker build -q -t prueba-bot whatsapp-bot
+
+  deploy:
+    name: Deploy al VPS
+    needs: pruebas
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Los deploys van de a uno y nunca se cancelan a mitad de camino.
+    concurrency:
+      group: deploy-produccion
+      cancel-in-progress: false
+    steps:
+      - name: Disparar ci-deploy.sh en el VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          set -e
+          if [ -z "$VPS_HOST" ] || [ -z "$VPS_SSH_KEY" ] || [ -z "$VPS_KNOWN_HOSTS" ]; then
+            echo "::error::Faltan los secretos VPS_HOST, VPS_SSH_KEY o VPS_KNOWN_HOSTS (ver README del servidor)."
+            exit 1
+          fi
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          # El comando que se manda no importa: el VPS solo deja correr ci-deploy.sh con esta clave.
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes -o BatchMode=yes \
+              -o ServerAliveInterval=30 root@"$VPS_HOST" deploy
