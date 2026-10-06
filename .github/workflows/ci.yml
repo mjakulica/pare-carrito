@@ -73,9 +73,10 @@ jobs:
       - name: Scripts de deploy
         run: bash -n deploy.sh && bash -n ci-deploy.sh
 
+      # Igual que el Dockerfile: npm install con el package.json (el contenedor no usa el lock).
       - name: Dependencias de la API
         working-directory: pare-carrito-sas-server
-        run: npm ci --no-audit --no-fund
+        run: npm install --omit=dev --no-audit --no-fund
 
       - name: Prueba de la API contra una base vacia
         working-directory: pare-carrito-sas-server
