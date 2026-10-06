@@ -3126,9 +3126,11 @@ tr:last-child td {
     padding: 0 2px;
   }
 
+  /* Celular: Fecha y Presente en una fila, Inicio y Fin en otra. Con 4 columnas dentro de media
+     pantalla cada campo quedaba de ~40px y la hora de fin se salia por debajo del recuadro de al lado. */
   .attendance-form-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 6px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
   }
 
   .attendance-form-grid .field {
@@ -3148,6 +3150,9 @@ tr:last-child td {
 
   .attendance-form-grid input,
   .attendance-form-grid select {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
     min-height: var(--tap);
     padding: 5px 6px;
     font-size: 12px;
@@ -3171,8 +3176,9 @@ tr:last-child td {
     font-size: 11px;
   }
 
+  /* Horario e Ingreso de efectivo uno debajo del otro: lado a lado no entraban en el celular. */
   .grid.two.attendance-middle-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: 1fr;
     gap: 10px;
     align-items: start;
   }
