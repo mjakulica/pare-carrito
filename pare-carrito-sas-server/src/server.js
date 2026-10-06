@@ -1002,8 +1002,11 @@ function serverProductCost(data, productId) {
   const cost = rec && Number(rec.cost) > 0 ? Number(rec.cost) : (product ? Number(product.baseCost || 0) : 0);
   return Math.max(0, cost);
 }
-function repriceOrdersOnServer(beforeData, nextData, nowIso) {
+// fechasCompletas: dias en los que se reprecian TODOS los productos de todos los pedidos con la lista
+// actual (boton "Aplicar la lista de precios" de Remitos), para corregir pedidos que quedaron viejos.
+function repriceOrdersOnServer(beforeData, nextData, nowIso, fechasCompletas) {
   if (!nextData || !Array.isArray(nextData.orders)) return 0;
+  const completas = fechasCompletas instanceof Set ? fechasCompletas : new Set();
   const hoy = nowArt().dateISO;
   const porFecha = new Map(); // fecha -> Set(productId)
   const marcar = (fecha, pid) => { if (!fecha || !pid) return; if (!porFecha.has(fecha)) porFecha.set(fecha, new Set()); porFecha.get(fecha).add(String(pid)); };
@@ -1026,12 +1029,12 @@ function repriceOrdersOnServer(beforeData, nextData, nowIso) {
   //    cargados a mano, las reposiciones y la carga historica (ids IMP-) no se tocan.
   const idsAntes = new Set(((beforeData && beforeData.orders) || []).filter(Boolean).map((o) => String(o.id)));
   const nuevos = new Set(nextData.orders.filter((o) => o && !idsAntes.has(String(o.id)) && !/^IMP/i.test(String(o.id))).map((o) => String(o.id)));
-  if (!porFecha.size && !nuevos.size) return 0;
+  if (!porFecha.size && !nuevos.size && !completas.size) return 0;
   const clientes = new Map((nextData.clients || []).filter(Boolean).map((c) => [String(c.id), c]));
   const productos = new Map((nextData.products || []).filter(Boolean).map((p) => [String(p.id), p]));
   const cambiados = new Map();
   nextData.orders = nextData.orders.map((order) => {
-    const esNuevo = order && nuevos.has(String(order.id));
+    const esNuevo = order && (nuevos.has(String(order.id)) || (completas.has(order.date) && !/^IMP/i.test(String(order.id))));
     if (!order || ["cancelado", "anulado"].includes(order.status) || (!porFecha.has(order.date) && !esNuevo) || !Array.isArray(order.items)) return order;
     // Reposiciones: van sin cargo a proposito.
     if (/reposici[oó]n de /i.test(String(order.notes || ""))) return order;
@@ -1560,6 +1563,44 @@ app.put("/state", authenticate, requireRole(...SYNC_ROLES), async (req, res) => 
     await clientDb.query("ROLLBACK").catch(() => {});
     console.error("PUT /state:", error);
     res.status(500).json({ error: "No se pudo guardar el estado: " + error.message });
+  } finally {
+    clientDb.release();
+  }
+});
+
+// Aplica la lista de precios ACTUAL a todos los pedidos de un dia (salvo precios cargados a mano,
+// reposiciones y carga historica). Lo hace el servidor sobre todos los pedidos, no un equipo sobre
+// los que tiene: asi el resultado es el mismo en todos los dispositivos.
+app.post("/orders/reprice-day", authenticate, requireRole("manager", "admin"), async (req, res) => {
+  const fecha = String((req.body && req.body.date) || "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return res.status(400).json({ error: "Fecha invalida." });
+  const clientDb = await pool.connect();
+  try {
+    await clientDb.query("BEGIN");
+    const current = await clientDb.query("SELECT data FROM app_state WHERE id = 'main' FOR UPDATE");
+    if (!current.rows.length) { await clientDb.query("ROLLBACK"); return res.status(404).json({ error: "Sin datos guardados todavía." }); }
+    const beforeData = current.rows[0].data || {};
+    const nextData = JSON.parse(JSON.stringify(beforeData));
+    const pedidosDelDia = (nextData.orders || []).filter((o) => o && o.date === fecha && !["cancelado", "anulado"].includes(o.status)).length;
+    const cambiados = repriceOrdersOnServer(beforeData, nextData, new Date().toISOString(), new Set([fecha]));
+    if (!cambiados) {
+      await clientDb.query("ROLLBACK");
+      return res.json({ ok: true, date: fecha, orders: pedidosDelDia, changed: 0 });
+    }
+    const saved = await clientDb.query(
+      "UPDATE app_state SET data = $1, updated_at = now(), updated_by = $2 WHERE id = 'main' RETURNING updated_at",
+      [nextData, req.user.username]
+    );
+    await clientDb.query("INSERT INTO state_history (data, updated_by) VALUES ($1, $2)", [nextData, req.user.username + " (precios del " + fecha + ")"]);
+    await clientDb.query("DELETE FROM state_history WHERE id NOT IN (SELECT id FROM state_history ORDER BY id DESC LIMIT $1)", [STATE_HISTORY_KEEP]);
+    await mirrorStateToTables(clientDb, nextData, beforeData);
+    await clientDb.query("COMMIT");
+    syncSheetsFromStateDiff(beforeData, nextData);
+    res.json({ ok: true, date: fecha, orders: pedidosDelDia, changed: cambiados, updatedAt: saved.rows[0].updated_at.toISOString() });
+  } catch (error) {
+    await clientDb.query("ROLLBACK").catch(() => {});
+    console.error("POST /orders/reprice-day:", error);
+    res.status(500).json({ error: "No se pudieron recalcular los precios: " + error.message });
   } finally {
     clientDb.release();
   }
