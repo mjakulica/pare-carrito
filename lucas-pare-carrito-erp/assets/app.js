@@ -5,7 +5,7 @@
   const USER_KEY = "lpc_current_user_v1";
   const OPERATIONAL_RESET_VERSION = "20260610-operational-clean-1";
   const BUSINESS_NAME = "Pare Carrito SAS";
-  const APP_VERSION = "v45";
+  const APP_VERSION = "v46";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -452,6 +452,7 @@
     if (active && ["INPUT", "TEXTAREA", "SELECT"].includes(active.tagName)) return true;
     if (ui.modal) return true;
     if (purchaseFormTouched && document.getElementById("purchase-items")) return true;
+    if (formTouchedRecently()) return true;
     const draft = ui.orderDraft && typeof ui.orderDraft === "object" ? Object.values(ui.orderDraft) : [];
     if (draft.some((entry) => entry && (Number(entry.quantity) > 0 || entry.note))) return true;
     const pegado = document.getElementById("whatsapp-order-text") || document.querySelector("textarea");
@@ -1931,6 +1932,17 @@
   // cargando (con un proveedor elegido ademas volvia a "Todos" y recargaba la lista).
   let purchaseFormTouched = false;
   function markPurchaseFormTouched() { purchaseFormTouched = true; }
+  // Lo mismo para cualquier otro formulario: en el celular, los selectores de fecha y hora no dejan
+  // el foco en el campo, asi que el chequeo de "esta escribiendo" no los protegia y el redibujo
+  // devolvia el campo a su valor inicial (Horarios guardaba la hora del momento y la fecha de hoy).
+  // Se respeta hasta 10 minutos: si el formulario queda abandonado, la pantalla se vuelve a actualizar.
+  const FORM_TOUCH_HOLD_MS = 10 * 60 * 1000;
+  let formTouchedAt = 0;
+  ["input", "change"].forEach((tipo) => document.addEventListener(tipo, (event) => {
+    const target = event.target;
+    if (event.isTrusted && target && target.closest && target.closest("#app form")) formTouchedAt = Date.now();
+  }, true));
+  function formTouchedRecently() { return formTouchedAt > 0 && Date.now() - formTouchedAt < FORM_TOUCH_HOLD_MS; }
 
   let cloudPollTimer = null;
 
@@ -2364,8 +2376,12 @@
       // Aviso visible mientras baja el estado. En el celular la primera descarga despues de abrir
       // la app puede tardar bastante (es todo el estado de la ventana) y sin esto las paginas se
       // ven vacias sin explicacion, como si no hubiera pedidos.
-      ui.syncDownloading = true;
-      render();
+      // Solo al abrir la app o a pedido: en el sondeo automatico este redibujo pasaba ANTES de los
+      // chequeos de abajo y borraba lo que se estaba cargando en cualquier formulario.
+      if (manual || isLogin) {
+        ui.syncDownloading = true;
+        render();
+      }
       const response = await cloudRequest(config, "/state" + query, { method: "GET" });
       if (response.status === 404) {
         // Servidor sin datos todavia (primera vez): respondio, asi que este equipo esta "al dia".
@@ -2390,6 +2406,7 @@
         if (typing || ui.modal || cloudPushTimer) return;
         // Solo frena si el formulario de compras sigue en pantalla con algo cargado a mano.
         if (purchaseFormTouched && document.getElementById("purchase-items")) return;
+        if (formTouchedRecently()) return;
       }
       const localUnsyncedChanges = hasLocalUnsyncedPatchChanges();
       if (!manual && !isLogin && localUnsyncedChanges) {
@@ -2551,6 +2568,7 @@
   function render() {
     try {
       purchaseFormTouched = false;
+      formTouchedAt = 0;
       renderInner();
     } catch (error) {
       // Nunca dejar la pantalla en blanco: si algo falla al dibujar, se muestra el motivo.
@@ -13299,7 +13317,7 @@
     const empLogFrom = ui.employeeLogFrom || addDaysISO(todayISO(), -29);
     const empLogTo = ui.employeeLogTo || todayISO();
     ui.employeeLogFrom = empLogFrom; ui.employeeLogTo = empLogTo;
-    const todayEntry = getAttendanceEntry(currentUser.id, todayISO());
+    const att = attendanceFormValues();
     // Fecha del cierre de caja: hoy por defecto, pero se puede cargar el de un dia anterior.
     if (!ui.ccDate || ui.ccDate > todayISO()) ui.ccDate = todayISO();
     const ccToday = ui.ccDate;
@@ -13342,17 +13360,17 @@
       <div class="grid two attendance-middle-grid" style="margin-top:14px">
         <form id="attendance-form" class="panel">
           <div class="form-grid attendance-form-grid">
-            <div class="field"><label>Fecha</label><input type="date" id="attendance-date" value="${todayEntry ? todayEntry.date : todayISO()}" /></div>
+            <div class="field"><label>Fecha</label><input type="date" id="attendance-date" max="${todayISO()}" value="${escapeAttr(att.date)}" /></div>
             <div class="field attendance-present-field">
               <label>Presente</label>
               <label class="check-item">
-                <input type="checkbox" id="attendance-present" ${!todayEntry || todayEntry.present ? "checked" : ""} />
+                <input type="checkbox" id="attendance-present" ${att.present ? "checked" : ""} />
                 <span>Presente</span>
               </label>
             </div>
-            <div class="field"><label>Inicio</label><input type="time" id="attendance-start" value="${escapeAttr(todayEntry ? todayEntry.startTime || "05:45" : "05:45")}" /></div>
-            <div class="field"><label>Fin del dia</label><input type="time" id="attendance-end" value="${escapeAttr(todayEntry ? todayEntry.endTime || currentTimeHHMM() : currentTimeHHMM())}" /></div>
-            <div class="field span-4"><label>Notas</label><input id="attendance-notes" value="${escapeAttr(todayEntry ? todayEntry.notes || "" : "")}" placeholder="Retiro temprano, franco, reemplazo, etc." /></div>
+            <div class="field"><label>Inicio</label><input type="time" id="attendance-start" value="${escapeAttr(att.startTime)}" /></div>
+            <div class="field"><label>Fin del dia</label><input type="time" id="attendance-end" value="${escapeAttr(att.endTime)}" /></div>
+            <div class="field span-4"><label>Notas</label><input id="attendance-notes" value="${escapeAttr(att.notes)}" placeholder="Retiro temprano, franco, reemplazo, etc." /></div>
           </div>
           <div class="page-actions attendance-form-actions" style="margin-top:12px"><button class="btn primary" type="submit">Guardar horario</button></div>
         </form>
@@ -13464,18 +13482,40 @@
       });
     }
 
-    document.getElementById("attendance-form").addEventListener("submit", (event) => {
+    const attForm = document.getElementById("attendance-form");
+    const attField = (id) => document.getElementById(id);
+    const leerAtt = () => ({
+      userId: currentUser.id,
+      date: attField("attendance-date").value || todayISO(),
+      present: attField("attendance-present").checked,
+      startTime: attField("attendance-start").value,
+      endTime: attField("attendance-end").value,
+      notes: attField("attendance-notes").value
+    });
+    // Cada cambio queda guardado en pantalla: si la pagina se redibuja, no se pierde.
+    attForm.addEventListener("input", () => { ui.attendanceDraft = leerAtt(); });
+    attForm.addEventListener("change", (event) => {
+      if (event.target && event.target.id === "attendance-date") {
+        // Otro dia: se muestran los datos ya cargados para esa fecha (o los de por defecto).
+        ui.attendanceDraft = null;
+        const valores = attendanceFormValues(attField("attendance-date").value || todayISO());
+        attField("attendance-present").checked = valores.present;
+        attField("attendance-start").value = valores.startTime;
+        attField("attendance-end").value = valores.endTime;
+        attField("attendance-notes").value = valores.notes;
+      }
+      ui.attendanceDraft = leerAtt();
+    });
+    attForm.addEventListener("submit", (event) => {
       event.preventDefault();
-      upsertAttendance({
-        userId: currentUser.id,
-        date: document.getElementById("attendance-date").value || todayISO(),
-        present: document.getElementById("attendance-present").checked,
-        startTime: document.getElementById("attendance-start").value,
-        endTime: document.getElementById("attendance-end").value,
-        notes: document.getElementById("attendance-notes").value.trim()
-      });
+      const datos = leerAtt();
+      if (datos.date > todayISO()) return alert("No se puede cargar el horario de un dia que todavia no paso.");
+      if (datos.present && (!datos.startTime || !datos.endTime)) return alert("Carga la hora de inicio y la de fin del dia.");
+      if (datos.present && datos.endTime <= datos.startTime) return alert("La hora de fin tiene que ser posterior a la de inicio.");
+      upsertAttendance({ ...datos, notes: datos.notes.trim() });
+      ui.attendanceDraft = null;
       saveState();
-      alert("Horario guardado.");
+      alert("Horario del " + formatDate(datos.date) + " guardado: " + (datos.present ? datos.startTime + " a " + datos.endTime : "ausente") + ".");
       render();
     });
     const reimbursementForm = document.getElementById("employee-reimbursement-form");
@@ -19766,6 +19806,24 @@
 
   function getAttendanceEntry(userId, date) {
     return state.attendance.find((entry) => entry.userId === userId && entry.date === date);
+  }
+
+  // Valores del formulario de Horarios: lo que se esta cargando (si hay) o lo guardado para esa
+  // fecha. Sin nada guardado, el fin del dia por defecto es la hora actual solo si es HOY; para un
+  // dia anterior queda vacio, para que no se guarde sin querer la hora del momento.
+  function attendanceFormValues(fecha) {
+    const draft = ui.attendanceDraft;
+    if (!fecha && draft && draft.userId === currentUser.id && draft.date) return draft;
+    const date = fecha || todayISO();
+    const entry = getAttendanceEntry(currentUser.id, date);
+    return {
+      userId: currentUser.id,
+      date,
+      present: entry ? !!entry.present : true,
+      startTime: entry ? entry.startTime || "05:45" : "05:45",
+      endTime: entry && entry.endTime ? entry.endTime : (date === todayISO() ? currentTimeHHMM() : ""),
+      notes: entry ? entry.notes || "" : ""
+    };
   }
 
   function upsertAttendance(payload) {
