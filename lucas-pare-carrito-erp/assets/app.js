@@ -5,7 +5,7 @@
   const USER_KEY = "lpc_current_user_v1";
   const OPERATIONAL_RESET_VERSION = "20260610-operational-clean-1";
   const BUSINESS_NAME = "Pare Carrito SAS";
-  const APP_VERSION = "v39";
+  const APP_VERSION = "v40";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -17060,10 +17060,10 @@
     const itemRows = order.items.map((item) => `
       <div class="order-edit-line" data-edit-order-item="${item.id}">
         <strong>${escapeHtml(item.productName)}</strong>
-        <div class="field"><label>Cantidad</label><input data-edit-qty inputmode="decimal" value="${formatAmountInput(item.quantity)}" /></div>
-        ${isCustomerEdit ? `<input type="hidden" data-edit-unit value="${escapeAttr(item.unitType)}" />` : `<div class="field"><label>Unidad</label><select data-edit-unit>${unitOptions(item.unitType)}</select></div>`}
-        ${isCustomerEdit ? `<input type="hidden" data-edit-price value="${formatAmountInput(item.unitPrice)}" />` : `<div class="field"><label>Precio</label><input data-edit-price inputmode="decimal" value="${formatAmountInput(item.unitPrice)}" /></div>`}
-        <div class="field"><label>Nota</label><div class="edit-note-row"><input data-edit-note value="${escapeAttr(item.note || "")}" /><button class="btn small danger edit-remove-btn" type="button" data-edit-remove title="Quitar producto">X</button></div></div>
+        <div class="field"><label>Cantidad</label><input data-edit-qty inputmode="decimal" value="${formatAmountInput(item.quantity)}" data-orig="${escapeAttr(formatAmountInput(item.quantity))}" /></div>
+        ${isCustomerEdit ? `<input type="hidden" data-edit-unit value="${escapeAttr(item.unitType)}" data-orig="${escapeAttr(item.unitType)}" />` : `<div class="field"><label>Unidad</label><select data-edit-unit data-orig="${escapeAttr(item.unitType)}">${unitOptions(item.unitType)}</select></div>`}
+        ${isCustomerEdit ? `<input type="hidden" data-edit-price value="${formatAmountInput(item.unitPrice)}" data-orig="${escapeAttr(formatAmountInput(item.unitPrice))}" />` : `<div class="field"><label>Precio</label><input data-edit-price inputmode="decimal" value="${formatAmountInput(item.unitPrice)}" data-orig="${escapeAttr(formatAmountInput(item.unitPrice))}" /></div>`}
+        <div class="field"><label>Nota</label><div class="edit-note-row"><input data-edit-note value="${escapeAttr(item.note || "")}" data-orig="${escapeAttr(item.note || "")}" /><button class="btn small danger edit-remove-btn" type="button" data-edit-remove title="Quitar producto">X</button></div></div>
       </div>
     `).join("");
     showModal(
@@ -17110,7 +17110,10 @@
           const focusQty = focusRow && focusRow.querySelector("[data-edit-qty]");
           if (focusQty) { focusQty.focus(); if (focusQty.select) focusQty.select(); }
         }
-        document.getElementById("modal-save").addEventListener("click", () => {
+        // Al guardar se toma el pedido ACTUAL: si mientras el formulario estaba abierto llegaron datos
+        // del servidor, la copia de cuando se abrio ya no es la del sistema y lo editado se perdia.
+        document.getElementById("modal-save").addEventListener("click", ((pedidoAlAbrir) => () => {
+          const order = getOrder(pedidoAlAbrir.id) || pedidoAlAbrir;
           if (isCustomerEdit && !canCustomerEditOrder(order)) return alert("Este pedido ya no se puede editar desde el portal.");
           order.date = document.getElementById("edit-order-date").value || order.date;
           if (!isCustomerEdit) {
@@ -17125,10 +17128,14 @@
             if (!item) return;
             const product = getProduct(item.productId);
             const client = getClient(order.clientId);
-            item.quantity = parseAmount(row.querySelector("[data-edit-qty]").value);
-            item.unitType = row.querySelector("[data-edit-unit]").value;
-            item.unitPrice = parseAmount(row.querySelector("[data-edit-price]").value);
-            item.note = row.querySelector("[data-edit-note]").value.trim();
+            // Solo se escribe lo que la persona cambio en el formulario. Antes se reescribian TODOS los
+            // datos con los valores de cuando se abrio: si mientras tanto una compra repreciaba el
+            // pedido o en Unidades se corregia un peso, al guardar volvia el precio o el peso viejo.
+            const tocado = (sel) => { const el = row.querySelector(sel); return el && String(el.value) !== String(el.dataset.orig == null ? el.value : el.dataset.orig); };
+            if (tocado("[data-edit-qty]")) item.quantity = parseAmount(row.querySelector("[data-edit-qty]").value);
+            if (tocado("[data-edit-unit]")) item.unitType = row.querySelector("[data-edit-unit]").value;
+            if (tocado("[data-edit-price]")) item.unitPrice = parseAmount(row.querySelector("[data-edit-price]").value);
+            if (tocado("[data-edit-note]")) item.note = row.querySelector("[data-edit-note]").value.trim();
             item.subtotal = item.quantity * item.unitPrice;
             item.ivaRate = shouldApplyInvoiceVat(client) ? getIvaRate(product && product.ivaType) : 0;
             item.ivaAmount = item.subtotal * (item.ivaRate / 100);
@@ -17158,7 +17165,7 @@
           if (removedNames.length) changeBits.push("sacamos " + removedNames.join(", "));
           if (changeBits.length) notifyOrderProductChange(order, changeBits.join(" y "));
           closeModal();
-        });
+        })(order));
       }
     );
   }
