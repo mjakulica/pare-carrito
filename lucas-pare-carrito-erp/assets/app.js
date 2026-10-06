@@ -5,7 +5,7 @@
   const USER_KEY = "lpc_current_user_v1";
   const OPERATIONAL_RESET_VERSION = "20260610-operational-clean-1";
   const BUSINESS_NAME = "Pare Carrito SAS";
-  const APP_VERSION = "v40";
+  const APP_VERSION = "v41";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -1886,6 +1886,15 @@
       }
       if (!response.ok) throw new Error("HTTP " + response.status + (await readCloudErrorDetail(response)));
       const payload = await response.json();
+      if (payload && payload.serverChanged) {
+        // El servidor reprecio pedidos al recibir esto: hay que bajar el resultado.
+        lastSyncedState = cloneSyncState(state);
+        config.lastError = "";
+        saveCloudSyncConfig(config);
+        setTimeout(() => { cloudPull(false).catch(() => {}); }, 400);
+        if (manual) alert("Datos subidos. El servidor actualizo precios de pedidos; se estan descargando.");
+        return;
+      }
       config.lastSync = payload.updatedAt || new Date().toISOString();
       config.lastError = "";
       saveCloudSyncConfig(config);
@@ -4746,10 +4755,13 @@
         if (!productId) return;
         const qty = parseAmount(row.querySelector("[data-qty]") ? row.querySelector("[data-qty]").value : "");
         const note = row.querySelector("[data-note]") ? row.querySelector("[data-note]").value.trim() : "";
-        const price = row.querySelector("[data-price]") ? parseAmount(row.querySelector("[data-price]").value) : 0;
+        const priceEl = row.querySelector("[data-price]");
+        const price = priceEl ? parseAmount(priceEl.value) : 0;
         const unitType = row.querySelector("[data-unit]") ? row.querySelector("[data-unit]").value : "";
+        // Precio escrito a mano en el pedido: el reprecio automatico (compras, Precios) no lo pisa.
+        const priceManual = !!(priceEl && priceEl.dataset.manual === "1") || !!(ui.orderDraft[productId] && ui.orderDraft[productId].priceManual);
         if (qty > 0 || note) {
-          ui.orderDraft[productId] = { productId, quantity: qty, note, price, unitType };
+          ui.orderDraft[productId] = { productId, quantity: qty, note, price, unitType, priceManual };
         } else if (ui.orderDraft[productId]) {
           delete ui.orderDraft[productId];
         }
@@ -4836,6 +4848,9 @@
     const applyOrderFilters = () => {
       renderProductWindow(true);
     };
+    form.addEventListener("input", (event) => {
+      if (event.isTrusted && event.target && event.target.matches && event.target.matches("[data-price]")) event.target.dataset.manual = "1";
+    });
     const updateOrderPricesForClient = (client) => {
       document.querySelectorAll("[data-product-row]").forEach((row) => {
         const product = getProduct(row.dataset.productRow);
@@ -5299,6 +5314,7 @@
         const unitPrice = parseAmount(entry.price);
         const unitType = entry.unitType || (product ? product.unitType : "");
         const note = String(entry.note || "").trim();
+        const priceManual = !!entry.priceManual;
         const subtotal = qty * unitPrice;
         const ivaRate = shouldApplyInvoiceVat(client) ? getIvaRate(product && product.ivaType) : 0;
         const ivaAmount = subtotal * (ivaRate / 100);
@@ -5315,6 +5331,7 @@
           ivaAmount,
           totalWithIva: subtotal + ivaAmount,
           note,
+          ...(priceManual ? { priceManual: true } : {}),
           assignedProviderId: "",
           assignedToType: "",
           assignedToId: ""
@@ -7028,7 +7045,11 @@
     if (ui.historyData && ui.historyData.from === from && ui.historyData.to === to) return;
     const config = getCloudSyncConfig();
     if (!cloudSyncReady(config)) {
-      ui.historyError = "No hay conexión configurada al servidor para cargar historiales.";
+      const aviso = "No hay conexión configurada al servidor para cargar historiales.";
+      // Solo se redibuja si el aviso es nuevo: al dibujarse la pagina vuelve a pedir el historial y,
+      // sin servidor, esto se llamaba a si mismo sin fin (la pagina se rompia).
+      if (ui.historyError === aviso) return;
+      ui.historyError = aviso;
       if (isCurrentPage() && options.forceRender !== false) render();
       return;
     }
@@ -17134,7 +17155,7 @@
             const tocado = (sel) => { const el = row.querySelector(sel); return el && String(el.value) !== String(el.dataset.orig == null ? el.value : el.dataset.orig); };
             if (tocado("[data-edit-qty]")) item.quantity = parseAmount(row.querySelector("[data-edit-qty]").value);
             if (tocado("[data-edit-unit]")) item.unitType = row.querySelector("[data-edit-unit]").value;
-            if (tocado("[data-edit-price]")) item.unitPrice = parseAmount(row.querySelector("[data-edit-price]").value);
+            if (tocado("[data-edit-price]")) { item.unitPrice = parseAmount(row.querySelector("[data-edit-price]").value); item.priceManual = true; }
             if (tocado("[data-edit-note]")) item.note = row.querySelector("[data-edit-note]").value.trim();
             item.subtotal = item.quantity * item.unitPrice;
             item.ivaRate = shouldApplyInvoiceVat(client) ? getIvaRate(product && product.ivaType) : 0;
@@ -20789,7 +20810,7 @@
   // los totales del pedido y el saldo del cliente (updateOrderAccounting).
   function recalcDayPricesFromPurchases(dateISO) {
     const costs = getDayPurchaseCosts(dateISO);
-    const orders = (state.orders || []).filter((o) => o.date === dateISO && !["cancelado", "anulado"].includes(o.status));
+    const orders = (state.orders || []).filter((o) => o.date === dateISO && !["cancelado", "anulado"].includes(o.status) && !isReplacementOrder(o));
     let changedOrders = 0;
     let changedItems = 0;
     orders.forEach((order) => {
@@ -20798,7 +20819,7 @@
       let changed = false;
       (order.items || []).forEach((item) => {
         const cost = costs[item.productId];
-        if (!(cost > 0)) return;
+        if (!(cost > 0) || item.priceManual) return;
         const product = getProduct(item.productId);
         if (!product) return;
         const rec = state.prices[item.productId] || {};
@@ -20828,17 +20849,22 @@
     return { changedOrders, changedItems, orders: orders.length, products: Object.keys(costs).length };
   }
 
+  // Las reposiciones van sin cargo a proposito: ningun reprecio les pone precio.
+  function isReplacementOrder(order) {
+    return /reposici[oó]n de /i.test(String((order && order.notes) || ""));
+  }
+
   function updateOrdersWithNewPrices(purchaseDate, items) {
     const affectedProductIds = new Set(items.map((item) => item.productId).filter(Boolean));
     if (!affectedProductIds.size) return;
     let changedAny = false;
     state.orders
-      .filter((order) => order.date === purchaseDate && !["cancelado", "anulado"].includes(order.status))
+      .filter((order) => order.date === purchaseDate && !["cancelado", "anulado"].includes(order.status) && !isReplacementOrder(order))
       .forEach((order) => {
         const client = getClient(order.clientId);
         let changed = false;
         order.items.forEach((item) => {
-          if (!affectedProductIds.has(item.productId)) return;
+          if (!affectedProductIds.has(item.productId) || item.priceManual) return;
           const product = getProduct(item.productId);
           if (!product) return;
           const newUnitPrice = getAdjustedProductPrice(product, client);
@@ -21382,6 +21408,7 @@
     out.quantity = fq.quantity; out._tq = fq._tq; out._q = fq._q;
     out.unitAdjusted = fq.unitAdjusted !== undefined ? fq.unitAdjusted : out.unitAdjusted;
     out.unitPrice = fp.unitPrice; out._tp = fp._tp; out._p = fp._p;
+    if (fp.priceManual) out.priceManual = true; else delete out.priceManual;
     if (fq !== b || fp !== b) {
       out.subtotal = Number(out.quantity || 0) * Number(out.unitPrice || 0);
       out.ivaAmount = out.subtotal * (Number(out.ivaRate || 0) / 100);

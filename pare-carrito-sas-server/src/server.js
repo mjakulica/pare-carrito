@@ -821,6 +821,7 @@ function mergeItemCopies(a, b) {
   out.quantity = fq.quantity; out._tq = fq._tq; out._q = fq._q;
   out.unitAdjusted = fq.unitAdjusted !== undefined ? fq.unitAdjusted : out.unitAdjusted;
   out.unitPrice = fp.unitPrice; out._tp = fp._tp; out._p = fp._p;
+  if (fp.priceManual) out.priceManual = true; else delete out.priceManual;
   if (fq !== b || fp !== b) {
     out.subtotal = Number(out.quantity || 0) * Number(out.unitPrice || 0);
     out.ivaAmount = out.subtotal * (Number(out.ivaRate || 0) / 100);
@@ -946,6 +947,98 @@ function protectManualBalanceAdjustments(beforeData, nextData, role) {
 
 // Pedidos cuyo total quedo distinto al juntar copias: su movimiento de saldo se alinea al final.
 let mergedOrderTotals = new Map();
+
+// ---- Reprecio de pedidos en el SERVIDOR ----
+// Antes cada equipo repreciaba solo los pedidos que tenia en ese momento: si un pedido se habia
+// cargado en otro equipo y todavia no habia llegado, quedaba con el precio viejo (cliente 45 con la
+// frutilla a $11.300 mientras el cliente 7 ya tenia $14.690). Ahora, cuando al servidor le llega un
+// precio nuevo (Precios, compras, precio de mercado, ajuste automatico), el reprecia TODOS los
+// pedidos afectados y los equipos reciben el resultado. Mismas reglas que la app:
+// precio de lista (o costo para clientes "al costo") x (1 + ajuste % del cliente), IVA solo para
+// clientes con factura. Los precios cargados a mano en un pedido (priceManual) no se tocan.
+const IVA_RATES = { no_gravado: 0, exento: 0, "0": 0, "2.5": 2.5, "5": 5, "10.5": 10.5, "21": 21, "27": 27 };
+const PRICE_EXCLUDED_EXPENSES = new Set(["other_expense", "freight", "provider_payment", "provider_return", "cash_movement", "prepared"]);
+function serverProductPrice(data, productId) {
+  const rec = data.prices && data.prices[productId];
+  const product = (data.products || []).find((p) => p && p.id === productId);
+  return rec ? Number(rec.price || 0) : product ? Number(product.salePrice || 0) : 0;
+}
+function serverProductCost(data, productId) {
+  const rec = data.prices && data.prices[productId];
+  const product = (data.products || []).find((p) => p && p.id === productId);
+  const cost = rec && Number(rec.cost) > 0 ? Number(rec.cost) : (product ? Number(product.baseCost || 0) : 0);
+  return Math.max(0, cost);
+}
+function repriceOrdersOnServer(beforeData, nextData, nowIso) {
+  if (!nextData || !Array.isArray(nextData.orders)) return 0;
+  const hoy = nowArt().dateISO;
+  const porFecha = new Map(); // fecha -> Set(productId)
+  const marcar = (fecha, pid) => { if (!fecha || !pid) return; if (!porFecha.has(fecha)) porFecha.set(fecha, new Set()); porFecha.get(fecha).add(String(pid)); };
+  // 1) Precios que cambiaron: se reprecian los pedidos de hoy (igual que la app).
+  const antes = (beforeData && beforeData.prices) || {};
+  const ahora = nextData.prices || {};
+  Object.keys(ahora).forEach((pid) => {
+    const a = antes[pid] || {}; const b = ahora[pid] || {};
+    if (Number(a.price || 0) !== Number(b.price || 0) || Number(a.cost || 0) !== Number(b.cost || 0)) marcar(hoy, pid);
+  });
+  // 2) Compras nuevas o modificadas: se reprecian los pedidos de la fecha de la compra.
+  const comprasAntes = new Map(((beforeData && beforeData.purchases) || []).filter(Boolean).map((p) => [String(p.id), JSON.stringify(p)]));
+  (nextData.purchases || []).forEach((p) => {
+    if (!p || p.status === "anulado" || PRICE_EXCLUDED_EXPENSES.has(p.expenseType || "purchase")) return;
+    if (comprasAntes.get(String(p.id)) === JSON.stringify(p)) return;
+    const items = Array.isArray(p.items) && p.items.length ? p.items : (p.productId ? [{ productId: p.productId }] : []);
+    items.forEach((it) => marcar(p.date, it && it.productId));
+  });
+  // 3) Pedidos NUEVOS de hoy en adelante: si se cargaron en un equipo atrasado traen el precio viejo.
+  //    Se llevan al precio actual (los cargados a mano y las reposiciones no se tocan).
+  const idsAntes = new Set(((beforeData && beforeData.orders) || []).filter(Boolean).map((o) => String(o.id)));
+  const nuevos = new Set(nextData.orders.filter((o) => o && !idsAntes.has(String(o.id)) && String(o.date || "") >= hoy).map((o) => String(o.id)));
+  if (!porFecha.size && !nuevos.size) return 0;
+  const clientes = new Map((nextData.clients || []).filter(Boolean).map((c) => [String(c.id), c]));
+  const productos = new Map((nextData.products || []).filter(Boolean).map((p) => [String(p.id), p]));
+  const cambiados = new Map();
+  nextData.orders = nextData.orders.map((order) => {
+    const esNuevo = order && nuevos.has(String(order.id));
+    if (!order || ["cancelado", "anulado"].includes(order.status) || (!porFecha.has(order.date) && !esNuevo) || !Array.isArray(order.items)) return order;
+    // Reposiciones: van sin cargo a proposito.
+    if (/reposici[oó]n de /i.test(String(order.notes || ""))) return order;
+    const pids = porFecha.get(order.date) || new Set();
+    const client = clientes.get(String(order.clientId));
+    const ajuste = client ? Number(client.priceAdjustmentPct || 0) : 0;
+    const conIva = !!client && (client.priceTier === "con_factura" || client.needsInvoice);
+    let cambio = false;
+    const items = order.items.map((item) => {
+      if (!item || (!esNuevo && !pids.has(String(item.productId))) || item.priceManual) return item;
+      const product = productos.get(String(item.productId));
+      if (!product) return item;
+      const base = client && client.priceTier === "al_costo" ? serverProductCost(nextData, product.id) : serverProductPrice(nextData, product.id);
+      const nuevo = Math.max(0, base * (1 + ajuste / 100));
+      if (!(base > 0) || Math.abs(nuevo - Number(item.unitPrice || 0)) < 0.005) return item;
+      cambio = true;
+      const ivaRate = conIva ? (IVA_RATES[String(product.ivaType || "10.5")] != null ? IVA_RATES[String(product.ivaType || "10.5")] : 10.5) : 0;
+      const subtotal = Number(item.quantity || 0) * nuevo;
+      return { ...item, unitPrice: nuevo, subtotal, ivaRate, ivaAmount: subtotal * ivaRate / 100, totalWithIva: subtotal * (1 + ivaRate / 100), _tp: nowIso, _p: nuevo };
+    });
+    if (!cambio) return order;
+    const envio = Math.max(0, Number(order.shippingFee || 0) || 0);
+    let tasaEnvio = order.shippingIvaRate;
+    if (tasaEnvio == null || tasaEnvio === "") tasaEnvio = conIva ? 10.5 : 0;
+    const out = { ...order, items, updatedAt: nowIso };
+    out.subtotalAmount = items.reduce((sum, it) => sum + Number((it && it.subtotal) || 0), 0);
+    out.ivaAmount = items.reduce((sum, it) => sum + Number((it && it.ivaAmount) || 0), 0) + envio * (Number(tasaEnvio) || 0) / 100;
+    out.totalAmount = out.subtotalAmount + out.ivaAmount + envio;
+    cambiados.set(String(out.id), out);
+    return out;
+  });
+  if (cambiados.size && Array.isArray(nextData.saldos)) {
+    nextData.saldos = nextData.saldos.map((entry) => {
+      const order = entry && entry.relatedEntityType === "order" && entry.type === "pedido" ? cambiados.get(String(entry.relatedEntityId)) : null;
+      return order ? { ...entry, amount: Number(order.totalAmount || 0) } : entry;
+    });
+  }
+  if (cambiados.size) console.log("Reprecio en el servidor: " + cambiados.size + " pedido(s) actualizados.");
+  return cambiados.size;
+}
 
 function applyStatePatch(data, patch) {
   mergedOrderTotals = new Map();
@@ -1301,6 +1394,7 @@ app.put("/state", authenticate, requireRole(...SYNC_ROLES), async (req, res) => 
     await upsertProductHistoryState(clientDb, body.data, req.user.username);
     // El cliente pudo haber descargado solo una ventana: se preserva el historial que no tiene.
     const cleanData = protectManualBalanceAdjustments(beforeData, stripHistoryFromState(mergeWindowedState(beforeData, body.data)), req.user.role);
+    const repreciadosPut = repriceOrdersOnServer(beforeData, cleanData, new Date().toISOString());
     const saved = await clientDb.query(
       `INSERT INTO app_state (id, data, updated_at, updated_by) VALUES ('main', $1, now(), $2)
        ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, updated_at = EXCLUDED.updated_at, updated_by = EXCLUDED.updated_by
@@ -1325,7 +1419,7 @@ app.put("/state", authenticate, requireRole(...SYNC_ROLES), async (req, res) => 
     );
     await clientDb.query("COMMIT");
     syncSheetsFromStateDiff(beforeData, cleanData);
-    res.json({ ok: true, updatedAt: saved.rows[0].updated_at.toISOString() });
+    res.json({ ok: true, updatedAt: saved.rows[0].updated_at.toISOString(), serverChanged: repreciadosPut > 0, repriced: repreciadosPut });
   } catch (error) {
     await clientDb.query("ROLLBACK").catch(() => {});
     console.error("PUT /state:", error);
@@ -1376,6 +1470,7 @@ app.post("/state/patch", authenticate, requireRole(...PATCH_SYNC_ROLES), async (
     }
     const beforeData = current.rows[0].data || {};
     const nextData = protectManualBalanceAdjustments(beforeData, applyStatePatch(beforeData, body.patch), req.user.role);
+    const repreciados = repriceOrdersOnServer(beforeData, nextData, new Date().toISOString());
     const saved = await clientDb.query(
       "UPDATE app_state SET data = $1, updated_at = now(), updated_by = $2 WHERE id = 'main' RETURNING updated_at",
       [nextData, req.user.username]
@@ -1390,7 +1485,8 @@ app.post("/state/patch", authenticate, requireRole(...PATCH_SYNC_ROLES), async (
     // staleBase: el parche se aplico sobre una version mas nueva que la que tenia el equipo. El
     // equipo NO queda al dia: tiene que bajar el estado (si se marcara al dia, nunca recibiria lo
     // que cargaron los demas).
-    res.json({ ok: true, updatedAt: saved.rows[0].updated_at.toISOString(), staleBase: storedIso !== String(body.baseUpdatedAt) });
+    // Si el servidor reprecio pedidos, el equipo tampoco queda al dia: tiene que bajar el resultado.
+    res.json({ ok: true, updatedAt: saved.rows[0].updated_at.toISOString(), staleBase: storedIso !== String(body.baseUpdatedAt) || repreciados > 0, repriced: repreciados });
   } catch (error) {
     await clientDb.query("ROLLBACK").catch(() => {});
     console.error("POST /state/patch:", error);
