@@ -5,7 +5,7 @@
   const USER_KEY = "lpc_current_user_v1";
   const OPERATIONAL_RESET_VERSION = "20260610-operational-clean-1";
   const BUSINESS_NAME = "Pare Carrito SAS";
-  const APP_VERSION = "v41";
+  const APP_VERSION = "v42";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -426,7 +426,89 @@
     if (document.visibilityState !== "visible" || idleMs > 2 * 60 * 1000) forceReloadFresh();
     else showUpdateBanner();
   }
+  // Etiqueta del navegador para el aviso de versiones: sistema + navegador + un codigo corto propio
+  // de este navegador (para distinguir dos celulares de la misma persona).
+  function deviceLabel() {
+    let codigo = "";
+    try {
+      codigo = localStorage.getItem("lpc_device_code_v1") || "";
+      if (!codigo) { codigo = Math.random().toString(36).slice(2, 6).toUpperCase(); localStorage.setItem("lpc_device_code_v1", codigo); }
+    } catch (e) { codigo = "----"; }
+    const ua = navigator.userAgent || "";
+    const so = /iPhone|iPad/.test(ua) ? "iPhone" : /Android/.test(ua) ? "Android" : /Windows/.test(ua) ? "Windows" : /Mac OS/.test(ua) ? "Mac" : /Linux/.test(ua) ? "Linux" : "Otro";
+    const nav = /Edg\//.test(ua) ? "Edge" : /CriOS|Chrome\//.test(ua) ? "Chrome" : /FxiOS|Firefox\//.test(ua) ? "Firefox" : /Safari\//.test(ua) ? "Safari" : "Navegador";
+    return so + " " + nav + " #" + codigo;
+  }
+
+  // ---- Actualizacion automatica ----
+  // Cada minuto (y al volver a la app) se consulta version.json, un archivo de unos bytes. Si hay
+  // una version nueva, se envia lo pendiente y se recarga sola en el primer momento seguro: sin
+  // ventanas abiertas, sin escribir en un campo, sin un pedido o una compra a medio cargar. Antes se
+  // buscaba solo a ciertas horas y, si la persona estaba usando el sistema, solo aparecia un cartel
+  // que se podia ignorar: habia celulares trabajando dias con versiones viejas.
+  let latestServedVersion = "";
+  function hasUnsavedWork() {
+    const active = document.activeElement;
+    if (active && ["INPUT", "TEXTAREA", "SELECT"].includes(active.tagName)) return true;
+    if (ui.modal) return true;
+    if (purchaseFormTouched && document.getElementById("purchase-items")) return true;
+    const draft = ui.orderDraft && typeof ui.orderDraft === "object" ? Object.values(ui.orderDraft) : [];
+    if (draft.some((entry) => entry && (Number(entry.quantity) > 0 || entry.note))) return true;
+    const pegado = document.getElementById("whatsapp-order-text") || document.querySelector("textarea");
+    if (pegado && String(pegado.value || "").trim()) return true;
+    return false;
+  }
+  async function checkServedVersion() {
+    if (!/^https?:$/.test(location.protocol)) return;
+    try {
+      const r = await fetch("./version.json?t=" + Date.now(), { cache: "no-store" });
+      if (!r.ok) return;
+      const j = await r.json();
+      const servida = String((j && j.version) || "");
+      if (!servida || servida === APP_VERSION) return;
+      latestServedVersion = servida;
+      await applyServedVersionWhenSafe();
+    } catch (e) { /* sin red: se reintenta */ }
+  }
+  async function applyServedVersionWhenSafe() {
+    if (!latestServedVersion || latestServedVersion === APP_VERSION) return;
+    if (hasUnsavedWork()) { showUpdateBanner(); return; }
+    // Lo pendiente sale antes de recargar (la cola tambien sobrevive a la recarga, pero asi no espera).
+    if (loadPatchQueue().length) {
+      try { await flushPatchQueue(false); } catch (e) { /* se reintenta despues de recargar */ }
+    }
+    forceReloadFresh();
+  }
+
+  // Aviso al gerente/admin: navegadores que siguen con una version vieja.
+  async function refreshDeviceVersions() {
+    if (!currentUser || !["manager", "admin"].includes(currentUser.role)) return;
+    const config = getCloudSyncConfig();
+    if (!cloudSyncReady(config)) return;
+    try {
+      const r = await cloudRequest(config, "/devices/versions", { method: "GET" });
+      if (!r.ok) return;
+      const j = await r.json();
+      const viejos = (j.devices || []).filter((d) => d.version !== APP_VERSION && (Date.now() - new Date(d.lastSeen).getTime()) < 24 * 3600 * 1000);
+      const antes = JSON.stringify(ui.outdatedDevices || []);
+      ui.outdatedDevices = viejos;
+      if (JSON.stringify(viejos) !== antes && !hasUnsavedWork()) render();
+    } catch (e) { /* se reintenta */ }
+  }
+  function outdatedDevicesBannerHtml() {
+    const lista = ui.outdatedDevices || [];
+    if (!lista.length || !currentUser || !["manager", "admin"].includes(currentUser.role)) return "";
+    const hace = (iso) => { const min = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000)); return min < 60 ? "hace " + min + " min" : "hace " + Math.round(min / 60) + " h"; };
+    return `<div class="alert warn" style="margin-bottom:14px"><strong>Equipos con una version vieja del sistema</strong> (la actual es ${escapeHtml(APP_VERSION)}). Lo que carguen puede no llegar a los demas: pediles que cierren el sistema y lo vuelvan a abrir.<ul style="margin:6px 0 0 18px">${lista.map((d) => `<li>${escapeHtml(d.username)} - ${escapeHtml(d.device)}: <strong>${escapeHtml(d.version)}</strong> (${hace(d.lastSeen)})</li>`).join("")}</ul></div>`;
+  }
+
   function startVersionWatch() {
+    checkServedVersion();
+    setInterval(() => { checkServedVersion(); }, 60 * 1000);
+    setInterval(() => { if (latestServedVersion) applyServedVersionWhenSafe(); }, 15 * 1000);
+    window.addEventListener("focus", () => { checkServedVersion(); });
+    refreshDeviceVersions();
+    setInterval(() => { refreshDeviceVersions(); }, 5 * 60 * 1000);
     fetchAppStamp().then((st) => { if (st) bootAssetStamp = st; });
     // Timer liviano cada minuto SIN red: solo dispara el chequeo (una peticion HEAD) al entrar
     // en una de las horas objetivo, una sola vez por hora.
@@ -440,7 +522,7 @@
     }, 60 * 1000);
     // Ademas, al volver a la pestania se chequea una vez (evento, no polling).
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") maybeApplyUpdate();
+      if (document.visibilityState === "visible") { maybeApplyUpdate(); checkServedVersion(); }
     });
   }
 
@@ -488,6 +570,13 @@
     console.warn("Backend migrado de " + anterior + " a /api");
     return true;
   }
+
+  window.addEventListener("online", () => { scheduleServerGateRender(); cloudPull(false, true).catch(() => {}); });
+  window.addEventListener("offline", () => { scheduleServerGateRender(); });
+  setInterval(() => {
+    const listo = serverDataReady();
+    if (listo !== ui.lastServerReadyShown) { ui.lastServerReadyShown = listo; scheduleServerGateRender(); }
+  }, 10000);
 
   window.addEventListener("DOMContentLoaded", async () => {
     captureSessionBootIds();
@@ -1568,15 +1657,19 @@
         headers: {
           "content-type": "application/json",
           authorization: "Bearer " + (useJwt ? config.jwt : config.token),
+          "x-app-version": APP_VERSION,
+          "x-device-id": deviceLabel(),
           ...((options && options.headers) || {})
         }
       });
     } catch (error) {
+      markServerContact(false);
       if (error && error.name === "AbortError") throw new Error("el servidor tardo demasiado en responder");
       throw error;
     } finally {
       if (timer) clearTimeout(timer);
     }
+    markServerContact(response.status < 500);
     if (response.status === 401 && useJwt && !retried) {
       await cloudLogin(config);
       return cloudRequest(config, path, options, true);
@@ -1620,6 +1713,7 @@
       return false;
     }
     if (navigator.onLine === false) {
+      if (lastSyncedState && !(queue[0] && queue[0].sessionOnly)) { rollbackUnconfirmedChanges("sin conexion a internet"); return false; }
       ui.syncStatus = queue.length + " cambio(s) pendiente(s) sin conexión";
       schedulePatchFlush(5000);
       return false;
@@ -1652,7 +1746,12 @@
         const detail = await readCloudErrorDetail(response);
         config.lastError = "Conflicto al sincronizar cambio pendiente" + detail + ". Se conservo la informacion local y se reintentara la sincronizacion.";
         saveCloudSyncConfig(config);
-        ui.syncStatus = "Conflicto de sincronización";
+        if (lastSyncedState && !op.sessionOnly) {
+          patchFlightInProgress = false;
+          rollbackUnconfirmedChanges("el servidor tenia cambios mas nuevos y no se pudo combinar");
+          setTimeout(() => { cloudPull(false, true).catch(() => {}); }, 300);
+          return false;
+        }
         ui.syncStatus = "Cambios pendientes por sincronizar";
         if (manual) alert(config.lastError);
         schedulePatchFlush(6000);
@@ -1721,16 +1820,40 @@
       if (manual) alert("Cambios pendientes sincronizados.");
       return true;
     } catch (error) {
-      config.lastError = "Subida pendiente fallida " + formatTimestampShort(new Date().toISOString()) + ": " + error.message;
+      config.lastError = "Subida fallida " + formatTimestampShort(new Date().toISOString()) + ": " + error.message;
       saveCloudSyncConfig(config);
+      console.warn("Sincronización:", error.message);
+      if (lastSyncedState && !op.sessionOnly) {
+        patchFlightInProgress = false;
+        rollbackUnconfirmedChanges(/fetch|network|tardo|conexi/i.test(error.message) ? "sin conexion con el servidor" : error.message);
+        return false;
+      }
       ui.syncStatus = "Sincronización pendiente";
-      console.warn("Sincronización pendiente:", error.message);
       schedulePatchFlush(5000);
       if (manual) alert("No se pudo sincronizar todavía: " + error.message);
       return false;
     } finally {
       patchFlightInProgress = false;
     }
+  }
+
+  // El servidor es la unica fuente de verdad. Si un cambio no se pudo confirmar (sin conexion, error
+  // del servidor), NO queda guardado solo en este equipo: se vuelve a lo ultimo que confirmo el
+  // servidor y se avisa. Antes quedaba en una cola local y, si nunca salia, ese equipo mostraba
+  // pedidos, precios o saldos que los demas no tenian.
+  function rollbackUnconfirmedChanges(motivo) {
+    savePatchQueue([]);
+    patchSyncedStates.clear();
+    pendingPatchBaseState = null;
+    pendingPatchBaseUpdatedAt = "";
+    if (lastSyncedState) {
+      state = normalizeLoadedState({ ...seedState(), ...state, ...cloneSyncState(lastSyncedState) }, seedState());
+      if (localPersistRole()) writeLocalStateSnapshot(state, "No se pudo guardar la version del servidor en localStorage.");
+    }
+    ui.syncStatus = "";
+    ui.syncWarning = "El ultimo cambio NO se guardo (" + motivo + "). Se volvio a los datos del servidor: volve a cargarlo cuando haya conexion.";
+    render();
+    try { alert("No se pudo guardar en el servidor (" + motivo + ").\n\nEl cambio NO quedo registrado y se volvio a los datos del servidor. Volve a cargarlo cuando haya conexion."); } catch (e) { /* sin dialogos */ }
   }
 
   async function mergePendingPatchConflictWithRemote(config, manual) {
@@ -2245,6 +2368,8 @@
       render();
       const response = await cloudRequest(config, "/state" + query, { method: "GET" });
       if (response.status === 404) {
+        // Servidor sin datos todavia (primera vez): respondio, asi que este equipo esta "al dia".
+        ui.serverLoadedThisSession = true;
         if (manual) alert("Todavia no hay datos en la nube. Use Subir datos ahora desde el dispositivo principal.");
         return;
       }
@@ -2320,6 +2445,7 @@
         ? normalizeLoadedState({ ...seedState(), ...mergeCloudStates(remoteState, state) }, seedState())
         : remoteState;
       writeLocalStateSnapshot(state, "No se pudo guardar la descarga de nube en localStorage.");
+      ui.serverLoadedThisSession = true;
       config.lastSync = remoteUpdated || new Date().toISOString();
       config.lastError = "";
       saveCloudSyncConfig(config);
@@ -2790,6 +2916,7 @@
           if (["manager", "admin", "employee", "contador"].includes(serverResult.payload.role)) {
             startCloudAutoSync();
           }
+          setTimeout(() => { refreshDeviceVersions(); }, 1500);
           let user = state.users.find((item) => item.isActive !== false && (item.username.toLowerCase() === username || String(item.email || "").toLowerCase() === username));
           if (!user) {
             user = { id: "USR-REMOTE-" + Date.now(), username, name: serverResult.payload.name || username, role: serverResult.payload.role, password, isActive: true };
@@ -2965,7 +3092,54 @@
     `;
   }
 
+  // ---- Datos solo desde el servidor ----
+  // Pedidos, precios y saldos se muestran solamente si este equipo esta al dia con el servidor: ya
+  // bajo los datos en esta sesion y el servidor respondio hace poco. Sin conexion no se muestran
+  // (mejor no ver nada que ver datos viejos). Horarios y Backup quedan siempre disponibles.
+  const ROUTES_WITHOUT_SERVER = new Set(["horarios", "backup", "configuracion"]);
+  const SERVER_FRESH_MS = 2 * 60 * 1000;
+  function markServerContact(ok) {
+    const antes = serverDataReady();
+    if (ok) ui.lastServerOkAt = Date.now(); else ui.lastServerFailAt = Date.now();
+    if (serverDataReady() !== antes) scheduleServerGateRender();
+  }
+  function serverDataReady() {
+    const config = getCloudSyncConfig();
+    if (!cloudSyncReady(config)) return true; // sistema sin servidor (uso local / demostracion)
+    if (typeof navigator !== "undefined" && navigator.onLine === false) return false;
+    if (!ui.serverLoadedThisSession) return false;
+    if ((ui.lastServerFailAt || 0) > (ui.lastServerOkAt || 0)) return false;
+    return Date.now() - (ui.lastServerOkAt || 0) < SERVER_FRESH_MS;
+  }
+  let serverGateTimer = null;
+  function scheduleServerGateRender() {
+    clearTimeout(serverGateTimer);
+    serverGateTimer = setTimeout(() => { if (currentUser && !hasUnsavedWork()) render(); }, 300);
+  }
+  function renderServerGate() {
+    const config = getCloudSyncConfig();
+    const cargando = navigator.onLine !== false && !ui.serverLoadedThisSession && !ui.lastServerFailAt;
+    afterRender.push(() => {
+      const b = document.getElementById("server-gate-retry");
+      if (b) b.addEventListener("click", () => { b.disabled = true; b.textContent = "Conectando..."; cloudPull(false, true).catch(() => {}).finally(() => render()); });
+    });
+    return pageShell(
+      cargando ? "Cargando datos del servidor" : "Sin conexion con el servidor",
+      "",
+      "",
+      `<div class="panel" style="max-width:640px">
+        <p style="margin-top:0">${cargando
+          ? "Se estan descargando los pedidos, precios y saldos del servidor. En un momento aparecen."
+          : "No hay conexion con el servidor. Para no mostrar ni guardar pedidos, precios o saldos que no esten confirmados, esta pantalla solo funciona con conexion. Se reconecta sola apenas vuelva internet."}</p>
+        ${cargando ? "" : `<button class="btn primary" type="button" id="server-gate-retry">Reintentar ahora</button>`}
+        <p class="muted" style="margin-bottom:0;font-size:12px">Servidor: ${escapeHtml(cloudBaseUrl(config) || "-")}${ui.lastServerOkAt ? " &middot; ultima respuesta " + formatTimestampShort(new Date(ui.lastServerOkAt).toISOString()) : ""}</p>
+      </div>`,
+      "sin-servidor"
+    );
+  }
+
   function renderRoute(route) {
+    if (currentUser && !ROUTES_WITHOUT_SERVER.has(route.base) && !serverDataReady()) return renderServerGate();
     if (route.base === "vehiculos-print") return renderVehiclePrint(route.id);
     if (route.base === "remito-print") return renderRemitoPrint(route.id);
     if (route.base === "remitos-today-print") return renderTodayRemitosPrint();
@@ -3017,7 +3191,7 @@
       ? `<div class="alert" style="margin-bottom:14px"><strong>Sincronizando:</strong> descargando datos del servidor...</div>`
       : "";
     if (!localPersistRole()) return bajando;
-    let html = bajando;
+    let html = bajando + outdatedDevicesBannerHtml();
     if (ui.syncWarning) {
       html += `<div class="alert" style="margin-bottom:14px"><strong>Atencion sincronizacion:</strong> ${escapeHtml(ui.syncWarning)}</div>`;
     }
@@ -7871,9 +8045,9 @@
     const canUseProviders = ["manager", "admin"].includes(currentUser.role);
     if (!canUseProviders) ui.purchaseTab = "registro";
     const purchaseTab = ui.purchaseTab || "registro";
-    const visiblePurchases = currentUser.role === "employee"
-      ? state.purchases.filter((purchase) => purchase.userRole === "employee" || purchase.recordedBy === currentUser.name)
-      : currentUser.role === "proveedor"
+    // Gerente, admin y empleados ven TODAS las compras (antes los empleados solo veian las cargadas
+    // por empleados). El proveedor externo sigue viendo solo las suyas.
+    const visiblePurchases = currentUser.role === "proveedor"
       ? state.purchases.filter((purchase) => purchase.recordedBy === currentUser.name)
       : state.purchases;
     const isManager = currentUser.role === "manager";
@@ -20855,6 +21029,9 @@
   }
 
   function updateOrdersWithNewPrices(purchaseDate, items) {
+    // Con servidor, el reprecio lo hace EL SERVIDOR sobre todos los pedidos (los equipos lo reciben
+    // al sincronizar). Repreciar aca solo cambiaba los pedidos que tenia este equipo.
+    if (cloudSyncReady(getCloudSyncConfig())) return;
     const affectedProductIds = new Set(items.map((item) => item.productId).filter(Boolean));
     if (!affectedProductIds.size) return;
     let changedAny = false;

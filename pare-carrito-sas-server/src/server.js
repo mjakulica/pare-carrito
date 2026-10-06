@@ -219,12 +219,39 @@ function signToken(user) {
   return jwt.sign({ sub: user.id, username: user.username, role: user.role, name: user.name }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
 }
 
+// Version de la app de cada navegador. Las versiones nuevas mandan el encabezado x-app-version;
+// las anteriores a la v42 no lo mandan y quedan como "anterior a v42".
+const deviceVersionSeen = new Map();
+function describeDevice(ua) {
+  const s = String(ua || "");
+  const so = /iPhone|iPad/.test(s) ? "iPhone" : /Android/.test(s) ? "Android" : /Windows/.test(s) ? "Windows" : /Mac OS/.test(s) ? "Mac" : /Linux/.test(s) ? "Linux" : "Otro";
+  const nav = /Edg\//.test(s) ? "Edge" : /CriOS|Chrome\//.test(s) ? "Chrome" : /FxiOS|Firefox\//.test(s) ? "Firefox" : /Safari\//.test(s) ? "Safari" : "Navegador";
+  return so + " " + nav;
+}
+function recordDeviceVersion(req) {
+  try {
+    const user = req.user && req.user.username;
+    if (!user || req.user.role === "customer") return;
+    const version = String(req.headers["x-app-version"] || "anterior a v42").slice(0, 30);
+    const device = String(req.headers["x-device-id"] || describeDevice(req.headers["user-agent"])).slice(0, 80);
+    const key = user + "|" + device;
+    const prev = deviceVersionSeen.get(key);
+    if (prev && prev.version === version && Date.now() - prev.at < 60000) return;
+    deviceVersionSeen.set(key, { version, at: Date.now() });
+    pool.query(
+      "INSERT INTO device_versions (username, device, app_version, last_seen) VALUES ($1,$2,$3,now()) ON CONFLICT (username, device) DO UPDATE SET app_version = EXCLUDED.app_version, last_seen = now()",
+      [user, device, version]
+    ).catch(() => {});
+  } catch (e) { /* nunca frena el pedido */ }
+}
+
 function authenticate(req, res, next) {
   const header = String(req.headers.authorization || "");
   const token = header.replace(/^Bearer\s+/i, "").trim();
   if (!token) return res.status(401).json({ error: "Falta el token. Inicie sesión en /auth/login." });
   try {
     req.user = jwt.verify(token, JWT_SECRET);
+    recordDeviceVersion(req);
     next();
   } catch {
     return res.status(401).json({ error: "Token inválido o vencido. Vuelva a iniciar sesión." });
@@ -276,6 +303,12 @@ function sanitizeExternalApiError(detail) {
 }
 
 // ---------- Rutas publicas ----------
+// Navegadores vistos en los ultimos 3 dias con su version (solo gerente/admin).
+app.get("/devices/versions", authenticate, requireRole("manager", "admin"), async (req, res) => {
+  const { rows } = await pool.query("SELECT username, device, app_version, last_seen FROM device_versions WHERE last_seen > now() - interval '3 days' ORDER BY last_seen DESC");
+  res.json({ devices: rows.map((r) => ({ username: r.username, device: r.device, version: r.app_version, lastSeen: r.last_seen.toISOString() })) });
+});
+
 app.get("/health", async (req, res) => {
   try {
     await pool.query("SELECT 1");
@@ -989,10 +1022,10 @@ function repriceOrdersOnServer(beforeData, nextData, nowIso) {
     const items = Array.isArray(p.items) && p.items.length ? p.items : (p.productId ? [{ productId: p.productId }] : []);
     items.forEach((it) => marcar(p.date, it && it.productId));
   });
-  // 3) Pedidos NUEVOS de hoy en adelante: si se cargaron en un equipo atrasado traen el precio viejo.
-  //    Se llevan al precio actual (los cargados a mano y las reposiciones no se tocan).
+  // 3) Pedidos NUEVOS: el precio lo pone el servidor (el equipo pudo tener una lista vieja). Los
+  //    cargados a mano, las reposiciones y la carga historica (ids IMP-) no se tocan.
   const idsAntes = new Set(((beforeData && beforeData.orders) || []).filter(Boolean).map((o) => String(o.id)));
-  const nuevos = new Set(nextData.orders.filter((o) => o && !idsAntes.has(String(o.id)) && String(o.date || "") >= hoy).map((o) => String(o.id)));
+  const nuevos = new Set(nextData.orders.filter((o) => o && !idsAntes.has(String(o.id)) && !/^IMP/i.test(String(o.id))).map((o) => String(o.id)));
   if (!porFecha.size && !nuevos.size) return 0;
   const clientes = new Map((nextData.clients || []).filter(Boolean).map((c) => [String(c.id), c]));
   const productos = new Map((nextData.products || []).filter(Boolean).map((p) => [String(p.id), p]));
@@ -1040,10 +1073,112 @@ function repriceOrdersOnServer(beforeData, nextData, nowIso) {
   return cambiados.size;
 }
 
+// Numeros repetidos: las versiones anteriores a la v36 numeraban los registros contando lo que
+// tenia cada navegador, asi que dos equipos podian generar el mismo id y el segundo pisaba al
+// primero. Si llega un registro NUEVO con el id de otro que ya existe (distinta fecha de creacion),
+// se le cambia el id en vez de reemplazar, y se actualizan las referencias dentro del mismo envio.
+const COLLISION_KEYS = ["purchases", "orders", "payments", "attendance", "cashClosings", "employeeReimbursements",
+  "employeePayments", "stockMovements", "clientTransfers", "providerPayments", "replacements", "remitos"];
+const REFERENCE_FIELDS = ["relatedEntityId", "orderId", "purchaseId", "sourceOrderId", "remitoId", "paymentId"];
+function renameCollidingIds(data, arrays) {
+  const renombres = new Map();
+  COLLISION_KEYS.forEach((key) => {
+    const changes = arrays[key];
+    if (!changes || !Array.isArray(changes.upsert)) return;
+    const existentes = new Map((Array.isArray(data[key]) ? data[key] : []).filter((r) => r && r.id).map((r) => [String(r.id), r]));
+    changes.upsert = changes.upsert.map((item) => {
+      if (!item || !item.id) return item;
+      const previo = existentes.get(String(item.id));
+      if (!previo || !previo.createdAt || !item.createdAt || String(previo.createdAt) === String(item.createdAt)) return item;
+      const nuevoId = String(item.id) + "-S" + Math.random().toString(36).slice(2, 6).toUpperCase();
+      renombres.set(String(item.id), nuevoId);
+      console.warn("Id repetido " + key + " " + item.id + " (otro registro): se guarda como " + nuevoId);
+      return { ...item, id: nuevoId };
+    });
+  });
+  if (!renombres.size) return;
+  // Referencias de los registros del mismo envio que apuntan al id renombrado.
+  Object.keys(arrays).forEach((key) => {
+    const changes = arrays[key];
+    if (!changes || !Array.isArray(changes.upsert)) return;
+    changes.upsert = changes.upsert.map((item) => {
+      if (!item || typeof item !== "object") return item;
+      let out = item;
+      REFERENCE_FIELDS.forEach((campo) => {
+        if (typeof out[campo] === "string" && renombres.has(out[campo])) out = { ...out, [campo]: renombres.get(out[campo]) };
+      });
+      if (Array.isArray(out.orderIds) && out.orderIds.some((id) => renombres.has(String(id)))) out = { ...out, orderIds: out.orderIds.map((id) => renombres.get(String(id)) || id) };
+      return out;
+    });
+  });
+}
+
+// Totales, IVA y saldo de cada pedido que llega: los calcula el servidor a partir de sus productos
+// (el equipo pudo calcularlos con datos viejos). El saldo "pedido" del cliente queda igual al total
+// del pedido; si el pedido no tiene su movimiento de saldo, se crea.
+function normalizeOrdersOnServer(beforeData, nextData, nowIso) {
+  if (!nextData || !Array.isArray(nextData.orders)) return 0;
+  const antes = new Map(((beforeData && beforeData.orders) || []).filter(Boolean).map((o) => [String(o.id), JSON.stringify(o)]));
+  const clientes = new Map((nextData.clients || []).filter(Boolean).map((c) => [String(c.id), c]));
+  const productos = new Map((nextData.products || []).filter(Boolean).map((p) => [String(p.id), p]));
+  const tocados = new Map();
+  let cambios = 0;
+  const r2 = (n) => Math.round(Number(n || 0) * 100) / 100;
+  nextData.orders = nextData.orders.map((order) => {
+    if (!order || !order.id || antes.get(String(order.id)) === JSON.stringify(order) || !Array.isArray(order.items)) return order;
+    if (["cancelado", "anulado"].includes(order.status)) return order;
+    const client = clientes.get(String(order.clientId));
+    const conIva = !!client && (client.priceTier === "con_factura" || client.needsInvoice);
+    let distinto = false;
+    const items = order.items.map((item) => {
+      if (!item) return item;
+      const product = productos.get(String(item.productId));
+      const tasa = conIva ? (IVA_RATES[String((product && product.ivaType) || "10.5")] != null ? IVA_RATES[String((product && product.ivaType) || "10.5")] : 10.5) : 0;
+      const subtotal = Number(item.quantity || 0) * Number(item.unitPrice || 0);
+      const iva = subtotal * tasa / 100;
+      if (r2(item.subtotal) === r2(subtotal) && Number(item.ivaRate || 0) === tasa && r2(item.ivaAmount) === r2(iva)) return item;
+      distinto = true;
+      return { ...item, subtotal, ivaRate: tasa, ivaAmount: iva, totalWithIva: subtotal + iva };
+    });
+    const envio = Math.max(0, Number(order.shippingFee || 0) || 0);
+    let tasaEnvio = order.shippingIvaRate;
+    if (tasaEnvio == null || tasaEnvio === "") tasaEnvio = conIva ? 10.5 : 0;
+    const subtotalAmount = items.reduce((s, it) => s + Number((it && it.subtotal) || 0), 0);
+    const ivaAmount = items.reduce((s, it) => s + Number((it && it.ivaAmount) || 0), 0) + envio * (Number(tasaEnvio) || 0) / 100;
+    const totalAmount = subtotalAmount + ivaAmount + envio;
+    const out = (distinto || r2(order.subtotalAmount) !== r2(subtotalAmount) || r2(order.ivaAmount) !== r2(ivaAmount) || r2(order.totalAmount) !== r2(totalAmount))
+      ? { ...order, items, subtotalAmount, ivaAmount, totalAmount, updatedAt: nowIso }
+      : order;
+    if (out !== order) cambios += 1;
+    tocados.set(String(out.id), out);
+    return out;
+  });
+  if (tocados.size) {
+    nextData.saldos = Array.isArray(nextData.saldos) ? nextData.saldos : [];
+    const conSaldo = new Set();
+    nextData.saldos = nextData.saldos.map((entry) => {
+      const order = entry && entry.relatedEntityType === "order" && entry.type === "pedido" ? tocados.get(String(entry.relatedEntityId)) : null;
+      if (!order) return entry;
+      conSaldo.add(String(order.id));
+      if (r2(entry.amount) === r2(order.totalAmount) && entry.clientId === order.clientId && entry.date === order.date) return entry;
+      cambios += 1;
+      return { ...entry, amount: Number(order.totalAmount || 0), clientId: order.clientId, date: order.date };
+    });
+    tocados.forEach((order, id) => {
+      if (conSaldo.has(id) || order.exampleOnly) return;
+      cambios += 1;
+      nextData.saldos.push({ id: "SAL-SRV-" + Date.now().toString(36).toUpperCase() + Math.random().toString(36).slice(2, 6).toUpperCase(), date: order.date, clientId: order.clientId, type: "pedido", description: "Pedido " + order.id, amount: Number(order.totalAmount || 0), balance: 0, relatedEntityId: order.id, relatedEntityType: "order", notes: "Deuda generada por pedido.", createdAt: nowIso });
+    });
+  }
+  if (cambios) console.log("Servidor normalizo " + cambios + " dato(s) de pedidos (totales/IVA/saldo).");
+  return cambios;
+}
+
 function applyStatePatch(data, patch) {
   mergedOrderTotals = new Map();
   const next = stripHistoryFromState(data || {});
   const arrays = patch && patch.arrays && typeof patch.arrays === "object" ? patch.arrays : {};
+  renameCollidingIds(next, arrays);
   ARRAY_PATCH_KEYS.forEach((key) => {
     if (arrays[key]) applyArrayPatch(next, key, arrays[key]);
   });
@@ -1394,7 +1529,8 @@ app.put("/state", authenticate, requireRole(...SYNC_ROLES), async (req, res) => 
     await upsertProductHistoryState(clientDb, body.data, req.user.username);
     // El cliente pudo haber descargado solo una ventana: se preserva el historial que no tiene.
     const cleanData = protectManualBalanceAdjustments(beforeData, stripHistoryFromState(mergeWindowedState(beforeData, body.data)), req.user.role);
-    const repreciadosPut = repriceOrdersOnServer(beforeData, cleanData, new Date().toISOString());
+    const repreciadosPut = repriceOrdersOnServer(beforeData, cleanData, new Date().toISOString())
+      + normalizeOrdersOnServer(beforeData, cleanData, new Date().toISOString());
     const saved = await clientDb.query(
       `INSERT INTO app_state (id, data, updated_at, updated_by) VALUES ('main', $1, now(), $2)
        ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, updated_at = EXCLUDED.updated_at, updated_by = EXCLUDED.updated_by
@@ -1470,7 +1606,8 @@ app.post("/state/patch", authenticate, requireRole(...PATCH_SYNC_ROLES), async (
     }
     const beforeData = current.rows[0].data || {};
     const nextData = protectManualBalanceAdjustments(beforeData, applyStatePatch(beforeData, body.patch), req.user.role);
-    const repreciados = repriceOrdersOnServer(beforeData, nextData, new Date().toISOString());
+    const repreciados = repriceOrdersOnServer(beforeData, nextData, new Date().toISOString())
+      + normalizeOrdersOnServer(beforeData, nextData, new Date().toISOString());
     const saved = await clientDb.query(
       "UPDATE app_state SET data = $1, updated_at = now(), updated_by = $2 WHERE id = 'main' RETURNING updated_at",
       [nextData, req.user.username]

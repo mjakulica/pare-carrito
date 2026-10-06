@@ -166,3 +166,13 @@ CREATE TABLE IF NOT EXISTS state_writes (
   products_after INT NOT NULL DEFAULT 0,
   diff_orders INT NOT NULL DEFAULT 0
 );
+
+-- Version de la app con la que trabaja cada usuario/navegador (para avisar al gerente de equipos
+-- con versiones viejas). Se actualiza como mucho una vez por minuto por navegador.
+CREATE TABLE IF NOT EXISTS device_versions (
+  username TEXT NOT NULL,
+  device TEXT NOT NULL,
+  app_version TEXT NOT NULL,
+  last_seen TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (username, device)
+);
