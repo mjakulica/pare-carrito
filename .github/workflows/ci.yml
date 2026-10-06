@@ -8,6 +8,8 @@
 #   VPS_HOST         IP o dominio del VPS
 #   VPS_SSH_KEY      clave PRIVADA de deploy (la publica va en /root/.ssh/authorized_keys del VPS)
 #   VPS_KNOWN_HOSTS  salida de `ssh-keyscan -t ed25519 <VPS_HOST>`, para no conectarse a un impostor
+# El SSH del VPS se usa por el puerto 5733 (el firewall del proveedor bloquea el 22). Para cambiarlo,
+# crear la variable VPS_PORT en Settings -> Secrets and variables -> Actions -> Variables.
 # Ver "Deploy automatico" en pare-carrito-sas-server/README.md.
 
 name: CI
@@ -41,9 +43,9 @@ jobs:
           --health-cmd "pg_isready -U parecarrito -d parecarrito"
           --health-interval 5s --health-timeout 3s --health-retries 12
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
 
@@ -106,6 +108,7 @@ jobs:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
           VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+          VPS_PORT: ${{ vars.VPS_PORT || '5733' }}
         run: |
           set -e
           if [ -z "$VPS_HOST" ] || [ -z "$VPS_SSH_KEY" ] || [ -z "$VPS_KNOWN_HOSTS" ]; then
@@ -115,6 +118,9 @@ jobs:
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
           printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          # Con un puerto distinto del 22, ssh busca la huella como [IP]:puerto: se agrega esa forma
+          # a partir de la linea cargada (que viene como "IP ssh-ed25519 ...").
+          printf '%s\n' "$VPS_KNOWN_HOSTS" | sed -n "s/^\([^[ #][^ ]*\) /[\1]:$VPS_PORT /p" >> ~/.ssh/known_hosts
           # El comando que se manda no importa: el VPS solo deja correr ci-deploy.sh con esta clave.
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes -o BatchMode=yes \
-              -o ServerAliveInterval=30 root@"$VPS_HOST" deploy
+          ssh -i ~/.ssh/deploy_key -p "$VPS_PORT" -o StrictHostKeyChecking=yes -o BatchMode=yes \
+              -o ConnectTimeout=30 -o ServerAliveInterval=30 root@"$VPS_HOST" deploy
