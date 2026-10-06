@@ -5,7 +5,7 @@
   const USER_KEY = "lpc_current_user_v1";
   const OPERATIONAL_RESET_VERSION = "20260610-operational-clean-1";
   const BUSINESS_NAME = "Pare Carrito SAS";
-  const APP_VERSION = "v43";
+  const APP_VERSION = "v44";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -17579,6 +17579,18 @@
     return entry;
   }
 
+  // Saldo del cliente al cierre de un dia (todos los movimientos con fecha hasta ese dia inclusive).
+  function getClientBalanceAt(clientId, fechaISO) {
+    return (state.saldos || []).filter((entry) => entry.clientId === clientId && String(entry.date || "") <= fechaISO)
+      .reduce((sum, entry) => sum + Number(entry.amount || 0), 0);
+  }
+
+  // Corte de la ventana de saldos que tiene este equipo: antes de esa fecha solo hay un acumulado.
+  function balanceWindowCutoff() {
+    if (!stateWindow || stateWindow.full || !stateWindow.cutoffs) return "";
+    return String(stateWindow.cutoffs.saldos || "");
+  }
+
   function openBalanceAdjustModal(clientId) {
     const client = getClient(clientId);
     if (!client || !canAdjustClientBalance()) return;
@@ -17586,45 +17598,71 @@
     const body = `
       <form id="balance-adjust-form" class="form-grid">
         <div class="field span-2"><label>Cliente</label><input value="${escapeAttr(client.id + " - " + client.name)}" disabled /></div>
-        <div class="field"><label>Saldo actual</label><input value="${escapeAttr(formatMoney(actual))}" disabled /></div>
-        <div class="field"><label>Fecha</label><input type="date" id="adj-date" value="${todayISO()}" /></div>
+        <div class="field"><label>Saldo de hoy</label><input value="${escapeAttr(formatMoney(actual))}" disabled /></div>
+        <div class="field"><label>Fecha del ajuste</label><input type="date" id="adj-date" value="${todayISO()}" max="${todayISO()}" /></div>
         <div class="field span-2"><label>Que hacer</label>
           <select id="adj-mode">
             <option value="sumar">Sumar al saldo (el cliente debe mas)</option>
             <option value="restar">Restar del saldo (el cliente debe menos)</option>
-            <option value="fijar">Dejar el saldo en un valor exacto</option>
+            <option value="fijar">Dejar el saldo en un valor exacto a esa fecha</option>
           </select>
         </div>
         <div class="field"><label id="adj-amount-label">Monto</label><input id="adj-amount" inputmode="decimal" placeholder="0" /></div>
-        <div class="field"><label>Saldo resultante</label><input id="adj-result" value="${escapeAttr(formatMoney(actual))}" disabled /></div>
+        <div class="field"><label id="adj-at-label">Saldo a esa fecha</label><input id="adj-at" disabled /></div>
+        <div class="field"><label>Saldo de hoy despues del ajuste</label><input id="adj-result" value="${escapeAttr(formatMoney(actual))}" disabled /></div>
+        <p class="muted span-2" id="adj-explain" style="margin:0;font-size:12px"></p>
         <div class="field span-2"><label>Motivo *</label><input id="adj-reason" placeholder="Ej.: saldo inicial, diferencia acordada, error de carga..." /></div>
         <div class="field span-2"><button class="btn primary" type="button" id="adj-save">Guardar ajuste</button></div>
       </form>`;
     showModal("Ajustar saldo", body, () => {
       const mode = document.getElementById("adj-mode");
       const amount = document.getElementById("adj-amount");
+      const dateInput = document.getElementById("adj-date");
       const result = document.getElementById("adj-result");
+      const atInput = document.getElementById("adj-at");
+      const atLabel = document.getElementById("adj-at-label");
+      const explain = document.getElementById("adj-explain");
       const label = document.getElementById("adj-amount-label");
+      const fecha = () => (dateInput.value && dateInput.value <= todayISO() ? dateInput.value : todayISO());
+      // "Dejar en un valor exacto" se mide contra el saldo AL CIERRE de la fecha elegida, no contra el
+      // de hoy: asi los pedidos y pagos posteriores siguen contando. Antes, con fecha 1/10 y saldo 0,
+      // el saldo quedaba en 0 HOY y se borraban del saldo los movimientos del 2/10 en adelante.
       const movimiento = () => {
         const valor = parseAmount(amount.value);
-        if (mode.value === "fijar") return valor - actual;
+        if (mode.value === "fijar") return valor - getClientBalanceAt(client.id, fecha());
         return mode.value === "restar" ? -Math.abs(valor) : Math.abs(valor);
       };
       const refrescar = () => {
-        label.textContent = mode.value === "fijar" ? "Nuevo saldo" : "Monto";
-        result.value = formatMoney(actual + movimiento());
+        const f = fecha();
+        const alDia = getClientBalanceAt(client.id, f);
+        const delta = movimiento();
+        label.textContent = mode.value === "fijar" ? "Saldo al " + formatDate(f) : "Monto";
+        atLabel.textContent = "Saldo al " + formatDate(f) + " (antes del ajuste)";
+        atInput.value = formatMoney(alDia);
+        result.value = formatMoney(actual + delta);
+        const posteriores = actual - alDia;
+        explain.textContent = f < todayISO()
+          ? "Despues del " + formatDate(f) + " hay movimientos por " + formatMoney(posteriores) + " (pedidos y pagos), que se suman sobre el saldo ajustado."
+          : "";
       };
       mode.addEventListener("change", refrescar);
+      dateInput.addEventListener("change", refrescar);
       amount.addEventListener("input", () => { formatThousandsInputEl(amount); refrescar(); });
+      refrescar();
       document.getElementById("adj-save").addEventListener("click", () => {
         const motivo = document.getElementById("adj-reason").value.trim();
+        const f = fecha();
+        const corte = balanceWindowCutoff();
+        if (corte && f < corte && historyMode() !== "full") {
+          return alert("Este equipo tiene cargados los saldos desde el " + formatDate(corte) + ". Para ajustar con fecha " + formatDate(f) + " carga primero el historial completo (barra de arriba en Saldos).");
+        }
         const delta = Math.round(movimiento() * 100) / 100;
-        const fecha = document.getElementById("adj-date").value || todayISO();
         if (!amount.value.trim()) return alert("Ingresa el monto.");
         if (!motivo) return alert("Ingresa el motivo del ajuste.");
-        if (Math.abs(delta) < 0.005) return alert("El saldo ya es ese: no hay nada que ajustar.");
-        if (!confirm("Ajustar el saldo de " + client.name + " en " + formatMoney(delta) + " (queda en " + formatMoney(actual + delta) + ")?")) return;
-        pushManualBalanceAdjustment(client.id, delta, fecha, "Ajuste manual: " + motivo);
+        if (Math.abs(delta) < 0.005) return alert("El saldo a esa fecha ya es ese: no hay nada que ajustar.");
+        const textoFijar = mode.value === "fijar" ? " Al " + formatDate(f) + " queda en " + formatMoney(getClientBalanceAt(client.id, f) + delta) + "." : "";
+        if (!confirm("Ajustar el saldo de " + client.name + " en " + formatMoney(delta) + " con fecha " + formatDate(f) + "." + textoFijar + " Hoy queda en " + formatMoney(actual + delta) + ". Continuar?")) return;
+        pushManualBalanceAdjustment(client.id, delta, f, "Ajuste manual: " + motivo);
         saveState();
         openBalanceHistory(client.id);
       });
@@ -17636,7 +17674,8 @@
     const entry = (state.saldos || []).find((item) => item.id === entryId);
     if (!isManualBalanceAdjustment(entry) || entry.annulledAt || entry.annulsId) return;
     if (!confirm("Anular el ajuste de " + formatMoney(entry.amount) + " (" + (entry.description || "") + ")? Se agrega un movimiento que lo compensa.")) return;
-    const reverso = pushManualBalanceAdjustment(entry.clientId, -Number(entry.amount || 0), todayISO(), "Anulacion de ajuste: " + String(entry.description || "").replace(/^Ajuste manual:\s*/, ""), { annulsId: entry.id });
+    // El reverso lleva la MISMA fecha que el ajuste: asi el saldo a esa fecha tambien vuelve a como estaba.
+    const reverso = pushManualBalanceAdjustment(entry.clientId, -Number(entry.amount || 0), entry.date || todayISO(), "Anulacion de ajuste: " + String(entry.description || "").replace(/^Ajuste manual:\s*/, ""), { annulsId: entry.id });
     entry.annulledAt = reverso.createdAt;
     entry.annulledBy = reverso.id;
     entry.updatedAt = reverso.createdAt;
