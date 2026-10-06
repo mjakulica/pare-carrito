@@ -115,12 +115,24 @@ jobs:
             echo "::error::Faltan los secretos VPS_HOST, VPS_SSH_KEY o VPS_KNOWN_HOSTS (ver README del servidor)."
             exit 1
           fi
+          # Espacios o saltos de linea que pudieron quedar al pegar la IP en el secreto.
+          VPS_HOST=$(printf '%s' "$VPS_HOST" | tr -d '[:space:]')
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
-          printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          # Con un puerto distinto del 22, ssh busca la huella como [IP]:puerto: se agrega esa forma
-          # a partir de la linea cargada (que viene como "IP ssh-ed25519 ...").
-          printf '%s\n' "$VPS_KNOWN_HOSTS" | sed -n "s/^\([^[ #][^ ]*\) /[\1]:$VPS_PORT /p" >> ~/.ssh/known_hosts
+          # De VPS_KNOWN_HOSTS se toma solo la clave del servidor ("ssh-ed25519 AAAA..."), sea cual sea
+          # el nombre con que se genero (IP, localhost) y aunque tenga saltos de linea de Windows, y se
+          # anota para la IP y el puerto reales (con otro puerto que el 22, ssh la busca como [IP]:puerto).
+          printf '%s\n' "$VPS_KNOWN_HOSTS" | tr -d '\r' | grep -E '(^| )ssh-[a-z0-9-]+ AAAA' | grep -v '^#' \
+            | sed -E 's/^.*(ssh-[a-z0-9-]+ AAAA[^ ]*).*$/\1/' | sort -u \
+            | while read -r clave; do
+                echo "[$VPS_HOST]:$VPS_PORT $clave"
+                echo "$VPS_HOST $clave"
+              done > ~/.ssh/known_hosts
+          if [ ! -s ~/.ssh/known_hosts ]; then
+            echo "::error::VPS_KNOWN_HOSTS no tiene ninguna clave 'ssh-ed25519 AAAA...'. Volver a generarlo con ssh-keyscan."
+            exit 1
+          fi
+          echo "Huella esperada del VPS:"; ssh-keygen -lf ~/.ssh/known_hosts | sort -u -k2,2
           # El comando que se manda no importa: el VPS solo deja correr ci-deploy.sh con esta clave.
           ssh -i ~/.ssh/deploy_key -p "$VPS_PORT" -o StrictHostKeyChecking=yes -o BatchMode=yes \
               -o ConnectTimeout=30 -o ServerAliveInterval=30 root@"$VPS_HOST" deploy
