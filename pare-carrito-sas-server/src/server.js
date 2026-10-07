@@ -1217,6 +1217,62 @@ function canApplyStaleEmployeePatch(patch) {
   });
 }
 
+// Parche desactualizado que NO entra en canApplyStaleEmployeePatch (tipicamente una compra: trae
+// precios, el producto con su costo nuevo y el proveedor con sus productos). Antes se rechazaba y el
+// equipo tenia que bajar TODO el estado, fusionar y reenviar: en el celular eso tardaba y, si en el
+// medio se bloqueaba la pantalla (la ultima compra del dia, justo al terminar), la compra se perdia.
+// Ahora se aplica de forma conservadora, sin pisar lo que otros cambiaron mientras tanto:
+//  - registros operativos (compras, caja, saldos, pedidos...): como siempre, gana el mas nuevo;
+//  - precios: producto por producto (lo que cambio este equipo);
+//  - productos existentes: solo costo y precio; proveedores existentes: se suman sus productos;
+//    relaciones de costo existentes: solo el divisor;
+//  - cualquier otra lista: solo se agregan registros nuevos; configuracion: solo claves nuevas.
+// Si el parche borra algo, sigue el camino de siempre (conflicto y fusion en el equipo).
+const STALE_FIELD_MERGE = { products: ["baseCost", "salePrice"], costRelations: ["divisor"] };
+function conservativeStalePatch(current, patch) {
+  if (!patch || typeof patch !== "object") return null;
+  const arrays = patch.arrays && typeof patch.arrays === "object" ? patch.arrays : {};
+  const out = { arrays: {}, objects: {} };
+  const omitidos = [];
+  for (const key of Object.keys(arrays)) {
+    const entry = arrays[key] || {};
+    if (Array.isArray(entry.delete) && entry.delete.length) return null;
+    const upsert = Array.isArray(entry.upsert) ? entry.upsert : [];
+    if (EMPLOYEE_STALE_PATCH_ARRAY_KEYS.has(key)) { out.arrays[key] = { upsert }; continue; }
+    const existentes = new Map((Array.isArray(current[key]) ? current[key] : []).map((item) => [patchKeyForItem(key, item), item]));
+    const filas = [];
+    upsert.forEach((item) => {
+      const id = patchKeyForItem(key, item);
+      const existente = id ? existentes.get(id) : null;
+      if (!existente) { filas.push(item); return; }
+      if (key === "providers") {
+        const union = Array.from(new Set([...(existente.productsSupplied || []), ...(item.productsSupplied || [])]));
+        if (union.length !== (existente.productsSupplied || []).length) filas.push({ ...existente, productsSupplied: union });
+        return;
+      }
+      const campos = STALE_FIELD_MERGE[key];
+      if (campos) {
+        const cambio = {};
+        campos.forEach((campo) => { if (item[campo] !== undefined) cambio[campo] = item[campo]; });
+        if (Object.keys(cambio).length) filas.push({ ...existente, ...cambio });
+        return;
+      }
+      omitidos.push(key + ":" + id);
+    });
+    if (filas.length) out.arrays[key] = { upsert: filas };
+  }
+  const objects = patch.objects && typeof patch.objects === "object" ? patch.objects : {};
+  if (objects.prices && typeof objects.prices === "object") out.objects.prices = objects.prices;
+  if (objects.appSettings && typeof objects.appSettings === "object") {
+    const actuales = current.appSettings || {};
+    const nuevas = {};
+    Object.keys(objects.appSettings).forEach((k) => { if (actuales[k] === undefined) nuevas[k] = objects.appSettings[k]; else omitidos.push("appSettings." + k); });
+    if (Object.keys(nuevas).length) out.objects.appSettings = nuevas;
+  }
+  if (patch.scalars && Object.keys(patch.scalars).length) omitidos.push("scalars:" + Object.keys(patch.scalars).join(","));
+  return { patch: out, omitidos };
+}
+
 // ---------- Estado por ventana de fechas ----------
 // El estado completo son decenas de MB y se descargaba entero en cada carga, en cada dispositivo.
 // El grueso es historico (pedidos con sus items, saldos, caja, compras) que en el celular no se
@@ -1633,6 +1689,7 @@ app.post("/state/patch", authenticate, requireRole(...PATCH_SYNC_ROLES), async (
       return res.status(409).json({ error: "conflicto: operación sin version base. Descargue primero.", updatedAt: current.rows[0].updated_at.toISOString() });
     }
     const storedIso = current.rows[0].updated_at.toISOString();
+    let patchAplicado = body.patch;
     if (storedIso !== String(body.baseUpdatedAt)) {
       // Un parche que solo agrega o modifica registros (sin borrar, sin precios ni configuracion) se
       // aplica sobre una version mas nueva para cualquier rol: cada registro gana por fecha y los
@@ -1641,12 +1698,17 @@ app.post("/state/patch", authenticate, requireRole(...PATCH_SYNC_ROLES), async (
       // el celular, y a veces habia que repetir el cambio).
       const allowEmployeeMerge = canApplyStaleEmployeePatch(body.patch);
       if (!allowEmployeeMerge) {
-        await clientDb.query("ROLLBACK");
-        return res.status(409).json({ error: "conflicto: el servidor tiene una version mas nueva", updatedAt: storedIso });
+        const conservador = conservativeStalePatch(current.rows[0].data || {}, body.patch);
+        if (!conservador) {
+          await clientDb.query("ROLLBACK");
+          return res.status(409).json({ error: "conflicto: el servidor tiene una version mas nueva", updatedAt: storedIso });
+        }
+        if (conservador.omitidos.length) console.warn("Parche desactualizado de " + req.user.username + ": no se aplicaron " + conservador.omitidos.slice(0, 20).join(", ") + " (ya habian cambiado en el servidor).");
+        patchAplicado = conservador.patch;
       }
     }
     const beforeData = current.rows[0].data || {};
-    const nextData = protectManualBalanceAdjustments(beforeData, applyStatePatch(beforeData, body.patch), req.user.role);
+    const nextData = protectManualBalanceAdjustments(beforeData, applyStatePatch(beforeData, patchAplicado), req.user.role);
     const repreciados = repriceOrdersOnServer(beforeData, nextData, new Date().toISOString())
       + normalizeOrdersOnServer(beforeData, nextData, new Date().toISOString());
     const saved = await clientDb.query(

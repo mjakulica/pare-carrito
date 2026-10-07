@@ -5,7 +5,7 @@
   const USER_KEY = "lpc_current_user_v1";
   const OPERATIONAL_RESET_VERSION = "20260610-operational-clean-1";
   const BUSINESS_NAME = "Pare Carrito SAS";
-  const APP_VERSION = "v47";
+  const APP_VERSION = "v48";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -1743,7 +1743,9 @@
       });
       if (response.status === 409) {
         const merged = !resolvingConflict && await mergePendingPatchConflictWithRemote(config, manual);
-        if (merged) return flushPatchQueue(manual, true);
+        // Se libera el envio antes de reintentar: si no, el reintento veia "envio en curso", devolvia
+        // "pendiente" y el empleado recibia un aviso de SIN CONEXION aunque la compra si salia.
+        if (merged) { patchFlightInProgress = false; return flushPatchQueue(manual, true); }
         const detail = await readCloudErrorDetail(response);
         config.lastError = "Conflicto al sincronizar cambio pendiente" + detail + ". Se conservo la informacion local y se reintentara la sincronizacion.";
         saveCloudSyncConfig(config);
@@ -9100,12 +9102,12 @@
       // guardado. Asi el cambio sale mientras la app sigue en primer plano (si el celular se
       // bloquea 500ms despues, el envio ya salio) y, si falla, el usuario se entera en el momento.
       if (["proveedor", "employee"].includes(currentUser.role)) {
-        try {
-          if (typeof navigator !== "undefined" && navigator.onLine === false) throw new Error("sin conexión");
-          const ok = await flushPatchQueue(false);
-          if (ok === false) throw new Error("pendiente");
-        } catch (e) {
-          alert("\u26A0 SIN CONEXIÓN: el egreso TODAVÍA NO se envió al sistema. Quedó guardado en este dispositivo y se reintentará al volver internet. No cierres el sistema hasta tener conexión.");
+        let ok = false;
+        try { ok = await flushPatchQueue(false); } catch (e) { ok = false; }
+        // Si no se pudo guardar, flushPatchQueue ya volvio a los datos del servidor y lo aviso. Solo
+        // queda avisar si el envio sigue en curso (se reintenta solo en unos segundos).
+        if (ok === false && loadPatchQueue().length) {
+          alert("El egreso se esta terminando de enviar al sistema. No cierres la app hasta que diga \"Guardado\" arriba.");
         }
       }
       render();
