@@ -5,7 +5,7 @@
   const USER_KEY = "lpc_current_user_v1";
   const OPERATIONAL_RESET_VERSION = "20260610-operational-clean-1";
   const BUSINESS_NAME = "Pare Carrito SAS";
-  const APP_VERSION = "v48";
+  const APP_VERSION = "v49";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -18785,7 +18785,9 @@
         unmatched.push(line);
         return;
       }
-      let product = findProductForParsedLine(parsed.name, parsed.unitType, clientId);
+      let product = parsed.requestedUnit
+        ? findProductForParsedLine(parsed.name, parsed.unitTypeBeforeAdjust, clientId, parsed.requestedUnit)
+        : findProductForParsedLine(parsed.name, parsed.unitType, clientId);
       product = applyParsedProductLineOverrides(product, line, parsed, clientId);
       if (!product) {
         unmatched.push(line);
@@ -18928,12 +18930,14 @@
         index += 1;
       }
       let unitType = "";
+      let unidadEscrita = "";
       const nextToken = tokens[index + 1] || "";
       const prevToken = tokens[index - 1] || "";
       const nextUnit = normalizeParsedUnit(nextToken);
       const prevUnit = normalizeParsedUnit(prevToken);
       if (nextUnit) {
         unitType = nextUnit;
+        unidadEscrita = requestedUnitFromToken(nextToken);
         remove.add(index + 1);
         if (isGramParsedUnitToken(nextToken)) quantity = quantity / 1000;
         if (normalizeText(nextToken).startsWith("un") && quantity >= 12 && quantity % 12 === 0) {
@@ -18942,6 +18946,7 @@
         }
       } else if (prevUnit) {
         unitType = prevUnit;
+        unidadEscrita = requestedUnitFromToken(prevToken);
         remove.add(index - 1);
         if (isGramParsedUnitToken(prevToken)) quantity = quantity / 1000;
         if (normalizeText(prevToken).startsWith("un") && quantity >= 12 && quantity % 12 === 0) {
@@ -18973,9 +18978,9 @@
         const unitProduct = findProductForParsedLine(resolved.name, "unidad", clientId);
         if (unitProduct && normalizeText(unitProduct.unitType) === "unidad") unitType = "unidad";
       }
-      const product = findProductForParsedLine(resolved.name, unitType, clientId);
+      const product = findProductForParsedLine(resolved.name, unitType, clientId, unidadEscrita);
       const adjusted = adjustParsedQuantityAndUnitForProduct(quantity, unitType, product, nameTokens);
-      return { name: resolved.name, quantity: adjusted.quantity, unitType: adjusted.unitType, note: resolved.note };
+      return { name: resolved.name, quantity: adjusted.quantity, unitType: adjusted.unitType, note: resolved.note, requestedUnit: unidadEscrita, unitTypeBeforeAdjust: unitType };
     }
     // Sin cantidad explicita: si el texto matchea un producto, cantidad por defecto 1.
     const noQtyRaw = rawTokens.filter((t) => {
@@ -19240,12 +19245,39 @@
     return kept.join(" ").trim();
   }
 
-  function findProductForParsedLine(name, unitType, clientId) {
-    const match = matchProductForParsedLine(name, unitType, clientId);
+  // Unidad que escribio el cliente, tal cual (para comparar con el producto). "Atado" y "planta" se
+  // distinguen de "unidad" (el lector los cuenta igual); envases como botella o frasco no cuentan.
+  function requestedUnitFromToken(token) {
+    const t = normalizeText(token);
+    if (!t) return "";
+    if (t === "at" || t === "ot" || t.startsWith("atad")) return "atado";
+    if (t === "pl" || t === "plta" || t.startsWith("plant")) return "planta";
+    if (/^(botel|frasc|pote|horma|paq)/.test(t) || t === "pq") return "";
+    return normalizeParsedUnit(t);
+  }
+
+  // La unidad pedida es compatible con el producto si es la suya, si figura en el nombre ("Lechuga
+  // Crespa Unidad") o si son unidades de algo que se vende por docena. aceptaKg: unidades de algo
+  // que se vende por kg tambien sirve (se pasa a kg con el peso por unidad, como el kiwi).
+  function parsedUnitFitsProduct(product, unitText, aceptaKg) {
+    if (!product) return true;
+    const pedida = normalizeText(unitText);
+    if (!pedida) return true;
+    const propia = normalizeText(product.unitType).replace(/unidades/g, "unidad");
+    if (propia === pedida) return true;
+    if (pedida === "unidad" && propia === "docena") return true;
+    if (aceptaKg && pedida === "unidad" && propia === "kg") return true;
+    return normalizeText(product.name).split(/\s+/).map((w) => w.replace(/unidades/g, "unidad")).includes(pedida);
+  }
+
+  function findProductForParsedLine(name, unitType, clientId, requestedUnit) {
+    const match = matchProductForParsedLine(name, unitType, clientId, requestedUnit);
     return match ? match.product : null;
   }
 
-  function matchProductForParsedLine(name, unitType, clientId) {
+  // requestedUnit: la unidad que ESCRIBIO el cliente ("unidad", "atado", "cajon", "kg"...), no la que
+  // dedujo el lector. skipAliases: uso interno, para buscar sin alias.
+  function matchProductForParsedLine(name, unitType, clientId, requestedUnit, skipAliases) {
     let clean = normalizeText(name);
     clean = clean.replace(/\bpimientos?\b/g, "morron").replace(/\bmolido\b/g, "polvo").replace(/\bzucc?h?ini\b/g, "zukini");
     if (!clean) return null;
@@ -19264,15 +19296,20 @@
       if (aNo && singularizeParsedProductText(aNo) === singularizeParsedProductText(cNo)) return true;
       return false;
     };
-    const clientAlias = state.clientProductAliases.find((alias) => alias.clientId === clientId && aliasMatchesClean(alias.alias));
-    if (clientAlias) {
-      const product = getProduct(clientAlias.productId);
-      return product ? { product, score: 120, exact: true } : null;
-    }
-    const generalAlias = state.productAliases.find((alias) => aliasMatchesClean(alias.alias));
-    if (generalAlias) {
-      const product = getProduct(generalAlias.productId);
-      return product ? { product, score: 115, exact: true } : null;
+    const clientAlias = skipAliases ? null : state.clientProductAliases.find((alias) => alias.clientId === clientId && aliasMatchesClean(alias.alias));
+    const generalAlias = skipAliases || clientAlias ? null : state.productAliases.find((alias) => aliasMatchesClean(alias.alias));
+    const alias = clientAlias || generalAlias;
+    if (alias) {
+      const product = getProduct(alias.productId);
+      if (!product) return null;
+      const porAlias = { product, score: clientAlias ? 120 : 115, exact: true };
+      // Un alias ("zanahoria" -> Zanahoria Atado) no manda si el pedido ESCRIBE otra unidad: "4 unidades
+      // de zanahorias" salia como 4 atados. Se busca el producto de esa unidad y, si no hay ninguno
+      // que corresponda, queda el del alias como antes.
+      if (!requestedUnit || parsedUnitFitsProduct(product, requestedUnit)) return porAlias;
+      const otro = matchProductForParsedLine(name, unitType, clientId, requestedUnit, true);
+      if (otro && otro.product && parsedUnitFitsProduct(otro.product, requestedUnit, true)) return otro;
+      return porAlias;
     }
     const unitSensitiveProduct = findUnitSensitiveParsedProduct(clean, unitText, clientId);
     if (unitSensitiveProduct) return { product: unitSensitiveProduct, score: 118, exact: true };
