@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v52";
+  const APP_VERSION = "v53";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -316,6 +316,9 @@
   const LOCAL_SNAPSHOT_DELAY_MS = 1500;
   let localSnapshotTimer = null;
   let localSnapshotPending = false;
+  // Guardado a prueba de memoria llena (ver storeGet/storeSet): se declara antes de leer el usuario.
+  const memoryStore = new Map();
+  let storageProblemReported = false;
   let state = loadState();
   let currentUser = loadCurrentUser();
   let lastSyncedState = null;
@@ -401,9 +404,21 @@
       return r.headers.get("last-modified") || r.headers.get("etag") || "";
     } catch (e) { return null; }
   }
-  function forceReloadFresh() {
+  // Recarga para tomar la version nueva. Nunca con envios sin confirmar: con el almacenamiento del
+  // celular lleno la cola puede vivir solo en memoria y una recarga la borraria. Primero se intenta
+  // enviar; si sigue habiendo pendientes, no se recarga (se reintenta mas tarde).
+  async function forceReloadFresh() {
+    if (pendingSyncCount() > 0) {
+      try { await flushPatchQueue(false); } catch (e) { /* se reintenta */ }
+      try { await flushClientWriteQueue(false); } catch (e) { /* se reintenta */ }
+      if (pendingSyncCount() > 0) {
+        showUpdateBanner();
+        return false;
+      }
+    }
     try { location.replace(location.pathname + "?v=" + Date.now() + location.hash); }
     catch (e) { location.reload(); }
+    return true;
   }
   function showUpdateBanner() {
     if (document.getElementById("update-banner")) return;
@@ -413,7 +428,10 @@
     b.innerHTML = 'Hay una nueva version disponible. <button type="button" id="update-now-btn">Actualizar ahora</button>';
     document.body.appendChild(b);
     const btn = document.getElementById("update-now-btn");
-    if (btn) btn.addEventListener("click", forceReloadFresh);
+    if (btn) btn.addEventListener("click", async () => {
+      const ok = await forceReloadFresh();
+      if (!ok) alert("Hay cambios de este celular que todavia no llegaron al servidor. La app se actualiza sola apenas se envien.");
+    });
   }
   // Horarios de chequeo (hora local): 4,5,6,7,8,10,12 y luego cada 4 h (16, 20, 0).
   const UPDATE_CHECK_HOURS = [0, 4, 5, 6, 7, 8, 10, 12, 16, 20];
@@ -435,8 +453,8 @@
   function deviceLabel() {
     let codigo = "";
     try {
-      codigo = localStorage.getItem("lpc_device_code_v1") || "";
-      if (!codigo) { codigo = Math.random().toString(36).slice(2, 6).toUpperCase(); localStorage.setItem("lpc_device_code_v1", codigo); }
+      codigo = storeGet("lpc_device_code_v1") || "";
+      if (!codigo) { codigo = Math.random().toString(36).slice(2, 6).toUpperCase(); storeSet("lpc_device_code_v1", codigo); }
     } catch (e) { codigo = "----"; }
     const ua = navigator.userAgent || "";
     const so = /iPhone|iPad/.test(ua) ? "iPhone" : /Android/.test(ua) ? "Android" : /Windows/.test(ua) ? "Windows" : /Mac OS/.test(ua) ? "Mac" : /Linux/.test(ua) ? "Linux" : "Otro";
@@ -478,11 +496,8 @@
   async function applyServedVersionWhenSafe() {
     if (!latestServedVersion || latestServedVersion === APP_VERSION) return;
     if (hasUnsavedWork()) { showUpdateBanner(); return; }
-    // Lo pendiente sale antes de recargar (la cola tambien sobrevive a la recarga, pero asi no espera).
-    if (loadPatchQueue().length) {
-      try { await flushPatchQueue(false); } catch (e) { /* se reintenta despues de recargar */ }
-    }
-    forceReloadFresh();
+    // Lo pendiente sale antes de recargar; si no puede salir, no se recarga (ver forceReloadFresh).
+    await forceReloadFresh();
   }
 
   // Aviso al gerente/admin: navegadores que siguen con una version vieja.
@@ -877,6 +892,41 @@
       priceAutoSchedule: [],
       createdAt: new Date().toISOString()
     };
+  }
+
+  // ---- Guardado en el navegador a prueba de memoria llena ----
+  // Lo chico y critico (usuario conectado, conexion con el servidor, colas de envios, codigo del
+  // dispositivo) vive en memoria mientras la app esta abierta; el navegador es solo una copia para
+  // la proxima vez. En un celular sin espacio, localStorage.setItem falla: antes eso hacia que no se
+  // pudiera iniciar sesion, que la app "olvidara" el servidor o que los cambios no se anotaran para
+  // enviar (la compra se veia pero nunca salia). Si no hay lugar se libera espacio y se reintenta;
+  // si igual no entra, se sigue en memoria y se avisa en pantalla.
+  function storeGet(key) {
+    if (memoryStore.has(key)) return memoryStore.get(key);
+    try { return localStorage.getItem(key); } catch (e) { return null; }
+  }
+  function storeSet(key, value) {
+    const texto = String(value);
+    memoryStore.set(key, texto);
+    try { localStorage.setItem(key, texto); return true; } catch (e) { /* se libera espacio y se reintenta */ }
+    freeLocalStorageSpace();
+    try { localStorage.setItem(key, texto); return true; } catch (error) {
+      noteStorageProblem("no se pudo guardar " + key + ": " + ((error && error.message) || error));
+      return false;
+    }
+  }
+  function storeRemove(key) {
+    memoryStore.set(key, null);
+    try { localStorage.removeItem(key); } catch (e) { /* nada */ }
+  }
+  function noteStorageProblem(detalle) {
+    const nuevo = !ui.storageProblem;
+    ui.storageProblem = true;
+    ui.storageProblemDetail = detalle;
+    if (!storageProblemReported) {
+      try { storageProblemReported = reportClientProblem("almacenamiento", "El navegador no tiene espacio: " + detalle) === true; } catch (e) { /* nada */ }
+    }
+    if (nuevo) { try { setTimeout(() => render(), 0); } catch (e) { /* nada */ } }
   }
 
   function loadState() {
@@ -1307,11 +1357,21 @@
   }
 
   function writeLocalStateSnapshot(data, warningMessage) {
+    let texto;
+    try { texto = JSON.stringify(data); } catch (error) { console.warn(warningMessage, error); return false; }
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      localStorage.setItem(STORAGE_KEY, texto);
       return true;
     } catch (error) {
       console.warn(warningMessage || "No se pudo guardar el estado completo en localStorage.", error);
+    }
+    // Sin lugar: se borran los respaldos (y la copia vieja) y se reintenta una vez.
+    try { localStorage.removeItem("lpc_erp_local_backups_v1"); localStorage.removeItem(STORAGE_KEY); } catch (e) { /* nada */ }
+    try {
+      localStorage.setItem(STORAGE_KEY, texto);
+      return true;
+    } catch (error) {
+      noteStorageProblem("copia de los datos: " + ((error && error.message) || error));
       return false;
     }
   }
@@ -1496,33 +1556,17 @@
   // se copia a localStorage para sobrevivir a un cierre. Antes vivia SOLO en localStorage: si el
   // espacio del navegador estaba lleno (respaldos locales de varios MB en el celular), la escritura
   // fallaba sin avisar, la cola quedaba vacia y la compra se veia en pantalla pero nunca se enviaba.
-  let patchQueueMemory = null;
   function loadPatchQueue() {
-    if (patchQueueMemory) return patchQueueMemory.slice();
     try {
-      patchQueueMemory = JSON.parse(localStorage.getItem(PATCH_QUEUE_KEY) || "[]");
-      if (!Array.isArray(patchQueueMemory)) patchQueueMemory = [];
+      const cola = JSON.parse(storeGet(PATCH_QUEUE_KEY) || "[]");
+      return Array.isArray(cola) ? cola : [];
     } catch {
-      patchQueueMemory = [];
+      return [];
     }
-    return patchQueueMemory.slice();
   }
 
   function savePatchQueue(queue) {
-    patchQueueMemory = Array.isArray(queue) ? queue.slice() : [];
-    const texto = JSON.stringify(patchQueueMemory);
-    try {
-      localStorage.setItem(PATCH_QUEUE_KEY, texto);
-      return;
-    } catch (error) {
-      console.warn("No se pudo guardar la cola offline; se libera espacio y se reintenta.", error);
-    }
-    freeLocalStorageSpace();
-    try {
-      localStorage.setItem(PATCH_QUEUE_KEY, texto);
-    } catch (error) {
-      reportClientProblem("almacenamiento", "No se pudo guardar la cola de envios en el navegador (sigue en memoria): " + ((error && error.message) || error));
-    }
+    storeSet(PATCH_QUEUE_KEY, JSON.stringify(Array.isArray(queue) ? queue : []));
   }
 
   // Libera lo que no hace falta para operar: los respaldos locales y, en los roles que trabajan
@@ -1615,18 +1659,14 @@
 
   function getCloudSyncConfig() {
     try {
-      return JSON.parse(localStorage.getItem(SYNC_KEY) || "{}") || {};
+      return JSON.parse(storeGet(SYNC_KEY) || "{}") || {};
     } catch {
       return {};
     }
   }
 
   function saveCloudSyncConfig(config) {
-    try {
-      localStorage.setItem(SYNC_KEY, JSON.stringify(config || {}));
-    } catch (error) {
-      console.warn("No se pudo guardar la configuración de sincronización local.", error);
-    }
+    storeSet(SYNC_KEY, JSON.stringify(config || {}));
   }
 
   function cloudSyncReady(config) {
@@ -1685,9 +1725,9 @@
   let clientProblemsSent = 0;
   function reportClientProblem(kind, message, detail) {
     try {
-      if (clientProblemsSent >= 30) return;
+      if (clientProblemsSent >= 30) return false;
       const config = getCloudSyncConfig();
-      if (!currentUser || !cloudSyncReady(config)) return;
+      if (!currentUser || !cloudSyncReady(config)) return false;
       clientProblemsSent += 1;
       cloudRequest(config, "/client-log", { method: "POST", body: JSON.stringify({
         kind: String(kind || "error").slice(0, 40),
@@ -1695,7 +1735,9 @@
         detail: String(detail || "").slice(0, 1500),
         route: String(location.hash || "").slice(0, 60)
       }) }).catch(() => {});
+      return true;
     } catch (e) { /* nunca romper por reportar */ }
+    return false;
   }
   window.addEventListener("error", (event) => {
     reportClientProblem("error", (event && event.message) || "error", event && event.error && event.error.stack);
@@ -2132,18 +2174,14 @@
 
   function loadClientWriteQueue() {
     try {
-      return JSON.parse(localStorage.getItem(CLIENT_WRITE_QUEUE_KEY) || "[]");
+      return JSON.parse(storeGet(CLIENT_WRITE_QUEUE_KEY) || "[]");
     } catch {
       return [];
     }
   }
 
   function saveClientWriteQueue(queue) {
-    try {
-      localStorage.setItem(CLIENT_WRITE_QUEUE_KEY, JSON.stringify(queue || []));
-    } catch (error) {
-      console.warn("No se pudo guardar la cola de cliente.", error);
-    }
+    storeSet(CLIENT_WRITE_QUEUE_KEY, JSON.stringify(queue || []));
   }
 
   function queueClientWrite(type, payload) {
@@ -2582,6 +2620,9 @@
         : remoteState;
       writeLocalStateSnapshot(state, "No se pudo guardar la descarga de nube en localStorage.");
       ui.serverLoadedThisSession = true;
+      if (ui.storageProblem && !storageProblemReported) {
+        storageProblemReported = reportClientProblem("almacenamiento", "El navegador no tiene espacio: " + (ui.storageProblemDetail || "")) === true;
+      }
       config.lastSync = remoteUpdated || new Date().toISOString();
       config.lastError = "";
       saveCloudSyncConfig(config);
@@ -2614,7 +2655,7 @@
       if (manual) {
         if (localUnsyncedChanges) {
           alert(requeuedMergedPatch
-            ? "Datos descargados y fusionados con cambios locales. Los cambios locales quedaron pendientes para subir sin pisar la nube."
+            ? "Datos actualizados. Lo que se cargo en este celular se volvio a enviar al servidor para asegurarse de que no falte nada."
             : "Datos descargados y fusionados correctamente.");
         } else {
           alert(clearedQueueCount ? `Datos descargados de la nube correctamente. Se limpiaron ${clearedQueueCount} cambio(s) pendiente(s) anteriores porque pertenecian a una version vieja del servidor.` : "Datos descargados de la nube correctamente.");
@@ -2651,11 +2692,17 @@
     }
   }
 
+  const USER_SNAPSHOT_KEY = "lpc_current_user_obj_v1";
   function loadCurrentUser() {
     try {
-      const id = localStorage.getItem(USER_KEY);
+      const id = storeGet(USER_KEY);
       if (!id) return null;
-      return state.users.find((user) => user.id === id) || null;
+      const enEstado = state.users.find((user) => user.id === id);
+      if (enEstado) return enEstado;
+      // La copia grande de los datos pudo borrarse para liberar espacio: se usa la copia minima del
+      // usuario hasta que baje el estado del servidor.
+      const copia = JSON.parse(storeGet(USER_SNAPSHOT_KEY) || "null");
+      return copia && copia.id === id ? copia : null;
     } catch {
       return null;
     }
@@ -2663,8 +2710,14 @@
 
   function setCurrentUser(user) {
     currentUser = user;
-    if (user) localStorage.setItem(USER_KEY, user.id);
-    else localStorage.removeItem(USER_KEY);
+    if (user) {
+      storeSet(USER_KEY, user.id);
+      const { password, passwordHash, ...sinClave } = user;
+      storeSet(USER_SNAPSHOT_KEY, JSON.stringify(sinClave));
+    } else {
+      storeRemove(USER_KEY);
+      storeRemove(USER_SNAPSHOT_KEY);
+    }
   }
 
   // Si el sistema quedo abierto de un dia para el otro, al cambiar de dia se reajustan a hoy
@@ -3327,9 +3380,11 @@
   function renderSyncBanners() {
     // El aviso de descarga se muestra en todos los roles: es la unica senal de que las pantallas
     // estan vacias porque todavia estan bajando los datos.
-    const bajando = ui.syncDownloading
+    const bajando = (ui.syncDownloading
       ? `<div class="alert" style="margin-bottom:14px"><strong>Sincronizando:</strong> descargando datos del servidor...</div>`
-      : "";
+      : "") + (ui.storageProblem
+      ? `<div class="alert warn" style="margin-bottom:14px"><strong>Este celular no tiene espacio libre.</strong> La app sigue funcionando y envia todo al servidor, pero si se cierra con cambios sin enviar se pueden perder. Libera espacio en el telefono (fotos, videos, apps) cuando puedas.</div>`
+      : "");
     if (!localPersistRole()) return bajando;
     let html = bajando + outdatedDevicesBannerHtml();
     if (ui.syncWarning) {
