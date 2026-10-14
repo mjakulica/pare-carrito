@@ -4239,3 +4239,14 @@ tr:last-child td {
     padding: 8px 12px;
   }
 }
+
+/* Precios: fila con margen menor al minimo (no se puede guardar) */
+.prices-table tr.price-below-min > td {
+  background: #fde8e8;
+}
+.prices-table tr.price-below-min [data-margin-pct],
+.prices-table tr.price-below-min [data-sale-price] {
+  border-color: #dc2626;
+  color: #b91c1c;
+  font-weight: 700;
+}

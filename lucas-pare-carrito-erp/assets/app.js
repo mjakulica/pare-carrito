@@ -5,7 +5,11 @@
   const USER_KEY = "lpc_current_user_v1";
   const OPERATIONAL_RESET_VERSION = "20260610-operational-clean-1";
   const BUSINESS_NAME = "Pare Carrito SAS";
-  const APP_VERSION = "v49";
+  // Margen minimo entre costo y precio de lista. Ningun precio puede quedar por debajo: ni a mano en
+  // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
+  // servidor lo vuelve a controlar en cada cambio de precio.
+  const MIN_MARGIN_PCT = 8;
+  const APP_VERSION = "v50";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -1644,6 +1648,31 @@
 
   const CLOUD_REQUEST_TIMEOUT_MS = 45000;
 
+  // Problemas que pasan en el dispositivo (errores de la app, cambios que no se pudieron guardar) se
+  // anotan en el log del servidor: sin esto, cuando algo fallaba en un celular no quedaba ningun rastro.
+  let clientProblemsSent = 0;
+  function reportClientProblem(kind, message, detail) {
+    try {
+      if (clientProblemsSent >= 30) return;
+      const config = getCloudSyncConfig();
+      if (!currentUser || !cloudSyncReady(config)) return;
+      clientProblemsSent += 1;
+      cloudRequest(config, "/client-log", { method: "POST", body: JSON.stringify({
+        kind: String(kind || "error").slice(0, 40),
+        message: String(message || "").slice(0, 500),
+        detail: String(detail || "").slice(0, 1500),
+        route: String(location.hash || "").slice(0, 60)
+      }) }).catch(() => {});
+    } catch (e) { /* nunca romper por reportar */ }
+  }
+  window.addEventListener("error", (event) => {
+    reportClientProblem("error", (event && event.message) || "error", event && event.error && event.error.stack);
+  });
+  window.addEventListener("unhandledrejection", (event) => {
+    const reason = event && event.reason;
+    reportClientProblem("promesa", (reason && reason.message) || String(reason || ""), reason && reason.stack);
+  });
+
   async function cloudRequest(config, path, options, retried) {
     const useJwt = !!config.username;
     if (useJwt && !config.jwt) await cloudLogin(config);
@@ -1845,6 +1874,7 @@
   // servidor y se avisa. Antes quedaba en una cola local y, si nunca salia, ese equipo mostraba
   // pedidos, precios o saldos que los demas no tenian.
   function rollbackUnconfirmedChanges(motivo) {
+    reportClientProblem("no-guardado", "Cambio descartado (" + motivo + ")", JSON.stringify(loadPatchQueue().map((op) => Object.keys((op.patch && op.patch.arrays) || {}))).slice(0, 300));
     savePatchQueue([]);
     patchSyncedStates.clear();
     pendingPatchBaseState = null;
@@ -6611,6 +6641,7 @@
         const changedIds = [];
         const notFound = [];
         const ambiguous = [];
+        const bajoMinimo = [];
         lines.forEach((line) => {
           const m = line.match(/^(.+?)\s+([\d.,]+)\s+([\d.,]+)\s*$/);
           if (!m) return;
@@ -6624,6 +6655,7 @@
             else if (cands.length > 1) { ambiguous.push(name + " (" + cands.map((c) => c.name).join(" / ") + ")"); return; }
           }
           if (!prod) { notFound.push(name); return; }
+          if (priceBelowMinMargin(cost, venta)) { bajoMinimo.push(prod.name + " (costo " + formatMoney(cost) + ", venta " + formatMoney(venta) + ", minimo " + formatMoney(minListPrice(cost)) + ")"); return; }
           const prev = state.prices[prod.id] || {};
           state.prices[prod.id] = { productId: prod.id, date: todayISO(), cost, marketPrice: prev.marketPrice || 0, marginPct: calcMargin(cost, venta), price: venta };
           prod.baseCost = cost;
@@ -6631,7 +6663,8 @@
           changedIds.push({ productId: prod.id });
           updated += 1;
         });
-        if (!updated && !notFound.length && !ambiguous.length) { alert("No se detectaron filas validas. Revisa el formato."); return; }
+        if (!updated && !notFound.length && !ambiguous.length && !bajoMinimo.length) { alert("No se detectaron filas validas. Revisa el formato."); return; }
+        if (bajoMinimo.length) alert("No se aplicaron " + bajoMinimo.length + " precio(s) con margen menor al " + MIN_MARGIN_PCT + "%:\n" + bajoMinimo.join("\n"));
         updateOrdersWithNewPrices(todayISO(), changedIds);
         saveState();
         const resultNode = document.getElementById("import-prices-result");
@@ -6667,6 +6700,12 @@
     return `<div class="margin-legend"><strong>Margen:</strong>${MARGIN_BANDS.map((band) => `<span class="${band.cls}">${escapeHtml(band.label)}</span>`).join("")}</div>`;
   }
 
+  function pricesBelowMinMarginBannerHtml() {
+    const lista = productsBelowMinMargin();
+    if (!lista.length) return "";
+    return `<div class="alert warn" style="margin-bottom:14px"><strong>${lista.length} producto(s) con margen menor al ${MIN_MARGIN_PCT}%.</strong> Revisa el costo (puede ser el de un cajon cargado como kilo) o subi el precio de lista:<ul style="margin:6px 0 0 18px">${lista.map((row) => `<li>${escapeHtml(row.product.name)}: costo ${formatMoney(row.cost)}, precio ${formatMoney(row.price)} (${formatNumber(roundOne(calcMargin(row.cost, row.price)))}%). Minimo: ${formatMoney(minListPrice(row.cost))}</li>`).join("")}</ul></div>`;
+  }
+
   function renderPrices() {
     const rows = activeProducts().sort((a, b) => a.sortOrder - b.sortOrder).map((product) => {
       const rec = state.prices[product.id] || { cost: product.baseCost || 0, price: product.salePrice || 0, marketPrice: 0, marginPct: calcMargin(product.baseCost, product.salePrice) };
@@ -6676,7 +6715,7 @@
       if (product.priceAutoExempt) autoPill = `<span class="pill gray" title="No se ajusta automaticamente">exento</span>`;
       else if (lastLog) { const up = Number(lastLog.marginNew) > Number(lastLog.marginPrev); const dn = Number(lastLog.marginNew) < Number(lastLog.marginPrev); autoPill = `<span class="pill ${up ? "green" : dn ? "amber" : "gray"}" title="${escapeAttr(lastLog.event + " " + formatDate(lastLog.date) + ": margen " + roundOne(lastLog.marginPrev) + "→" + roundOne(lastLog.marginNew) + (lastLog.applied ? "" : " (simulado)"))}">${roundOne(lastLog.marginPrev)}→${roundOne(lastLog.marginNew)}%</span>`; }
       return `
-        <tr data-price-row="${product.id}">
+        <tr data-price-row="${product.id}" class="${priceBelowMinMargin(rec.cost, rec.price) ? "price-below-min" : ""}">
           <td>${escapeHtml(product.name)}<br><span class="muted">${escapeHtml(product.category)} - ${escapeHtml(product.unitType)}</span></td>
           <td><input data-cost value="${formatAmountInput(rec.cost)}" inputmode="decimal" /></td>
           <td><input data-market-price value="${formatAmountInput(rec.marketPrice || 0)}" inputmode="decimal" /></td>
@@ -6703,6 +6742,7 @@
       "Entrada diaria de costo y precio de lista. Solo admin.",
       `<button class="btn primary" id="save-prices">Guardar precios</button><button class="btn ghost" id="import-prices-paste">Importar precios (pegar)</button>`,
       `
+      ${pricesBelowMinMarginBannerHtml()}
       <div class="panel">
         ${marginLegendHtml()}
         <div class="price-search-bar">
@@ -6769,6 +6809,9 @@
       if (!cell) return;
       MARGIN_BANDS.forEach((band) => cell.classList.remove(band.cls));
       cell.classList.add(marginBandClass(parseAmount(row.querySelector("[data-margin-pct]").value)));
+      const bajo = priceBelowMinMargin(parseAmount(row.querySelector("[data-cost]").value), parseAmount(row.querySelector("[data-sale-price]").value));
+      row.classList.toggle("price-below-min", bajo);
+      cell.title = bajo ? "Margen menor al " + MIN_MARGIN_PCT + "%: no se puede guardar" : "";
     };
     // Buscador: lleva a la linea del producto (sin tildes y tambien por alias), la resalta y deja
     // el cursor en el costo. No filtra la tabla, asi no se pierde lo que ya se escribio en otras filas.
@@ -6806,6 +6849,22 @@
     document.querySelectorAll("[data-margin-section]").forEach((sel) => sel.addEventListener("change", () => { const p = getProduct(sel.dataset.marginSection); if (p) { p.marginSectionId = sel.value; saveState(); } }));
     document.querySelectorAll("[data-price-exempt]").forEach((chk) => chk.addEventListener("change", () => { const p = getProduct(chk.dataset.priceExempt); if (p) { p.priceAutoExempt = chk.checked; saveState(); render(); } }));
     document.getElementById("save-prices").addEventListener("click", () => {
+      // Margen minimo: no se guarda ninguna fila modificada que quede por debajo.
+      const bajoMinimo = [];
+      document.querySelectorAll("[data-price-row]").forEach((row) => {
+        const productId = row.dataset.priceRow;
+        const prev = state.prices[productId] || {};
+        const cost = parseAmount(row.querySelector("[data-cost]").value);
+        const price = Math.ceil(parseAmount(row.querySelector("[data-sale-price]").value));
+        const cambio = Number(prev.cost || 0) !== cost || Number(prev.price || 0) !== price;
+        if (cambio && priceBelowMinMargin(cost, price)) {
+          const product = getProduct(productId);
+          bajoMinimo.push((product ? product.name : productId) + ": costo " + formatMoney(cost) + ", precio " + formatMoney(price) + " -> minimo " + formatMoney(minListPrice(cost)));
+        }
+      });
+      if (bajoMinimo.length) {
+        return alert("No se guardo nada: estos precios quedan con margen menor al " + MIN_MARGIN_PCT + "%.\n\n" + bajoMinimo.join("\n") + "\n\nSubi el precio de lista o corregi el costo.");
+      }
       const changedProducts = [];
       document.querySelectorAll("[data-price-row]").forEach((row) => {
         const productId = row.dataset.priceRow;
@@ -6861,6 +6920,8 @@
       const sourceProductId = document.getElementById("relation-source").value;
       const targetProductId = document.getElementById("relation-target").value;
       if (!sourceProductId || !targetProductId || sourceProductId === targetProductId) return alert("Seleccione origen y destino distintos.");
+      const margenRelacion = document.getElementById("relation-margin").value.trim();
+      if (margenRelacion && parseAmount(margenRelacion) < MIN_MARGIN_PCT) return alert("El margen no puede ser menor al " + MIN_MARGIN_PCT + "%.");
       state.costRelations.push({
         id: nextDatedId("REL", state.costRelations),
         sourceProductId,
@@ -8870,7 +8931,7 @@
       const select = row ? row.querySelector("[data-item-provider]") : null;
       if (select) select.hidden = !event.target.checked;
     });
-    document.getElementById("purchase-form").addEventListener("submit", async (event) => {
+    const submitPurchaseForm = async (event) => {
       event.preventDefault();
       const purchaseSubmitBtn = event.target.querySelector("button[type=submit]");
       if (purchaseSubmitBtn && purchaseSubmitBtn.dataset.busy === "1") return;
@@ -8980,6 +9041,7 @@
       if (expenseType === "purchase" && !provider && providerInput && parsePurchaseProviderValue(providerInput.value).type === "all") {
         const multiItems = readPurchaseItems(false);
         if (!multiItems.length) return alert("Agregue al menos un producto valido.");
+        if (!confirmPurchaseCostsAgainstList(multiItems)) return;
         if (purchaseSubmitBtn && purchaseSubmitBtn.dataset.busy === "1") return;
         const creadas = registerMultiProviderPurchase({
           items: multiItems,
@@ -9009,6 +9071,7 @@
           ? 0
         : items.reduce((sum, item) => sum + item.totalCost, 0);
       if (!isOtherExp && !items.length) return alert("Agregue al menos un producto valido.");
+      if (["purchase", "product_expense"].includes(expenseType) && !confirmPurchaseCostsAgainstList(items)) return;
       if (!["prepared", "market_price"].includes(expenseType) && totalCost <= 0) return alert("Complete el monto/costo.");
       let proofFile = "";
       let proofKey = "";
@@ -9111,6 +9174,20 @@
         }
       }
       render();
+    };
+    // Si algo falla a mitad del guardado, antes la compra quedaba a medias solo en este equipo, sin
+    // aviso, y desaparecia en la siguiente descarga. Ahora se avisa, se registra el motivo en el
+    // servidor y se vuelve a los datos del servidor (la compra no quedo guardada).
+    document.getElementById("purchase-form").addEventListener("submit", async (event) => {
+      try {
+        await submitPurchaseForm(event);
+      } catch (error) {
+        const motivo = String((error && error.message) || error);
+        console.error("Guardar egreso:", error);
+        reportClientProblem("compra", "Fallo al guardar un egreso: " + motivo, error && error.stack);
+        alert("No se pudo guardar el egreso: " + motivo + ".\n\nNo quedo registrado. Volve a cargarlo y, si se repite, avisale al gerente.");
+        cloudPull(false, true).catch(() => {}).finally(() => render());
+      }
     });
     document.querySelectorAll("[data-annul-purchase]").forEach((button) => button.addEventListener("click", () => {
       const purchase = state.purchases.find((item) => item.id === button.dataset.annulPurchase);
@@ -9671,6 +9748,23 @@
       creadas.push(purchase);
     });
     return creadas;
+  }
+
+  // Costo por encima del precio de lista: casi siempre es el precio de un cajon o bulto cargado en un
+  // producto por kilo (ciruela kg a $10.000 con lista $1.250). Se pide confirmacion antes de guardar,
+  // porque al guardar el precio de lista sube para respetar el margen minimo.
+  function confirmPurchaseCostsAgainstList(items) {
+    const raros = (items || []).map((item) => {
+      const product = getProduct(item.productId);
+      if (!product) return null;
+      const rec = state.prices[product.id] || {};
+      const lista = Number(rec.price || product.salePrice || 0);
+      const costo = Number(item.unitCost || 0);
+      if (!(lista > 0) || !(costo > lista)) return null;
+      return product.name + " (" + product.unitType + "): costo " + formatMoney(costo) + " y precio de lista " + formatMoney(lista) + ". Al guardar, la lista pasa a " + formatMoney(minListPrice(costo)) + " o mas.";
+    }).filter(Boolean);
+    if (!raros.length) return true;
+    return confirm("Revisa estos costos: son MAYORES al precio de venta.\n\n" + raros.join("\n") + "\n\nSi es el precio de un cajon o bulto, cancela y carga el costo por unidad de venta (kg, unidad...). Guardar igual?");
   }
 
   function readPurchaseItems(allowZeroCost) {
@@ -15314,10 +15408,10 @@
         const sec = getMarginSections().find((x) => x.id === row.dataset.secRow);
         if (!sec) return;
         const mn = parseAmount(row.querySelector("[data-sec-min]").value), nm = parseAmount(row.querySelector("[data-sec-normal]").value), mx = parseAmount(row.querySelector("[data-sec-max]").value);
-        if (!(mn < nm && nm < mx)) { ok = false; return; }
+        if (!(mn < nm && nm < mx) || mn < MIN_MARGIN_PCT) { ok = false; return; }
         sec.name = row.querySelector("[data-sec-name]").value.trim() || sec.name; sec.minPct = mn; sec.normalPct = nm; sec.maxPct = mx;
       });
-      if (!ok) return alert("En cada sección debe cumplirse mín < normal < máx.");
+      if (!ok) return alert("En cada sección debe cumplirse mín < normal < máx, y el mínimo no puede ser menor al " + MIN_MARGIN_PCT + "%.");
       saveState(); alert("Secciones guardadas.");
     });
     document.querySelectorAll("[data-sec-del]").forEach((b) => b.addEventListener("click", () => {
@@ -20979,7 +21073,7 @@
     if (excessPct > upThr) target = S.normalPct - P.kUp * (excessPct - upThr);
     else if (excessPct < -downThr) target = S.normalPct + P.kDown * (Math.abs(excessPct) - downThr);
     else target = currentMargin + (S.normalPct - currentMargin) * (P.recoveryStepPct / 100);
-    target = Math.max(S.minPct, Math.min(S.maxPct, target));
+    target = Math.max(Math.max(S.minPct, MIN_MARGIN_PCT), Math.min(S.maxPct, target));
     return roundOne(target);
   }
   function computeStepPrice(currentPrice, targetPrice) {
@@ -20991,6 +21085,20 @@
     return np;
   }
   function ceilMoney(x) { return Math.ceil(Number(x || 0) - 1e-6); }
+  function minListPrice(cost) {
+    const c = Number(cost || 0);
+    return c > 0 ? ceilMoney(c * (1 + MIN_MARGIN_PCT / 100)) : 0;
+  }
+  function priceBelowMinMargin(cost, price) {
+    return Number(cost || 0) > 0 && Number(price || 0) < minListPrice(cost);
+  }
+  // Productos cuyo precio de lista guardado hoy queda por debajo del margen minimo.
+  function productsBelowMinMargin() {
+    return activeProducts().map((product) => {
+      const rec = state.prices[product.id] || { cost: product.baseCost || 0, price: product.salePrice || 0 };
+      return { product, cost: Number(rec.cost || 0), price: Number(rec.price || 0) };
+    }).filter((row) => priceBelowMinMargin(row.cost, row.price));
+  }
   function applyCostChange(product, costNew, eventType, opts) {
     opts = opts || {};
     const P = getPriceAutoSettings();
@@ -21006,6 +21114,9 @@
       // producto vuelve a venderse sobre su costo real.
       const market = opts.marketPrice != null ? Number(opts.marketPrice) || 0 : 0;
       if (market > 0) price = ceilMoney(market * (1 + margin / 100));
+      // Nunca por debajo del margen minimo sobre el costo real.
+      if (priceBelowMinMargin(costNew, price)) price = minListPrice(costNew);
+      if (!(market > 0) && costNew > 0) margin = Math.max(Number(margin) || 0, roundOne(calcMargin(costNew, price)));
       // La fecha ("ultima actualizacion de precio") solo se toca si el costo o el precio
       // realmente cambian. Antes se ponia hoy siempre, aunque no cambiara nada (reprocesos,
       // relaciones de costo), por lo que figuraba "actualizado hoy" sin motivo.
@@ -21111,7 +21222,7 @@
       let margin = Number(rec.marginPct);
       if (!Number.isFinite(margin) || margin <= 0) margin = calcMargin(rec.cost || product.baseCost, rec.price || product.salePrice);
       const pricePrev = Number(rec.price || product.salePrice || 0);
-      const priceNew = ceilMoney(Number(item.marketPrice) * (1 + margin / 100));
+      const priceNew = Math.max(ceilMoney(Number(item.marketPrice) * (1 + margin / 100)), minListPrice(rec.cost));
       rec.marketPrice = Number(item.marketPrice);
       rec.marginPct = roundOne(margin);
       rec.price = priceNew;
@@ -21252,11 +21363,11 @@
         const hasExplicitMargin = !(relation.marginPct === null || relation.marginPct === "" || relation.marginPct === undefined);
         if (hasExplicitMargin) {
           // Regla manual explicita: gana (comportamiento actual).
-          const margin = roundOne(Number(relation.marginPct));
+          const margin = Math.max(roundOne(Number(relation.marginPct)), MIN_MARGIN_PCT);
           const rec = state.prices[target.id] || { productId: target.id, cost: target.baseCost || 0, price: target.salePrice || 0 };
           rec.cost = cost;
           rec.marginPct = margin;
-          rec.price = Math.ceil(cost * (1 + margin / 100));
+          rec.price = Math.max(Math.ceil(cost * (1 + margin / 100)), minListPrice(cost));
           rec.date = todayISO();
           state.prices[target.id] = rec;
           target.baseCost = cost;

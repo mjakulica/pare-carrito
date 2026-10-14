@@ -304,6 +304,25 @@ function sanitizeExternalApiError(detail) {
 
 // ---------- Rutas publicas ----------
 // Navegadores vistos en los ultimos 3 dias con su version (solo gerente/admin).
+// Problemas que reporta la app desde cada dispositivo (errores, cambios que no se pudieron guardar).
+// Solo se anotan en el log del servidor: docker compose logs api | grep "\[dispositivo\]".
+const clientLogCounts = new Map();
+app.post("/client-log", authenticate, (req, res) => {
+  const user = String((req.user && req.user.username) || "?");
+  const hora = new Date().toISOString().slice(0, 13);
+  const clave = user + "|" + hora;
+  const n = (clientLogCounts.get(clave) || 0) + 1;
+  clientLogCounts.set(clave, n);
+  if (clientLogCounts.size > 500) clientLogCounts.clear();
+  if (n <= 60) {
+    const b = req.body || {};
+    const corto = (v, max) => String(v || "").replace(/\s+/g, " ").slice(0, max);
+    console.warn("[dispositivo] " + user + " " + corto(req.get("x-device-id"), 40) + " " + corto(req.get("x-app-version"), 10)
+      + " " + corto(b.route, 40) + " " + corto(b.kind, 30) + ": " + corto(b.message, 500) + (b.detail ? " | " + corto(b.detail, 800) : ""));
+  }
+  res.status(204).end();
+});
+
 app.get("/devices/versions", authenticate, requireRole("manager", "admin"), async (req, res) => {
   const { rows } = await pool.query("SELECT username, device, app_version, last_seen FROM device_versions WHERE last_seen > now() - interval '3 days' ORDER BY last_seen DESC");
   res.json({ devices: rows.map((r) => ({ username: r.username, device: r.device, version: r.app_version, lastSeen: r.last_seen.toISOString() })) });
@@ -1004,6 +1023,35 @@ function serverProductCost(data, productId) {
 }
 // fechasCompletas: dias en los que se reprecian TODOS los productos de todos los pedidos con la lista
 // actual (boton "Aplicar la lista de precios" de Remitos), para corregir pedidos que quedaron viejos.
+// Margen minimo entre costo y precio de lista (igual que MIN_MARGIN_PCT de la app). La app ya no deja
+// guardar menos, pero el servidor lo vuelve a controlar en cada precio que CAMBIA en esta escritura
+// (versiones viejas de la app, planilla, importaciones): si queda por debajo, sube el precio de lista
+// al minimo. Los que ya estaban mal y nadie toco no se corrigen solos: la pagina Precios los marca
+// en rojo, porque casi siempre el error es el costo (un cajon cargado como kilo) y no el precio.
+const MIN_MARGIN_PCT = 8;
+function enforceMinMarginOnServer(beforeData, nextData) {
+  const antes = (beforeData && beforeData.prices) || {};
+  const ahora = (nextData && nextData.prices) || {};
+  const corregidos = [];
+  Object.keys(ahora).forEach((pid) => {
+    const rec = ahora[pid];
+    if (!rec || typeof rec !== "object") return;
+    const prev = antes[pid] || {};
+    const cambio = Number(prev.cost || 0) !== Number(rec.cost || 0) || Number(prev.price || 0) !== Number(rec.price || 0);
+    const costo = Number(rec.cost || 0);
+    if (!cambio || !(costo > 0)) return;
+    const minimo = Math.ceil(costo * (1 + MIN_MARGIN_PCT / 100) - 1e-6);
+    if (Number(rec.price || 0) >= minimo) return;
+    const precioAnterior = Number(rec.price || 0);
+    ahora[pid] = { ...rec, price: minimo, marginPct: Math.round(((minimo / costo) - 1) * 1000) / 10 };
+    const product = (nextData.products || []).find((p) => p && p.id === pid);
+    if (product) product.salePrice = minimo;
+    corregidos.push(pid + " " + precioAnterior + "->" + minimo + " (costo " + costo + ")");
+  });
+  if (corregidos.length) console.warn("Margen minimo " + MIN_MARGIN_PCT + "%: se subio el precio de lista de " + corregidos.join(", "));
+  return corregidos.length;
+}
+
 function repriceOrdersOnServer(beforeData, nextData, nowIso, fechasCompletas) {
   if (!nextData || !Array.isArray(nextData.orders)) return 0;
   const completas = fechasCompletas instanceof Set ? fechasCompletas : new Set();
@@ -1588,7 +1636,8 @@ app.put("/state", authenticate, requireRole(...SYNC_ROLES), async (req, res) => 
     await upsertProductHistoryState(clientDb, body.data, req.user.username);
     // El cliente pudo haber descargado solo una ventana: se preserva el historial que no tiene.
     const cleanData = protectManualBalanceAdjustments(beforeData, stripHistoryFromState(mergeWindowedState(beforeData, body.data)), req.user.role);
-    const repreciadosPut = repriceOrdersOnServer(beforeData, cleanData, new Date().toISOString())
+    const margenPut = enforceMinMarginOnServer(beforeData, cleanData);
+    const repreciadosPut = margenPut + repriceOrdersOnServer(beforeData, cleanData, new Date().toISOString())
       + normalizeOrdersOnServer(beforeData, cleanData, new Date().toISOString());
     const saved = await clientDb.query(
       `INSERT INTO app_state (id, data, updated_at, updated_by) VALUES ('main', $1, now(), $2)
@@ -1709,7 +1758,8 @@ app.post("/state/patch", authenticate, requireRole(...PATCH_SYNC_ROLES), async (
     }
     const beforeData = current.rows[0].data || {};
     const nextData = protectManualBalanceAdjustments(beforeData, applyStatePatch(beforeData, patchAplicado), req.user.role);
-    const repreciados = repriceOrdersOnServer(beforeData, nextData, new Date().toISOString())
+    const margenCorregidos = enforceMinMarginOnServer(beforeData, nextData);
+    const repreciados = margenCorregidos + repriceOrdersOnServer(beforeData, nextData, new Date().toISOString())
       + normalizeOrdersOnServer(beforeData, nextData, new Date().toISOString());
     const saved = await clientDb.query(
       "UPDATE app_state SET data = $1, updated_at = now(), updated_by = $2 WHERE id = 'main' RETURNING updated_at",
