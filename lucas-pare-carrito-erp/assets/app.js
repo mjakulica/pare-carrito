@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v51";
+  const APP_VERSION = "v52";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -1834,6 +1834,7 @@
         return true;
       }
       const payload = await response.json();
+      if (payload && payload.updatedAt) noteServerVersion(payload.updatedAt);
       if (payload && payload.staleBase) {
         // El servidor tenia cambios de otros equipos que este navegador no bajo. Se marca como
         // sincronizado lo enviado, pero la version queda la vieja: asi la descarga automatica ve que
@@ -2404,6 +2405,44 @@
     });
   }
 
+  // Registros creados en este dispositivo que el servidor todavia NO confirmo (no estan en el
+  // servidor ni en la ultima version que el servidor confirmo). Al descargar se conservan y se
+  // reenvian en vez de perderse. Lo que el servidor tuvo y ya no tiene fue borrado por alguien: eso
+  // no se revive. Antes esta red existia solo para pedidos: una compra que no habia salido (por
+  // ejemplo con el almacenamiento del celular lleno) desaparecia al tocar "Actualizar datos ahora".
+  const UNCONFIRMED_RECORD_KEYS = ["purchases", "payments", "caja", "saldos", "attendance", "cashClosings",
+    "employeeReimbursements", "employeePayments", "providerPayments", "providerLedger", "clientTransfers",
+    "stockMovements", "replacements", "remitos", "vendorLedger"];
+  function localRecordsMissingFromRemote(localState, remoteData, windowInfo) {
+    const out = [];
+    // Sin una version confirmada en esta sesion no se puede distinguir "nuevo" de "borrado por otro".
+    if (!lastSyncedState) return out;
+    const confirmado = lastSyncedState;
+    UNCONFIRMED_RECORD_KEYS.forEach((key) => {
+      const locales = Array.isArray(localState && localState[key]) ? localState[key] : [];
+      if (!locales.length) return;
+      const remotos = new Set((Array.isArray(remoteData && remoteData[key]) ? remoteData[key] : []).map((row) => String((row && row.id) || "")));
+      const yaConfirmados = new Set((Array.isArray(confirmado[key]) ? confirmado[key] : []).map((row) => String((row && row.id) || "")));
+      const corte = (windowInfo && windowInfo.cutoffs && windowInfo.cutoffs[key]) || "";
+      locales.forEach((row) => {
+        if (!row || !row.id) return;
+        const id = String(row.id);
+        if (remotos.has(id) || yaConfirmados.has(id)) return;
+        if (corte && String(row.date || "") < corte) return;
+        out.push({ key, id });
+      });
+    });
+    return out;
+  }
+
+  // Version mas nueva del servidor que confirmo un envio de este equipo.
+  let latestKnownServerVersion = "";
+  let staleRemoteSkips = 0;
+  function noteServerVersion(iso) {
+    const v = String(iso || "");
+    if (v > latestKnownServerVersion) latestKnownServerVersion = v;
+  }
+
   async function cloudPull(manual, isLogin) {
     const config = getCloudSyncConfig();
     if (!canReadCloudState()) {
@@ -2458,6 +2497,17 @@
       if (!payload || typeof payload.data !== "object") throw new Error("respuesta inválida");
       stateWindow = payload.window || null;
       const remoteUpdated = String(payload.updatedAt || "");
+      // Una descarga que empezo ANTES de que el servidor guardara un envio de este equipo trae una
+      // version sin ese cambio. Si se aplicara, el cambio desapareceria de la pantalla (por ejemplo
+      // un peso de Unidades que vuelve a figurar pendiente). Se descarta y se vuelve a pedir.
+      if (remoteUpdated && latestKnownServerVersion && remoteUpdated < latestKnownServerVersion && staleRemoteSkips < 5) {
+        staleRemoteSkips += 1;
+        setTimeout(() => { cloudPull(false, true).catch(() => {}); }, 1200);
+        return;
+      }
+      // Tope de reintentos (por ejemplo si se restauro un respaldo viejo en el servidor).
+      staleRemoteSkips = 0;
+      if (remoteUpdated && remoteUpdated < latestKnownServerVersion) latestKnownServerVersion = remoteUpdated;
       if (!manual && !isLogin) {
         if (config.lastSync && remoteUpdated && remoteUpdated <= config.lastSync) return;
         if (!config.lastSync) return;
@@ -2514,7 +2564,12 @@
       // ventana que el servidor no tiene, se fusiona en vez de reemplazar y se avisa. Es la red
       // que evita que una subida fallida termine borrando pedidos de la pantalla.
       const huerfanos = localOrdersMissingFromRemote(state, payload.data, payload.window);
-      const debeFusionar = localUnsyncedChanges || huerfanos.length > 0;
+      const otrosSinConfirmar = localRecordsMissingFromRemote(state, payload.data, payload.window);
+      if (otrosSinConfirmar.length) {
+        reportClientProblem("sin-confirmar", otrosSinConfirmar.length + " registro(s) de este dispositivo no estaban en el servidor; se conservan y se reenvian: "
+          + otrosSinConfirmar.slice(0, 8).map((x) => x.key + ":" + x.id).join(", "));
+      }
+      const debeFusionar = localUnsyncedChanges || huerfanos.length > 0 || otrosSinConfirmar.length > 0;
       if (huerfanos.length && !localUnsyncedChanges) {
         const aviso = huerfanos.length + " pedido(s) de este dispositivo no estaban en el servidor ("
           + huerfanos.slice(0, 5).map((order) => order.id).join(", ")
@@ -11243,6 +11298,13 @@
         refreshBtn.textContent = "Actualizando...";
         try {
           if (pendingSyncCount() > 0) await flushPatchQueue(false);
+          // Nunca se descarga encima de cambios que todavia no llegaron al servidor.
+          if (pendingSyncCount() > 0) {
+            alert("Hay cambios de este celular que todavia no se enviaron. No se actualiza para no perderlos: espera a tener conexion y volve a intentar.");
+            refreshBtn.disabled = false;
+            refreshBtn.textContent = "Actualizar datos ahora";
+            return;
+          }
           await cloudPull(true);
         } catch (e) {
           alert("No se pudo actualizar: " + (e && e.message ? e.message : "error de conexion"));
@@ -11583,7 +11645,13 @@
     const todaysNotes = getProductNotesByDate(date);
     const omittedUnitCards = ui.omittedUnitCards || {};
     const unitRows = unitItems.filter((group) => !omittedUnitCards[group.key]).map((group) => renderUnitProductCard(group, true)).join("");
-    const shortageRows = missingPurchases.filter((group) => !omittedUnitCards[group.key]).map((group) => renderUnitProductCard(group, false)).join("");
+    // Un producto por unidad con compra insuficiente aparecia en las DOS tarjetas con las mismas
+    // lineas de pedido: se cargaba el peso en una, la misma linea seguia en la otra con el valor viejo
+    // y habia que cargarla dos veces (o se pisaba el peso bueno). Abajo queda solo el resumen.
+    const unitKeys = new Set(unitItems.map((group) => group.key));
+    const unitProductIds = new Set(unitItems.map((group) => group.productId));
+    const shortageRows = missingPurchases.filter((group) => !omittedUnitCards[group.key])
+      .map((group) => renderUnitProductCard(group, false, unitKeys.has(group.key) || unitProductIds.has(group.productId))).join("");
     afterRender.push(bindUnits);
     return pageShell(
       "Unidades",
@@ -11618,9 +11686,18 @@
     );
   }
 
-  function renderUnitProductCard(group, allowBulkUpdate) {
+  function renderUnitProductCard(group, allowBulkUpdate, soloResumen) {
     const omittedLines = ui.omittedUnitLines || {};
-    const entries = (allowBulkUpdate ? group.pendingEntries : group.entries).filter(({ order, item }) => !omittedLines[order.id + "|" + item.id]);
+    const entries = soloResumen ? [] : (allowBulkUpdate ? group.pendingEntries : group.entries).filter(({ order, item }) => !omittedLines[order.id + "|" + item.id]);
+    if (soloResumen) {
+      return `
+      <div class="assigned-product-card" data-unit-group="${escapeAttr(group.key)}">
+        <span class="product-name"><img class="product-thumb" src="${productThumb(getProduct(group.productId))}" alt="" />${escapeHtml(group.productName)}</span>
+        <strong>Pedido: ${formatNumber(group.quantity)} ${escapeHtml(group.unitType)}</strong>
+        <span class="muted">Comprado: ${formatNumber(group.purchasedQuantity || 0)} ${escapeHtml(group.unitType)}${group.shortageQuantity > 0 ? ` - Falta ${formatNumber(group.shortageQuantity)} ${escapeHtml(group.unitType)}` : ""}</span>
+        <span class="muted" style="font-size:12px">Los pesos de cada pedido se cargan arriba, en "Productos por unidades pendientes".</span>
+      </div>`;
+    }
     if (!entries.length) return "";
     return `
       <div class="assigned-product-card" data-unit-group="${escapeAttr(group.key)}">
@@ -11704,12 +11781,15 @@
         // sin lineas, se saca la tarjeta entera.
         ui.omittedUnitLines = ui.omittedUnitLines || {};
         ui.omittedUnitLines[button.dataset.uo + "|" + button.dataset.uitem] = true;
-        if (line) {
-          const list = line.parentElement;
-          const card = line.closest("[data-unit-group]");
-          line.remove();
+        // Se saca la linea de TODAS las tarjetas donde aparezca, no solo de la que se toco.
+        document.querySelectorAll(`[data-send-unit-qty][data-uo="${cssEscape(button.dataset.uo)}"][data-uitem="${cssEscape(button.dataset.uitem)}"]`).forEach((otro) => {
+          const linea = otro.closest(".unit-order-line");
+          if (!linea) return;
+          const list = linea.parentElement;
+          const card = linea.closest("[data-unit-group]");
+          linea.remove();
           if (list && !list.querySelector(".unit-order-line") && card) card.remove();
-        }
+        });
       });
     });
     document.querySelectorAll("[data-remove-unit-order-item]").forEach((button) => {
