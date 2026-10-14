@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v50";
+  const APP_VERSION = "v51";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -1348,7 +1348,14 @@
     }
   }
 
+  // Respaldo local antes de reemplazar datos. Cada uno es el estado completo (varios MB): con 10
+  // copias el espacio del navegador del celular se llenaba y dejaban de guardarse los envios. Ahora
+  // son 2 como maximo y solo en los roles que guardan el estado en el dispositivo (gerente/admin).
   function backupLocalState(label) {
+    if (!localPersistRole()) {
+      try { localStorage.removeItem("lpc_erp_local_backups_v1"); } catch (e) { /* nada */ }
+      return;
+    }
     try {
       flushLocalStateSnapshot();
       const raw = localStorage.getItem(STORAGE_KEY);
@@ -1359,10 +1366,11 @@
         label: label || "auto",
         stateRaw: raw
       });
-      while (backups.length > 10) backups.pop();
+      while (backups.length > 2) backups.pop();
       localStorage.setItem("lpc_erp_local_backups_v1", JSON.stringify(backups));
     } catch (e) {
       console.warn("No se pudo crear backup local:", e);
+      try { localStorage.removeItem("lpc_erp_local_backups_v1"); } catch (e2) { /* nada */ }
     }
   }
 
@@ -1484,20 +1492,44 @@
     try { n += (loadClientWriteQueue() || []).length; } catch (e) { /* ignore */ }
     return n;
   }
+  // La cola de cambios por enviar vive en memoria (fuente de verdad mientras la app esta abierta) y
+  // se copia a localStorage para sobrevivir a un cierre. Antes vivia SOLO en localStorage: si el
+  // espacio del navegador estaba lleno (respaldos locales de varios MB en el celular), la escritura
+  // fallaba sin avisar, la cola quedaba vacia y la compra se veia en pantalla pero nunca se enviaba.
+  let patchQueueMemory = null;
   function loadPatchQueue() {
+    if (patchQueueMemory) return patchQueueMemory.slice();
     try {
-      return JSON.parse(localStorage.getItem(PATCH_QUEUE_KEY) || "[]");
+      patchQueueMemory = JSON.parse(localStorage.getItem(PATCH_QUEUE_KEY) || "[]");
+      if (!Array.isArray(patchQueueMemory)) patchQueueMemory = [];
     } catch {
-      return [];
+      patchQueueMemory = [];
     }
+    return patchQueueMemory.slice();
   }
 
   function savePatchQueue(queue) {
+    patchQueueMemory = Array.isArray(queue) ? queue.slice() : [];
+    const texto = JSON.stringify(patchQueueMemory);
     try {
-      localStorage.setItem(PATCH_QUEUE_KEY, JSON.stringify(queue || []));
+      localStorage.setItem(PATCH_QUEUE_KEY, texto);
+      return;
     } catch (error) {
-      console.warn("No se pudo guardar la cola offline.", error);
+      console.warn("No se pudo guardar la cola offline; se libera espacio y se reintenta.", error);
     }
+    freeLocalStorageSpace();
+    try {
+      localStorage.setItem(PATCH_QUEUE_KEY, texto);
+    } catch (error) {
+      reportClientProblem("almacenamiento", "No se pudo guardar la cola de envios en el navegador (sigue en memoria): " + ((error && error.message) || error));
+    }
+  }
+
+  // Libera lo que no hace falta para operar: los respaldos locales y, en los roles que trabajan
+  // siempre contra el servidor, la copia completa del estado.
+  function freeLocalStorageSpace() {
+    try { localStorage.removeItem("lpc_erp_local_backups_v1"); } catch (e) { /* nada */ }
+    if (!localPersistRole()) { try { localStorage.removeItem(STORAGE_KEY); } catch (e) { /* nada */ } }
   }
 
   function clearPatchQueueAfterCloudPull(reason) {
@@ -8625,8 +8657,8 @@
       }
       let sum = 0;
       itemsContainer.querySelectorAll("[data-purchase-item-row]").forEach((row) => {
-        const quantity = parseAmount(row.querySelector("[data-item-qty]").value);
-        const unitCost = parseAmount(row.querySelector("[data-item-cost]").value);
+        const quantity = parsePurchaseNumber(row.querySelector("[data-item-qty]").value) || 0;
+        const unitCost = parsePurchaseNumber(row.querySelector("[data-item-cost]").value) || 0;
         const subtotal = quantity * unitCost;
         sum += subtotal;
         row.querySelector("[data-item-total]").value = formatMoney(subtotal);
@@ -9021,6 +9053,7 @@
       if (expenseType === "provider_return") {
         if (!provider) return alert("Seleccione el proveedor al que le devuelve la mercaderia.");
         const returnItems = readPurchaseItems(false);
+        if (!returnItems) return;
         const returnSourceEl = document.getElementById("purchase-return-source");
         const created = registerProviderReturn({
           provider,
@@ -9040,6 +9073,7 @@
       // Compra con el proveedor en "Todos": se reparte por proveedor segun la linea.
       if (expenseType === "purchase" && !provider && providerInput && parsePurchaseProviderValue(providerInput.value).type === "all") {
         const multiItems = readPurchaseItems(false);
+        if (!multiItems) return;
         if (!multiItems.length) return alert("Agregue al menos un producto valido.");
         if (!confirmPurchaseCostsAgainstList(multiItems)) return;
         if (purchaseSubmitBtn && purchaseSubmitBtn.dataset.busy === "1") return;
@@ -9063,6 +9097,7 @@
       if (expenseType === "other_expense" && !description) return alert("Ingrese una descripción para el gasto.");
       const isOtherExp = expenseType === "other_expense" || expenseType === "freight";
       const items = isOtherExp ? [] : expenseType === "market_price" ? readMarketPriceItems() : readPurchaseItems(expenseType === "prepared");
+      if (!items) return;
       const totalCost = isOtherExp
         ? parseAmount(otherAmount.value)
         : expenseType === "market_price"
@@ -9767,14 +9802,40 @@
     return confirm("Revisa estos costos: son MAYORES al precio de venta.\n\n" + raros.join("\n") + "\n\nSi es el precio de un cajon o bulto, cancela y carga el costo por unidad de venta (kg, unidad...). Guardar igual?");
   }
 
+  // Numeros de cantidad y costo de una compra: "1/2", "1 1/2", "0,5" y "0.5" son medio; "10.000" es
+  // diez mil. Antes "1/2" daba 0 (la linea se descartaba sin avisar) y "0.5" daba 5.
+  // Devuelve NaN si lo escrito no se entiende.
+  function parsePurchaseNumber(value) {
+    const crudo = String(value == null ? "" : value).replace(/\$/g, "").trim();
+    if (!crudo) return 0;
+    let m = crudo.match(/^(\d+)\s+(\d+)\s*\/\s*(\d+)$/);
+    if (m) return Number(m[3]) ? Number(m[1]) + Number(m[2]) / Number(m[3]) : NaN;
+    m = crudo.match(/^(\d+(?:[.,]\d+)?)\s*\/\s*(\d+)$/);
+    if (m) return Number(m[2]) ? Number(m[1].replace(",", ".")) / Number(m[2]) : NaN;
+    const limpio = crudo.replace(/\s/g, "");
+    if (!/^\d[\d.,]*$/.test(limpio)) return NaN;
+    if (limpio.includes(",")) {
+      const n = Number(limpio.replace(/\./g, "").replace(",", "."));
+      return Number.isFinite(n) ? n : NaN;
+    }
+    if (/^\d{1,3}(\.\d{3})+$/.test(limpio)) return Number(limpio.replace(/\./g, ""));
+    const n = Number(limpio);
+    return Number.isFinite(n) ? n : NaN;
+  }
+
   function readPurchaseItems(allowZeroCost) {
     const items = [];
     let invalidProduct = "";
+    const incompletas = [];
     document.querySelectorAll("[data-purchase-item-row]").forEach((row) => {
       updatePurchaseProductSelect(row);
       const rawProduct = row.querySelector("[data-product-select]").value.trim();
-      const quantity = parseAmount(row.querySelector("[data-item-qty]").value);
-      const unitCost = parseAmount(row.querySelector("[data-item-cost]").value);
+      const qtyText = row.querySelector("[data-item-qty]").value;
+      const costText = row.querySelector("[data-item-cost]").value;
+      const qtyParsed = parsePurchaseNumber(qtyText);
+      const costParsed = parsePurchaseNumber(costText);
+      const quantity = qtyParsed || 0;
+      const unitCost = costParsed || 0;
       const relationUnits = parseAmount(row.querySelector("[data-item-relation-units]").value);
       const marketPrice = parseAmount(row.querySelector("[data-item-market-price]").value);
       if (!rawProduct && quantity <= 0 && unitCost <= 0) return;
@@ -9783,7 +9844,22 @@
         invalidProduct = row.querySelector("[data-product-filter]").value.trim() || "producto sin nombre";
         return;
       }
-      if (quantity <= 0 || (!allowZeroCost && unitCost <= 0)) return;
+      // Antes una linea con producto pero sin cantidad o sin costo (o con algo que no se entendia,
+      // como "1/2") se descartaba sin avisar y la compra se guardaba sin ese producto. Ahora se avisa.
+      // Solo se ignoran en silencio las lineas que se cargaron SOLAS al elegir el proveedor y no se
+      // completaron (productos que no se compraron).
+      const autoSinTocar = row.hasAttribute("data-auto-provider") && !(unitCost > 0) && !Number.isNaN(costParsed);
+      if (autoSinTocar) return;
+      if (Number.isNaN(qtyParsed)) { incompletas.push(product.name + ": no se entiende la cantidad \"" + qtyText.trim() + "\""); return; }
+      if (Number.isNaN(costParsed)) { incompletas.push(product.name + ": no se entiende el costo \"" + costText.trim() + "\""); return; }
+      if (quantity <= 0) { incompletas.push(product.name + ": falta la cantidad"); return; }
+      if (!allowZeroCost && unitCost <= 0) {
+        const mercadoEscrito = parsePurchaseNumber(row.querySelector("[data-item-market-price]").value) || 0;
+        incompletas.push(product.name + (mercadoEscrito > 0
+          ? ": pusiste " + formatMoney(mercadoEscrito) + " en \"$ mercado\" pero el costo esta vacio. El precio que pagaste va en \"costo u.\""
+          : ": falta el costo"));
+        return;
+      }
       const ccCheck = row.querySelector("[data-item-cc]");
       const providerSelect = row.querySelector("[data-item-provider]");
       items.push({
@@ -9802,6 +9878,10 @@
     if (invalidProduct) {
       alert("Producto no encontrado: " + invalidProduct);
       return [];
+    }
+    if (incompletas.length) {
+      alert("No se guardo la compra. Revisa estas lineas:\n\n" + incompletas.join("\n") + "\n\nLas cantidades pueden ir como 0,5 o 1/2.");
+      return null;
     }
     return items;
   }
