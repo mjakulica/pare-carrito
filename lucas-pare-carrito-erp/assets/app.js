@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v53";
+  const APP_VERSION = "v54";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -4617,6 +4617,13 @@
     return list.sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
   }
 
+  // Entre las 00:00 y las 05:45 el reparto del dia todavia no salio: la reposicion se puede mandar HOY
+  // (se crea ya el pedido de reposicion con fecha de hoy) sin esperar a otro pedido del cliente.
+  const REPLACE_TODAY_UNTIL = "05:45";
+  function canReplaceToday() {
+    return currentTimeHHMM() <= REPLACE_TODAY_UNTIL;
+  }
+
   function openRecambioModal(preselectOrderId) {
     const pre = typeof preselectOrderId === "string" ? preselectOrderId : "";
     let orders = recentOrdersForRecambio();
@@ -4626,7 +4633,7 @@
       <div class="field"><label>Pedido</label><select id="recambio-order"><option value="">Elegir pedido...</option>${orders.map((o) => { const c = getClient(o.clientId); return `<option value="${escapeAttr(o.id)}" ${o.id === pre ? "selected" : ""}>${formatDate(o.date)} - ${escapeHtml(o.id)} - ${escapeHtml(c ? c.name : o.clientId)}</option>`; }).join("")}</select></div>
       <div id="recambio-products" style="margin-top:8px"></div>
       <div id="recambio-selected" style="margin-top:10px"></div>
-      <div class="field" style="margin-top:10px"><label>Reponer en</label><select id="recambio-when"><option value="proximo">Proximo pedido</option><option value="manana">Manana</option></select></div>
+      <div class="field" style="margin-top:10px"><label>Reponer en</label><select id="recambio-when">${canReplaceToday() ? `<option value="hoy" selected>Hoy (sale en el reparto de hoy)</option>` : ""}<option value="proximo">Proximo pedido</option><option value="manana">Manana</option></select></div>
     `;
     showModal("Pedir recambio", body, () => bindRecambioModal(pre), { className: "wide" });
   }
@@ -4677,7 +4684,9 @@
       const keys = Object.keys(selected);
       if (!keys.length) return alert("Seleccioná al menos un producto para recambio.");
       for (const k of keys) { if (!selected[k].photo) return alert("Falta la foto de: " + selected[k].productName); if (selected[k].qty <= 0) return alert("Cantidad invalida en: " + selected[k].productName); if (selected[k].qty > Number(selected[k].originalQty || 0)) return alert("La cantidad a recambiar no puede superar la pedida en: " + selected[k].productName); }
-      const when = document.getElementById("recambio-when").value === "manana" ? "manana" : "proximo_pedido";
+      const eleccion = document.getElementById("recambio-when").value;
+      if (eleccion === "hoy" && !canReplaceToday()) return alert("Ya pasaron las " + REPLACE_TODAY_UNTIL + ": la reposicion no llega al reparto de hoy. Elegi Mañana o Proximo pedido.");
+      const when = eleccion === "hoy" ? "hoy" : eleccion === "manana" ? "manana" : "proximo_pedido";
       state.replacements = state.replacements || [];
       // Las fotos del recambio van al servidor; en el estado queda solo la clave (photoKey). Si falla
       // la subida, la foto queda adentro del estado y se puede mover despues desde Backup.
@@ -4688,10 +4697,13 @@
         } catch (error) { console.warn("No se pudo subir la foto del recambio, queda guardada en el sistema:", error.message); }
       }
       state.replacements.push({ id: nextDatedId("REC", state.replacements), clientId: order.clientId, sourceOrderId: order.id, when, status: "pendiente", createdAt: new Date().toISOString(), createdDate: todayISO(), items: keys.map((k) => ({ productId: selected[k].productId, productName: selected[k].productName, unitType: selected[k].unitType, originalQty: selected[k].originalQty, qty: selected[k].qty, photo: selected[k].photo || "", photoKey: selected[k].photoKey || "" })) });
+      const recambio = state.replacements[state.replacements.length - 1];
+      let pedidoHoy = null;
+      if (when === "hoy") pedidoHoy = generateReplacementOrder(recambio, todayISO());
       saveState();
       generatePendingReplacements();
       closeModal();
-      alert("Recambio registrado.");
+      alert(pedidoHoy ? "Recambio registrado: se creo el pedido de reposicion " + pedidoHoy.id + " para el reparto de hoy." : "Recambio registrado.");
       render();
     });
   }
@@ -4716,8 +4728,8 @@
   function generatePendingReplacements() {
     const today = todayISO();
     let any = false;
-    (state.replacements || []).filter((r) => r.status === "pendiente" && r.when === "manana").forEach((r) => {
-      const sched = r.scheduledDate || addDaysISO(r.createdDate || today, 1);
+    (state.replacements || []).filter((r) => r.status === "pendiente" && (r.when === "manana" || r.when === "hoy")).forEach((r) => {
+      const sched = r.when === "hoy" ? (r.createdDate || today) : (r.scheduledDate || addDaysISO(r.createdDate || today, 1));
       if (sched > today) return; // todavia no llego el dia
       generateReplacementOrder(r, sched);
       any = true;
@@ -4756,7 +4768,7 @@
     const rows = rowsData.map(({ r, items }) => {
       const c = getClient(r.clientId);
       const parts = items.map((it) => `${escapeHtml(it.productName)} x${formatNumber(it.qty)}${it.photo || it.photoKey ? " " + proofImageTag(it.photoKey, it.photo, `data-recambio-photo-view="${escapeAttr(it.photoKey || it.photo)}" style="height:26px;vertical-align:middle;border-radius:3px;cursor:pointer" title="Ver foto del recambio"`) : ` <span class="pill amber">sin foto</span>`}`).join(", ");
-      return `<div style="padding:3px 0;border-bottom:1px solid #eee"><strong>${escapeHtml(c ? c.name : r.clientId)}</strong> <span class="muted">(${r.when === "manana" ? "mañana" : "próximo pedido"})</span>: ${parts}</div>`;
+      return `<div style="padding:3px 0;border-bottom:1px solid #eee"><strong>${escapeHtml(c ? c.name : r.clientId)}</strong> <span class="muted">(${r.when === "manana" ? "mañana" : r.when === "hoy" ? "hoy" : "próximo pedido"})</span>: ${parts}</div>`;
     }).join("");
     return `<div class="panel highlight-panel" style="margin-bottom:14px"><h2 class="page-title" style="font-size:16px">Productos de reposición pendientes (${rowsData.length})</h2>${rows}</div>`;
   }
@@ -4767,7 +4779,7 @@
     const rows = list.map((r) => {
       const c = getClient(r.clientId);
       const prods = (r.items || []).map((it) => `${escapeHtml(it.productName)} <strong>${formatNumber(it.qty)}</strong>${it.originalQty != null ? `<span class="muted">/${formatNumber(it.originalQty)} ${escapeHtml(it.unitType || "")}</span>` : ""}${it.photo || it.photoKey ? " " + proofImageTag(it.photoKey, it.photo, `data-recambio-photo-view="${escapeAttr(it.photoKey || it.photo)}" style="height:26px;vertical-align:middle;border-radius:3px;cursor:pointer" title="Ver foto"`) : ` <span class="pill amber">sin foto</span>`}`).join("<br>");
-      const cuando = r.when === "manana" ? ("Mañana" + (r.scheduledDate || r.createdDate ? " (" + formatDate(addDaysISO(r.createdDate || todayISO(), 1)) + ")" : "")) : "Próximo pedido";
+      const cuando = r.when === "hoy" ? "Hoy" : r.when === "manana" ? ("Mañana" + (r.scheduledDate || r.createdDate ? " (" + formatDate(addDaysISO(r.createdDate || todayISO(), 1)) + ")" : "")) : "Próximo pedido";
       const estado = r.status === "pendiente" ? `<span class="pill amber">Pendiente</span>` : `<span class="pill green">Aplicado</span>`;
       return `<tr>
         <td>${formatDate(r.createdDate || (r.createdAt || "").slice(0, 10))}</td>
@@ -19102,6 +19114,17 @@
         unmatched.push(line);
         return;
       }
+      // La unidad que escribio el cliente manda: "1at zanahoria" va a Zanahoria Atado y "1/2 kg de
+      // zanahorias" a Zanahoria Kg, aunque un alias o la busqueda hayan elegido otra variante. Si no
+      // hay ninguna variante en esa unidad, se avisa en vez de cargar 0,5 de otra cosa sin decir nada.
+      if (parsed.requestedUnit && !parsedUnitFitsProduct(product, parsed.requestedUnit, true)) {
+        const variante = productVariantForUnit(product, parsed.requestedUnit);
+        if (variante) {
+          product = variante;
+        } else if (parsed.requestedUnit !== "unidad") {
+          warnings.push(product.name + ": pidieron \"" + line.trim() + "\" (" + parsed.requestedUnit + ") y este producto se vende por " + (product.unitType || "unidad") + ". Revisa la cantidad.");
+        }
+      }
       const porUnidad = convertExplicitUnitsToKg(line, product, parsed.quantity, parsed.unitType, parsed.note || "");
       if (porUnidad) {
         items.push({ product, quantity: porUnidad.quantity, unitType: porUnidad.unitType, note: porUnidad.note });
@@ -19605,8 +19628,11 @@
       if (aNo && singularizeParsedProductText(aNo) === singularizeParsedProductText(cNo)) return true;
       return false;
     };
-    const clientAlias = skipAliases ? null : state.clientProductAliases.find((alias) => alias.clientId === clientId && aliasMatchesClean(alias.alias));
-    const generalAlias = skipAliases || clientAlias ? null : state.productAliases.find((alias) => aliasMatchesClean(alias.alias));
+    // Un alias que apunta a un producto borrado o desactivado no se usa (antes la linea quedaba sin
+    // reconocer): se busca como si no hubiera alias.
+    const aliasVivo = (alias) => { const p = getProduct(alias.productId); return !!p && p.isActive !== false; };
+    const clientAlias = skipAliases ? null : state.clientProductAliases.find((alias) => alias.clientId === clientId && aliasMatchesClean(alias.alias) && aliasVivo(alias));
+    const generalAlias = skipAliases || clientAlias ? null : state.productAliases.find((alias) => aliasMatchesClean(alias.alias) && aliasVivo(alias));
     const alias = clientAlias || generalAlias;
     if (alias) {
       const product = getProduct(alias.productId);
@@ -19749,6 +19775,20 @@
       const n = normalizeText(product.name);
       return n.includes("miel") && n.includes(kind);
     }) || null;
+  }
+
+  // Otra variante del mismo producto (Zanahoria Kg / Atado / Bolsa / Unidad) que se venda en la
+  // unidad pedida. Primero una que coincida exacto; para "unidad" sirve tambien una por kg (se pasa a
+  // kg con el peso por unidad).
+  function productVariantForUnit(product, unit) {
+    if (!product || !unit) return null;
+    const base = singularizeParsedProductText(stripTrailingProductUnitWords(normalizeText(product.name)));
+    if (!base) return null;
+    const hermanos = activeProducts().filter((p) => p.id !== product.id
+      && parsedBaseEquivalent(singularizeParsedProductText(stripTrailingProductUnitWords(normalizeText(p.name))), base));
+    return hermanos.find((p) => parsedUnitFitsProduct(p, unit))
+      || hermanos.find((p) => parsedUnitFitsProduct(p, unit, true))
+      || null;
   }
 
   function parsedBaseEquivalent(a, b) {
