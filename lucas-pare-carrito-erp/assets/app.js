@@ -1791,6 +1791,24 @@
     }, 500);
   }
 
+  // Espera a que el servidor confirme lo que se acaba de guardar (con algunos reintentos).
+  // "ok": confirmado; "pendiente": sigue en la cola y se reintenta solo; "rechazado": no se pudo y se
+  // volvio a los datos del servidor; "local": sin servidor configurado.
+  async function confirmChangesReachedServer() {
+    const config = getCloudSyncConfig();
+    if (!canWritePatchCloudSync() || !cloudSyncReady(config) || config.auto === false) return "local";
+    clearTimeout(cloudPushTimer);
+    cloudPushTimer = null;
+    for (let intento = 0; intento < 8; intento += 1) {
+      let ok = false;
+      try { ok = await flushPatchQueue(false); } catch (e) { ok = false; }
+      if (ok && !loadPatchQueue().length) return "ok";
+      if (!loadPatchQueue().length) return ok ? "ok" : "rechazado";
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    }
+    return loadPatchQueue().length ? "pendiente" : "ok";
+  }
+
   function schedulePatchFlush(delay) {
     const config = getCloudSyncConfig();
     if (!canWritePatchCloudSync() || !cloudSyncReady(config) || config.auto === false) return;
@@ -5523,6 +5541,8 @@
     }
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
+      const botonGuardar = form.querySelector("button[type=submit]");
+      if (botonGuardar && botonGuardar.dataset.busy === "1") return;
       if (rejectSunday(dateInput.value)) {
         alert("No se pueden crear pedidos para domingo");
         return;
@@ -5625,7 +5645,21 @@
           alert("\u26A0 SIN CONEXIÓN: tu pedido TODAVÍA NO se envió al sistema. Quedó guardado en este dispositivo y se reintentará al volver internet. No cierres el sistema hasta que tengas conexión, o volvé a enviarlo.");
         }
       } else {
-        alert("Pedido guardado: " + order.id);
+        // "Pedido guardado" SOLO cuando el servidor lo confirmo. Antes se mostraba al guardar en el
+        // dispositivo: si despues el envio fallaba, el pedido se sacaba y nadie se enteraba (pasaba
+        // con el ultimo pedido de la noche). Si no llega, se avisa y los productos quedan cargados.
+        if (botonGuardar) { botonGuardar.dataset.busy = "1"; botonGuardar.disabled = true; botonGuardar.dataset.textoOriginal = botonGuardar.textContent; botonGuardar.textContent = "Guardando..."; }
+        const resultado = await confirmChangesReachedServer();
+        if (botonGuardar) { botonGuardar.dataset.busy = ""; botonGuardar.disabled = false; botonGuardar.textContent = botonGuardar.dataset.textoOriginal || "Guardar"; }
+        if (resultado === "rechazado" || !getOrder(order.id)) {
+          reportClientProblem("pedido", "Pedido de " + client.name + " no confirmado por el servidor (" + resultado + ")");
+          alert("\u26A0 El pedido de " + client.name + " NO se guardo en el servidor.\n\nLos productos siguen cargados en pantalla: revisa la conexion y toca Guardar otra vez.");
+          render();
+          return;
+        }
+        alert(resultado === "pendiente"
+          ? "El pedido de " + client.name + " (" + order.id + ") se esta terminando de enviar. No cierres la app hasta que diga \"Guardado\" arriba."
+          : "Pedido guardado: " + order.id);
       }
       ui.selectedClientId = "";
       ui.orderProductFilter = "";
