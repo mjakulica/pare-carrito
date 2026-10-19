@@ -70,7 +70,10 @@ function syncSheetsFromStateDiff(beforeData, afterData) {
     beforeOrders.forEach((o) => { if (o) beforeById[o.id] = o; });
     const isCancelled = (o) => ["cancelado", "anulado"].includes(o && o.status);
     const itemsSig = (o) => (o.items || []).map((it) => it.productId + ":" + it.quantity + ":" + (it.note || "")).join("|") + "|" + (o.status || "");
+    // Los productos que ya se entregaron antes y solo se cobran en este pedido (deliveredOn) no
+    // van a la planilla: no hay que comprarlos de nuevo.
     const mapItems = (o) => (o.items || [])
+      .filter((it) => !it.deliveredOn)
       .map((it) => ({ producto: it.productName, cantidad: Number(it.quantity || 0), nota: String(it.note || "").trim() }))
       .filter((it) => it.producto && it.cantidad > 0);
     const baseOrder = (o) => ({

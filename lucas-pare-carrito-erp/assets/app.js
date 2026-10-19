@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v56";
+  const APP_VERSION = "v57";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -3498,7 +3498,7 @@
     const balance = pid ? getProviderBalance(pid) : 0;
     const products = providerAssignedProducts();
     const todayItems = getDivideAssignables().filter(({ item }) => getProductAssigneeValue(item.productId) === "provider:" + pid);
-    const pendRecambios = (state.replacements || []).filter((r) => r.status === "pendiente" && (r.items || []).some((it) => getProductAssigneeValue(it.productId) === "provider:" + pid)).length;
+    const pendRecambios = (state.replacements || []).filter((r) => r.status === "pendiente" && !isChargeRecord(r) && (r.items || []).some((it) => getProductAssigneeValue(it.productId) === "provider:" + pid)).length;
     return pageShell(
       "Inicio",
       "Panel del proveedor.",
@@ -3656,7 +3656,7 @@
     (state.orders || []).forEach((order) => {
       if (["cancelado", "anulado"].includes(order.status)) return;
       if (!order.date || order.date < fromInc || order.date >= toExc) return;
-      (order.items || []).forEach((item) => { if (item.productId === productId) sum += Number(item.quantity || 0); });
+      (order.items || []).forEach((item) => { if (item.productId === productId && !itemIsChargeOnly(item)) sum += Number(item.quantity || 0); });
     });
     return sum;
   }
@@ -4538,7 +4538,7 @@
     (state.orders || [])
       .filter((order) => order.date === date && !["cancelado", "anulado"].includes(order.status))
       .forEach((order) => (order.items || []).forEach((item) => {
-        if (getEffectiveItemAssigneeValue(item)) return;
+        if (itemIsChargeOnly(item) || getEffectiveItemAssigneeValue(item)) return;
         const key = item.productId || normalizeText(item.productName);
         const entry = map.get(key) || { productId: item.productId, name: item.productName, quantity: 0, unitType: divideItemUnit(item), clients: new Set() };
         entry.quantity += Number(item.quantity || 0);
@@ -4667,7 +4667,8 @@
   }
 
   // Entre las 00:00 y las 05:45 el reparto del dia todavia no salio: la reposicion se puede mandar HOY
-  // (se crea ya el pedido de reposicion con fecha de hoy) sin esperar a otro pedido del cliente.
+  // (se crea ya el pedido de reposicion con fecha de hoy y se suma a los pedidos del dia). Despues de
+  // esa hora la opcion se ve deshabilitada, para que se sepa que existe.
   const REPLACE_TODAY_UNTIL = "05:45";
   function canReplaceToday() {
     return currentTimeHHMM() <= REPLACE_TODAY_UNTIL;
@@ -4682,7 +4683,7 @@
       <div class="field"><label>Pedido</label><select id="recambio-order"><option value="">Elegir pedido...</option>${orders.map((o) => { const c = getClient(o.clientId); return `<option value="${escapeAttr(o.id)}" ${o.id === pre ? "selected" : ""}>${formatDate(o.date)} - ${escapeHtml(o.id)} - ${escapeHtml(c ? c.name : o.clientId)}</option>`; }).join("")}</select></div>
       <div id="recambio-products" style="margin-top:8px"></div>
       <div id="recambio-selected" style="margin-top:10px"></div>
-      <div class="field" style="margin-top:10px"><label>Reponer en</label><select id="recambio-when">${canReplaceToday() ? `<option value="hoy" selected>Hoy (sale en el reparto de hoy)</option>` : ""}<option value="proximo">Proximo pedido</option><option value="manana">Manana</option></select></div>
+      <div class="field" style="margin-top:10px"><label>Reponer en</label><select id="recambio-when">${canReplaceToday() ? `<option value="hoy" selected>Hoy (se suma a los pedidos de hoy)</option>` : `<option value="hoy" disabled>Hoy (solo hasta las ${REPLACE_TODAY_UNTIL})</option>`}<option value="proximo" ${canReplaceToday() ? "" : "selected"}>Próximo pedido</option><option value="manana">Mañana</option></select></div>
     `;
     showModal("Pedir recambio", body, () => bindRecambioModal(pre), { className: "wide" });
   }
@@ -4734,7 +4735,7 @@
       if (!keys.length) return alert("Seleccioná al menos un producto para recambio.");
       for (const k of keys) { if (!selected[k].photo) return alert("Falta la foto de: " + selected[k].productName); if (selected[k].qty <= 0) return alert("Cantidad invalida en: " + selected[k].productName); if (selected[k].qty > Number(selected[k].originalQty || 0)) return alert("La cantidad a recambiar no puede superar la pedida en: " + selected[k].productName); }
       const eleccion = document.getElementById("recambio-when").value;
-      if (eleccion === "hoy" && !canReplaceToday()) return alert("Ya pasaron las " + REPLACE_TODAY_UNTIL + ": la reposicion no llega al reparto de hoy. Elegi Mañana o Proximo pedido.");
+      if (eleccion === "hoy" && !canReplaceToday()) return alert("Ya pasaron las " + REPLACE_TODAY_UNTIL + ": la reposicion no llega al reparto de hoy. Elegi Mañana o Próximo pedido.");
       const when = eleccion === "hoy" ? "hoy" : eleccion === "manana" ? "manana" : "proximo_pedido";
       state.replacements = state.replacements || [];
       // Las fotos del recambio van al servidor; en el estado queda solo la clave (photoKey). Si falla
@@ -4777,18 +4778,20 @@
   function generatePendingReplacements() {
     const today = todayISO();
     let any = false;
-    (state.replacements || []).filter((r) => r.status === "pendiente" && (r.when === "manana" || r.when === "hoy")).forEach((r) => {
+    (state.replacements || []).filter((r) => r.status === "pendiente" && !isChargeRecord(r) && (r.when === "manana" || r.when === "hoy")).forEach((r) => {
       const sched = r.when === "hoy" ? (r.createdDate || today) : (r.scheduledDate || addDaysISO(r.createdDate || today, 1));
       if (sched > today) return; // todavia no llego el dia
       generateReplacementOrder(r, sched);
       any = true;
     });
+    if (applyPendingCharges()) any = true;
     if (any) saveState();
   }
 
   function attachProximoReplacements(order) {
     if (!order || String(order.notes || "").includes("[REC-")) return; // no encadenar sobre un pedido de reposicion
-    const pend = (state.replacements || []).filter((r) => r.status === "pendiente" && r.when !== "manana" && r.clientId === order.clientId);
+    attachPendingCharges(order);
+    const pend = (state.replacements || []).filter((r) => r.status === "pendiente" && !isChargeRecord(r) && r.when !== "manana" && r.clientId === order.clientId);
     if (!pend.length) return;
     // Se materializa como pedido SEPARADO (misma fecha), no se mezcla con el pedido del cliente.
     pend.forEach((r) => generateReplacementOrder(r, order.date));
@@ -4796,7 +4799,7 @@
 
   function renderPendingReplacementsBanner() {
     if (!["manager", "admin", "employee"].includes(currentUser.role)) return "";
-    const count = (state.replacements || []).filter((r) => r.status === "pendiente").length;
+    const count = (state.replacements || []).filter((r) => r.status === "pendiente" && !isChargeRecord(r)).length;
     if (!count) return "";
     return `
       <a class="pending-transfers-banner" data-route="reposiciones" title="Productos de reposicion pendientes">
@@ -4809,7 +4812,7 @@
   function renderPendingReplacementsPanel() {
     if (isClientLikeRole(currentUser.role)) return "";
     const pid = currentProviderId();
-    const rowsData = (state.replacements || []).filter((r) => r.status === "pendiente").map((r) => {
+    const rowsData = (state.replacements || []).filter((r) => r.status === "pendiente" && !isChargeRecord(r)).map((r) => {
       const items = pid ? r.items.filter((it) => getProductAssigneeValue(it.productId) === "provider:" + pid) : r.items;
       return { r, items };
     }).filter((x) => x.items.length);
@@ -4822,14 +4825,135 @@
     return `<div class="panel highlight-panel" style="margin-bottom:14px"><h2 class="page-title" style="font-size:16px">Productos de reposición pendientes (${rowsData.length})</h2>${rows}</div>`;
   }
 
+  // ===== Cobrar en el proximo pedido =====
+  // Un producto que se entrego a ultimo momento, fuera de un pedido: no se compra ni se divide de
+  // nuevo, pero se cobra en el proximo pedido del cliente, con la nota "entregado el dd/mm". Queda
+  // pendiente en state.replacements (kind "cobro", ya sincronizado) hasta que se suma a ese pedido.
+  function isChargeRecord(r) {
+    return !!r && r.kind === "cobro";
+  }
+
+  function itemIsChargeOnly(item) {
+    return !!(item && item.deliveredOn);
+  }
+
+  function chargeItemNote(dateISO) {
+    return "entregado el " + formatDateShort(dateISO);
+  }
+
+  // El proximo pedido: uno de un dia posterior a la entrega, o del mismo dia cargado despues.
+  function chargeFitsOrder(r, order) {
+    if (!order || order.clientId !== r.clientId || order.exampleOnly) return false;
+    if (["cancelado", "anulado"].includes(order.status) || isReplacementOrder(order)) return false;
+    const date = String(order.date || "");
+    if (date > String(r.createdDate || "")) return true;
+    return date === String(r.createdDate || "") && String(order.createdAt || "") > String(r.createdAt || "");
+  }
+
+  function attachPendingCharges(order, records) {
+    const pend = (records || (state.replacements || []).filter((r) => isChargeRecord(r) && r.status === "pendiente"))
+      .filter((r) => chargeFitsOrder(r, order));
+    if (!pend.length) return false;
+    const client = getClient(order.clientId);
+    const now = new Date().toISOString();
+    pend.forEach((r) => {
+      (r.items || []).forEach((it, idx) => {
+        // Id fijo: si dos dispositivos lo agregan a la vez, al juntar las copias queda uno solo.
+        const id = "IT-" + r.id + "-" + idx;
+        if (order.items.some((x) => x.id === id)) return;
+        const product = getProduct(it.productId);
+        const quantity = Number(it.qty || 0);
+        const unitPrice = getProductPrice(it.productId);
+        const subtotal = quantity * unitPrice;
+        const ivaRate = shouldApplyInvoiceVat(client) ? getIvaRate(product && product.ivaType) : 0;
+        const ivaAmount = subtotal * (ivaRate / 100);
+        order.items.push({ id, productId: it.productId, productName: it.productName, quantity, unitType: it.unitType, unitPrice, subtotal, ivaRate, ivaAmount, totalWithIva: subtotal + ivaAmount, note: chargeItemNote(r.createdDate), deliveredOn: r.createdDate, chargeRecordId: r.id, assignedProviderId: "", assignedToType: "", assignedToId: "" });
+      });
+      r.status = "aplicado";
+      r.appliedOrderId = order.id;
+      r.appliedAt = now;
+    });
+    recalcOrderTotals(order);
+    updateOrderAccounting(order);
+    return true;
+  }
+
+  // Cobros pendientes cuyo proximo pedido ya existe (por ejemplo un pedido que entro por el bot o
+  // que ya estaba cargado para mañana).
+  function applyPendingCharges() {
+    let any = false;
+    (state.replacements || []).filter((r) => isChargeRecord(r) && r.status === "pendiente").forEach((r) => {
+      const target = (state.orders || []).filter((order) => chargeFitsOrder(r, order))
+        .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.createdAt || "").localeCompare(String(b.createdAt || "")))[0];
+      if (target && attachPendingCharges(target, [r])) any = true;
+    });
+    return any;
+  }
+
+  function openChargeNextOrderModal() {
+    const clients = activeClients().sort(compareClientIds);
+    const products = activeProducts().slice().sort((a, b) => a.name.localeCompare(b.name));
+    const row = () => `<div class="form-grid charge-row" data-charge-row style="margin-top:6px">
+      <div class="field span-2"><label>Producto</label><input data-charge-product list="charge-product-list" placeholder="Buscar producto" autocomplete="off" /></div>
+      <div class="field"><label>Cantidad</label><input data-charge-qty inputmode="decimal" placeholder="0" /></div>
+      <div class="field"><label>&nbsp;</label><button class="btn small danger" type="button" data-charge-del>X</button></div>
+    </div>`;
+    const body = `
+      <p class="muted" style="margin-top:0">Para un producto que se entrego a ultimo momento: no aparece en Dividir compras ni en la lista de compras, y se cobra en el proximo pedido del cliente con la nota "entregado el ...".</p>
+      <div class="form-grid">
+        <div class="field span-2"><label>Cliente</label><input id="charge-client" list="charge-client-list" placeholder="Buscar por nombre o numero" autocomplete="off" />
+          <datalist id="charge-client-list">${clients.map((c) => `<option value="${escapeAttr(c.id + " - " + c.name)}"></option>`).join("")}</datalist></div>
+        <div class="field"><label>Entregado el</label><input type="date" id="charge-date" value="${todayISO()}" max="${todayISO()}" /></div>
+      </div>
+      <datalist id="charge-product-list">${products.map((p) => `<option value="${escapeAttr(p.name)}"></option>`).join("")}</datalist>
+      <div id="charge-rows">${row()}</div>
+      <button class="btn small ghost" type="button" id="charge-add-row" style="margin-top:8px">+ Otro producto</button>
+    `;
+    showModal("Cobrar en el próximo pedido", body, () => {
+      const rows = document.getElementById("charge-rows");
+      document.getElementById("charge-add-row").addEventListener("click", () => rows.insertAdjacentHTML("beforeend", row()));
+      rows.addEventListener("click", (event) => {
+        const del = event.target.closest("[data-charge-del]");
+        if (!del) return;
+        if (rows.querySelectorAll("[data-charge-row]").length > 1) del.closest("[data-charge-row]").remove();
+      });
+      document.getElementById("modal-save").addEventListener("click", () => {
+        const client = findClientByInput(document.getElementById("charge-client").value);
+        if (!client) return alert("Elegi el cliente.");
+        const date = document.getElementById("charge-date").value || todayISO();
+        const items = [];
+        for (const r of rows.querySelectorAll("[data-charge-row]")) {
+          const name = r.querySelector("[data-charge-product]").value.trim();
+          const qty = parseAmount(r.querySelector("[data-charge-qty]").value);
+          if (!name && !qty) continue;
+          const product = activeProducts().find((p) => normalizeText(p.name) === normalizeText(name));
+          if (!product) return alert("No se encontro el producto: " + name);
+          if (!(qty > 0)) return alert("Pone la cantidad de " + product.name + ".");
+          items.push({ productId: product.id, productName: product.name, unitType: product.unitType, qty });
+        }
+        if (!items.length) return alert("Agrega al menos un producto.");
+        state.replacements = state.replacements || [];
+        const record = { id: nextDatedId("COB", state.replacements), kind: "cobro", clientId: client.id, when: "proximo_pedido", status: "pendiente", createdAt: new Date().toISOString(), createdDate: date, createdBy: currentUser ? currentUser.name : "", items };
+        state.replacements.push(record);
+        applyPendingCharges();
+        saveState();
+        closeModal();
+        alert(record.status === "aplicado"
+          ? "Se sumo al pedido " + record.appliedOrderId + " (" + client.name + ") con la nota \"" + chargeItemNote(date) + "\"."
+          : "Listo: se va a cobrar en el proximo pedido de " + client.name + ".");
+        render();
+      });
+    }, { className: "wide" });
+  }
+
   function renderReplacementsPage() {
     const canDelete = ["manager", "admin"].includes(currentUser.role);
     const list = (state.replacements || []).slice().sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
     const rows = list.map((r) => {
       const c = getClient(r.clientId);
-      const prods = (r.items || []).map((it) => `${escapeHtml(it.productName)} <strong>${formatNumber(it.qty)}</strong>${it.originalQty != null ? `<span class="muted">/${formatNumber(it.originalQty)} ${escapeHtml(it.unitType || "")}</span>` : ""}${it.photo || it.photoKey ? " " + proofImageTag(it.photoKey, it.photo, `data-recambio-photo-view="${escapeAttr(it.photoKey || it.photo)}" style="height:26px;vertical-align:middle;border-radius:3px;cursor:pointer" title="Ver foto"`) : ` <span class="pill amber">sin foto</span>`}`).join("<br>");
-      const cuando = r.when === "hoy" ? "Hoy" : r.when === "manana" ? ("Mañana" + (r.scheduledDate || r.createdDate ? " (" + formatDate(addDaysISO(r.createdDate || todayISO(), 1)) + ")" : "")) : "Próximo pedido";
-      const estado = r.status === "pendiente" ? `<span class="pill amber">Pendiente</span>` : `<span class="pill green">Aplicado</span>`;
+      const prods = (r.items || []).map((it) => isChargeRecord(r) ? `${escapeHtml(it.productName)} <strong>${formatNumber(it.qty)}</strong> <span class="muted">${escapeHtml(it.unitType || "")}</span>` : `${escapeHtml(it.productName)} <strong>${formatNumber(it.qty)}</strong>${it.originalQty != null ? `<span class="muted">/${formatNumber(it.originalQty)} ${escapeHtml(it.unitType || "")}</span>` : ""}${it.photo || it.photoKey ? " " + proofImageTag(it.photoKey, it.photo, `data-recambio-photo-view="${escapeAttr(it.photoKey || it.photo)}" style="height:26px;vertical-align:middle;border-radius:3px;cursor:pointer" title="Ver foto"`) : ` <span class="pill amber">sin foto</span>`}`).join("<br>");
+      const cuando = isChargeRecord(r) ? `Cobrar en el próximo pedido<br><span class="muted">entregado el ${formatDate(r.createdDate)}</span>` : r.when === "hoy" ? "Hoy" : r.when === "manana" ? ("Mañana" + (r.scheduledDate || r.createdDate ? " (" + formatDate(addDaysISO(r.createdDate || todayISO(), 1)) + ")" : "")) : "Próximo pedido";
+      const estado = r.status === "pendiente" ? `<span class="pill amber">Pendiente</span>` : `<span class="pill green">Aplicado</span>${r.appliedOrderId ? `<br><span class="muted">${escapeHtml(r.appliedOrderId)}</span>` : ""}`;
       return `<tr>
         <td>${formatDate(r.createdDate || (r.createdAt || "").slice(0, 10))}</td>
         <td>${escapeHtml(c ? c.name : r.clientId)}</td>
@@ -4851,8 +4975,9 @@
         saveState(); render();
       }));
       document.querySelectorAll("[data-open-recambio]").forEach((b) => b.addEventListener("click", openRecambioModal));
+      document.querySelectorAll("[data-open-charge-next]").forEach((b) => b.addEventListener("click", () => openChargeNextOrderModal()));
     });
-    return pageShell("Reposiciones", "Productos marcados para recambio/reposición.", `<button class="btn ghost" data-open-recambio>Pedir recambio</button>`,
+    return pageShell("Reposiciones", "Productos marcados para recambio/reposición y productos para cobrar en el próximo pedido.", `<button class="btn ghost" data-open-recambio>Pedir recambio</button><button class="btn ghost" data-open-charge-next>Cobrar en próximo pedido</button>`,
       `<div class="panel"><div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Cliente</th><th>Productos (recambio/pedido)</th><th>Reponer en</th><th>Estado</th><th></th></tr></thead><tbody>${rows || emptyRow(6, "Sin reposiciones registradas.")}</tbody></table></div></div>`,
       "reposiciones");
   }
@@ -5969,6 +6094,7 @@
     afterRender.push(bindOrderInvoiceButtons);
     afterRender.push(() => {
       document.querySelectorAll("[data-open-recambio]").forEach((b) => b.addEventListener("click", openRecambioModal));
+      document.querySelectorAll("[data-open-charge-next]").forEach((b) => b.addEventListener("click", () => openChargeNextOrderModal()));
       document.querySelectorAll("[data-add-recambio-order]").forEach((b) => b.addEventListener("click", () => openRecambioModal(b.dataset.addRecambioOrder)));
       document.querySelectorAll("[data-recambio-photo-view]").forEach((img) => img.addEventListener("click", () => {
         // El atributo trae la clave del archivo en el servidor o, en los recambios viejos, el base64.
@@ -5981,7 +6107,7 @@
       currentUser.role === "employee" ? "Pedidos para reparto y cobranza segun el rango seleccionado." : isClientLikeRole(currentUser.role) ? "Pedidos de su cuenta." : "Lista de pedidos y estados.",
       (["manager", "admin"].includes(currentUser.role)
         ? `<button class="btn primary" data-route="nuevo-pedido">Nuevo pedido</button>`
-        : currentUser.role === "employee" ? `<button class="btn primary" data-route="nuevo-pedido">Nuevo Pedido</button><button class="btn blue" data-route="pagos">Registrar pago</button>` : "") + `<button class="btn ghost" data-open-recambio>Pedir recambio</button>`,
+        : currentUser.role === "employee" ? `<button class="btn primary" data-route="nuevo-pedido">Nuevo Pedido</button><button class="btn blue" data-route="pagos">Registrar pago</button>` : "") + `<button class="btn ghost" data-open-recambio>Pedir recambio</button>` + (["manager", "admin", "employee"].includes(currentUser.role) ? `<button class="btn ghost" data-open-charge-next>Cobrar en próximo pedido</button>` : ""),
       `
       ${showTrashTabs ? `<div class="tabs"><button class="tab ${!annulledView && !deletedView ? "active" : ""}" data-orders-tab="activos">Pedidos</button><button class="tab ${annulledView ? "active" : ""}" data-orders-tab="anulados">Anulados</button><button class="tab ${deletedView ? "active" : ""}" data-orders-tab="eliminados">Eliminados</button></div>` : ""}
       <div class="panel" style="margin-bottom:14px">
@@ -6216,7 +6342,7 @@
     return ordersByDate(date || todayISO()).flatMap((order) => {
       const client = getClient(order.clientId);
       return order.items
-        .filter((item) => item.note)
+        .filter((item) => item.note && !itemIsChargeOnly(item))
         .map((item) => ({
           orderId: order.id,
           clientId: order.clientId,
@@ -6311,6 +6437,8 @@
     const groups = {};
     ordersByDate(date).forEach((order) => {
       order.items.forEach((item) => {
+        // Lo que ya se entrego antes y solo se cobra en este pedido no se compra ni se pesa.
+        if (itemIsChargeOnly(item)) return;
         // Agrupar por PRODUCTO (no por unidad): el mismo producto con la unidad escrita
         // distinto en cada pedido (ej. "unidad" vs "atado") se suma en una sola tarjeta.
         const key = item.productId || ("name:" + item.productName);
@@ -10528,7 +10656,7 @@
     return state.orders
       .filter((order) => !["cancelado", "anulado"].includes(order.status)
         && (sel.length ? sel.includes(order.id) : order.date === todayISO()))
-      .flatMap((order) => order.items.map((item) => ({ order, item })));
+      .flatMap((order) => order.items.filter((item) => !itemIsChargeOnly(item)).map((item) => ({ order, item })));
   }
 
   function getDivideContextDate() {
@@ -11001,7 +11129,7 @@
     if (orderIsReplacement(order)) {
       out.push({ tipo: "reposicion", texto: "Es una reposicion: no se cobra. Retira el producto devuelto.", detalle: (order.items || []).map((i) => i.productName).join(", ") });
     }
-    (state.replacements || []).filter((r) => r.status === "pendiente" && r.clientId === order.clientId).forEach((r) => {
+    (state.replacements || []).filter((r) => r.status === "pendiente" && !isChargeRecord(r) && r.clientId === order.clientId).forEach((r) => {
       out.push({ tipo: "reposicion", texto: "Tiene un recambio pendiente: retira lo que hay que devolver.", detalle: (r.items || []).map((i) => i.productName + " x" + formatNumber(i.qty)).join(", ") });
     });
     const otros = recorridoTodayOrders().filter((o) => o.id !== order.id && o.clientId === order.clientId && o.status !== "entregado");
@@ -11757,6 +11885,7 @@
       order.items.forEach((item) => {
         const product = getProduct(item.productId);
         if (product && product.showInVehicleTotals === false) return;
+        if (itemIsChargeOnly(item)) return;
         const key = item.productId + "|" + item.unitType;
         if (!totals[key]) totals[key] = { productName: item.productName, unitType: item.unitType, quantity: 0 };
         totals[key].quantity += Number(item.quantity || 0);
@@ -11866,6 +11995,7 @@
       order.items.forEach((item) => {
         const product = getProduct(item.productId);
         if (product && product.showInVehicleTotals === false) return;
+        if (itemIsChargeOnly(item)) return;
         const key = item.productId + "|" + item.unitType;
         if (!totals[key]) totals[key] = { productName: item.productName, unitType: item.unitType, quantity: 0 };
         totals[key].quantity += Number(item.quantity || 0);
@@ -12312,7 +12442,7 @@
         <table class="remito-table">
           <thead><tr><th style="width:42px">Cantidad</th><th>Descripcion</th><th class="num" style="width:116px">Precio unitario</th><th class="num" style="width:116px">Precio total</th></tr></thead>
           <tbody>
-            ${order.items.map((item) => `<tr><td class="num">${formatNumber(item.quantity)}</td><td><strong>${escapeHtml(item.productName)}</strong>${item.note ? `<br>Nota: ${escapeHtml(item.note)}` : ""}</td><td class="num">${formatMoney(item.unitPrice)}</td><td class="num"><strong>${formatMoney(getOrderItemSubtotal(item))}</strong></td></tr>`).join("")}
+            ${order.items.map((item) => `<tr><td class="num">${formatNumber(item.quantity)}</td><td><strong>${escapeHtml(item.productName)}</strong>${item.note || itemIsChargeOnly(item) ? `<br>Nota: ${escapeHtml(item.note || chargeItemNote(item.deliveredOn))}` : ""}</td><td class="num">${formatMoney(item.unitPrice)}</td><td class="num"><strong>${formatMoney(getOrderItemSubtotal(item))}</strong></td></tr>`).join("")}
             ${Array.from({ length: blankRows }).map(() => `<tr class="blank-row"><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>`).join("")}
           </tbody>
         </table>
@@ -22754,6 +22884,7 @@
         itemCount += 1;
         const product = getProduct(item.productId);
         if (product && product.showInVehicleTotals === false) return;
+        if (itemIsChargeOnly(item)) return;
         const key = item.productId + "|" + item.unitType;
         if (!products[key]) {
           products[key] = {
