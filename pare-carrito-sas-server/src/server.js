@@ -1717,15 +1717,20 @@ app.post("/state/patch", authenticate, requireRole(...PATCH_SYNC_ROLES), async (
     return res.status(400).json({ error: "Cuerpo inválido: se espera { operationId, baseUpdatedAt, patch }." });
   }
   const clientDb = await pool.connect();
+  const inicioPatch = Date.now();
   try {
     await clientDb.query("BEGIN");
+    // Primero se bloquea el estado y DESPUES se mira si la operacion ya se aplico. Antes se miraba
+    // antes de bloquear: si el mismo envio llegaba dos veces casi juntas (el celular reintenta
+    // cuando se corta la conexion), las dos pasaban el control, la segunda chocaba al guardar
+    // (duplicate key, error 500) y el celular descartaba el pedido aunque ya estuviera guardado.
+    const current = await clientDb.query("SELECT updated_at, data FROM app_state WHERE id = 'main' FOR UPDATE");
     const existingOp = await clientDb.query("SELECT applied_at FROM state_operations WHERE operation_id = $1", [String(body.operationId)]);
     if (existingOp.rows.length) {
-      const current = await clientDb.query("SELECT updated_at FROM app_state WHERE id = 'main'");
       await clientDb.query("COMMIT");
+      console.warn("Envio repetido de " + req.user.username + " (" + String(body.operationId) + "): ya estaba aplicado, se confirma sin volver a aplicarlo.");
       return res.json({ ok: true, duplicate: true, updatedAt: current.rows[0] ? current.rows[0].updated_at.toISOString() : null });
     }
-    const current = await clientDb.query("SELECT updated_at, data FROM app_state WHERE id = 'main' FOR UPDATE");
     if (!current.rows.length) {
       await clientDb.query("ROLLBACK");
       return res.status(404).json({ error: "Sin datos guardados todavía." });
@@ -1765,13 +1770,15 @@ app.post("/state/patch", authenticate, requireRole(...PATCH_SYNC_ROLES), async (
       "UPDATE app_state SET data = $1, updated_at = now(), updated_by = $2 WHERE id = 'main' RETURNING updated_at",
       [nextData, req.user.username]
     );
-    await clientDb.query("INSERT INTO state_operations (operation_id, operation_type, base_updated_at, applied_by, patch) VALUES ($1,$2,$3,$4,$5)", [String(body.operationId), String(body.operationType || "patch"), body.baseUpdatedAt, req.user.username, body.patch]);
+    await clientDb.query("INSERT INTO state_operations (operation_id, operation_type, base_updated_at, applied_by, patch) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (operation_id) DO NOTHING", [String(body.operationId), String(body.operationType || "patch"), body.baseUpdatedAt, req.user.username, body.patch]);
     await clientDb.query("INSERT INTO state_history (data, updated_by) VALUES ($1, $2)", [nextData, req.user.username]);
     await clientDb.query("DELETE FROM state_history WHERE id NOT IN (SELECT id FROM state_history ORDER BY id DESC LIMIT $1)", [STATE_HISTORY_KEEP]);
     await mirrorStateToTables(clientDb, nextData, beforeData);
     await syncUsersFromState(clientDb, nextData);
     await clientDb.query("COMMIT");
     syncSheetsFromStateDiff(beforeData, nextData);
+    const demora = Date.now() - inicioPatch;
+    if (demora > 8000) console.warn("Envio lento de " + req.user.username + ": " + Math.round(demora / 1000) + " s (" + String(body.operationId) + ").");
     // staleBase: el parche se aplico sobre una version mas nueva que la que tenia el equipo. El
     // equipo NO queda al dia: tiene que bajar el estado (si se marcara al dia, nunca recibiria lo
     // que cargaron los demas).
