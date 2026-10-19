@@ -4309,3 +4309,9 @@ tr:last-child td {
   .recorrido-pay-options { grid-template-columns: 1fr; }
   .recorrido-footer .btn.big { flex: 1; }
 }
+
+.recorrido-avisos { margin-bottom: 14px; }
+.recorrido-aviso { padding: 8px 10px; border-left: 4px solid var(--blue); background: var(--blue-soft); border-radius: var(--radius-sm); margin-top: 6px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.recorrido-aviso.warn { border-left-color: var(--amber); background: var(--amber-soft); }
+.recorrido-reminder.cobro { background: var(--green-soft); border-left-color: var(--green); }
+.recorrido-cierre-caja { margin-top: 4px; }

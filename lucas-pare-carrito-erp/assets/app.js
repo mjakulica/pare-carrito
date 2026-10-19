@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v58";
+  const APP_VERSION = "v59";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -11132,6 +11132,28 @@
     saveState();
   }
 
+  // Ultimo orden de reparto de cada cliente: la posicion que tuvo en la ruta mas reciente donde
+  // aparecio (relativa al largo de esa ruta, asi se pueden mezclar dias distintos). Primero las
+  // rutas propias; si no hay, las de cualquiera.
+  function recorridoLastRoutePositions() {
+    const today = todayISO();
+    const previos = (state.orders || []).filter((o) => o && o.routeDate && o.routeDate < today && Number(o.routeSeq) > 0);
+    const mios = previos.filter((o) => String(o.routeBy) === String(currentUser.id));
+    const base = mios.length ? mios : previos;
+    const porDia = new Map();
+    base.forEach((o) => {
+      const clave = o.routeDate + "|" + o.routeBy;
+      if (!porDia.has(clave)) porDia.set(clave, []);
+      porDia.get(clave).push(o);
+    });
+    const pos = new Map();
+    Array.from(porDia.keys()).sort().reverse().forEach((clave) => {
+      const lista = porDia.get(clave).sort((a, b) => Number(a.routeSeq) - Number(b.routeSeq));
+      lista.forEach((o, i) => { if (!pos.has(o.clientId)) pos.set(o.clientId, (i + 1) / lista.length); });
+    });
+    return pos;
+  }
+
   function recorridoDefaultVehicle() {
     if (ui.recorridoVehicle !== undefined) return ui.recorridoVehicle;
     const nombre = normalizeText(currentUser.name || "");
@@ -11154,6 +11176,11 @@
       porTexto.get(texto).push(item.productName || product.name);
     });
     porTexto.forEach((productos, texto) => out.push({ tipo: "producto", texto, detalle: Array.from(new Set(productos)).join(", ") }));
+    const yaEntregados = (order.items || []).filter((item) => itemIsChargeOnly(item));
+    if (yaEntregados.length) {
+      out.push({ tipo: "cobro", texto: "Incluye productos que ya se entregaron antes: se cobran en este pedido (no hay que llevarlos).", detalle: yaEntregados.map((i) => i.productName + " x" + formatNumber(i.quantity) + " (" + chargeItemNote(i.deliveredOn) + ")").join(", ") });
+    }
+    if (order.routeSkippedAt) out.push({ tipo: "otro", texto: "Lo dejaste para despues.", detalle: "" });
     if (orderIsReplacement(order)) {
       out.push({ tipo: "reposicion", texto: "Es una reposicion: no se cobra. Retira el producto devuelto.", detalle: (order.items || []).map((i) => i.productName).join(", ") });
     }
@@ -11264,13 +11291,76 @@
     }).join("")}</div>`;
   }
 
+  // Todo lo que el empleado tiene que tener presente hoy, en un solo lugar.
+  function renderRecorridoAvisos() {
+    const today = todayISO();
+    const route = recorridoMyRoute();
+    const nombre = (clientId) => { const c = getClient(clientId); return escapeHtml(clientId) + " - " + escapeHtml(c ? c.name : clientId); };
+    const avisos = [];
+    const faltaStock = stockMissingLastWorkday();
+    if (faltaStock) avisos.push(`<div class="recorrido-aviso warn"><strong>No se cargo el stock ${faltaStock === addDaysISO(today, -1) ? "ayer" : "el " + formatDate(faltaStock)}.</strong> <button class="btn small primary" type="button" data-recorrido-stock>Cargar el stock</button></div>`);
+    route.filter((o) => o.status !== "entregado" && o.routeSkippedAt).forEach((o) => {
+      avisos.push(`<div class="recorrido-aviso"><strong>Dejado para después:</strong> ${nombre(o.clientId)} <span class="muted">${escapeHtml(o.id)}</span> <button class="btn small primary" type="button" data-aviso-retomar="${escapeAttr(o.id)}">Entregar ahora</button></div>`);
+    });
+    const recordatorios = new Map();
+    route.filter((o) => o.status !== "entregado").forEach((o) => (o.items || []).forEach((item) => {
+      const product = getProduct(item.productId);
+      const texto = product && String(product.deliveryReminder || "").trim();
+      if (!texto) return;
+      if (!recordatorios.has(texto)) recordatorios.set(texto, new Set());
+      recordatorios.get(texto).add(o.clientId);
+    }));
+    recordatorios.forEach((clientes, texto) => avisos.push(`<div class="recorrido-aviso"><strong>&#9888; ${escapeHtml(texto)}</strong> <span class="muted">${clientes.size} pedido(s) de tu ruta: ${Array.from(clientes).map((id) => escapeHtml(formatClientIdShort(id))).join(", ")}</span></div>`));
+    route.filter((o) => o.status !== "entregado" && (o.items || []).some((i) => itemIsChargeOnly(i))).forEach((o) => {
+      avisos.push(`<div class="recorrido-aviso"><strong>Hoy se cobra lo entregado antes:</strong> ${nombre(o.clientId)} <span class="muted">${(o.items || []).filter((i) => itemIsChargeOnly(i)).map((i) => escapeHtml(i.productName + " (" + chargeItemNote(i.deliveredOn) + ")")).join(", ")}</span></div>`);
+    });
+    (state.replacements || []).filter((r) => isChargeRecord(r) && r.status === "pendiente").forEach((r) => {
+      avisos.push(`<div class="recorrido-aviso"><strong>Cobrar en el próximo pedido:</strong> ${nombre(r.clientId)} <span class="muted">${(r.items || []).map((i) => escapeHtml(i.productName + " x" + formatNumber(i.qty))).join(", ")} · entregado el ${formatDateShort(r.createdDate)}</span></div>`);
+    });
+    (state.replacements || []).filter((r) => !isChargeRecord(r) && r.status === "pendiente").forEach((r) => {
+      avisos.push(`<div class="recorrido-aviso"><strong>Recambio pendiente:</strong> ${nombre(r.clientId)} <span class="muted">${(r.items || []).map((i) => escapeHtml(i.productName + " x" + formatNumber(i.qty))).join(", ")} · ${r.when === "manana" ? "mañana" : r.when === "hoy" ? "hoy" : "próximo pedido"}</span></div>`);
+    });
+    const mios = (state.orders || []).filter((o) => o.date === today && o.status === "entregado" && String(o.deliveredById || "") === String(currentUser.id));
+    mios.filter((o) => o.deliveryPayment && o.deliveryPayment.method === "cuenta").forEach((o) => {
+      avisos.push(`<div class="recorrido-aviso"><strong>Entregado sin cobrar (a cuenta):</strong> ${nombre(o.clientId)} ${formatMoney(getOrderTotal(o))}${o.deliveryRemitoPhoto ? "" : ` <span class="pill amber">sin foto</span>`}</div>`);
+    });
+    mios.filter((o) => !orderIsSettled(o) && !(o.deliveryPayment && o.deliveryPayment.sinFoto)).forEach((o) => {
+      avisos.push(`<div class="recorrido-aviso warn"><strong>Sin rendir (falta pago o foto):</strong> ${nombre(o.clientId)} <button class="btn small yellow" type="button" data-settle-order="${escapeAttr(o.id)}">Rendir</button></div>`);
+    });
+    return `<div class="panel recorrido-avisos">
+      <div class="page-actions" style="justify-content:space-between;align-items:center;margin-bottom:6px">
+        <h2 class="page-title" style="font-size:18px;margin:0">Avisos${avisos.length ? " (" + avisos.length + ")" : ""}</h2>
+        <button class="btn small ghost" type="button" data-open-charge-next>Cobrar en próximo pedido</button>
+      </div>
+      ${avisos.join("") || `<div class="muted">Nada pendiente por ahora.</div>`}
+    </div>`;
+  }
+
+  function bindRecorridoAvisos() {
+    document.querySelectorAll("[data-open-charge-next]").forEach((b) => b.addEventListener("click", () => openChargeNextOrderModal()));
+    document.querySelectorAll("[data-settle-order]").forEach((b) => b.addEventListener("click", () => openDeliverySettleModal(b.dataset.settleOrder)));
+    document.querySelectorAll("[data-aviso-retomar]").forEach((b) => b.addEventListener("click", () => {
+      const id = b.dataset.avisoRetomar;
+      const route = recorridoMyRoute();
+      const ids = route.map((o) => o.id).filter((x) => x !== id);
+      const primero = route.findIndex((o) => o.status !== "entregado" && o.id !== id);
+      const pos = primero < 0 ? ids.length : ids.indexOf(route[primero].id);
+      ids.splice(pos, 0, id);
+      const order = getOrder(id);
+      if (order) { delete order.routeSkippedAt; order.updatedAt = new Date().toISOString(); }
+      saveRecorridoRoute(ids);
+      ui.repartoPago = null;
+      navigate("mi-recorrido/reparto");
+    }));
+  }
+
   function renderRecorridoHome() {
     const done = recorridoDone();
     const estados = RECORRIDO_PASOS.map((paso) => ({ paso, st: recorridoStepState(paso, done) }));
     const siguiente = estados.find((e) => !e.st.ok);
-    const faltaStock = stockMissingLastWorkday();
+    afterRender.push(bindRecorridoAvisos);
     return `
-      ${faltaStock ? recorridoStockWarning(faltaStock) : ""}
+      ${renderRecorridoAvisos()}
       ${siguiente ? `<div class="panel recorrido-next"><div class="muted">Te toca</div><div style="font-size:20px;font-weight:700;margin:4px 0 10px">${escapeHtml(siguiente.paso.label)}</div><button class="btn primary big" type="button" data-recorrido-step="${siguiente.paso.key}">Seguir &rarr;</button></div>`
         : `<div class="panel recorrido-next"><div style="font-size:20px;font-weight:700">Terminaste el dia &#127881;</div><div class="muted">Todo cargado. Buen trabajo.</div></div>`}
       <div class="recorrido-home-grid">
@@ -11333,9 +11423,16 @@
     const enRuta = new Set(route.map((o) => o.id));
     const vehiculo = recorridoDefaultVehicle();
     const disponibles = recorridoTodayOrders()
-      .filter((o) => !enRuta.has(o.id))
-      .filter((o) => vehiculo === "all" || (vehiculo === "none" ? !getVehicle(o.deliveryVehicleId) : o.deliveryVehicleId === vehiculo))
-      .sort((a, b) => compareClientIdStrings(a.clientId, b.clientId));
+      .filter((o) => !enRuta.has(o.id) && o.status !== "entregado")
+      .filter((o) => vehiculo === "all" || (vehiculo === "none" ? !getVehicle(o.deliveryVehicleId) : o.deliveryVehicleId === vehiculo));
+    // Por defecto, en el ultimo orden que se uso; los clientes que nunca estuvieron en una ruta van
+    // al final por numero de cliente.
+    const ultimo = recorridoLastRoutePositions();
+    disponibles.sort((a, b) => {
+      const pa = ultimo.has(a.clientId) ? ultimo.get(a.clientId) : 9;
+      const pb = ultimo.has(b.clientId) ? ultimo.get(b.clientId) : 9;
+      return pa - pb || compareClientIdStrings(a.clientId, b.clientId);
+    });
     const nombre = (o) => { const c = getClient(o.clientId); return escapeHtml(o.clientId) + " - " + escapeHtml(c ? c.name : o.clientId); };
     const direccion = (o) => { const c = getClient(o.clientId); return c && c.address ? `<span class="muted">${escapeHtml(c.address)}</span>` : ""; };
     afterRender.push(() => {
@@ -11382,7 +11479,7 @@
       </div>
       <div class="panel" style="margin-top:14px">
         <div class="page-actions" style="justify-content:space-between;align-items:flex-end">
-          <h2 class="page-title" style="font-size:18px;margin:0">Pedidos de hoy para agregar (${disponibles.length})</h2>
+          <div><h2 class="page-title" style="font-size:18px;margin:0">Pedidos de hoy para agregar (${disponibles.length})</h2><div class="muted" style="font-size:12px">${ultimo.size ? "Ordenados como en la última ruta." : "Ordenados por número de cliente."}</div></div>
           <div class="field" style="min-width:180px"><label>Vehiculo</label><select id="recorrido-vehicle">
             <option value="all" ${vehiculo === "all" ? "selected" : ""}>Todos</option>
             ${activeVehicles().map((v) => `<option value="${escapeAttr(v.id)}" ${vehiculo === v.id ? "selected" : ""}>${escapeHtml(v.name)}${v.driverName ? " - " + escapeHtml(v.driverName) : ""}</option>`).join("")}
@@ -11395,7 +11492,7 @@
             <span class="recorrido-route-actions"><button class="btn small primary" type="button" data-ruta-add="${escapeAttr(o.id)}">+ Agregar</button></span>
           </div>`).join("") || `<div class="empty compact">No quedan pedidos de hoy para agregar${vehiculo !== "all" ? " en este vehiculo" : ""}.</div>`}
         </div>
-        ${disponibles.length > 1 ? `<div class="page-actions" style="margin-top:10px"><button class="btn ghost" type="button" data-ruta-add-all>Agregar todos (por numero de cliente)</button></div>` : ""}
+        ${disponibles.length ? `<div class="page-actions" style="margin-top:10px"><button class="btn ${route.length ? "ghost" : "primary"}" type="button" data-ruta-add-all>Agregar todos, último orden</button></div>` : ""}
         ${otrosEnRuta.length ? `<p class="muted" style="font-size:12px">${otrosEnRuta.length} pedido(s) ya estan en la ruta de otro empleado.</p>` : ""}
       </div>
       <div class="recorrido-footer">
@@ -11468,7 +11565,7 @@
         </div>` : ""}`}
         <div class="recorrido-footer" style="margin-top:14px">
           <button class="btn primary big" type="button" id="rep-entregado">&#10003; Entregado</button>
-          <button class="btn ghost" type="button" id="rep-saltear">Dejar para despues</button>
+          <button class="btn ghost" type="button" id="rep-saltear" title="Lo pasa al final de la ruta; tambien queda en Avisos del inicio para retomarlo">Dejar para después (entregar al final)</button>
         </div>
       </div>
       ${siguientes.length ? `<div class="panel" style="margin-top:12px"><div class="muted" style="margin-bottom:6px">Despues siguen</div>${siguientes.map((o) => { const c = getClient(o.clientId); return `<div style="padding:4px 0">${escapeHtml(o.clientId)} - ${escapeHtml(c ? c.name : o.clientId)}</div>`; }).join("")}</div>` : ""}
@@ -11516,6 +11613,8 @@
     const saltear = document.getElementById("rep-saltear");
     if (saltear) saltear.addEventListener("click", () => {
       const ids = recorridoMyRoute().map((o) => o.id).filter((id) => id !== order.id);
+      order.routeSkippedAt = new Date().toISOString();
+      order.updatedAt = order.routeSkippedAt;
       saveRecorridoRoute([...ids, order.id]);
       ui.repartoPago = null;
       render();
@@ -11541,6 +11640,7 @@
       if (pago.photo) order.deliveryRemitoPhoto = pago.photo;
       order.deliveryPayment = { method, amount: monto, at: stamp, by: currentUser.name || "", byId: currentUser.id, ...(pago.sinFoto && !pago.photo ? { sinFoto: true } : {}) };
       order.status = "entregado";
+      delete order.routeSkippedAt;
       order.deliveredAt = stamp;
       order.deliveredBy = currentUser.name || "";
       order.deliveredById = currentUser.id;
@@ -11564,10 +11664,12 @@
     const caja = getCashClosingForDate(currentUser.id, today);
     const att = getAttendanceEntry(currentUser.id, today);
     const done = recorridoDone();
+    if (!ui.ccDate || ui.ccDate > today) ui.ccDate = today;
     afterRender.push(() => {
       document.querySelectorAll("[data-settle-order]").forEach((b) => b.addEventListener("click", () => openDeliverySettleModal(b.dataset.settleOrder)));
       const goCaja = document.querySelector("[data-cierre-caja]");
-      if (goCaja) goCaja.addEventListener("click", () => goRecorridoPage("horarios", "Cierre: 1. Cerrar la caja", "Tilda los pedidos cobrados, controla el efectivo y guarda el cierre de caja.", "rec-caja", "mi-recorrido/cierre", "Listo, volver al cierre"));
+      if (goCaja) goCaja.addEventListener("click", () => { const box = document.getElementById("cc-orders"); if (box) box.closest(".panel").scrollIntoView({ behavior: "smooth" }); });
+      bindCashClosing();
       const goStock = document.querySelector("[data-cierre-stock]");
       if (goStock) goStock.addEventListener("click", () => goRecorridoPage("stock", "Cierre: 2. Stock para mañana", "Conta lo que quedo y guardalo producto por producto.", "stock", "mi-recorrido/cierre", "Listo, volver al cierre"));
       const goHorario = document.querySelector("[data-cierre-horario]");
@@ -11587,10 +11689,11 @@
       ${sinEntregar.length ? `<div class="alert warn" style="margin-top:12px">Quedan ${sinEntregar.length} pedido(s) de tu ruta sin marcar como entregados. <button class="btn small ghost" type="button" data-recorrido-step="reparto">Ir al reparto</button></div>` : ""}
       ${sinRendir.length ? `<div class="panel" style="margin-top:12px"><strong>Entregas sin rendir</strong><p class="muted" style="margin:4px 0 8px">Les falta el pago o la foto del remito.</p>${sinRendir.map((o) => { const c = getClient(o.clientId); return `<div class="page-actions" style="justify-content:space-between;padding:4px 0"><span>${escapeHtml(o.clientId)} - ${escapeHtml(c ? c.name : o.clientId)}</span><button class="btn small yellow" type="button" data-settle-order="${escapeAttr(o.id)}">Rendir</button></div>`; }).join("")}</div>` : ""}
       <div class="panel" style="margin-top:12px">
-        ${paso(1, !!caja, "Cerrar la caja", caja ? "Guardado: cobrado " + formatMoney(caja.actualCollected || 0) + ", efectivo " + formatMoney(caja.actualCash || 0) : "Controla lo cobrado y el efectivo que entregas", "data-cierre-caja")}
+        ${paso(1, !!caja, "Cerrar la caja", caja ? "Guardado: cobrado " + formatMoney(caja.actualCollected || 0) + ", efectivo " + formatMoney(caja.actualCash || 0) : "Aca abajo: los cobrados en el reparto ya vienen tildados", "data-cierre-caja")}
         ${paso(2, !!done.stock, "Stock para mañana", "Conta lo que quedo en la camioneta y el deposito", "data-cierre-stock")}
         ${paso(3, !!(att && att.endTime), "Marcar tu horario", att && att.endTime ? "Salida " + att.endTime : "Hora de salida", "data-cierre-horario")}
-      </div>`;
+      </div>
+      <div class="recorrido-cierre-caja">${renderCashClosingBox()}</div>`;
   }
 
   function renderCompliance() {
@@ -13553,7 +13656,10 @@
     afterRender.push(bindDeliveryTransfersPanel);
     return `<div class="panel" style="margin-bottom:14px">
       <h2 class="page-title" style="font-size:18px">Remitos del reparto pagados por transferencia</h2>
-      <p class="muted" style="margin-top:0">Los marca el empleado en Mi recorrido con la foto del remito. "Llego" registra el pago en Banco; "No llego" deja la deuda y aparece en Control.</p>
+      <div class="page-actions" style="justify-content:space-between;align-items:flex-start">
+        <p class="muted" style="margin-top:0;flex:1">Los marca el empleado en Mi recorrido con la foto del remito. "Llego" registra el pago en Banco; "No llego" deja la deuda y aparece en Control.</p>
+        <button class="btn primary" type="button" data-dt-bank>Comprobar con el banco</button>
+      </div>
       <div class="tabs">
         <button class="tab ${filtro === "pendiente" ? "active" : ""}" type="button" data-dt-filter="pendiente">Por comprobar (${cuenta("pendiente")})</button>
         <button class="tab ${filtro === "ok" ? "active" : ""}" type="button" data-dt-filter="ok">Llegaron (${cuenta("ok")})</button>
@@ -13566,6 +13672,108 @@
     </div>`;
   }
 
+  // Marca la transferencia del remito como recibida y, si falta cobrar, registra el pago en Banco.
+  function confirmDeliveryTransfer(o, amount, bank) {
+    const stamp = new Date().toISOString();
+    let paymentId = "";
+    if (amount > 0 && orderPendingAmount(o) > 0.5) {
+      const pago = recordPayment({
+        clientId: o.clientId, orderIds: [o.id], amount, method: "transferencia", receivedByUserId: currentUser.id,
+        notes: "Transferencia comprobada del remito " + o.id + " (reparto " + (o.deliveryPayment.by || "") + ")" + (bank ? " - banco " + formatDateShort(bank.fecha) + " " + (bank.descripcion || "") : ""),
+        transferProofKey: o.deliveryRemitoPhoto && o.deliveryRemitoPhoto.key || "",
+        transferProofFile: o.deliveryRemitoPhoto && !o.deliveryRemitoPhoto.key ? o.deliveryRemitoPhoto.data || "" : ""
+      });
+      paymentId = pago ? pago.id : "";
+    }
+    o.transferReview = { status: "ok", at: stamp, by: currentUser.name || "", amount, paymentId, ...(bank ? { bank: { fecha: bank.fecha, monto: bank.monto, descripcion: bank.descripcion || "" } } : {}) };
+    o.updatedAt = stamp;
+  }
+
+  // Cruza los ingresos del banco con los remitos por comprobar: mismo monto (lo que falta cobrar o
+  // el total), fecha entre el dia anterior al remito y 10 dias despues, y gana el que tiene el
+  // nombre del cliente en la descripcion. Cada movimiento y cada remito se usan una sola vez.
+  function matchBankMovements(movements) {
+    const pendientes = deliveryTransferOrders().filter((o) => deliveryTransferStatus(o) === "pendiente");
+    const palabras = (o) => { const c = getClient(o.clientId); return normalizeText(c ? c.name + " " + (c.businessName || c.razonSocial || "") : "").split(/\s+/).filter((w) => w.length >= 4); };
+    const pares = [];
+    movements.forEach((m, mi) => pendientes.forEach((o) => {
+      const montos = [orderPendingAmount(o), Number(o.totalAmount || 0)];
+      if (!montos.some((x) => x > 0 && Math.abs(x - m.monto) <= 1)) return;
+      if (m.fecha < addDaysISO(o.date, -1) || m.fecha > addDaysISO(o.date, 10)) return;
+      const desc = normalizeText(m.descripcion || "");
+      const nombre = palabras(o).some((w) => desc.includes(w));
+      const dias = Math.abs((new Date(m.fecha + "T12:00:00") - new Date(o.date + "T12:00:00")) / 86400000);
+      pares.push({ mi, o, m, nombre, dias });
+    }));
+    pares.sort((a, b) => (b.nombre - a.nombre) || (a.dias - b.dias));
+    const usadosM = new Set();
+    const usadosO = new Set();
+    const matches = [];
+    pares.forEach((p) => {
+      if (usadosM.has(p.mi) || usadosO.has(p.o.id)) return;
+      usadosM.add(p.mi); usadosO.add(p.o.id);
+      const alternativas = pares.filter((x) => x.mi === p.mi && x.o.id !== p.o.id).length;
+      matches.push({ ...p, seguro: p.nombre || alternativas === 0 });
+    });
+    return { matches, sinRemito: movements.filter((_, i) => !usadosM.has(i)), pendientes: pendientes.length };
+  }
+
+  function openBankCheckModal() {
+    const body = `
+      <p class="muted" style="margin-top:0">Subi el archivo de movimientos que exporta el banco o Mercado Pago (CSV; si te da Excel, guardalo como CSV), una captura de pantalla de los movimientos, o pegalos como texto. Se buscan los remitos por transferencia que coinciden.</p>
+      <div class="form-grid">
+        <div class="field span-4"><label>Archivo o captura</label><input type="file" id="bank-file" accept=".csv,.txt,text/csv,text/plain,image/*" /></div>
+        <div class="field span-4"><label>O pega los movimientos</label><textarea id="bank-text" rows="4" placeholder="19/10/2026  Transferencia de Juan Perez  $ 15.000,00"></textarea></div>
+      </div>
+      <div class="page-actions" style="margin-top:8px"><button class="btn primary" type="button" id="bank-read">Leer movimientos</button><span id="bank-status" class="muted"></span></div>
+      <div id="bank-result" style="margin-top:12px"></div>`;
+    showModal("Comprobar con el banco", body, () => {
+      const status = document.getElementById("bank-status");
+      const result = document.getElementById("bank-result");
+      let matches = [];
+      document.getElementById("bank-read").addEventListener("click", async () => {
+        const file = document.getElementById("bank-file").files[0];
+        const text = document.getElementById("bank-text").value.trim();
+        if (!file && !text) return alert("Elegi un archivo o captura, o pega los movimientos.");
+        status.textContent = " Leyendo...";
+        try {
+          let payload;
+          if (file && /^image\//.test(file.type)) payload = { imageData: await compressImageFile(file, 1800, 0.85) };
+          else if (file) payload = { text: await file.text() };
+          else payload = { text };
+          const r = await cloudRequest(getCloudSyncConfig(), "/bank/parse", { method: "POST", body: JSON.stringify(payload) });
+          const j = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(j.error || "HTTP " + r.status);
+          const movs = j.movements || [];
+          const res = matchBankMovements(movs);
+          matches = res.matches;
+          status.textContent = " " + movs.length + " ingreso(s) leidos" + (j.provider && j.provider !== "archivo" ? " (con " + j.provider + ")" : "") + ".";
+          result.innerHTML = `
+            <strong>Coinciden con remitos por comprobar (${matches.length} de ${res.pendientes})</strong>
+            ${matches.length ? `<div class="table-wrap"><table><thead><tr><th></th><th>Banco</th><th>Remito</th></tr></thead><tbody>${matches.map((x, i) => { const c = getClient(x.o.clientId); return `<tr>
+              <td><input type="checkbox" data-bank-match="${i}" ${x.seguro ? "checked" : ""} style="width:auto;min-height:auto" /></td>
+              <td>${formatDate(x.m.fecha)} · <strong>${formatMoney(x.m.monto)}</strong><br><span class="muted">${escapeHtml(x.m.descripcion || "")}</span></td>
+              <td>${escapeHtml(x.o.clientId)} - ${escapeHtml(c ? c.name : x.o.clientId)}<br><span class="muted">${escapeHtml(x.o.id)} · ${formatDate(x.o.date)}${x.nombre ? " · coincide el nombre" : x.seguro ? "" : " · revisar: hay otro remito con el mismo monto"}</span></td>
+            </tr>`; }).join("")}</tbody></table></div>
+            <div class="page-actions" style="margin-top:8px"><button class="btn primary" type="button" id="bank-confirm">Marcar como llegadas las tildadas</button></div>` : `<p class="muted">Ningun movimiento coincide en monto y fecha con un remito por comprobar.</p>`}
+            ${res.sinRemito.length ? `<details style="margin-top:10px"><summary>${res.sinRemito.length} ingreso(s) sin remito del reparto</summary><ul>${res.sinRemito.map((m) => `<li>${formatDate(m.fecha)} ${formatMoney(m.monto)} <span class="muted">${escapeHtml(m.descripcion || "")}</span></li>`).join("")}</ul></details>` : ""}`;
+          const confirmBtn = document.getElementById("bank-confirm");
+          if (confirmBtn) confirmBtn.addEventListener("click", () => {
+            const elegidos = Array.from(result.querySelectorAll("[data-bank-match]")).filter((c) => c.checked).map((c) => matches[Number(c.dataset.bankMatch)]);
+            if (!elegidos.length) return alert("No hay ninguna tildada.");
+            elegidos.forEach((x) => confirmDeliveryTransfer(x.o, x.m.monto, x.m));
+            saveState();
+            closeModal();
+            alert(elegidos.length + " transferencia(s) marcadas como llegadas y registradas en Banco.");
+            render();
+          });
+        } catch (e) {
+          status.textContent = " No se pudo leer: " + e.message;
+        }
+      });
+    }, { cancelLabel: "Cerrar", hideSave: true, className: "wide" });
+  }
+
   function bindDeliveryTransfersPanel() {
     document.querySelectorAll("[data-dt-filter]").forEach((b) => b.addEventListener("click", () => { ui.deliveryTransferFilter = b.dataset.dtFilter; render(); }));
     document.querySelectorAll("[data-dt-photo]").forEach((b) => b.addEventListener("click", () => {
@@ -13576,27 +13784,18 @@
       const o = getOrder(b.dataset.dtOk);
       if (!o) return;
       const pendiente = orderPendingAmount(o);
-      const stamp = new Date().toISOString();
-      let paymentId = "";
       let amount = 0;
       if (pendiente > 0.5) {
         const valor = prompt("Monto que llego por transferencia de " + ((getClient(o.clientId) || {}).name || o.clientId) + " (remito " + o.id + "):", formatAmountInput(pendiente));
         if (valor === null) return;
         amount = parseAmount(valor);
         if (!(amount > 0)) return alert("Monto invalido.");
-        const pago = recordPayment({
-          clientId: o.clientId, orderIds: [o.id], amount, method: "transferencia", receivedByUserId: currentUser.id,
-          notes: "Transferencia comprobada del remito " + o.id + " (reparto " + (o.deliveryPayment.by || "") + ")",
-          transferProofKey: o.deliveryRemitoPhoto && o.deliveryRemitoPhoto.key || "",
-          transferProofFile: o.deliveryRemitoPhoto && !o.deliveryRemitoPhoto.key ? o.deliveryRemitoPhoto.data || "" : ""
-        });
-        paymentId = pago ? pago.id : "";
       }
-      o.transferReview = { status: "ok", at: stamp, by: currentUser.name || "", amount, paymentId };
-      o.updatedAt = stamp;
+      confirmDeliveryTransfer(o, amount, null);
       saveState();
       render();
     }));
+    document.querySelectorAll("[data-dt-bank]").forEach((b) => b.addEventListener("click", () => openBankCheckModal()));
     document.querySelectorAll("[data-dt-no]").forEach((b) => b.addEventListener("click", () => {
       const o = getOrder(b.dataset.dtNo);
       if (!o) return;
@@ -13746,6 +13945,17 @@
       const inp = document.getElementById("control-date");
       if (inp) inp.addEventListener("change", () => { ui.controlDate = inp.value || todayISO(); render(); });
       document.querySelectorAll("[data-control-day]").forEach((b) => b.addEventListener("click", () => { ui.controlDate = addDaysISO(todayISO(), -Number(b.dataset.controlDay)); render(); }));
+      const send = document.getElementById("control-send-email");
+      if (send) send.addEventListener("click", async () => {
+        send.disabled = true; send.textContent = "Enviando...";
+        try {
+          const r = await cloudRequest(getCloudSyncConfig(), "/control/daily-email", { method: "POST", body: JSON.stringify({ date }) });
+          const j = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(j.error || "HTTP " + r.status);
+          alert(j.sent ? "Resumen del " + formatDate(date) + " enviado a " + (j.to || []).join(", ") + "." : "No se envio: " + (j.reason || "el servidor no tiene configurado el correo (SMTP)."));
+        } catch (e) { alert("No se pudo enviar: " + e.message); }
+        send.disabled = false; send.textContent = "Enviar resumen por correo";
+      });
       document.querySelectorAll("[data-settle-order]").forEach((b) => b.addEventListener("click", () => openDeliverySettleModal(b.dataset.settleOrder)));
     });
     const lista = (arr, extra) => arr.length ? `<ul style="margin:6px 0 0 18px">${arr.map((o) => `<li>${nombreCliente(o)} <span class="muted">${escapeHtml(o.id)}${extra ? " · " + extra(o) : ""}</span></li>`).join("")}</ul>` : "";
@@ -13753,7 +13963,8 @@
       "Control",
       "Cruces del dia para detectar faltantes: pedidos, caja, transferencias y deudas.",
       `<div class="page-actions"><div class="field"><label>Dia</label><input type="date" id="control-date" value="${escapeAttr(date)}" max="${todayISO()}" /></div>
-        <button class="btn small ghost" type="button" data-control-day="0">Hoy</button><button class="btn small ghost" type="button" data-control-day="1">Ayer</button></div>`,
+        <button class="btn small ghost" type="button" data-control-day="0">Hoy</button><button class="btn small ghost" type="button" data-control-day="1">Ayer</button>
+        <button class="btn small primary" type="button" id="control-send-email" title="Se manda solo todas las noches; con esto se manda ya">Enviar resumen por correo</button></div>`,
       `
       ${avisoVentana}
       <div class="grid three">
@@ -14740,23 +14951,7 @@
     const empLogTo = ui.employeeLogTo || todayISO();
     ui.employeeLogFrom = empLogFrom; ui.employeeLogTo = empLogTo;
     const att = attendanceFormValues();
-    // Fecha del cierre de caja: hoy por defecto, pero se puede cargar el de un dia anterior.
-    if (!ui.ccDate || ui.ccDate > todayISO()) ui.ccDate = todayISO();
-    const ccToday = ui.ccDate;
-    const ccCloseToday = getCashClosingForDate(currentUser.id, ccToday);
-    const ccPaidSet = employeePaidOrderIdsToday(currentUser.id, ccToday);
-    if (ui.ccCheckedDate !== ccToday) { ui.ccCheckedDate = ccToday; ui.ccChecked = ccCloseToday ? (ccCloseToday.orderIds || []).slice() : Array.from(ccPaidSet); }
-    const ccCheckedSet = new Set(ui.ccChecked || []);
-    const ccOrders = ordersByDate(ccToday).filter((o) => !["cancelado", "anulado"].includes(o.status)).sort((a, b) => String(a.clientId).localeCompare(String(b.clientId)));
-    const ccSumChecked = ccOrders.filter((o) => ccCheckedSet.has(o.id)).reduce((s, o) => s + Number(o.totalAmount || 0), 0);
-    const ccDefCollected = ccCloseToday ? Number(ccCloseToday.actualCollected || 0) : ccSumChecked;
-    const ccDefCash = ccCloseToday ? Number(ccCloseToday.actualCash || 0) : expectedEmployeeCash(currentUser.id, ccDefCollected, ccToday);
     const ccLimit = Number(ui.cashClosingLimit) || 30;
-    const ccOrderRows = ccOrders.map((o) => {
-      const client = getClient(o.clientId);
-      const registered = ccPaidSet.has(o.id);
-      return `<label class="cc-order-row" style="display:flex;gap:8px;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);padding:5px 2px"><span style="display:flex;gap:6px;align-items:center"><input type="checkbox" data-cc-order="${escapeAttr(o.id)}" data-cc-total="${Number(o.totalAmount || 0)}" data-cc-registered="${registered ? 1 : 0}" ${ccCheckedSet.has(o.id) ? "checked" : ""} style="width:auto;min-height:auto" /><span>${escapeHtml(o.clientId)} - ${escapeHtml(client ? client.name : o.clientId)}${registered ? "" : ` <span class="pill amber" style="font-size:10px">sin pago</span>`}</span></span><strong>${formatMoney(o.totalAmount || 0)}</strong></label>`;
-    }).join("");
     // Se muestran tambien los feriados: no tienen horario cargado pero se pagan igual.
     const rows = state.attendance.filter((entry) => entry.userId === currentUser.id)
       .concat(holidayAttendanceEntries(currentUser.id, addDaysISO(todayISO(), -120), todayISO()))
@@ -14834,24 +15029,7 @@
         </div>
         <div class="page-actions" style="margin-top:12px"><button class="btn primary" type="submit">Registrar cobro</button></div>
       </form>
-      <div class="panel" style="margin-top:14px">
-        <h2 class="page-title" style="font-size:18px">Cierre de caja</h2>
-        <div class="form-grid" style="margin:6px 0">
-          <div class="field"><label>Fecha del cierre</label><input type="date" id="cc-date" value="${escapeAttr(ccToday)}" max="${todayISO()}" /></div>
-          <div class="field span-3" style="align-self:end">${ccCloseToday ? `<span class="pill green">Ya hay un cierre guardado para el ${formatDate(ccToday)}: al guardar se reemplaza</span>` : ""}</div>
-        </div>
-        ${employeeMissingClosingsHtml(currentUser.id)}
-        <p class="muted">Marca los pedidos que cobraste ${ccToday === todayISO() ? "hoy" : "el " + formatDate(ccToday)} en efectivo. Los que ya tienen pago registrado vienen tildados.</p>
-        <div id="cc-orders" style="margin-top:8px">${ccOrderRows || `<div class="empty compact">No hay pedidos para ${ccToday === todayISO() ? "hoy" : "el " + formatDate(ccToday)}.</div>`}</div>
-        <div class="form-grid" style="margin-top:12px">
-          <div class="field span-2"><label>${ccToday === todayISO() ? "Hoy cobré" : "Ese día cobré"} en efectivo</label><input id="cc-collected" inputmode="decimal" value="${formatAmountInput(ccDefCollected)}" /></div>
-          <div class="field span-2"><label>Diferencia de cobro</label><input id="cc-collect-diff" disabled /></div>
-          <div class="field span-2"><label>Mi caja al cierre del día es</label><input id="cc-cash" inputmode="decimal" value="${formatAmountInput(ccDefCash)}" /></div>
-          <div class="field span-2"><label>Diferencia de caja</label><input id="cc-cash-diff" disabled /></div>
-        </div>
-        <p class="muted" id="cc-expected-lines" style="font-size:12px;margin-top:6px"></p>
-        <div class="page-actions" style="margin-top:12px"><button class="btn primary" type="button" id="cc-save">Guardar cierre de caja</button></div>
-      </div>
+      ${renderCashClosingBox()}
       <div class="panel" style="margin-top:14px">
         <div class="page-actions" style="justify-content:space-between"><h2 class="page-title" style="font-size:18px">Mis movimientos</h2></div>
         <p class="muted">Gastos para reintegro, ingresos de efectivo y todo lo que paso por tu caja.</p>
@@ -14972,6 +15150,47 @@
       render();
     });
     bindCashClosing();
+  }
+
+  // Recuadro de cierre de caja del empleado. Lo usan Horarios y el cierre de Mi recorrido (es el
+  // mismo recuadro, con los pedidos ya cobrados tildados por defecto).
+  function renderCashClosingBox() {
+    // Fecha del cierre de caja: hoy por defecto, pero se puede cargar el de un dia anterior.
+    if (!ui.ccDate || ui.ccDate > todayISO()) ui.ccDate = todayISO();
+    const ccToday = ui.ccDate;
+    const ccCloseToday = getCashClosingForDate(currentUser.id, ccToday);
+    const ccPaidSet = employeePaidOrderIdsToday(currentUser.id, ccToday);
+    if (ui.ccCheckedDate !== ccToday) { ui.ccCheckedDate = ccToday; ui.ccChecked = ccCloseToday ? (ccCloseToday.orderIds || []).slice() : Array.from(ccPaidSet); }
+    const ccCheckedSet = new Set(ui.ccChecked || []);
+    const ccOrders = ordersByDate(ccToday).filter((o) => !["cancelado", "anulado"].includes(o.status)).sort((a, b) => String(a.clientId).localeCompare(String(b.clientId)));
+    const ccSumChecked = ccOrders.filter((o) => ccCheckedSet.has(o.id)).reduce((s, o) => s + Number(o.totalAmount || 0), 0);
+    const ccDefCollected = ccCloseToday ? Number(ccCloseToday.actualCollected || 0) : ccSumChecked;
+    const ccDefCash = ccCloseToday ? Number(ccCloseToday.actualCash || 0) : expectedEmployeeCash(currentUser.id, ccDefCollected, ccToday);
+    const ccOrderRows = ccOrders.map((o) => {
+      const client = getClient(o.clientId);
+      const registered = ccPaidSet.has(o.id);
+      return `<label class="cc-order-row" style="display:flex;gap:8px;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);padding:5px 2px"><span style="display:flex;gap:6px;align-items:center"><input type="checkbox" data-cc-order="${escapeAttr(o.id)}" data-cc-total="${Number(o.totalAmount || 0)}" data-cc-registered="${registered ? 1 : 0}" ${ccCheckedSet.has(o.id) ? "checked" : ""} style="width:auto;min-height:auto" /><span>${escapeHtml(o.clientId)} - ${escapeHtml(client ? client.name : o.clientId)}${registered ? "" : ` <span class="pill amber" style="font-size:10px">sin pago</span>`}</span></span><strong>${formatMoney(o.totalAmount || 0)}</strong></label>`;
+    }).join("");
+    return `
+      <div class="panel" style="margin-top:14px">
+        <h2 class="page-title" style="font-size:18px">Cierre de caja</h2>
+        <div class="form-grid" style="margin:6px 0">
+          <div class="field"><label>Fecha del cierre</label><input type="date" id="cc-date" value="${escapeAttr(ccToday)}" max="${todayISO()}" /></div>
+          <div class="field span-3" style="align-self:end">${ccCloseToday ? `<span class="pill green">Ya hay un cierre guardado para el ${formatDate(ccToday)}: al guardar se reemplaza</span>` : ""}</div>
+        </div>
+        ${employeeMissingClosingsHtml(currentUser.id)}
+        <p class="muted">Marca los pedidos que cobraste ${ccToday === todayISO() ? "hoy" : "el " + formatDate(ccToday)} en efectivo. Los que ya tienen pago registrado vienen tildados.</p>
+        <div id="cc-orders" style="margin-top:8px">${ccOrderRows || `<div class="empty compact">No hay pedidos para ${ccToday === todayISO() ? "hoy" : "el " + formatDate(ccToday)}.</div>`}</div>
+        <div class="form-grid" style="margin-top:12px">
+          <div class="field span-2"><label>${ccToday === todayISO() ? "Hoy cobré" : "Ese día cobré"} en efectivo</label><input id="cc-collected" inputmode="decimal" value="${formatAmountInput(ccDefCollected)}" /></div>
+          <div class="field span-2"><label>Diferencia de cobro</label><input id="cc-collect-diff" disabled /></div>
+          <div class="field span-2"><label>Mi caja al cierre del día es</label><input id="cc-cash" inputmode="decimal" value="${formatAmountInput(ccDefCash)}" /></div>
+          <div class="field span-2"><label>Diferencia de caja</label><input id="cc-cash-diff" disabled /></div>
+        </div>
+        <p class="muted" id="cc-expected-lines" style="font-size:12px;margin-top:6px"></p>
+        <div class="page-actions" style="margin-top:12px"><button class="btn primary" type="button" id="cc-save">Guardar cierre de caja</button></div>
+      </div>
+    `;
   }
 
   function bindCashClosing() {
@@ -16442,6 +16661,11 @@
             <div class="field span-2"><label>Asunto del correo de mora (usa {cliente})</label><input id="dunning-mail-subject" value="${escapeAttr((state.appSettings && state.appSettings.dunningMailSubject) || "Demora de pago: {cliente}")}" /></div>
             <div class="field span-4"><label>Mensaje de correo de mora (usa {cliente}, {diassinpago} y {saldo})</label><textarea id="dunning-mail-message" rows="2">${escapeHtml((state.appSettings && state.appSettings.dunningMailMessage) || "El cliente {cliente} tiene una demora de pago de {diassinpago} y su saldo es {saldo}.")}</textarea></div>
             <div class="field span-2"><label>Nombre de plantilla Meta (recordatorio de pago)</label><input id="dunning-template" value="${escapeAttr((state.appSettings && state.appSettings.dunningWhatsappTemplate) || "")}" placeholder="ej: recordatorio_pago" /></div>
+            <div class="field span-4"><label><input type="checkbox" id="dunning-unusual-enabled" ${!state.appSettings || state.appSettings.dunningUnusualEnabled !== false ? "checked" : ""} style="width:auto;min-height:auto" /> Con los recordatorios de pago activados, avisar también a los clientes que deben bastante más que lo habitual (una vez por semana, por WhatsApp si hay bot y por correo)</label></div>
+            <div class="field span-4"><label>Mensaje para deuda más alta que lo habitual (usa {cliente} y {saldo})</label><textarea id="dunning-unusual-message" rows="2">${escapeHtml((state.appSettings && state.appSettings.dunningUnusualMessage) || "Hola {cliente}, te escribimos de Pare Carrito: tu saldo es {saldo}, mas alto que lo habitual. Cuando puedas regularizalo. Gracias!")}</textarea></div>
+            <div class="field span-4"><label><input type="checkbox" id="control-email-enabled" ${!state.appSettings || state.appSettings.controlEmailEnabled !== false ? "checked" : ""} style="width:auto;min-height:auto" /> Enviar todas las noches el resumen de Control (faltantes, caja, transferencias, deudas) por correo al gerente</label></div>
+            <div class="field span-2"><label>Correo(s) para el resumen (vacio = el del gerente)</label><input id="control-email-to" value="${escapeAttr((state.appSettings && state.appSettings.controlEmailTo) || "")}" placeholder="gerente@..., otro@..." /></div>
+            <div class="field"><label>Hora del resumen</label><input id="control-email-hour" type="number" min="0" max="23" value="${escapeAttr(String(state.appSettings && state.appSettings.controlEmailHour != null && state.appSettings.controlEmailHour !== "" ? state.appSettings.controlEmailHour : 21))}" /></div>
             <div class="field span-4"><label>Mensaje de aviso de suba de precio (usa {producto}, {porcentaje}, {precioAnterior}, {precioNuevo})</label><textarea id="priceinc-message" rows="2">${escapeHtml(getPriceIncreaseMessageText())}</textarea></div>
             <div class="field span-2"><label>Nombre de plantilla Meta (suba de precio)</label><input id="priceinc-template" value="${escapeAttr((state.appSettings && state.appSettings.priceIncreaseTemplateName) || "")}" placeholder="ej: suba_precio" /></div>
           </div>
@@ -16768,6 +16992,16 @@
     if (dnMail) dnMail.addEventListener("change", () => { state.appSettings.dunningMailMessage = dnMail.value.trim(); saveState(); });
     const dnMailSubj = document.getElementById("dunning-mail-subject");
     if (dnMailSubj) dnMailSubj.addEventListener("change", () => { state.appSettings.dunningMailSubject = dnMailSubj.value.trim(); saveState(); });
+    const dnUnusual = document.getElementById("dunning-unusual-enabled");
+    if (dnUnusual) dnUnusual.addEventListener("change", () => { state.appSettings.dunningUnusualEnabled = dnUnusual.checked; saveState(); });
+    const dnUnusualMsg = document.getElementById("dunning-unusual-message");
+    if (dnUnusualMsg) dnUnusualMsg.addEventListener("change", () => { state.appSettings.dunningUnusualMessage = dnUnusualMsg.value.trim(); saveState(); });
+    const ctlEnabled = document.getElementById("control-email-enabled");
+    if (ctlEnabled) ctlEnabled.addEventListener("change", () => { state.appSettings.controlEmailEnabled = ctlEnabled.checked; saveState(); });
+    const ctlTo = document.getElementById("control-email-to");
+    if (ctlTo) ctlTo.addEventListener("change", () => { state.appSettings.controlEmailTo = ctlTo.value.trim(); saveState(); });
+    const ctlHour = document.getElementById("control-email-hour");
+    if (ctlHour) ctlHour.addEventListener("change", () => { const h = Math.max(0, Math.min(23, Math.round(Number(ctlHour.value)))); state.appSettings.controlEmailHour = Number.isFinite(h) ? h : 21; saveState(); });
     const dnTpl = document.getElementById("dunning-template");
     if (dnTpl) dnTpl.addEventListener("change", () => { state.appSettings.dunningWhatsappTemplate = dnTpl.value.trim(); saveState(); });
     const piMsg = document.getElementById("priceinc-message");

@@ -10,6 +10,7 @@ const { Pool } = require("pg");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { billingConfig, nowArt, computeDueInvoices, runBilling, regeneratePdf, emitCreditNote, creditNoteTypeFor } = require("./billing");
+const { controlDailySummary, parseBankText, parseBankJson } = require("./control");
 const { syncSheetsFromStateDiff, pushPrecio } = require("./sheetsSync");
 
 const PORT = Number(process.env.PORT || 3000);
@@ -1735,6 +1736,99 @@ app.get("/control/client-debts", authenticate, requireRole("manager", "admin"), 
   }
 });
 
+// ---------- Control: resumen diario por correo al gerente ----------
+function controlEmailRecipients(data) {
+  const settings = data.appSettings || {};
+  const extra = String(settings.controlEmailTo || "").split(/[,;\s]+/).filter((x) => /@/.test(x));
+  if (extra.length) return extra;
+  const managers = (data.users || []).filter((u) => u && u.role === "manager" && u.isActive !== false && u.email).map((u) => u.email);
+  return managers.length ? managers : [process.env.MANAGER_EMAIL].filter(Boolean);
+}
+
+async function sendControlDailyEmail(date) {
+  const row = await pool.query("SELECT data FROM app_state WHERE id = 'main'");
+  const data = row.rows.length ? row.rows[0].data || {} : {};
+  const settings = data.appSettings || {};
+  const to = controlEmailRecipients(data);
+  if (!to.length) return { sent: false, reason: "No hay correo del gerente (cargalo en Usuarios o en Configuracion)." };
+  if (settings.mailingEnabled === false) return { sent: false, reason: "Los correos automaticos estan desactivados en Configuracion." };
+  const today = new Date(Date.now() - 3 * 3600 * 1000).toISOString().slice(0, 10);
+  const summary = controlDailySummary(data, date, controlClientDebts(data, today));
+  const fecha = date.split("-").reverse().join("/");
+  const subject = (summary.problemas ? "⚠ Control " + fecha + ": " + summary.problemas + " punto(s) para revisar" : "✔ Control " + fecha + ": todo en orden");
+  const sent = await sendMail(to.join(","), subject, summary.html);
+  return { sent, to, problemas: summary.problemas, counts: summary.counts };
+}
+
+app.post("/control/daily-email", authenticate, requireRole("manager", "admin"), async (req, res) => {
+  const date = String((req.body && req.body.date) || new Date(Date.now() - 3 * 3600 * 1000).toISOString().slice(0, 10));
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: "Fecha invalida." });
+  try {
+    const r = await sendControlDailyEmail(date);
+    res.json({ ok: true, ...r });
+  } catch (error) {
+    console.error("control/daily-email:", error.message);
+    res.status(500).json({ error: "No se pudo enviar el resumen." });
+  }
+});
+
+let controlEmailLastRunDate = "";
+async function initControlEmailScheduler() {
+  try { const { rows } = await pool.query("SELECT data->>'controlEmailLastRunDate' AS d FROM app_state WHERE id = 'main'"); controlEmailLastRunDate = (rows[0] && rows[0].d) || ""; }
+  catch (e) { console.warn("No se pudo cargar controlEmailLastRunDate:", e.message); }
+  setInterval(async () => {
+    try {
+      const art = nowArt();
+      const cfg = await pool.query("SELECT data->'appSettings'->>'controlEmailEnabled' AS e, data->'appSettings'->>'controlEmailHour' AS h FROM app_state WHERE id = 'main'").catch(() => ({ rows: [] }));
+      const r0 = cfg.rows[0] || {};
+      if (r0.e === "false") return;
+      const hora = Number(r0.h) >= 0 && Number(r0.h) <= 23 && r0.h !== null && r0.h !== "" ? Number(r0.h) : 21;
+      if (art.hour < hora || controlEmailLastRunDate === art.dateISO) return;
+      controlEmailLastRunDate = art.dateISO;
+      await pool.query("UPDATE app_state SET data = jsonb_set(COALESCE(data, '{}'), '{controlEmailLastRunDate}', to_jsonb($1::text)) WHERE id = 'main'", [art.dateISO]).catch(() => {});
+      const r = await sendControlDailyEmail(art.dateISO);
+      console.log("Resumen de Control", art.dateISO, r.sent ? "enviado a " + r.to.join(",") : "no enviado: " + (r.reason || "error de correo"));
+    } catch (e) { console.error("Resumen de Control fallo:", e.message); }
+  }, 5 * 60 * 1000);
+}
+
+// ---------- Movimientos del banco: archivo exportado o captura de pantalla ----------
+// Se devuelven los ingresos (fecha, monto, descripcion) y la web los cruza con los remitos del
+// reparto pagados por transferencia.
+app.post("/bank/parse", authenticate, requireRole("manager", "admin"), async (req, res) => {
+  const today = new Date(Date.now() - 3 * 3600 * 1000).toISOString().slice(0, 10);
+  const body = req.body || {};
+  if (typeof body.text === "string" && body.text.trim()) {
+    return res.json({ ok: true, provider: "archivo", movements: parseBankText(body.text, today) });
+  }
+  const image = parseImageDataUrl(body.imageData);
+  if (!image) return res.status(400).json({ error: "Mande el archivo exportado o una captura (PNG, JPG o WEBP)." });
+  if (image.byteLength > 8 * 1024 * 1024) return res.status(413).json({ error: "La imagen supera el maximo de 8 MB." });
+  const prompt = "Es una captura de movimientos de una cuenta bancaria o de Mercado Pago de Argentina. Extrae SOLO los INGRESOS (dinero recibido, transferencias recibidas), no los pagos ni egresos. "
+    + "Responde UNICAMENTE un arreglo JSON, sin texto alrededor: [{\"fecha\":\"AAAA-MM-DD\",\"monto\":12345.5,\"descripcion\":\"nombre de quien transfirio o detalle\"}]. "
+    + "El monto es un numero sin separador de miles y con punto decimal. Si no figura el anio usa " + today.slice(0, 4) + ". Si dice Hoy usa " + today + " y si dice Ayer el dia anterior.";
+  const errors = [];
+  const llms = [];
+  if (OPENROUTER_API_KEY) llms.push(["OpenRouter", () => visionOcrRequest(OPENROUTER_API_URL, OPENROUTER_API_KEY, OPENROUTER_VISION_MODEL, image, prompt, { "HTTP-Referer": "https://parecarrito.app", "X-Title": "Pare Carrito" })]);
+  if (MOONSHOT_API_KEY) llms.push(["Kimi", () => visionOcrRequest(MOONSHOT_API_URL, MOONSHOT_API_KEY, MOONSHOT_VISION_MODEL, image, prompt)]);
+  for (const [nombre, fn] of llms) {
+    try {
+      const movs = parseBankJson(await fn());
+      if (movs) return res.json({ ok: true, provider: nombre, movements: movs });
+      errors.push(nombre + ": respuesta sin movimientos");
+    } catch (error) { errors.push(nombre + ": " + error.message); }
+  }
+  // Sin IA de texto: se lee la imagen con OCR y se interpretan los renglones.
+  if (GOOGLE_VISION_API_KEY) {
+    try {
+      const text = await googleVisionOcrRequest(GOOGLE_VISION_URL, GOOGLE_VISION_API_KEY, image, "es");
+      return res.json({ ok: true, provider: "google-vision", movements: parseBankText(text, today), text });
+    } catch (error) { errors.push("Google Vision: " + error.message); }
+  }
+  if (!llms.length && !GOOGLE_VISION_API_KEY) return res.status(503).json({ error: "La lectura de capturas no esta configurada en el servidor (falta OPENROUTER_API_KEY, MOONSHOT_API_KEY o GOOGLE_VISION_API_KEY)." });
+  return res.status(502).json({ error: "No se pudo leer la captura. " + errors.join(" | ") });
+});
+
 app.post("/orders/reprice-day", authenticate, requireRole("manager", "admin"), async (req, res) => {
   const fecha = String((req.body && req.body.date) || "");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return res.status(400).json({ error: "Fecha invalida." });
@@ -3333,6 +3427,36 @@ async function runDunning({ pool, now = new Date() }) {
       }
     } catch (e) { console.error("dunning cliente:", e.message); }
   }
+  // Clientes que deben bastante mas que lo habitual (aunque no esten "en mora" por su forma de
+  // pago): un recordatorio por semana, por los mismos canales.
+  if (settings.dunningUnusualEnabled !== false) {
+    const unusualTpl = settings.dunningUnusualMessage || "Hola {cliente}, te escribimos de Pare Carrito: tu saldo es {saldo}, mas alto que lo habitual. Cuando puedas regularizalo. Gracias!";
+    for (const x of controlClientDebts(d, today)) {
+      try {
+        if (!x.motivos.some((m) => m.tipo === "habitual")) continue;
+        if (dunningState[x.clientId]) continue; // ya recibe los avisos de mora
+        const key = "inusual:" + x.clientId;
+        const prev = dunningState[key];
+        if (prev && prev.lastSent && daysBetween(prev.lastSent, today) < 7) continue;
+        const c = clients.find((cl) => cl.id === x.clientId);
+        if (!c) continue;
+        const msg = unusualTpl.replace(/{cliente}/g, c.name || "").replace(/{saldo}/g, money(x.actual));
+        let enviado = false;
+        const phone = String(c.phone || (Array.isArray(c.phones) ? c.phones[0] : "") || "").replace(/\D/g, "");
+        if (botUrl && templateName && phone && !whatsappOff(settings)) {
+          try {
+            await fetch(botUrl, { method: "POST", headers: { "content-type": "application/json", "x-broadcast-key": botKey }, body: JSON.stringify({ numbers: [phone], templateName, lang, params: [msg] }) });
+            waSent += 1; enviado = true;
+          } catch (e) { console.error("dunning inusual whatsapp:", e.message); }
+        }
+        const to = [c.billingEmail || c.email, managerEmail].filter(Boolean).join(",");
+        if (to && settings.mailingEnabled !== false) {
+          try { if (await sendMail(to, "Saldo pendiente: " + (c.name || ""), "<p>" + msg + "</p>")) { mailsSent += 1; enviado = true; } } catch (e) { console.error("dunning inusual mail:", e.message); }
+        }
+        if (enviado) dunningState[key] = { lastSent: today, saldo: x.actual };
+      } catch (e) { console.error("dunning inusual:", e.message); }
+    }
+  }
   await saveDunningState(dunningState);
   return { ran: true, waSent, mailsSent };
 }
@@ -3501,6 +3625,7 @@ if (require.main === module) {
     .then(() => {
       initBillingScheduler();
       initDunningScheduler();
+      initControlEmailScheduler();
       return app.listen(PORT, () => console.log("Pare Carrito SAS API escuchando en puerto " + PORT));
     })
     .catch((error) => {
