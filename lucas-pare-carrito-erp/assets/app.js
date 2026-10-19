@@ -14630,6 +14630,48 @@
   //  - "error": la emision se intento y TusFacturas la rechazo (queda en el log y nadie la mira).
   //  - "atrasada": el cliente acumula pedidos sin facturar mas alla de lo que permite su frecuencia
   //    (por ejemplo un cliente de factura diaria con pedidos de ayer todavia pendientes).
+  // Avisos que el gerente/admin descarto porque esa factura ya no hace falta. Se guardan en
+  // appSettings (se sincroniza con el servidor y se ve igual en todos los dispositivos).
+  function billingDismissedMap() {
+    const map = state.appSettings && state.appSettings.billingDismissed;
+    return map && typeof map === "object" ? map : {};
+  }
+
+  function billingWarningKey(kind, item) {
+    if (kind === "error") return "error|" + item.clientId + "|" + (item.from || "") + "|" + (item.to || "");
+    if (kind === "overdue") return "overdue|" + item.clientId;
+    if (kind === "gap") return "gap|" + item.clientId + "|" + item.date;
+    return "dup|" + item.ids.slice().sort().join("|");
+  }
+
+  // Un aviso de "atrasada" descartado vuelve a aparecer si el cliente tiene pedidos sin facturar
+  // posteriores al descarte (los que se descartaron no se vuelven a avisar).
+  function billingWarningDismissed(kind, item, map) {
+    const entry = map[billingWarningKey(kind, item)];
+    if (!entry) return false;
+    if (kind === "overdue") return !!entry.hasta && String(item.newest || "") <= String(entry.hasta);
+    return true;
+  }
+
+  function dismissBillingWarning(kind, key, hasta, label) {
+    if (!state.appSettings) state.appSettings = {};
+    const map = { ...billingDismissedMap() };
+    map[key] = { at: new Date().toISOString(), by: currentUser ? currentUser.name : "", label: label || "", ...(hasta ? { hasta } : {}) };
+    // Se limpian descartes de mas de 120 dias para que no crezca para siempre.
+    const limite = new Date(Date.now() - 120 * 86400000).toISOString();
+    Object.keys(map).forEach((k) => { if (String(map[k] && map[k].at || "") < limite) delete map[k]; });
+    state.appSettings.billingDismissed = map;
+    saveState();
+    render();
+  }
+
+  function restoreBillingWarnings() {
+    if (!state.appSettings) state.appSettings = {};
+    state.appSettings.billingDismissed = {};
+    saveState();
+    render();
+  }
+
   function getUnbilledWarnings() {
     const today = todayISO();
     const errors = [];
@@ -14666,6 +14708,11 @@
           .filter(Boolean)
           .sort()[0];
         if (!oldest) return;
+        const newest = pending.orderList
+          .map((order) => String(order.date || "").slice(0, 10))
+          .filter(Boolean)
+          .sort()
+          .pop();
         const freq = String(client.invoiceFrequency || "mensual").toLowerCase();
         const tolerance = BILLING_OVERDUE_DAYS[freq] == null ? BILLING_OVERDUE_DAYS.mensual : BILLING_OVERDUE_DAYS[freq];
         const days = Math.round((new Date(today + "T12:00:00") - new Date(oldest + "T12:00:00")) / 86400000);
@@ -14675,14 +14722,25 @@
           clientName: client.name,
           frequency: freq,
           oldest,
+          newest,
           days,
           orders: pending.orders,
           total: pending.total
         });
       });
     overdue.sort((a, b) => b.days - a.days);
-    const { gaps, duplicates } = getBillingGapsAndDuplicates(today);
-    return { errors, overdue, gaps, duplicates, count: errors.length + overdue.length + gaps.length + duplicates.length };
+    const found = getBillingGapsAndDuplicates(today);
+    const map = billingDismissedMap();
+    const keep = (kind, list) => list.filter((item) => !billingWarningDismissed(kind, item, map));
+    const result = {
+      errors: keep("error", errors),
+      overdue: keep("overdue", overdue),
+      gaps: keep("gap", found.gaps),
+      duplicates: keep("dup", found.duplicates)
+    };
+    result.count = result.errors.length + result.overdue.length + result.gaps.length + result.duplicates.length;
+    result.dismissedCount = Object.keys(map).length;
+    return result;
   }
 
   // Firma de un pedido para detectar cargas dobles: productos y cantidades, sin el precio (la copia
@@ -14743,16 +14801,25 @@
 
   function unbilledWarningHtml(options = {}) {
     const warnings = getUnbilledWarnings();
-    if (!warnings.count) return "";
+    const canDismiss = currentUser && ["manager", "admin"].includes(currentUser.role);
+    if (!warnings.count) {
+      return !options.compact && canDismiss && warnings.dismissedCount
+        ? `<div class="muted" style="margin-bottom:14px">${warnings.dismissedCount} aviso${warnings.dismissedCount === 1 ? "" : "s"} de facturas descartado${warnings.dismissedCount === 1 ? "" : "s"}. <button class="btn small ghost" type="button" data-billing-restore>Volver a mostrarlos</button></div>`
+        : "";
+    }
     const compact = !!options.compact;
-    const errorItems = warnings.errors.map((item) => `<li><strong>${escapeHtml(item.clientName)}</strong> - ${formatDate(item.from)} a ${formatDate(item.to)} por ${formatMoney(item.total)}${item.detail ? `<br><span class="muted">${escapeHtml(item.detail)}</span>` : ""}</li>`).join("");
-    const overdueItems = warnings.overdue.map((item) => `<li><strong>${escapeHtml(item.clientName)}</strong> (${escapeHtml(item.frequency)}) - ${item.orders} pedido${item.orders === 1 ? "" : "s"} sin facturar por ${formatMoney(item.total)}, el mas viejo del ${formatDate(item.oldest)} (${item.days} dia${item.days === 1 ? "" : "s"})</li>`).join("");
+    const dismissBtn = (kind, item, label) => canDismiss
+      ? ` <button class="btn small ghost" type="button" title="Ya no hace falta: ocultar este aviso" data-billing-dismiss="${escapeAttr(billingWarningKey(kind, item))}" data-dismiss-hasta="${escapeAttr(kind === "overdue" ? item.newest || "" : "")}" data-dismiss-label="${escapeAttr(label)}">No hace falta</button>`
+      : "";
+    const errorItems = warnings.errors.map((item) => `<li><strong>${escapeHtml(item.clientName)}</strong> - ${formatDate(item.from)} a ${formatDate(item.to)} por ${formatMoney(item.total)}${dismissBtn("error", item, item.clientName + " " + item.from + " a " + item.to)}${item.detail ? `<br><span class="muted">${escapeHtml(item.detail)}</span>` : ""}</li>`).join("");
+    const overdueItems = warnings.overdue.map((item) => `<li><strong>${escapeHtml(item.clientName)}</strong> (${escapeHtml(item.frequency)}) - ${item.orders} pedido${item.orders === 1 ? "" : "s"} sin facturar por ${formatMoney(item.total)}, el mas viejo del ${formatDate(item.oldest)} (${item.days} dia${item.days === 1 ? "" : "s"})${dismissBtn("overdue", item, item.clientName + " hasta " + item.newest)}</li>`).join("");
     return `<div class="panel highlight-panel billing-warning" style="margin-bottom:14px">
       <strong style="font-size:15px">\u26A0 ${warnings.count} factura${warnings.count === 1 ? "" : "s"} sin emitir</strong>
       ${warnings.errors.length ? `<div class="muted" style="margin-top:6px">Se intentaron emitir y fallaron:</div><ul style="margin:6px 0 0 18px">${errorItems}</ul>` : ""}
       ${warnings.overdue.length ? `<div class="muted" style="margin-top:8px">Acumulan pedidos sin facturar mas alla de su frecuencia:</div><ul style="margin:6px 0 0 18px">${overdueItems}</ul>` : ""}
-      ${warnings.gaps.length ? `<div class="muted" style="margin-top:8px">Dias que quedaron sin factura (la corrida de esa noche no llego a emitirlos). Emitilos con "Emitir manual" poniendo ese dia en Desde y Hasta:</div><ul style="margin:6px 0 0 18px">${warnings.gaps.map((item) => `<li><strong>${escapeHtml(item.clientId)} - ${escapeHtml(item.clientName)}</strong> - ${formatDate(item.date)}: ${item.orders} pedido${item.orders === 1 ? "" : "s"} por ${formatMoney(item.total)}</li>`).join("")}</ul>` : ""}
-      ${warnings.duplicates.length ? `<div class="muted" style="margin-top:8px">Posibles pedidos cargados dos veces (mismos productos y cantidades, mismo dia). Se facturan doble: borra el que sobra antes de emitir:</div><ul style="margin:6px 0 0 18px">${warnings.duplicates.map((item) => `<li><strong>${escapeHtml(item.clientId)} - ${escapeHtml(item.clientName)}</strong> - ${formatDate(item.date)}: ${escapeHtml(item.ids[0])} (${formatMoney(item.totals[0])}) y ${escapeHtml(item.ids[1])} (${formatMoney(item.totals[1])})</li>`).join("")}</ul>` : ""}
+      ${warnings.gaps.length ? `<div class="muted" style="margin-top:8px">Dias que quedaron sin factura (la corrida de esa noche no llego a emitirlos). Emitilos con "Emitir manual" poniendo ese dia en Desde y Hasta:</div><ul style="margin:6px 0 0 18px">${warnings.gaps.map((item) => `<li><strong>${escapeHtml(item.clientId)} - ${escapeHtml(item.clientName)}</strong> - ${formatDate(item.date)}: ${item.orders} pedido${item.orders === 1 ? "" : "s"} por ${formatMoney(item.total)}${dismissBtn("gap", item, item.clientName + " " + item.date)}</li>`).join("")}</ul>` : ""}
+      ${warnings.duplicates.length ? `<div class="muted" style="margin-top:8px">Posibles pedidos cargados dos veces (mismos productos y cantidades, mismo dia). Se facturan doble: borra el que sobra antes de emitir:</div><ul style="margin:6px 0 0 18px">${warnings.duplicates.map((item) => `<li><strong>${escapeHtml(item.clientId)} - ${escapeHtml(item.clientName)}</strong> - ${formatDate(item.date)}: ${escapeHtml(item.ids[0])} (${formatMoney(item.totals[0])}) y ${escapeHtml(item.ids[1])} (${formatMoney(item.totals[1])})${dismissBtn("dup", item, item.clientName + " " + item.date + " duplicado")}</li>`).join("")}</ul>` : ""}
+      ${canDismiss ? `<div class="muted" style="margin-top:8px;font-size:12px">"No hace falta" oculta el aviso en todos los dispositivos. Si el cliente vuelve a acumular pedidos nuevos sin facturar, el aviso reaparece.${!compact && warnings.dismissedCount ? ` <button class="btn small ghost" type="button" data-billing-restore>Mostrar ${warnings.dismissedCount} descartado${warnings.dismissedCount === 1 ? "" : "s"}</button>` : ""}</div>` : ""}
       ${compact ? `<div style="margin-top:10px"><button class="btn small yellow" type="button" data-route="facturacion">Ir a Facturacion</button></div>` : ""}
     </div>`;
   }
@@ -18327,6 +18394,13 @@
   }
 
   function bindCommon() {
+    document.querySelectorAll("[data-billing-dismiss]").forEach((button) => button.addEventListener("click", () => {
+      const kind = button.dataset.billingDismiss.split("|")[0];
+      dismissBillingWarning(kind, button.dataset.billingDismiss, button.dataset.dismissHasta, button.dataset.dismissLabel);
+    }));
+    document.querySelectorAll("[data-billing-restore]").forEach((button) => button.addEventListener("click", () => {
+      if (confirm("Volver a mostrar todos los avisos de facturas descartados?")) restoreBillingWarnings();
+    }));
     document.querySelectorAll("[data-route]").forEach((button) => {
       button.addEventListener("click", () => {
         const sidebar = document.querySelector(".sidebar");
