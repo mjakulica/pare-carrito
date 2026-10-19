@@ -2222,6 +2222,11 @@ tr:last-child td {
   column-gap: 22px;
   font-size: 12px;
 }
+.print-cols-table { width: 100%; table-layout: fixed; border-collapse: collapse; }
+.print-cols-table td { width: 33.33%; vertical-align: top; padding: 0 3px; border: 0; }
+.print-cols-table .product-sum-grid { column-count: 1; list-style: none; padding: 0; margin: 0; }
+.print-cols-table ul { list-style: none; padding-left: 0; margin: 0; }
+.print-cols-table ul ul { padding-left: 14px; }
 
 .product-sum-line {
   display: flex;

@@ -1676,6 +1676,65 @@ app.put("/state", authenticate, requireRole(...SYNC_ROLES), async (req, res) => 
 // Aplica la lista de precios ACTUAL a todos los pedidos de un dia (salvo precios cargados a mano,
 // reposiciones y carga historica). Lo hace el servidor sobre todos los pedidos, no un equipo sobre
 // los que tiene: asi el resultado es el mismo en todos los dispositivos.
+// ---------- Control: clientes con mas deuda que lo habitual ----------
+// Los dispositivos bajan pocos dias de saldos y pagos (vista rapida), asi que el promedio de 8
+// semanas solo se puede calcular aca, con el historial completo. Misma regla que muestra la web.
+function controlClientDebts(data, today) {
+  const addDays = (iso, n) => new Date(new Date(iso + "T12:00:00Z").getTime() + n * 86400000).toISOString().slice(0, 10);
+  const muestras = [];
+  for (let k = 1; k <= 8; k += 1) muestras.push(addDays(today, -7 * k));
+  const porCliente = new Map();
+  (data.saldos || []).forEach((e) => {
+    if (!e || !e.clientId) return;
+    if (!porCliente.has(e.clientId)) porCliente.set(e.clientId, []);
+    porCliente.get(e.clientId).push(e);
+  });
+  const desde = addDays(today, -56);
+  const compras = new Map();
+  (data.orders || []).forEach((o) => {
+    if (!o || ["cancelado", "anulado"].includes(o.status) || String(o.date || "") < desde || String(o.date || "") > today) return;
+    compras.set(o.clientId, (compras.get(o.clientId) || 0) + Number(o.totalAmount || 0));
+  });
+  const ultimoPago = new Map();
+  (data.payments || []).forEach((p) => {
+    if (!p || p.status === "anulado") return;
+    const ids = Array.isArray(p.groupClientIds) && p.groupClientIds.length ? p.groupClientIds : [p.clientId];
+    ids.forEach((id) => { if (String(p.date || "") > String(ultimoPago.get(id) || "")) ultimoPago.set(id, p.date); });
+  });
+  const out = [];
+  (data.clients || []).filter((c) => c && c.isActive !== false).forEach((client) => {
+    const movs = porCliente.get(client.id) || [];
+    const saldoAl = (d) => movs.reduce((s, e) => s + (String(e.date || "") <= d ? Number(e.amount || 0) : 0), 0);
+    const actual = movs.reduce((s, e) => s + Number(e.amount || 0), 0);
+    if (!(actual > 1000)) return;
+    const semanal = (compras.get(client.id) || 0) / 8;
+    const primerMov = movs.reduce((min, e) => (!min || String(e.date || "") < min ? String(e.date || "") : min), "");
+    const validas = muestras.filter((d) => primerMov && d >= primerMov);
+    const habitual = validas.length >= 3 ? validas.reduce((s, d) => s + Math.max(0, saldoAl(d)), 0) / validas.length : null;
+    const pago = ultimoPago.get(client.id) || "";
+    const diasSinPagar = pago ? Math.round((new Date(today + "T12:00:00Z") - new Date(pago + "T12:00:00Z")) / 86400000) : null;
+    const motivos = [];
+    if (habitual !== null && actual > habitual * 1.5 && actual - habitual > Math.max(semanal * 0.5, 5000)) motivos.push({ tipo: "habitual", monto: actual - habitual });
+    if (habitual === null && semanal > 0 && actual > semanal * 3) motivos.push({ tipo: "semanas" });
+    if ((diasSinPagar === null || diasSinPagar > 14) && actual > Math.max(semanal, 5000)) motivos.push({ tipo: "sin_pago", dias: diasSinPagar });
+    if (!motivos.length) return;
+    out.push({ clientId: client.id, actual, habitual, semanal, diasSinPagar, motivos, exceso: habitual !== null ? actual - habitual : actual });
+  });
+  return out.sort((a, b) => b.exceso - a.exceso);
+}
+
+app.get("/control/client-debts", authenticate, requireRole("manager", "admin"), async (req, res) => {
+  try {
+    const row = await pool.query("SELECT data FROM app_state WHERE id = 'main'");
+    const data = row.rows.length ? row.rows[0].data || {} : {};
+    const today = new Date(Date.now() - 3 * 3600 * 1000).toISOString().slice(0, 10);
+    res.json({ ok: true, today, clients: controlClientDebts(data, today) });
+  } catch (error) {
+    console.error("control/client-debts:", error.message);
+    res.status(500).json({ error: "No se pudo calcular." });
+  }
+});
+
 app.post("/orders/reprice-day", authenticate, requireRole("manager", "admin"), async (req, res) => {
   const fecha = String((req.body && req.body.date) || "");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return res.status(400).json({ error: "Fecha invalida." });

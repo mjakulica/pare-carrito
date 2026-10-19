@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v57";
+  const APP_VERSION = "v58";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -329,6 +329,7 @@
   const menu = [
     { id: "dashboard", label: "Inicio", icon: "IN", roles: ["manager", "admin", "employee", "customer", "contador", "example", "proveedor"] },
     { id: "mi-recorrido", label: "Mi recorrido", icon: "MR", roles: ["manager", "admin", "employee"] },
+    { id: "control", label: "Control", icon: "CK", roles: ["manager", "admin"] },
     { id: "nuevo-pedido", label: "Nuevo Pedido", icon: "NP", roles: ["manager", "admin", "employee", "customer", "example"] },
     { id: "pedidos", label: "Pedidos", icon: "PE", roles: ["manager", "admin", "employee", "customer", "example", "proveedor"] },
     { id: "clientes", label: "Clientes", icon: "CL", roles: ["manager", "admin"] },
@@ -3263,6 +3264,7 @@
       "saldos": '<path d="M3 7a2 2 0 012-2h13v2.5"/><rect x="3" y="7" width="18" height="12" rx="2"/><circle cx="16.5" cy="13" r="1.1"/>',
       "caja": '<rect x="3" y="9" width="18" height="11" rx="2"/><path d="M7 9V4.5h10V9M9 13.5h6"/>',
       "empleados": '<rect x="4" y="3" width="16" height="18" rx="2"/><circle cx="12" cy="9.5" r="2.5"/><path d="M7.5 17.5c.7-2 2.4-3 4.5-3s3.8 1 4.5 3"/>',
+      "control": '<path d="M12 2.5l8 3.5v5.5c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10V6z"/><path d="M8.5 12l2.4 2.4 4.6-4.9"/>',
       "mi-recorrido": '<path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0113 0c0 5.4-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.3"/>',
       "horarios": '<circle cx="12" cy="13" r="8"/><path d="M12 9.5v3.5l2.5 2.5M9.5 2.5h5"/>',
       "registrar-transferencia": '<path d="M3 9.5L12 3.5l9 6"/><path d="M5 9.5V19M9.5 9.5V19M14.5 9.5V19M19 9.5V19M3 20.5h18"/>',
@@ -3387,6 +3389,7 @@
     const pages = {
       dashboard: renderDashboard,
       "mi-recorrido": () => renderMiRecorrido(route.id),
+      control: renderControl,
       "nuevo-pedido": renderNewOrder,
       pedidos: renderOrders,
       clientes: renderClients,
@@ -10786,6 +10789,31 @@
     }).join("")}</ul>`;
   }
 
+  // Columnas para imprimir. Antes eran columnas de CSS (column-count), pero Safari del iPhone las
+  // ignora al imprimir y sacaba todo en una sola columna larga. Ahora se reparten a mano en 3 celdas
+  // de una tabla (de arriba hacia abajo, parejas por cantidad de renglones), que todos respetan.
+  function printColumnsHtml(entries, listClass, n = 3) {
+    if (!entries.length) return "";
+    const total = entries.reduce((s, e) => s + e.weight, 0);
+    const cols = [];
+    let actual = [];
+    let acumulado = 0;
+    entries.forEach((entry, i) => {
+      const restantesCols = n - cols.length;
+      const objetivo = (total * (cols.length + 1)) / n;
+      // Se corta la columna cuando ya llego a su parte, si quedan entradas para las siguientes.
+      if (actual.length && restantesCols > 1 && acumulado + entry.weight / 2 > objetivo && entries.length - i >= restantesCols - 1) {
+        cols.push(actual);
+        actual = [];
+      }
+      actual.push(entry.html);
+      acumulado += entry.weight;
+    });
+    cols.push(actual);
+    while (cols.length < n) cols.push([]);
+    return `<table class="print-cols-table"><tr>${cols.map((c) => `<td><ul class="${listClass}">${c.join("")}</ul></td>`).join("")}</tr></table>`;
+  }
+
   function renderDivideClientList(assignables, assigneeValues) {
     const filtered = filterDivideAssignables(assignables, assigneeValues);
     if (!filtered.length) return `<p class="muted" style="font-size:10px;margin:0">Sin productos asignados para esta vista.</p>`;
@@ -10799,11 +10827,11 @@
       const assigned = getAssigneeByValue(getEffectiveItemAssigneeValue(item));
       groups[order.clientId].items.push({ ...item, assigneeName: assigned ? assigned.name : "Sin asignar" });
     });
-    return `<ul class="divide-print-list divide-print-cols">${Object.keys(groups).sort(compareClientIdStrings).map((clientId) => {
+    return printColumnsHtml(Object.keys(groups).sort(compareClientIdStrings).map((clientId) => {
       const group = groups[clientId];
       const itemsHtml = group.items.map((item) => `<li>${escapeHtml(divideQtyLabel(item.quantity, divideItemUnit(item)))} ${escapeHtml(item.productName)}${isAll ? " - " + escapeHtml(item.assigneeName) : ""}${item.note ? " (" + escapeHtml(item.note) + ")" : ""}</li>`).join("");
-      return `<li><strong>${escapeHtml(formatClientIdShort(clientId))})</strong><ul>${itemsHtml}</ul></li>`;
-    }).join("")}</ul>`;
+      return { weight: group.items.length + 1.4, html: `<li><strong>${escapeHtml(formatClientIdShort(clientId))})</strong><ul>${itemsHtml}</ul></li>` };
+    }), "divide-print-list");
   }
 
   function buildDivideClipboardText(assigneeValues, includeClientsOverride) {
@@ -11902,7 +11930,7 @@
           <ul>${order.items.map((item) => `<li>${escapeHtml(item.productName)}: ${formatNumber(item.quantity)} ${escapeHtml(item.unitType)}${item.note ? " (" + escapeHtml(item.note) + ")" : ""}</li>`).join("")}</ul>
         </li>
       `;
-    }).join("");
+    });
     return `
       <section class="print-page">
         <div class="print-controls no-print">
@@ -11914,7 +11942,7 @@
             <div><h1>${BUSINESS_NAME.toUpperCase()}</h1><strong>${escapeHtml(tplGet("vehiculos", "tituloSinDividir", "Pedidos sin dividir"))}</strong></div>
             <div>Fecha: ${formatDate(date)}</div>
           </div>
-          <ul class="vehicle-print-list vehicle-print-cols">${orderItems || "<li>Sin pedidos</li>"}</ul>
+          ${orderItems.length ? printColumnsHtml(orderItems.map((html, i) => ({ html, weight: orders[i].items.length + 3 })), "vehicle-print-list vehicle-print-cols") : `<ul class="vehicle-print-list"><li>Sin pedidos</li></ul>`}
           <h2 style="font-size:14px;margin:8px 0 4px">Sumatoria total de productos</h2>
           ${renderProductSumColumns(productTotals)}
         </article>
@@ -11938,7 +11966,7 @@
           <div class="vehicle-print-total"><span>Total</span> <strong>${formatMoney(order.totalAmount)}</strong></div>
         </li>
       `;
-    }).join("");
+    });
     return `
       <article class="print-sheet print-compact">
         <div class="print-title">
@@ -11951,7 +11979,7 @@
             <div>Conductor: ${escapeHtml(vehicle && vehicle.driverName ? vehicle.driverName : "-")}</div>
           </div>
         </div>
-        <ul class="vehicle-print-list vehicle-print-cols">${orderItems || "<li>Sin pedidos</li>"}</ul>
+        ${orderItems.length ? printColumnsHtml(orderItems.map((html, i) => ({ html, weight: totals.orders[i].items.length + 4 })), "vehicle-print-list vehicle-print-cols") : `<ul class="vehicle-print-list"><li>Sin pedidos</li></ul>`}
         <h2 style="font-size:14px;margin:8px 0 4px">Suma de productos</h2>
         ${renderProductSumColumns(productTotals)}
       </article>
@@ -11960,10 +11988,7 @@
 
   function renderProductSumColumns(productTotals) {
     if (!productTotals.length) return `<p class="muted" style="font-size:10px">Sin productos</p>`;
-    const lines = productTotals.map((item) => `
-      <div class="product-sum-line"><span>${escapeHtml(item.productName)}</span><strong>${formatNumber(item.quantity)} ${escapeHtml(item.unitType)}</strong></div>
-    `).join("");
-    return `<div class="product-sum-grid">${lines}</div>`;
+    return printColumnsHtml(productTotals.map((item) => ({ weight: 1, html: `<li class="product-sum-line"><span>${escapeHtml(item.productName)}</span><strong>${formatNumber(item.quantity)} ${escapeHtml(item.unitType)}</strong></li>` })), "product-sum-grid");
   }
 
   function buildVehicleAllText(date) {
@@ -13472,6 +13497,313 @@
     });
   }
 
+  // ===== Remitos del reparto pagados por transferencia (revision del gerente/admin) =====
+  // El empleado marca "Transferencia" en Mi recorrido y saca la foto del remito. Aca se comprueba
+  // contra el banco: "Llego" registra el pago (Banco) y "No llego" deja la deuda marcada para Control.
+  function deliveryTransferOrders() {
+    return (state.orders || []).filter((o) => o && o.deliveryPayment && o.deliveryPayment.method === "transferencia" && !["cancelado", "anulado"].includes(o.status));
+  }
+
+  function deliveryTransferStatus(order) {
+    const review = order.transferReview;
+    if (review && review.status) return review.status;
+    return "pendiente";
+  }
+
+  function deliveryTransferPendingCount() {
+    return deliveryTransferOrders().filter((o) => deliveryTransferStatus(o) === "pendiente").length;
+  }
+
+  function orderPendingAmount(order) {
+    return Math.max(0, Number(order.totalAmount || 0) - Number(order.paymentReceived || 0));
+  }
+
+  // Transferencias que el mismo cliente cargo desde su cuenta cerca de la fecha del remito: ayudan a
+  // comprobar sin abrir el banco.
+  function clientTransfersNear(order) {
+    const desde = addDaysISO(order.date, -2);
+    const hasta = addDaysISO(order.date, 5);
+    return (state.clientTransfers || []).filter((t) => (t.clientId === order.clientId || (t.clientIds || []).includes(order.clientId))
+      && String(t.date || "") >= desde && String(t.date || "") <= hasta && t.status !== "rejected");
+  }
+
+  function renderDeliveryTransfersPanel() {
+    const filtro = ui.deliveryTransferFilter || "pendiente";
+    const todas = deliveryTransferOrders();
+    const cuenta = (st) => todas.filter((o) => deliveryTransferStatus(o) === st).length;
+    const lista = todas.filter((o) => deliveryTransferStatus(o) === filtro)
+      .sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(a.clientId).localeCompare(String(b.clientId)));
+    const filas = lista.map((o) => {
+      const c = getClient(o.clientId);
+      const foto = o.deliveryRemitoPhoto && (o.deliveryRemitoPhoto.key || o.deliveryRemitoPhoto.data);
+      const pendiente = orderPendingAmount(o);
+      const cercanas = clientTransfersNear(o);
+      const review = o.transferReview || {};
+      return `<tr>
+        <td>${formatDate(o.date)}<br><span class="muted">${escapeHtml(o.id)}</span></td>
+        <td><strong>${escapeHtml(o.clientId)} - ${escapeHtml(c ? c.name : o.clientId)}</strong>${cercanas.length ? `<br><span class="pill blue">El cliente cargo ${cercanas.length} transferencia(s): ${cercanas.map((t) => formatMoney(t.amount) + " el " + formatDateShort(t.date)).join(", ")}</span>` : ""}</td>
+        <td class="num">${formatMoney(getOrderTotal(o))}${pendiente < Number(o.totalAmount || 0) - 0.5 ? `<br><span class="muted">falta ${formatMoney(pendiente)}</span>` : ""}</td>
+        <td>${escapeHtml(o.deliveryPayment.by || "")}<br><span class="muted">${formatTimestampShort(o.deliveryPayment.at)}</span></td>
+        <td>${foto ? `<button class="btn small ghost" type="button" data-dt-photo="${escapeAttr(o.id)}">Ver foto</button>` : `<span class="pill amber">Sin foto</span>`}</td>
+        <td class="page-actions">${filtro === "pendiente"
+          ? `<button class="btn small primary" type="button" data-dt-ok="${escapeAttr(o.id)}">${pendiente > 0.5 ? "Llego" : "Verificado"}</button><button class="btn small danger" type="button" data-dt-no="${escapeAttr(o.id)}">No llego</button>`
+          : `<span class="muted">${escapeHtml(review.by || "")} ${review.at ? formatTimestampShort(review.at) : ""}${review.amount ? " - " + formatMoney(review.amount) : ""}</span><button class="btn small ghost" type="button" data-dt-undo="${escapeAttr(o.id)}">Volver a pendiente</button>`}</td>
+      </tr>`;
+    }).join("");
+    afterRender.push(bindDeliveryTransfersPanel);
+    return `<div class="panel" style="margin-bottom:14px">
+      <h2 class="page-title" style="font-size:18px">Remitos del reparto pagados por transferencia</h2>
+      <p class="muted" style="margin-top:0">Los marca el empleado en Mi recorrido con la foto del remito. "Llego" registra el pago en Banco; "No llego" deja la deuda y aparece en Control.</p>
+      <div class="tabs">
+        <button class="tab ${filtro === "pendiente" ? "active" : ""}" type="button" data-dt-filter="pendiente">Por comprobar (${cuenta("pendiente")})</button>
+        <button class="tab ${filtro === "ok" ? "active" : ""}" type="button" data-dt-filter="ok">Llegaron (${cuenta("ok")})</button>
+        <button class="tab ${filtro === "no_llego" ? "active" : ""}" type="button" data-dt-filter="no_llego">No llegaron (${cuenta("no_llego")})</button>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Fecha</th><th>Cliente</th><th>Remito</th><th>Entrego</th><th>Foto</th><th>Acciones</th></tr></thead>
+        <tbody>${filas || emptyRow(6, filtro === "pendiente" ? "No hay remitos por comprobar." : "Nada en esta lista.")}</tbody>
+      </table></div>
+    </div>`;
+  }
+
+  function bindDeliveryTransfersPanel() {
+    document.querySelectorAll("[data-dt-filter]").forEach((b) => b.addEventListener("click", () => { ui.deliveryTransferFilter = b.dataset.dtFilter; render(); }));
+    document.querySelectorAll("[data-dt-photo]").forEach((b) => b.addEventListener("click", () => {
+      const o = getOrder(b.dataset.dtPhoto);
+      if (o && o.deliveryRemitoPhoto) openProofViewer(o.deliveryRemitoPhoto.key, o.deliveryRemitoPhoto.data, "Remito " + o.id);
+    }));
+    document.querySelectorAll("[data-dt-ok]").forEach((b) => b.addEventListener("click", () => {
+      const o = getOrder(b.dataset.dtOk);
+      if (!o) return;
+      const pendiente = orderPendingAmount(o);
+      const stamp = new Date().toISOString();
+      let paymentId = "";
+      let amount = 0;
+      if (pendiente > 0.5) {
+        const valor = prompt("Monto que llego por transferencia de " + ((getClient(o.clientId) || {}).name || o.clientId) + " (remito " + o.id + "):", formatAmountInput(pendiente));
+        if (valor === null) return;
+        amount = parseAmount(valor);
+        if (!(amount > 0)) return alert("Monto invalido.");
+        const pago = recordPayment({
+          clientId: o.clientId, orderIds: [o.id], amount, method: "transferencia", receivedByUserId: currentUser.id,
+          notes: "Transferencia comprobada del remito " + o.id + " (reparto " + (o.deliveryPayment.by || "") + ")",
+          transferProofKey: o.deliveryRemitoPhoto && o.deliveryRemitoPhoto.key || "",
+          transferProofFile: o.deliveryRemitoPhoto && !o.deliveryRemitoPhoto.key ? o.deliveryRemitoPhoto.data || "" : ""
+        });
+        paymentId = pago ? pago.id : "";
+      }
+      o.transferReview = { status: "ok", at: stamp, by: currentUser.name || "", amount, paymentId };
+      o.updatedAt = stamp;
+      saveState();
+      render();
+    }));
+    document.querySelectorAll("[data-dt-no]").forEach((b) => b.addEventListener("click", () => {
+      const o = getOrder(b.dataset.dtNo);
+      if (!o) return;
+      if (!confirm("Marcar que la transferencia del remito " + o.id + " NO llego? La deuda queda en la cuenta del cliente.")) return;
+      const stamp = new Date().toISOString();
+      o.transferReview = { status: "no_llego", at: stamp, by: currentUser.name || "" };
+      o.updatedAt = stamp;
+      saveState();
+      render();
+    }));
+    document.querySelectorAll("[data-dt-undo]").forEach((b) => b.addEventListener("click", () => {
+      const o = getOrder(b.dataset.dtUndo);
+      if (!o) return;
+      if (o.transferReview && o.transferReview.paymentId && !confirm("Ese pago ya se registro (" + o.transferReview.paymentId + "). Volver a pendiente NO lo anula: si hace falta, anulalo en Pagos. Seguir?")) return;
+      delete o.transferReview;
+      o.updatedAt = new Date().toISOString();
+      saveState();
+      render();
+    }));
+  }
+
+  // ===== Control: cruces para el gerente/admin =====
+  // Deuda habitual de cada cliente: el promedio de su saldo en los ultimos 8 cierres de semana y lo
+  // que compra por semana. Se agrupan los saldos una sola vez (con cientos de clientes y miles de
+  // movimientos, recorrer todo por cliente y por fecha era lento).
+  function clientDebtOutliers() {
+    const today = todayISO();
+    const cutoff = balanceWindowCutoff();
+    const muestras = [];
+    for (let k = 1; k <= 8; k += 1) {
+      const d = addDaysISO(today, -7 * k);
+      if (!cutoff || d >= cutoff) muestras.push(d);
+    }
+    const porCliente = new Map();
+    (state.saldos || []).forEach((e) => {
+      if (!e || !e.clientId) return;
+      if (!porCliente.has(e.clientId)) porCliente.set(e.clientId, []);
+      porCliente.get(e.clientId).push(e);
+    });
+    const desde = addDaysISO(today, -56);
+    const compras = new Map();
+    (state.orders || []).forEach((o) => {
+      if (!o || ["cancelado", "anulado"].includes(o.status) || String(o.date || "") < desde || String(o.date || "") > today) return;
+      compras.set(o.clientId, (compras.get(o.clientId) || 0) + Number(o.totalAmount || 0));
+    });
+    const ultimoPago = new Map();
+    (state.payments || []).forEach((p) => {
+      if (!p || p.status === "anulado") return;
+      const ids = Array.isArray(p.groupClientIds) && p.groupClientIds.length ? p.groupClientIds : [p.clientId];
+      ids.forEach((id) => { if (String(p.date || "") > String(ultimoPago.get(id) || "")) ultimoPago.set(id, p.date); });
+    });
+    const out = [];
+    activeClients().forEach((client) => {
+      const movs = porCliente.get(client.id) || [];
+      const saldoAl = (d) => movs.reduce((s, e) => s + (String(e.date || "") <= d ? Number(e.amount || 0) : 0), 0);
+      const actual = movs.reduce((s, e) => s + Number(e.amount || 0), 0);
+      if (!(actual > 1000)) return;
+      const semanal = (compras.get(client.id) || 0) / 8;
+      const habitual = muestras.length >= 3 ? muestras.reduce((s, d) => s + Math.max(0, saldoAl(d)), 0) / muestras.length : null;
+      const pago = ultimoPago.get(client.id) || "";
+      const diasSinPagar = pago ? Math.round((new Date(today + "T12:00:00") - new Date(pago + "T12:00:00")) / 86400000) : null;
+      const motivos = [];
+      if (habitual !== null && actual > habitual * 1.5 && actual - habitual > Math.max(semanal * 0.5, 5000)) motivos.push({ tipo: "habitual", monto: actual - habitual });
+      if (habitual === null && semanal > 0 && actual > semanal * 3) motivos.push({ tipo: "semanas" });
+      if ((diasSinPagar === null || diasSinPagar > 14) && actual > Math.max(semanal, 5000)) motivos.push({ tipo: "sin_pago", dias: diasSinPagar });
+      if (!motivos.length) return;
+      out.push({ clientId: client.id, actual, habitual, semanal, diasSinPagar, motivos, exceso: habitual !== null ? actual - habitual : actual });
+    });
+    return out.sort((a, b) => b.exceso - a.exceso);
+  }
+
+  function debtReasonText(m) {
+    if (m.tipo === "habitual") return "debe " + formatMoney(m.monto) + " mas que lo habitual";
+    if (m.tipo === "semanas") return "debe mas de 3 semanas de compras";
+    return m.dias === null || m.dias === undefined ? "sin pagos registrados" : m.dias + " dias sin pagar";
+  }
+
+  // Los dispositivos tienen pocos dias de saldos: el promedio de 8 semanas lo calcula el servidor.
+  // Sin servidor (uso local) se calcula aca con lo que haya.
+  function controlDebtList() {
+    const config = getCloudSyncConfig();
+    if (!cloudSyncReady(config)) return { list: clientDebtOutliers(), loading: false };
+    const cache = ui.controlDebts;
+    if (!cache || Date.now() - cache.at > 5 * 60 * 1000) {
+      if (!ui.controlDebtsLoading) {
+        ui.controlDebtsLoading = true;
+        cloudRequest(config, "/control/client-debts", { method: "GET" })
+          .then((r) => (r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status))))
+          .then((j) => { ui.controlDebts = { at: Date.now(), list: j.clients || [], error: "" }; })
+          .catch((e) => { ui.controlDebts = { at: Date.now(), list: [], error: e.message || "error" }; })
+          .finally(() => { ui.controlDebtsLoading = false; if (getRoute().base === "control" && !hasUnsavedWork()) render(); });
+      }
+    }
+    return { list: cache ? cache.list : [], loading: !cache, error: cache ? cache.error : "" };
+  }
+
+  function renderControl() {
+    if (!ui.controlDate || ui.controlDate > todayISO()) ui.controlDate = todayISO();
+    const date = ui.controlDate;
+    const orders = (state.orders || []).filter((o) => o.date === date && !["cancelado", "anulado"].includes(o.status) && !o.exampleOnly);
+    const entregados = orders.filter((o) => o.status === "entregado");
+    const sinEntregar = orders.filter((o) => o.status !== "entregado");
+    const sinRendir = entregados.filter((o) => !orderIsSettled(o) && !(o.deliveryPayment && ["transferencia", "cuenta"].includes(o.deliveryPayment.method) && o.deliveryRemitoPhoto));
+    const nombreCliente = (o) => { const c = getClient(o.clientId); return escapeHtml(o.clientId) + " - " + escapeHtml(c ? c.name : o.clientId); };
+    const ok = (b) => b ? `<span class="pill green">OK</span>` : `<span class="pill red">Revisar</span>`;
+
+    // Cobrado contra caja, por empleado
+    const empleados = (state.users || []).filter((u) => u && u.role === "employee" && u.isActive !== false);
+    const filasCaja = empleados.map((u) => {
+      const pagos = (state.payments || []).filter((p) => p.date === date && p.status !== "anulado" && p.method === "efectivo" && employeeMatchesPayment(u.id, p));
+      const cobrado = pagos.reduce((s, p) => s + Number(p.amount || 0), 0);
+      const repartoEfectivo = entregados.filter((o) => o.deliveryPayment && o.deliveryPayment.method === "efectivo" && String(o.deliveryPayment.byId) === String(u.id))
+        .reduce((s, o) => s + Number(o.deliveryPayment.amount || 0), 0);
+      const cierre = getCashClosingForDate(u.id, date);
+      const att = getAttendanceEntry(u.id, date);
+      const trabajo = (att && att.present) || pagos.length || cierre || entregados.some((o) => String(o.deliveredById || "") === String(u.id));
+      if (!trabajo) return "";
+      const difCobro = cierre ? Number(cierre.actualCollected || 0) - cobrado : null;
+      const difCaja = cierre ? Number(cierre.cashDiff || 0) : null;
+      const bien = cierre && Math.abs(difCobro) < 1 && Math.abs(difCaja) < 1;
+      return `<tr>
+        <td><strong>${escapeHtml(u.name)}</strong></td>
+        <td class="num">${formatMoney(cobrado)}<br><span class="muted">${pagos.length} pago(s)${repartoEfectivo ? " · reparto " + formatMoney(repartoEfectivo) : ""}</span></td>
+        <td class="num">${cierre ? formatMoney(cierre.actualCollected || 0) : `<span class="pill amber">Sin cierre</span>`}</td>
+        <td class="num">${difCobro === null ? "-" : `<strong style="color:${Math.abs(difCobro) < 1 ? "var(--green)" : "var(--red)"}">${formatMoney(difCobro)}</strong>`}</td>
+        <td class="num">${difCaja === null ? "-" : `<strong style="color:${Math.abs(difCaja) < 1 ? "var(--green)" : "var(--red)"}">${formatMoney(difCaja)}</strong>`}</td>
+        <td>${ok(bien)}</td>
+      </tr>`;
+    }).join("");
+
+    // Transferencias y cuenta corriente contra fotos
+    const transf = entregados.filter((o) => o.deliveryPayment && o.deliveryPayment.method === "transferencia");
+    const cuentaCte = entregados.filter((o) => o.deliveryPayment && o.deliveryPayment.method === "cuenta");
+    const conFoto = (o) => !!(o.deliveryRemitoPhoto && (o.deliveryRemitoPhoto.key || o.deliveryRemitoPhoto.data));
+    const pagosTransfSinComp = (state.payments || []).filter((p) => p.date === date && p.status !== "anulado" && p.method === "transferencia" && !p.transferProofFile && !p.transferProofKey);
+    const porComprobar = deliveryTransferPendingCount();
+    const noLlegaron = deliveryTransferOrders().filter((o) => deliveryTransferStatus(o) === "no_llego");
+
+    const cortes = (stateWindow && !stateWindow.full && stateWindow.cutoffs) || {};
+    const corteDia = [String(cortes.payments || ""), String(cortes.orders || ""), String(cortes.cashClosings || "")].sort().pop();
+    const avisoVentana = corteDia && date < corteDia
+      ? `<div class="alert warn" style="margin-bottom:14px">Este equipo tiene cargados los datos desde el ${formatDate(corteDia)}: para un dia anterior los cruces pueden salir incompletos. Usa "Cargar historial" arriba para traer todo.</div>`
+      : "";
+    const deudasInfo = controlDebtList();
+    const deudas = deudasInfo.list.map((x) => ({ ...x, client: getClient(x.clientId) || { id: x.clientId, name: x.clientId } }));
+    afterRender.push(() => {
+      const inp = document.getElementById("control-date");
+      if (inp) inp.addEventListener("change", () => { ui.controlDate = inp.value || todayISO(); render(); });
+      document.querySelectorAll("[data-control-day]").forEach((b) => b.addEventListener("click", () => { ui.controlDate = addDaysISO(todayISO(), -Number(b.dataset.controlDay)); render(); }));
+      document.querySelectorAll("[data-settle-order]").forEach((b) => b.addEventListener("click", () => openDeliverySettleModal(b.dataset.settleOrder)));
+    });
+    const lista = (arr, extra) => arr.length ? `<ul style="margin:6px 0 0 18px">${arr.map((o) => `<li>${nombreCliente(o)} <span class="muted">${escapeHtml(o.id)}${extra ? " · " + extra(o) : ""}</span></li>`).join("")}</ul>` : "";
+    return pageShell(
+      "Control",
+      "Cruces del dia para detectar faltantes: pedidos, caja, transferencias y deudas.",
+      `<div class="page-actions"><div class="field"><label>Dia</label><input type="date" id="control-date" value="${escapeAttr(date)}" max="${todayISO()}" /></div>
+        <button class="btn small ghost" type="button" data-control-day="0">Hoy</button><button class="btn small ghost" type="button" data-control-day="1">Ayer</button></div>`,
+      `
+      ${avisoVentana}
+      <div class="grid three">
+        ${metricCard("Pedidos entregados", entregados.length + " de " + orders.length, sinEntregar.length ? sinEntregar.length + " sin marcar entregados" : "Todos entregados")}
+        ${metricCard("Transferencias por comprobar", String(porComprobar), noLlegaron.length ? noLlegaron.length + " no llegaron" : "Remitos del reparto")}
+        ${metricCard("Clientes con deuda inusual", deudasInfo.loading ? "..." : String(deudas.length), "Contra su promedio de 8 semanas")}
+      </div>
+      <div class="grid two" style="margin-top:14px">
+        <div class="panel">
+          <h2 class="page-title" style="font-size:18px">1. Pedidos cargados contra entregados ${ok(!sinEntregar.length && !sinRendir.length)}</h2>
+          <div class="muted">${orders.length} cargados · ${entregados.length} entregados</div>
+          ${sinEntregar.length ? `<div style="margin-top:8px"><strong>Sin marcar entregados (${sinEntregar.length})</strong>${lista(sinEntregar, (o) => o.routeByName ? "ruta de " + escapeHtml(o.routeByName) : "fuera de Mi recorrido")}</div>` : ""}
+          ${sinRendir.length ? `<div style="margin-top:8px"><strong>Entregados sin rendir: sin pago ni foto (${sinRendir.length})</strong><ul style="margin:6px 0 0 18px">${sinRendir.map((o) => `<li>${nombreCliente(o)} <button class="btn small yellow" type="button" data-settle-order="${escapeAttr(o.id)}">Rendir</button></li>`).join("")}</ul></div>` : ""}
+        </div>
+        <div class="panel">
+          <h2 class="page-title" style="font-size:18px">3. Transferencias contra fotos ${ok(!transf.some((o) => !conFoto(o)) && !pagosTransfSinComp.length && !porComprobar)}</h2>
+          <div class="muted">Del reparto: ${transf.length} por transferencia (${transf.filter(conFoto).length} con foto) · ${cuentaCte.length} a cuenta (${cuentaCte.filter(conFoto).length} con foto)</div>
+          ${transf.filter((o) => !conFoto(o)).length || cuentaCte.filter((o) => !conFoto(o)).length ? `<div style="margin-top:8px"><strong>Sin foto del remito</strong>${lista(transf.concat(cuentaCte).filter((o) => !conFoto(o)), (o) => (o.deliveryPayment.method === "cuenta" ? "a cuenta" : "transferencia") + " · " + escapeHtml(o.deliveryPayment.by || ""))}</div>` : ""}
+          ${pagosTransfSinComp.length ? `<div style="margin-top:8px"><strong>Pagos por transferencia sin comprobante (${pagosTransfSinComp.length})</strong><ul style="margin:6px 0 0 18px">${pagosTransfSinComp.map((p) => { const c = getClient(p.clientId); return `<li>${escapeHtml(c ? c.name : p.clientId)} ${formatMoney(p.amount)} <span class="muted">${escapeHtml(p.recordedBy || "")}</span></li>`; }).join("")}</ul></div>` : ""}
+          ${porComprobar || noLlegaron.length ? `<div style="margin-top:8px">${porComprobar} remito(s) por comprobar contra el banco${noLlegaron.length ? " · " + noLlegaron.length + " no llegaron" : ""}. <button class="btn small primary" type="button" data-route="comprobar-transferencias">Comprobar</button></div>` : ""}
+        </div>
+      </div>
+      <div class="panel" style="margin-top:14px">
+        <h2 class="page-title" style="font-size:18px">2. Lo cobrado contra la caja</h2>
+        <p class="muted" style="margin-top:0">Efectivo registrado en Pagos a nombre de cada empleado contra lo que declaro en su cierre de caja. "Dif. efectivo" es lo que conto contra lo que tenia que haber.</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Empleado</th><th>Cobrado (Pagos)</th><th>Declarado en el cierre</th><th>Dif. cobrado</th><th>Dif. efectivo</th><th></th></tr></thead>
+          <tbody>${filasCaja || emptyRow(6, "Ningun empleado trabajo ese dia.")}</tbody>
+        </table></div>
+      </div>
+      <div class="panel" style="margin-top:14px">
+        <h2 class="page-title" style="font-size:18px">4. Clientes con mas deuda que lo habitual</h2>
+        <p class="muted" style="margin-top:0">Saldo de hoy contra el promedio de su saldo las ultimas 8 semanas, lo que compra por semana y los dias desde el ultimo pago.</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Cliente</th><th>Saldo hoy</th><th>Habitual</th><th>Compra semanal</th><th>Ultimo pago</th><th>Por que</th></tr></thead>
+          <tbody>${deudas.map((x) => `<tr>
+            <td><strong>${escapeHtml(x.client.id)} - ${escapeHtml(x.client.name)}</strong></td>
+            <td class="num"><strong>${formatMoney(x.actual)}</strong></td>
+            <td class="num">${x.habitual === null ? "-" : formatMoney(x.habitual)}</td>
+            <td class="num">${formatMoney(x.semanal)}</td>
+            <td>${x.diasSinPagar === null ? "nunca" : "hace " + x.diasSinPagar + " dia" + (x.diasSinPagar === 1 ? "" : "s")}</td>
+            <td>${x.motivos.map((m) => `<span class="pill amber">${escapeHtml(debtReasonText(m))}</span>`).join(" ")}</td>
+          </tr>`).join("") || emptyRow(6, deudasInfo.loading ? "Calculando con el historial del servidor..." : deudasInfo.error ? "No se pudo calcular: " + escapeHtml(deudasInfo.error) : "Ningun cliente debe fuera de lo habitual.")}</tbody>
+        </table></div>
+      </div>
+      `,
+      "control"
+    );
+  }
+
   function renderTransferApprovals() {
     const transfers = (state.clientTransfers || []).slice().reverse();
     const rows = transfers.map((transfer) => {
@@ -13500,10 +13832,12 @@
     });
     return pageShell(
       "Comprobar Transferencias",
-      "Acepte o rechace pagos enviados por clientes antes de impactar saldos y Banco.",
+      "Remitos del reparto pagados por transferencia y pagos que cargan los clientes, antes de impactar saldos y Banco.",
       "",
       `
+      ${renderDeliveryTransfersPanel()}
       <div class="panel">
+        <h2 class="page-title" style="font-size:18px">Transferencias cargadas por los clientes</h2>
         <div class="table-wrap">
           <table>
             <thead><tr><th>Fecha</th><th>Cliente</th><th>Pedidos</th><th>Monto</th><th>Estado</th><th>Comprobante</th><th>Acciones</th></tr></thead>
@@ -17240,7 +17574,7 @@
   }
 
   // Paginas donde se mira historial: ahi se ofrece traer mas datos.
-  const HISTORY_ROUTES = new Set([
+  const HISTORY_ROUTES = new Set(["control", 
     "pedidos", "saldos", "caja", "compras", "pagos", "remitos", "historiales", "rendimiento",
     "ganancias", "proveedores", "facturacion", "empleados", "unidades", "vehiculos", "mis-pedidos",
     "cumplimiento", "backup"
@@ -24533,6 +24867,10 @@
       .divide-print-list,.vehicle-print-list{list-style:none;padding:0;margin:0;font-size:13px}
       .divide-print-cols{column-count:3;column-gap:6px}
       .divide-print-cols>li{-webkit-column-break-inside:avoid;page-break-inside:avoid;break-inside:avoid}
+      .print-cols-table{width:100%;table-layout:fixed;border-collapse:collapse}
+      .print-cols-table td{width:33.33%;vertical-align:top;padding:0 3px;border:0}
+      .print-cols-table .vehicle-print-cols,.print-cols-table .product-sum-grid{column-count:1}
+      .product-sum-grid{list-style:none;padding:0;margin:0}
       .divide-print-list li,.vehicle-print-list li{padding:2px 0;border-bottom:1px solid #ececec}
       .divide-print-list ul,.vehicle-print-list ul{list-style:none;padding-left:14px;margin:2px 0 4px}
       .divide-print-list li:last-child,.vehicle-print-list li:last-child{border-bottom:0}
