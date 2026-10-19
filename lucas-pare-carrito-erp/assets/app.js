@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v55";
+  const APP_VERSION = "v56";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -328,6 +328,7 @@
 
   const menu = [
     { id: "dashboard", label: "Inicio", icon: "IN", roles: ["manager", "admin", "employee", "customer", "contador", "example", "proveedor"] },
+    { id: "mi-recorrido", label: "Mi recorrido", icon: "MR", roles: ["manager", "admin", "employee"] },
     { id: "nuevo-pedido", label: "Nuevo Pedido", icon: "NP", roles: ["manager", "admin", "employee", "customer", "example"] },
     { id: "pedidos", label: "Pedidos", icon: "PE", roles: ["manager", "admin", "employee", "customer", "example", "proveedor"] },
     { id: "clientes", label: "Clientes", icon: "CL", roles: ["manager", "admin"] },
@@ -3262,6 +3263,7 @@
       "saldos": '<path d="M3 7a2 2 0 012-2h13v2.5"/><rect x="3" y="7" width="18" height="12" rx="2"/><circle cx="16.5" cy="13" r="1.1"/>',
       "caja": '<rect x="3" y="9" width="18" height="11" rx="2"/><path d="M7 9V4.5h10V9M9 13.5h6"/>',
       "empleados": '<rect x="4" y="3" width="16" height="18" rx="2"/><circle cx="12" cy="9.5" r="2.5"/><path d="M7.5 17.5c.7-2 2.4-3 4.5-3s3.8 1 4.5 3"/>',
+      "mi-recorrido": '<path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0113 0c0 5.4-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.3"/>',
       "horarios": '<circle cx="12" cy="13" r="8"/><path d="M12 9.5v3.5l2.5 2.5M9.5 2.5h5"/>',
       "registrar-transferencia": '<path d="M3 9.5L12 3.5l9 6"/><path d="M5 9.5V19M9.5 9.5V19M14.5 9.5V19M19 9.5V19M3 20.5h18"/>',
       "comprobar-transferencias": '<path d="M6 2.5h8l4 4v15H6z"/><path d="M14 2.5v4h4M9 14l2.3 2.3 4-4.5"/>',
@@ -3381,8 +3383,10 @@
     if (route.base === "remito-print") return renderRemitoPrint(route.id);
     if (route.base === "remitos-today-print") return renderTodayRemitosPrint();
     if (route.base === "dividir-print") return renderDividePrint(route.id);
+    if (ui.recorridoGuide && ui.recorridoGuide.route !== route.base) ui.recorridoGuide = null;
     const pages = {
       dashboard: renderDashboard,
+      "mi-recorrido": () => renderMiRecorrido(route.id),
       "nuevo-pedido": renderNewOrder,
       pedidos: renderOrders,
       clientes: renderClients,
@@ -3479,6 +3483,7 @@
           </div>
           <div class="page-actions">${actions || ""}</div>
         </div>
+        ${recorridoGuideBar(routeName)}
         ${body}
       </section>
     `;
@@ -10869,6 +10874,569 @@
     });
   }
 
+  // ===== Mi recorrido: flujo guiado del empleado (en paralelo al sistema de siempre) =====
+  // Usa los mismos datos y funciones que las paginas de siempre (Dividir, Vehiculos, Compras,
+  // Unidades, Pagos, Horarios, Stock). Lo que se marca aca cuenta igual en Cumplimiento.
+  const RECORRIDO_PASOS = [
+    { key: "impresiones", label: "Impresiones", detalle: "Pedidos, compras y WhatsApp a proveedores" },
+    { key: "compras", label: "Compras/Gastos", detalle: "Cargar lo que se compro hoy", page: "compras", check: "compras" },
+    { key: "unidades", label: "Unidades", detalle: "Pesos de los productos por unidad", page: "unidades", check: "unidades" },
+    { key: "ruta", label: "Ruta de envios", detalle: "En que orden se reparte", check: "rec-ruta" },
+    { key: "reparto", label: "Reparto", detalle: "Pedido por pedido: entrega y cobro", check: "rec-reparto" },
+    { key: "cierre", label: "Cierre del dia", detalle: "Caja, stock para mañana y horario", check: "horario" }
+  ];
+
+  // Botones de impresion. "values" arma la misma seleccion que se haria a mano en Dividir Compras.
+  function recorridoPrintButtons() {
+    const all = activeAssignees().map((a) => a.value);
+    const miriam = assigneeValueByName("Miriam");
+    const antonia = assigneeValueByName("Antonia");
+    return [
+      { n: 1, key: "rec-imp-pedidos", label: "Pedidos sin dividir", sub: "Vehiculos - Sin dividir", run: () => printVehicleDirect("flat") },
+      { n: 2, key: "rec-imp-general", label: "Compras (todos menos Miriam)", sub: "Dividir - PDF", run: () => printDivideDocument(all.filter((v) => v !== miriam)) },
+      { n: 3, key: "rec-imp-miriam", label: "Miriam", sub: "Dividir - PDF", run: () => (miriam ? printDivideDocument([miriam]) : alert("No se encontro a Miriam en Dividir Compras.")),
+        wa: { key: "miriam", run: () => sendDivideWhatsappForName("Miriam", "5493876340895") } },
+      { n: 4, key: "rec-imp-antonia", label: "Antonia", sub: "Dividir - PDF", run: () => (antonia ? printDivideDocument([antonia]) : alert("No se encontro a Antonia en Dividir Compras.")) },
+      { n: 5, key: "mario", label: "Mario paltas", sub: "Dividir - WhatsApp", whatsapp: true, run: () => sendDivideWhatsappForName("Mario", "5493874662116") },
+      { n: 6, key: "chicho", label: "Chicho", sub: "Dividir - WhatsApp", whatsapp: true, run: () => sendDivideWhatsappForName("Chicho", "5493874630413", false) }
+    ];
+  }
+
+  // Las impresiones salen como en las paginas de siempre sin filtros puestos: todos los pedidos de
+  // hoy (no los que alguien haya tildado a mano en Dividir) y la fecha de hoy en Vehiculos.
+  function runRecorridoPrint(fn) {
+    const prevSel = ui.divideSelectedOrders;
+    const prevVehicleDate = ui.vehicleDate;
+    ui.divideSelectedOrders = [];
+    ui.vehicleDate = todayISO();
+    try { fn(); } finally {
+      ui.divideSelectedOrders = prevSel;
+      ui.vehicleDate = prevVehicleDate;
+    }
+  }
+
+  function recorridoEnabledFor(userId) {
+    const ids = state.appSettings && Array.isArray(state.appSettings.recorridoUserIds) ? state.appSettings.recorridoUserIds : [];
+    return ids.map(String).includes(String(userId));
+  }
+
+  function recorridoDone() {
+    return getEmployeeChecklistStore().done;
+  }
+
+  // Ultimo dia con pedidos antes de hoy (ayer, o el viernes si hoy es lunes) sin conteo de stock.
+  function stockMissingLastWorkday() {
+    if (!getStockTrackedProductIds().length) return "";
+    const today = todayISO();
+    for (let d = 1; d <= 7; d += 1) {
+      const day = addDaysISO(today, -d);
+      const hubo = (state.orders || []).some((o) => o.date === day && !["cancelado", "anulado"].includes(o.status));
+      if (!hubo) continue;
+      const contado = (state.stockMovements || []).some((m) => m && m.type === "conteo" && String(m.date || "") >= day);
+      return contado ? "" : day;
+    }
+    return "";
+  }
+
+  function recorridoTodayOrders() {
+    const today = todayISO();
+    return (state.orders || []).filter((o) => o.date === today && !["cancelado", "anulado"].includes(o.status));
+  }
+
+  // Ruta del empleado: los pedidos de hoy que puso en su ruta, en orden.
+  function recorridoMyRoute() {
+    const today = todayISO();
+    return recorridoTodayOrders()
+      .filter((o) => o.routeDate === today && String(o.routeBy || "") === String(currentUser.id) && Number(o.routeSeq) > 0)
+      .sort((a, b) => Number(a.routeSeq) - Number(b.routeSeq));
+  }
+
+  function saveRecorridoRoute(orderIds) {
+    const today = todayISO();
+    const stamp = new Date().toISOString();
+    const keep = new Set(orderIds);
+    orderIds.forEach((id, index) => {
+      const order = getOrder(id);
+      if (!order) return;
+      if (order.routeSeq === index + 1 && order.routeDate === today && String(order.routeBy) === String(currentUser.id)) return;
+      order.routeSeq = index + 1;
+      order.routeDate = today;
+      order.routeBy = currentUser.id;
+      order.routeByName = currentUser.name || "";
+      order.updatedAt = stamp;
+    });
+    recorridoMyRoute().forEach((order) => {
+      if (keep.has(order.id)) return;
+      delete order.routeSeq;
+      delete order.routeDate;
+      delete order.routeBy;
+      delete order.routeByName;
+      order.updatedAt = stamp;
+    });
+    saveState();
+  }
+
+  function recorridoDefaultVehicle() {
+    if (ui.recorridoVehicle !== undefined) return ui.recorridoVehicle;
+    const nombre = normalizeText(currentUser.name || "");
+    const mio = activeVehicles().find((v) => nombre && normalizeText(v.driverName || "") && (normalizeText(v.driverName).includes(nombre) || nombre.includes(normalizeText(v.driverName))));
+    return mio ? mio.id : "all";
+  }
+
+  function orderIsReplacement(order) {
+    return /\[REC-/.test(String(order && order.notes || ""));
+  }
+
+  function recorridoReminders(order) {
+    const out = [];
+    const porTexto = new Map();
+    (order.items || []).forEach((item) => {
+      const product = getProduct(item.productId);
+      const texto = product && String(product.deliveryReminder || "").trim();
+      if (!texto) return;
+      if (!porTexto.has(texto)) porTexto.set(texto, []);
+      porTexto.get(texto).push(item.productName || product.name);
+    });
+    porTexto.forEach((productos, texto) => out.push({ tipo: "producto", texto, detalle: Array.from(new Set(productos)).join(", ") }));
+    if (orderIsReplacement(order)) {
+      out.push({ tipo: "reposicion", texto: "Es una reposicion: no se cobra. Retira el producto devuelto.", detalle: (order.items || []).map((i) => i.productName).join(", ") });
+    }
+    (state.replacements || []).filter((r) => r.status === "pendiente" && r.clientId === order.clientId).forEach((r) => {
+      out.push({ tipo: "reposicion", texto: "Tiene un recambio pendiente: retira lo que hay que devolver.", detalle: (r.items || []).map((i) => i.productName + " x" + formatNumber(i.qty)).join(", ") });
+    });
+    const otros = recorridoTodayOrders().filter((o) => o.id !== order.id && o.clientId === order.clientId && o.status !== "entregado");
+    if (otros.length) out.push({ tipo: "otro", texto: "Este cliente tiene otro pedido hoy: entregalos juntos.", detalle: otros.map((o) => o.id).join(", ") });
+    return out;
+  }
+
+  function recorridoGuideBar(routeName) {
+    const guide = ui.recorridoGuide;
+    if (!guide || guide.route !== routeName) return "";
+    return `<div class="recorrido-guide">
+      <div><span class="recorrido-guide-tag">Mi recorrido</span> <strong>${escapeHtml(guide.label)}</strong>${guide.hint ? `<div class="muted" style="font-size:13px">${escapeHtml(guide.hint)}</div>` : ""}</div>
+      <div class="page-actions">
+        <button class="btn ghost" type="button" data-recorrido-back>Volver a Mi recorrido</button>
+        <button class="btn primary" type="button" data-recorrido-next>${escapeHtml(guide.nextLabel || "Listo, seguir")} &rarr;</button>
+      </div>
+    </div>`;
+  }
+
+  function bindRecorridoGuide() {
+    const guide = ui.recorridoGuide;
+    if (!guide) return;
+    document.querySelectorAll("[data-recorrido-back]").forEach((b) => b.addEventListener("click", () => {
+      ui.recorridoGuide = null;
+      navigate("mi-recorrido");
+    }));
+    document.querySelectorAll("[data-recorrido-next]").forEach((b) => b.addEventListener("click", () => {
+      if (guide.check) markChecklistStep(guide.check);
+      ui.recorridoGuide = null;
+      navigate(guide.next || "mi-recorrido");
+    }));
+  }
+
+  // Abre una pagina de las de siempre con la barra de Mi recorrido arriba.
+  function goRecorridoPage(route, label, hint, check, next, nextLabel) {
+    ui.recorridoGuide = { route, label, hint, check, next, nextLabel };
+    navigate(route);
+  }
+
+  function goRecorridoStep(key) {
+    if (key === "compras") return goRecorridoPage("compras", "Paso 2: Compras/Gastos", "Carga las compras y gastos de hoy. Cuando termines, segui.", "compras", "mi-recorrido/unidades", "Siguiente: Unidades");
+    if (key === "unidades") {
+      // Unidades es una pagina de siempre: se abre con la barra del recorrido.
+      return goRecorridoPage("unidades", "Paso 3: Unidades", "Actualiza los datos, carga los pesos y despues arma la ruta.", "unidades", "mi-recorrido/ruta", "Siguiente: Ruta de envios");
+    }
+    navigate("mi-recorrido/" + key);
+  }
+
+  function renderMiRecorrido(step) {
+    ui.recorridoGuide = null;
+    if (step === "compras" || step === "unidades") {
+      setTimeout(() => goRecorridoStep(step), 0);
+      return pageShell("Mi recorrido", "", "", `<div class="panel">Abriendo...</div>`, "mi-recorrido");
+    }
+    const body = step === "impresiones" ? renderRecorridoImpresiones()
+      : step === "ruta" ? renderRecorridoRuta()
+      : step === "reparto" ? renderRecorridoReparto()
+      : step === "cierre" ? renderRecorridoCierre()
+      : renderRecorridoHome();
+    const paso = RECORRIDO_PASOS.find((p) => p.key === step);
+    afterRender.push(() => {
+      document.querySelectorAll("[data-recorrido-step]").forEach((b) => b.addEventListener("click", () => goRecorridoStep(b.dataset.recorridoStep)));
+      document.querySelectorAll("[data-recorrido-stock]").forEach((b) => b.addEventListener("click", () => goRecorridoPage("stock", "Cargar el stock", "Conta lo que hay y guardalo producto por producto.", "stock", "mi-recorrido/" + (step || ""), "Volver a Mi recorrido")));
+    });
+    return pageShell(
+      paso ? "Mi recorrido: " + paso.label : "Mi recorrido",
+      paso ? paso.detalle : "Todo el dia, paso a paso. Toca un paso para ir directo.",
+      step ? `<button class="btn ghost" type="button" data-route="mi-recorrido">Inicio del recorrido</button>` : "",
+      `${step ? renderRecorridoStepper(step) : ""}${body}`,
+      "mi-recorrido"
+    );
+  }
+
+  function recorridoStepState(paso, done) {
+    if (paso.key === "impresiones") {
+      const botones = recorridoPrintButtons();
+      const total = botones.length + botones.filter((b) => b.wa).length;
+      const hechos = botones.filter((b) => done[b.key]).length + botones.filter((b) => b.wa && done[b.wa.key]).length;
+      return { ok: hechos >= total, texto: hechos + "/" + total + " impresiones" };
+    }
+    if (paso.key === "ruta") {
+      const route = recorridoMyRoute();
+      return { ok: route.length > 0, texto: route.length ? route.length + " pedidos en la ruta" : "Sin armar" };
+    }
+    if (paso.key === "reparto") {
+      const route = recorridoMyRoute();
+      const entregados = route.filter((o) => o.status === "entregado").length;
+      return { ok: route.length > 0 && entregados === route.length, texto: route.length ? entregados + " de " + route.length + " entregados" : "Primero arma la ruta" };
+    }
+    if (paso.key === "cierre") {
+      const caja = getCashClosingForDate(currentUser.id, todayISO());
+      const att = getAttendanceEntry(currentUser.id, todayISO());
+      const partes = [caja ? "caja ✓" : "caja", done.stock ? "stock ✓" : "stock", att && att.endTime ? "horario ✓" : "horario"];
+      return { ok: !!caja && !!done.stock && !!(att && att.endTime), texto: partes.join(" · ") };
+    }
+    return { ok: !!done[paso.check], texto: done[paso.check] ? "Hecho" : "Pendiente" };
+  }
+
+  function renderRecorridoStepper(current) {
+    const done = recorridoDone();
+    return `<div class="recorrido-stepper">${RECORRIDO_PASOS.map((paso, i) => {
+      const st = recorridoStepState(paso, done);
+      return `<button type="button" class="recorrido-step-chip ${paso.key === current ? "active" : ""} ${st.ok ? "ok" : ""}" data-recorrido-step="${paso.key}"><span>${st.ok ? "&#10003;" : i + 1}</span>${escapeHtml(paso.label)}</button>`;
+    }).join("")}</div>`;
+  }
+
+  function renderRecorridoHome() {
+    const done = recorridoDone();
+    const estados = RECORRIDO_PASOS.map((paso) => ({ paso, st: recorridoStepState(paso, done) }));
+    const siguiente = estados.find((e) => !e.st.ok);
+    const faltaStock = stockMissingLastWorkday();
+    return `
+      ${faltaStock ? recorridoStockWarning(faltaStock) : ""}
+      ${siguiente ? `<div class="panel recorrido-next"><div class="muted">Te toca</div><div style="font-size:20px;font-weight:700;margin:4px 0 10px">${escapeHtml(siguiente.paso.label)}</div><button class="btn primary big" type="button" data-recorrido-step="${siguiente.paso.key}">Seguir &rarr;</button></div>`
+        : `<div class="panel recorrido-next"><div style="font-size:20px;font-weight:700">Terminaste el dia &#127881;</div><div class="muted">Todo cargado. Buen trabajo.</div></div>`}
+      <div class="recorrido-home-grid">
+        ${estados.map(({ paso, st }, i) => `<button type="button" class="recorrido-home-card ${st.ok ? "ok" : ""}" data-recorrido-step="${paso.key}">
+          <span class="recorrido-home-num">${st.ok ? "&#10003;" : i + 1}</span>
+          <strong>${escapeHtml(paso.label)}</strong>
+          <span class="muted">${escapeHtml(paso.detalle)}</span>
+          <span class="recorrido-home-state">${escapeHtml(st.texto)}</span>
+        </button>`).join("")}
+      </div>`;
+  }
+
+  function recorridoStockWarning(day) {
+    return `<div class="alert warn recorrido-stock-alert">
+      <strong>No se cargo el stock ${day === addDaysISO(todayISO(), -1) ? "ayer" : "el " + formatDate(day)}.</strong>
+      <button class="btn small primary" type="button" data-recorrido-stock>Cargar el stock</button>
+    </div>`;
+  }
+
+  function renderRecorridoImpresiones() {
+    const done = recorridoDone();
+    const faltaStock = stockMissingLastWorkday();
+    const botones = recorridoPrintButtons();
+    afterRender.push(() => {
+      document.querySelectorAll("[data-recorrido-print]").forEach((b) => b.addEventListener("click", () => {
+        const n = Number(b.dataset.recorridoPrint);
+        const boton = botones.find((x) => x.n === n);
+        if (!boton) return;
+        const accion = b.dataset.wa ? boton.wa : boton;
+        runRecorridoPrint(accion.run);
+        markChecklistStep(accion.key);
+        // Las 4 impresiones en PDF juntas equivalen al "Generar Imprimibles" del checklist.
+        const d = recorridoDone();
+        if (["rec-imp-pedidos", "rec-imp-general", "rec-imp-miriam", "rec-imp-antonia"].every((k) => d[k])) markChecklistStep("imprimibles");
+        render();
+      }));
+    });
+    return `
+      ${faltaStock ? recorridoStockWarning(faltaStock) : ""}
+      <div class="panel">
+        <p class="muted" style="margin-top:0">Cada boton imprime o manda una cosa sola. Se tilda cuando lo usaste.</p>
+        <div class="recorrido-print-list">
+          ${botones.map((b) => `<div class="recorrido-print-row">
+            <button type="button" class="recorrido-print-btn ${done[b.key] ? "ok" : ""} ${b.whatsapp ? "wa" : ""}" data-recorrido-print="${b.n}">
+              <span class="recorrido-print-num">${done[b.key] ? "&#10003;" : b.n}</span>
+              <span><strong>${b.whatsapp ? WHATSAPP_SVG + " " : "&#128424; "}${escapeHtml(b.label)}</strong><br><span class="muted">${escapeHtml(b.sub)}</span></span>
+            </button>
+            ${b.wa ? `<button type="button" class="recorrido-print-btn wa side ${done[b.wa.key] ? "ok" : ""}" data-recorrido-print="${b.n}" data-wa="1" title="${escapeAttr(b.label)} por WhatsApp">${WHATSAPP_SVG}${done[b.wa.key] ? " &#10003;" : ""}</button>` : ""}
+          </div>`).join("")}
+        </div>
+      </div>
+      <div class="recorrido-footer">
+        <button class="btn primary big" type="button" data-recorrido-step="compras">Siguiente: Compras/Gastos &rarr;</button>
+      </div>`;
+  }
+
+  function renderRecorridoRuta() {
+    const today = todayISO();
+    const route = recorridoMyRoute();
+    const enRuta = new Set(route.map((o) => o.id));
+    const vehiculo = recorridoDefaultVehicle();
+    const disponibles = recorridoTodayOrders()
+      .filter((o) => !enRuta.has(o.id))
+      .filter((o) => vehiculo === "all" || (vehiculo === "none" ? !getVehicle(o.deliveryVehicleId) : o.deliveryVehicleId === vehiculo))
+      .sort((a, b) => compareClientIdStrings(a.clientId, b.clientId));
+    const nombre = (o) => { const c = getClient(o.clientId); return escapeHtml(o.clientId) + " - " + escapeHtml(c ? c.name : o.clientId); };
+    const direccion = (o) => { const c = getClient(o.clientId); return c && c.address ? `<span class="muted">${escapeHtml(c.address)}</span>` : ""; };
+    afterRender.push(() => {
+      const ids = () => recorridoMyRoute().map((o) => o.id);
+      const sel = document.getElementById("recorrido-vehicle");
+      if (sel) sel.addEventListener("change", () => { ui.recorridoVehicle = sel.value; render(); });
+      document.querySelectorAll("[data-ruta-add]").forEach((b) => b.addEventListener("click", () => { saveRecorridoRoute([...ids(), b.dataset.rutaAdd]); render(); }));
+      const addAll = document.querySelector("[data-ruta-add-all]");
+      if (addAll) addAll.addEventListener("click", () => { saveRecorridoRoute([...ids(), ...disponibles.map((o) => o.id)]); render(); });
+      document.querySelectorAll("[data-ruta-remove]").forEach((b) => b.addEventListener("click", () => { saveRecorridoRoute(ids().filter((id) => id !== b.dataset.rutaRemove)); render(); }));
+      document.querySelectorAll("[data-ruta-move]").forEach((b) => b.addEventListener("click", () => {
+        const [id, dir] = b.dataset.rutaMove.split("|");
+        const lista = ids();
+        const i = lista.indexOf(id);
+        const j = i + Number(dir);
+        if (i < 0 || j < 0 || j >= lista.length) return;
+        [lista[i], lista[j]] = [lista[j], lista[i]];
+        saveRecorridoRoute(lista);
+        render();
+      }));
+      const salir = document.querySelector("[data-ruta-salir]");
+      if (salir) salir.addEventListener("click", () => {
+        if (!recorridoMyRoute().length) return alert("Agrega al menos un pedido a la ruta.");
+        markChecklistStep("rec-ruta");
+        navigate("mi-recorrido/reparto");
+      });
+    });
+    const otrosEnRuta = recorridoTodayOrders().filter((o) => !enRuta.has(o.id) && o.routeDate === today && o.routeBy && String(o.routeBy) !== String(currentUser.id));
+    return `
+      <div class="panel">
+        <h2 class="page-title" style="font-size:18px">Tu ruta (${route.length})</h2>
+        <p class="muted" style="margin-top:0">Ordena con las flechas. La podes cambiar en cualquier momento, tambien en el camino.</p>
+        <div class="recorrido-route-list">
+          ${route.map((o, i) => `<div class="recorrido-route-row ${o.status === "entregado" ? "done" : ""}">
+            <span class="recorrido-route-num">${o.status === "entregado" ? "&#10003;" : i + 1}</span>
+            <span class="recorrido-route-name"><strong>${nombre(o)}</strong><br>${direccion(o)}</span>
+            <span class="recorrido-route-actions">
+              <button class="btn small ghost" type="button" data-ruta-move="${escapeAttr(o.id)}|-1" ${i === 0 ? "disabled" : ""} aria-label="Subir">&#9650;</button>
+              <button class="btn small ghost" type="button" data-ruta-move="${escapeAttr(o.id)}|1" ${i === route.length - 1 ? "disabled" : ""} aria-label="Bajar">&#9660;</button>
+              ${o.status === "entregado" ? "" : `<button class="btn small danger" type="button" data-ruta-remove="${escapeAttr(o.id)}" aria-label="Quitar">&#10005;</button>`}
+            </span>
+          </div>`).join("") || `<div class="empty compact">Todavia no agregaste pedidos. Agregalos abajo en el orden en que los vas a entregar.</div>`}
+        </div>
+      </div>
+      <div class="panel" style="margin-top:14px">
+        <div class="page-actions" style="justify-content:space-between;align-items:flex-end">
+          <h2 class="page-title" style="font-size:18px;margin:0">Pedidos de hoy para agregar (${disponibles.length})</h2>
+          <div class="field" style="min-width:180px"><label>Vehiculo</label><select id="recorrido-vehicle">
+            <option value="all" ${vehiculo === "all" ? "selected" : ""}>Todos</option>
+            ${activeVehicles().map((v) => `<option value="${escapeAttr(v.id)}" ${vehiculo === v.id ? "selected" : ""}>${escapeHtml(v.name)}${v.driverName ? " - " + escapeHtml(v.driverName) : ""}</option>`).join("")}
+            <option value="none" ${vehiculo === "none" ? "selected" : ""}>Sin vehiculo</option>
+          </select></div>
+        </div>
+        <div class="recorrido-route-list" style="margin-top:8px">
+          ${disponibles.map((o) => `<div class="recorrido-route-row">
+            <span class="recorrido-route-name"><strong>${nombre(o)}</strong><br>${direccion(o)}${o.routeBy ? ` <span class="pill amber">en la ruta de ${escapeHtml(o.routeByName || "otro")}</span>` : ""}</span>
+            <span class="recorrido-route-actions"><button class="btn small primary" type="button" data-ruta-add="${escapeAttr(o.id)}">+ Agregar</button></span>
+          </div>`).join("") || `<div class="empty compact">No quedan pedidos de hoy para agregar${vehiculo !== "all" ? " en este vehiculo" : ""}.</div>`}
+        </div>
+        ${disponibles.length > 1 ? `<div class="page-actions" style="margin-top:10px"><button class="btn ghost" type="button" data-ruta-add-all>Agregar todos (por numero de cliente)</button></div>` : ""}
+        ${otrosEnRuta.length ? `<p class="muted" style="font-size:12px">${otrosEnRuta.length} pedido(s) ya estan en la ruta de otro empleado.</p>` : ""}
+      </div>
+      <div class="recorrido-footer">
+        <button class="btn primary big" type="button" data-ruta-salir>Salir a repartir &rarr;</button>
+      </div>`;
+  }
+
+  function renderRecorridoReparto() {
+    const route = recorridoMyRoute();
+    if (!route.length) {
+      return `<div class="panel"><p>Todavia no armaste la ruta.</p><button class="btn primary big" type="button" data-recorrido-step="ruta">Armar la ruta</button></div>`;
+    }
+    const pendientes = route.filter((o) => o.status !== "entregado");
+    if (!pendientes.length) {
+      markChecklistStep("rec-reparto");
+      return `<div class="panel recorrido-next"><div style="font-size:20px;font-weight:700">Entregaste los ${route.length} pedidos &#127881;</div>
+        <p class="muted">Ahora cerra la caja, carga el stock para mañana y marca tu salida.</p>
+        <div class="page-actions"><button class="btn primary big" type="button" data-recorrido-step="cierre">Ir al cierre del dia &rarr;</button>
+        <button class="btn ghost" type="button" data-recorrido-step="ruta">Ver / editar la ruta</button></div></div>`;
+    }
+    const order = pendientes[0];
+    const client = getClient(order.clientId);
+    const posicion = route.indexOf(order) + 1;
+    const total = getOrderTotal(order);
+    const pendiente = Math.max(0, Number(order.totalAmount || 0) - Number(order.paymentReceived || 0));
+    const esReposicion = orderIsReplacement(order) || !(total > 0);
+    if (!ui.repartoPago || ui.repartoPago.orderId !== order.id) ui.repartoPago = { orderId: order.id, method: esReposicion ? "reposicion" : "", amount: pendiente > 0 ? formatAmountInput(pendiente) : "", photo: null, sinFoto: false };
+    const pago = ui.repartoPago;
+    const recordatorios = recorridoReminders(order);
+    const saldo = getClientBalance(order.clientId);
+    const siguientes = pendientes.slice(1, 4);
+    const telefono = client && client.phone ? String(client.phone).replace(/[^\d+]/g, "") : "";
+    const mapa = client && client.address ? "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(client.address) : "";
+    const necesitaFoto = pago.method === "transferencia" || pago.method === "cuenta";
+    afterRender.push(() => bindRecorridoReparto(order, pendiente));
+    return `
+      <div class="recorrido-progress"><div style="width:${Math.round(((posicion - 1) / route.length) * 100)}%"></div></div>
+      <div class="muted" style="margin:6px 0 10px">Pedido ${posicion} de ${route.length}</div>
+      <div class="panel recorrido-order">
+        <div class="recorrido-order-head">
+          <div><div class="recorrido-order-client">${escapeHtml(order.clientId)} - ${escapeHtml(client ? client.name : order.clientId)}</div>
+            ${client && client.address ? `<div class="muted">${escapeHtml(client.address)}</div>` : ""}</div>
+          <div class="page-actions">
+            ${mapa ? `<a class="btn small ghost" href="${escapeAttr(mapa)}" target="_blank" rel="noopener">Mapa</a>` : ""}
+            ${telefono ? `<a class="btn small ghost" href="tel:${escapeAttr(telefono)}">Llamar</a>` : ""}
+          </div>
+        </div>
+        ${recordatorios.length ? `<div class="recorrido-reminders">${recordatorios.map((r) => `<div class="recorrido-reminder ${r.tipo}"><strong>&#9888; ${escapeHtml(r.texto)}</strong>${r.detalle ? `<div>${escapeHtml(r.detalle)}</div>` : ""}</div>`).join("")}</div>` : ""}
+        ${order.notes && !orderIsReplacement(order) ? `<div class="note-text" style="margin:8px 0">${escapeHtml(order.notes)}</div>` : ""}
+        <ul class="recorrido-items">${(order.items || []).map((item) => `<li><span>${escapeHtml(item.productName)}${item.note ? ` <span class="note-text">${escapeHtml(item.note)}</span>` : ""}</span><strong>${formatNumber(item.quantity)} ${escapeHtml(item.unitType || "")}</strong></li>`).join("")}</ul>
+        <div class="recorrido-total"><span>Total del pedido</span><strong>${formatMoney(total)}</strong></div>
+        ${saldo > total + 1 ? `<div class="muted" style="font-size:13px">Saldo de la cuenta con este pedido: <strong>${formatMoney(saldo)}</strong></div>` : ""}
+      </div>
+      <div class="panel" style="margin-top:12px">
+        ${esReposicion ? `<p style="margin-top:0"><strong>Reposicion: no se cobra.</strong></p>` : `
+        <div style="font-weight:700;margin-bottom:8px">¿Como pago?</div>
+        <div class="recorrido-pay-options">
+          <button type="button" class="recorrido-pay ${pago.method === "efectivo" ? "active" : ""}" data-rep-method="efectivo">&#128181; Efectivo</button>
+          <button type="button" class="recorrido-pay ${pago.method === "transferencia" ? "active" : ""}" data-rep-method="transferencia">&#127974; Transferencia</button>
+          <button type="button" class="recorrido-pay ${pago.method === "cuenta" ? "active" : ""}" data-rep-method="cuenta">&#128221; No pago (cuenta)</button>
+        </div>
+        ${pago.method === "efectivo" ? `<div class="field" style="margin-top:10px;max-width:260px"><label>Monto cobrado en efectivo</label><input id="rep-amount" inputmode="decimal" value="${escapeAttr(pago.amount)}" /></div>` : ""}
+        ${necesitaFoto ? `<div style="margin-top:10px">
+          <p class="muted" style="margin:0 0 6px">Saca una foto del remito ${pago.method === "transferencia" ? "(el gerente comprueba la transferencia con esta foto)" : "firmado"}.</p>
+          <button class="btn ${pago.photo ? "ghost" : "blue"}" type="button" id="rep-photo-btn">&#128247; ${pago.photo ? "Cambiar foto" : "Sacar foto del remito"}</button>
+          <input type="file" id="rep-photo-file" accept="image/*" capture="environment" hidden />
+          <span id="rep-photo-status" class="muted"></span>
+          ${pago.photo ? `<div style="margin-top:8px">${proofImageTag(pago.photo.key, pago.photo.data, `alt="Remito" style="max-width:220px;border-radius:8px"`)}</div>` : ""}
+          ${pago.photo ? "" : `<label style="display:flex;gap:6px;align-items:center;margin-top:8px;font-size:13px"><input type="checkbox" id="rep-sin-foto" ${pago.sinFoto ? "checked" : ""} style="width:auto;min-height:auto" /> No puedo sacar la foto (le avisa al gerente)</label>`}
+        </div>` : ""}`}
+        <div class="recorrido-footer" style="margin-top:14px">
+          <button class="btn primary big" type="button" id="rep-entregado">&#10003; Entregado</button>
+          <button class="btn ghost" type="button" id="rep-saltear">Dejar para despues</button>
+        </div>
+      </div>
+      ${siguientes.length ? `<div class="panel" style="margin-top:12px"><div class="muted" style="margin-bottom:6px">Despues siguen</div>${siguientes.map((o) => { const c = getClient(o.clientId); return `<div style="padding:4px 0">${escapeHtml(o.clientId)} - ${escapeHtml(c ? c.name : o.clientId)}</div>`; }).join("")}</div>` : ""}
+      <div class="page-actions" style="margin-top:12px"><button class="btn ghost" type="button" data-recorrido-step="ruta">Editar la ruta</button></div>`;
+  }
+
+  function bindRecorridoReparto(order, pendiente) {
+    const pago = ui.repartoPago;
+    document.querySelectorAll("[data-rep-method]").forEach((b) => b.addEventListener("click", () => {
+      pago.method = b.dataset.repMethod;
+      render();
+    }));
+    const amount = document.getElementById("rep-amount");
+    if (amount) amount.addEventListener("input", () => { pago.amount = amount.value; });
+    const sinFoto = document.getElementById("rep-sin-foto");
+    if (sinFoto) sinFoto.addEventListener("change", () => { pago.sinFoto = sinFoto.checked; });
+    const photoBtn = document.getElementById("rep-photo-btn");
+    const photoFile = document.getElementById("rep-photo-file");
+    if (photoBtn && photoFile) {
+      photoBtn.addEventListener("click", () => photoFile.click());
+      photoFile.addEventListener("change", async () => {
+        const f = photoFile.files && photoFile.files[0];
+        if (!f) return;
+        const status = document.getElementById("rep-photo-status");
+        photoBtn.disabled = true;
+        try {
+          if (status) status.textContent = " Comprimiendo...";
+          const client = getClient(order.clientId);
+          const data = await compressImageFile(f, 1100, 0.6);
+          const photo = { name: fileDate(order.date) + " Remito " + (client ? client.name : order.clientId) + " " + order.id, data, at: new Date().toISOString(), by: currentUser ? currentUser.name : "" };
+          try {
+            if (status) status.textContent = " Subiendo al servidor...";
+            const key = await uploadPrivateFile(data, "remito-" + order.id);
+            if (key) { photo.key = key; photo.data = ""; }
+          } catch (error) { console.warn("No se pudo subir la foto del remito, queda guardada en el sistema:", error.message); }
+          pago.photo = photo;
+          pago.sinFoto = false;
+          render();
+        } catch (e) {
+          if (status) status.textContent = " No se pudo cargar la foto: " + e.message;
+          photoBtn.disabled = false;
+        } finally { photoFile.value = ""; }
+      });
+    }
+    const saltear = document.getElementById("rep-saltear");
+    if (saltear) saltear.addEventListener("click", () => {
+      const ids = recorridoMyRoute().map((o) => o.id).filter((id) => id !== order.id);
+      saveRecorridoRoute([...ids, order.id]);
+      ui.repartoPago = null;
+      render();
+    });
+    const entregado = document.getElementById("rep-entregado");
+    if (entregado) entregado.addEventListener("click", () => {
+      const method = pago.method;
+      if (!method) return alert("Marca como pago: efectivo, transferencia o no pago.");
+      let monto = 0;
+      if (method === "efectivo") {
+        monto = parseAmount(pago.amount);
+        if (!(monto > 0)) return alert("Pone el monto que cobraste en efectivo.");
+        if (pendiente > 0 && monto < pendiente - 1 && !confirm("Cobraste " + formatMoney(monto) + " y el pedido es de " + formatMoney(pendiente) + ". ¿Queda la diferencia en la cuenta del cliente?")) return;
+      }
+      if ((method === "transferencia" || method === "cuenta") && !pago.photo && !pago.sinFoto) {
+        return alert("Saca la foto del remito (o tilda que no podes sacarla).");
+      }
+      entregado.disabled = true;
+      const stamp = new Date().toISOString();
+      if (method === "efectivo") {
+        recordPayment({ clientId: order.clientId, orderIds: [order.id], amount: monto, method: "efectivo", receivedByUserId: currentUser.id, notes: "Cobrado en el reparto" });
+      }
+      if (pago.photo) order.deliveryRemitoPhoto = pago.photo;
+      order.deliveryPayment = { method, amount: monto, at: stamp, by: currentUser.name || "", byId: currentUser.id, ...(pago.sinFoto && !pago.photo ? { sinFoto: true } : {}) };
+      order.status = "entregado";
+      order.deliveredAt = stamp;
+      order.deliveredBy = currentUser.name || "";
+      order.deliveredById = currentUser.id;
+      order.updatedAt = stamp;
+      saveState();
+      ui.repartoPago = null;
+      window.scrollTo(0, 0);
+      render();
+    });
+  }
+
+  function renderRecorridoCierre() {
+    const today = todayISO();
+    const route = recorridoMyRoute();
+    const entregados = route.filter((o) => o.status === "entregado");
+    const sinEntregar = route.filter((o) => o.status !== "entregado");
+    const porMetodo = (m) => entregados.filter((o) => o.deliveryPayment && o.deliveryPayment.method === m);
+    const efectivo = (state.payments || []).filter((p) => p.date === today && p.status !== "anulado" && p.method === "efectivo" && String(p.receivedByUserId) === String(currentUser.id))
+      .reduce((s, p) => s + Number(p.amount || 0), 0);
+    const sinRendir = (state.orders || []).filter((o) => o.date === today && o.status === "entregado" && String(o.deliveredById || "") === String(currentUser.id) && !orderIsSettled(o) && !(o.deliveryPayment && o.deliveryPayment.sinFoto));
+    const caja = getCashClosingForDate(currentUser.id, today);
+    const att = getAttendanceEntry(currentUser.id, today);
+    const done = recorridoDone();
+    afterRender.push(() => {
+      document.querySelectorAll("[data-settle-order]").forEach((b) => b.addEventListener("click", () => openDeliverySettleModal(b.dataset.settleOrder)));
+      const goCaja = document.querySelector("[data-cierre-caja]");
+      if (goCaja) goCaja.addEventListener("click", () => goRecorridoPage("horarios", "Cierre: 1. Cerrar la caja", "Tilda los pedidos cobrados, controla el efectivo y guarda el cierre de caja.", "rec-caja", "mi-recorrido/cierre", "Listo, volver al cierre"));
+      const goStock = document.querySelector("[data-cierre-stock]");
+      if (goStock) goStock.addEventListener("click", () => goRecorridoPage("stock", "Cierre: 2. Stock para mañana", "Conta lo que quedo y guardalo producto por producto.", "stock", "mi-recorrido/cierre", "Listo, volver al cierre"));
+      const goHorario = document.querySelector("[data-cierre-horario]");
+      if (goHorario) goHorario.addEventListener("click", () => goRecorridoPage("horarios", "Cierre: 3. Marcar tu horario", "Carga la hora de salida y guarda.", "horario", "mi-recorrido", "Terminar el dia"));
+    });
+    const paso = (n, ok, titulo, detalle, attr) => `<div class="recorrido-cierre-row ${ok ? "ok" : ""}">
+      <span class="recorrido-home-num">${ok ? "&#10003;" : n}</span>
+      <span style="flex:1"><strong>${titulo}</strong><br><span class="muted">${detalle}</span></span>
+      <button class="btn ${ok ? "ghost" : "primary"}" type="button" ${attr}>${ok ? "Ver" : "Ir"}</button>
+    </div>`;
+    return `
+      <div class="grid three">
+        ${metricCard("Entregados", entregados.length + (route.length ? " de " + route.length : ""), sinEntregar.length ? sinEntregar.length + " sin entregar" : "Ruta completa")}
+        ${metricCard("Efectivo cobrado", formatMoney(efectivo), "Pagos en efectivo a tu nombre hoy")}
+        ${metricCard("Transferencia / cuenta", porMetodo("transferencia").length + " / " + porMetodo("cuenta").length, "Con foto del remito")}
+      </div>
+      ${sinEntregar.length ? `<div class="alert warn" style="margin-top:12px">Quedan ${sinEntregar.length} pedido(s) de tu ruta sin marcar como entregados. <button class="btn small ghost" type="button" data-recorrido-step="reparto">Ir al reparto</button></div>` : ""}
+      ${sinRendir.length ? `<div class="panel" style="margin-top:12px"><strong>Entregas sin rendir</strong><p class="muted" style="margin:4px 0 8px">Les falta el pago o la foto del remito.</p>${sinRendir.map((o) => { const c = getClient(o.clientId); return `<div class="page-actions" style="justify-content:space-between;padding:4px 0"><span>${escapeHtml(o.clientId)} - ${escapeHtml(c ? c.name : o.clientId)}</span><button class="btn small yellow" type="button" data-settle-order="${escapeAttr(o.id)}">Rendir</button></div>`; }).join("")}</div>` : ""}
+      <div class="panel" style="margin-top:12px">
+        ${paso(1, !!caja, "Cerrar la caja", caja ? "Guardado: cobrado " + formatMoney(caja.actualCollected || 0) + ", efectivo " + formatMoney(caja.actualCash || 0) : "Controla lo cobrado y el efectivo que entregas", "data-cierre-caja")}
+        ${paso(2, !!done.stock, "Stock para mañana", "Conta lo que quedo en la camioneta y el deposito", "data-cierre-stock")}
+        ${paso(3, !!(att && att.endTime), "Marcar tu horario", att && att.endTime ? "Salida " + att.endTime : "Hora de salida", "data-cierre-horario")}
+      </div>`;
+  }
+
   function renderCompliance() {
     const date = ui.complianceDate || employeeChecklistDayKey();
     ui.complianceDate = date;
@@ -11351,6 +11919,30 @@
     `;
   }
 
+  // Boton "Actualizar datos ahora" del aviso de frescura (Remitos y Unidades).
+  function bindFreshnessRefreshButton() {
+    const refreshBtn = document.getElementById("remitos-refresh-sync");
+    if (refreshBtn) refreshBtn.addEventListener("click", async () => {
+      refreshBtn.disabled = true;
+      refreshBtn.textContent = "Actualizando...";
+      try {
+        if (pendingSyncCount() > 0) await flushPatchQueue(false);
+        // Nunca se descarga encima de cambios que todavia no llegaron al servidor.
+        if (pendingSyncCount() > 0) {
+          alert("Hay cambios de este celular que todavia no se enviaron. No se actualiza para no perderlos: espera a tener conexion y volve a intentar.");
+          refreshBtn.disabled = false;
+          refreshBtn.textContent = "Actualizar datos ahora";
+          return;
+        }
+        await cloudPull(true);
+      } catch (e) {
+        alert("No se pudo actualizar: " + (e && e.message ? e.message : "error de conexion"));
+        refreshBtn.disabled = false;
+        refreshBtn.textContent = "Actualizar datos ahora";
+      }
+    });
+  }
+
   function renderRemitos() {
     const todaysNotes = getTodaysProductNotes();
     const missingPurchases = getProductPurchaseShortages(todayISO());
@@ -11419,26 +12011,7 @@
         render();
         alert("Listo — " + formatDate(dateISO) + ": " + res.changedOrders + " pedido(s) actualizados, " + res.changedItems + " item(s) reprecidados (sobre " + res.orders + " pedidos y " + res.products + " productos comprados). Ya podes reimprimir los remitos.");
       });
-      const refreshBtn = document.getElementById("remitos-refresh-sync");
-      if (refreshBtn) refreshBtn.addEventListener("click", async () => {
-        refreshBtn.disabled = true;
-        refreshBtn.textContent = "Actualizando...";
-        try {
-          if (pendingSyncCount() > 0) await flushPatchQueue(false);
-          // Nunca se descarga encima de cambios que todavia no llegaron al servidor.
-          if (pendingSyncCount() > 0) {
-            alert("Hay cambios de este celular que todavia no se enviaron. No se actualiza para no perderlos: espera a tener conexion y volve a intentar.");
-            refreshBtn.disabled = false;
-            refreshBtn.textContent = "Actualizar datos ahora";
-            return;
-          }
-          await cloudPull(true);
-        } catch (e) {
-          alert("No se pudo actualizar: " + (e && e.message ? e.message : "error de conexion"));
-          refreshBtn.disabled = false;
-          refreshBtn.textContent = "Actualizar datos ahora";
-        }
-      });
+      bindFreshnessRefreshButton();
       const clientSelect = document.getElementById("remitos-client-filter");
       const linkedSelect = document.getElementById("remitos-linked-client-filter");
       const fromInput = document.getElementById("remitos-from");
@@ -11785,6 +12358,7 @@
       "Ajuste de productos vendidos por unidad y cobrados por peso, pendientes de compra y remitos.",
       `<button class="btn primary" data-export-today-remitos>Exportar PDF remitos de hoy</button>`,
       `
+      ${renderRemitosFreshnessBanner()}
       <div class="panel" style="margin-bottom:14px">
         <div class="form-grid">
           <div class="field"><label>Fecha</label><input type="date" id="units-date" value="${date}" /></div>
@@ -11846,6 +12420,7 @@
   }
 
   function bindUnits() {
+    bindFreshnessRefreshButton();
     document.querySelectorAll("[data-units-view]").forEach((btn) => btn.addEventListener("click", () => { ui.unitsProductView = btn.dataset.unitsView || "grid"; render(); }));
     document.querySelectorAll("[data-omit-unit-card]").forEach((button) => {
       button.addEventListener("click", () => {
@@ -17576,6 +18151,7 @@
         <div class="field span-2"><label>Subir imagen</label><input id="product-image-file" type="file" accept="image/png,image/jpeg,image/webp" /></div>
         <div class="field span-2"><label>Alias generales</label><input id="product-aliases" value="${escapeAttr(generalAliases)}" placeholder="banana, cherry, tomate cherry" /></div>
         <div class="field span-2"><label>Alias por cliente</label><input id="product-client-aliases" value="${escapeAttr(clientAliases)}" placeholder="002:banana, 021:cherry" /></div>
+        <div class="field span-4"><label>Recordatorio al repartir (Mi recorrido)</label><input id="product-delivery-reminder" value="${escapeAttr(product ? product.deliveryReminder || "" : "")}" placeholder="ej: Lleva huevos: van en el cajon de atras" /><span class="muted" style="font-size:12px">Si un pedido tiene este producto, al empleado le aparece este aviso al entregarlo. Vacio = sin aviso.</span></div>
         <div class="field span-4"><label>Notas</label><textarea id="product-notes">${escapeHtml(product ? product.notes || "" : "")}</textarea></div>
       </form>
       `,
@@ -17615,7 +18191,8 @@
             imageKey,
             isActive: product ? product.isActive : true,
             sortOrder: product ? product.sortOrder : 0,
-            notes: document.getElementById("product-notes").value.trim()
+            notes: document.getElementById("product-notes").value.trim(),
+            deliveryReminder: ((document.getElementById("product-delivery-reminder") || {}).value || "").trim()
           };
           const [assignedType, assignedId] = String(document.getElementById("product-assignee-modal").value || "").split(":");
           payload.assignedToType = assignedType || "";
@@ -18028,6 +18605,10 @@
           <label>Cuenta de proveedor vinculada</label>
           <select id="user-provider"><option value="">Sin proveedor</option>${activeProviders().map((p) => `<option value="${p.id}" ${user && user.providerId === p.id ? "selected" : ""}>${escapeHtml(p.name)}</option>`).join("")}</select>
         </div>
+        <label class="field span-4 user-recorrido-field" style="display:${user && user.role === "employee" ? "flex" : "none"};align-items:center;gap:8px;grid-template-columns:auto 1fr">
+          <input type="checkbox" id="user-recorrido" style="width:auto;min-height:auto" ${user && recorridoEnabledFor(user.id) ? "checked" : ""} />
+          <span>Usar <strong>Mi recorrido</strong> (flujo guiado nuevo). Lo de siempre sigue disponible.</span>
+        </label>
         <label class="field" style="display:flex;align-items:center;gap:8px;grid-template-columns:auto 1fr">
           <input type="checkbox" id="user-active" style="width:auto;min-height:auto" ${!user || user.isActive !== false ? "checked" : ""} />
           <span>Activo</span>
@@ -18040,6 +18621,8 @@
           document.querySelector(".user-client-fields").style.display = isClientLikeRole(roleVal) ? "grid" : "none";
           const provWrap = document.querySelector(".user-provider-fields");
           if (provWrap) provWrap.style.display = roleVal === "proveedor" ? "grid" : "none";
+          const recWrap = document.querySelector(".user-recorrido-field");
+          if (recWrap) recWrap.style.display = roleVal === "employee" ? "flex" : "none";
         });
         document.getElementById("modal-save").addEventListener("click", () => {
           const username = document.getElementById("user-username").value.trim();
@@ -18073,6 +18656,13 @@
           else {
             state.users.push(payload);
             notifyNewUser(payload);
+          }
+          const recCheck = document.getElementById("user-recorrido");
+          if (recCheck) {
+            if (!state.appSettings) state.appSettings = {};
+            const recIds = new Set((state.appSettings.recorridoUserIds || []).map(String));
+            if (recCheck.checked && role === "employee") recIds.add(String(payload.id)); else recIds.delete(String(payload.id));
+            state.appSettings.recorridoUserIds = Array.from(recIds);
           }
           ensureUserCashBoxes();
           saveState();
@@ -18394,6 +18984,7 @@
   }
 
   function bindCommon() {
+    bindRecorridoGuide();
     document.querySelectorAll("[data-billing-dismiss]").forEach((button) => button.addEventListener("click", () => {
       const kind = button.dataset.billingDismiss.split("|")[0];
       dismissBillingWarning(kind, button.dataset.billingDismiss, button.dataset.dismissHasta, button.dataset.dismissLabel);
@@ -18551,6 +19142,8 @@
   }
 
   function pageVisibleForRole(item, role) {
+    // Mi recorrido convive con el sistema de siempre: el empleado lo ve solo si se lo activan en Usuarios.
+    if (item.id === "mi-recorrido") return role === "manager" || role === "admin" || (role === "employee" && !!currentUser && recorridoEnabledFor(currentUser.id));
     if (item.id === "mi-facturacion") {
       if (!isClientLikeRole(role)) return false;
       const billingClient = currentUser ? getClient(currentUser.clientId) : null;
