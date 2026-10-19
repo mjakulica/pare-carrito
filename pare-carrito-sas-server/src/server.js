@@ -1724,12 +1724,33 @@ function controlClientDebts(data, today) {
   return out.sort((a, b) => b.exceso - a.exceso);
 }
 
+// Diferencias de caja de cada empleado en los ultimos 30 dias: un faltante chico que se repite
+// no se ve mirando un solo dia.
+function controlCashHistory(data, today) {
+  const desde = new Date(new Date(today + "T12:00:00Z").getTime() - 30 * 86400000).toISOString().slice(0, 10);
+  const cierres = (data.cashClosings || []).filter((c) => c && String(c.date || "") >= desde && String(c.date || "") <= today);
+  const asistencia = (data.attendance || []).filter((a) => a && a.present && String(a.date || "") >= desde && String(a.date || "") < today);
+  return (data.users || []).filter((u) => u && u.role === "employee" && u.isActive !== false).map((u) => {
+    const mios = cierres.filter((c) => c.userId === u.id);
+    const conCierre = new Set(mios.map((c) => c.date));
+    const sinCierre = Array.from(new Set(asistencia.filter((a) => a.userId === u.id && !conCierre.has(a.date)).map((a) => a.date))).sort();
+    const conDif = mios.filter((c) => Math.abs(Number(c.cashDiff || 0)) >= 1 || Math.abs(Number(c.collectDiff || 0)) >= 1);
+    return {
+      userId: u.id, name: u.name, cierres: mios.length, sinCierre,
+      difCaja: mios.reduce((s, c) => s + Number(c.cashDiff || 0), 0),
+      difCobro: mios.reduce((s, c) => s + Number(c.collectDiff || 0), 0),
+      diasConDiferencia: conDif.length,
+      faltantes: mios.filter((c) => Number(c.cashDiff || 0) <= -1).length
+    };
+  }).filter((x) => x.cierres || x.sinCierre.length);
+}
+
 app.get("/control/client-debts", authenticate, requireRole("manager", "admin"), async (req, res) => {
   try {
     const row = await pool.query("SELECT data FROM app_state WHERE id = 'main'");
     const data = row.rows.length ? row.rows[0].data || {} : {};
     const today = new Date(Date.now() - 3 * 3600 * 1000).toISOString().slice(0, 10);
-    res.json({ ok: true, today, clients: controlClientDebts(data, today) });
+    res.json({ ok: true, today, clients: controlClientDebts(data, today), cash: controlCashHistory(data, today) });
   } catch (error) {
     console.error("control/client-debts:", error.message);
     res.status(500).json({ error: "No se pudo calcular." });

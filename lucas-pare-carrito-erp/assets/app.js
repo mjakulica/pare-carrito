@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v60";
+  const APP_VERSION = "v61";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -3563,6 +3563,7 @@
       ${renderPendingUsersBanner()}
       ${renderPendingReplacementsBanner()}
       ${unassignedOrderedBannerHtml()}
+      ${["manager", "admin"].includes(currentUser.role) ? controlDashboardHtml() : ""}
       ${["manager", "admin", "contador"].includes(currentUser.role) ? unbilledWarningHtml({ compact: true }) : ""}
       <div class="grid four dash-metrics-grid">
         ${metricCard("Pedidos de hoy", todaysOrders.length, "Pedidos activos cargados")}
@@ -11320,6 +11321,11 @@
     (state.replacements || []).filter((r) => !isChargeRecord(r) && r.status === "pendiente").forEach((r) => {
       avisos.push(`<div class="recorrido-aviso"><strong>Recambio pendiente:</strong> ${nombre(r.clientId)} <span class="muted">${(r.items || []).map((i) => escapeHtml(i.productName + " x" + formatNumber(i.qty))).join(", ")} · ${r.when === "manana" ? "mañana" : r.when === "hoy" ? "hoy" : "próximo pedido"}</span></div>`);
     });
+    const conCierre = new Set(getCashClosings().filter((c) => c.userId === currentUser.id).map((c) => c.date));
+    Array.from(new Set((state.attendance || []).filter((a) => a.userId === currentUser.id && a.present && a.date >= addDaysISO(today, -14) && a.date < today && !conCierre.has(a.date)).map((a) => a.date))).sort()
+      .forEach((fecha) => avisos.push(`<div class="recorrido-aviso warn"><strong>Te falto cerrar la caja del ${formatDate(fecha)}.</strong> <button class="btn small primary" type="button" data-aviso-cierre="${escapeAttr(fecha)}">Cerrarla</button></div>`));
+    (state.orders || []).filter((o) => o.date < today && o.date >= addDaysISO(today, -14) && o.status === "entregado" && String(o.deliveredById || "") === String(currentUser.id) && !orderIsSettled(o) && !(o.deliveryPayment && o.deliveryPayment.sinFoto))
+      .forEach((o) => avisos.push(`<div class="recorrido-aviso warn"><strong>Sin rendir del ${formatDateShort(o.date)}:</strong> ${nombre(o.clientId)} <button class="btn small yellow" type="button" data-settle-order="${escapeAttr(o.id)}">Rendir</button></div>`));
     const mios = (state.orders || []).filter((o) => o.date === today && o.status === "entregado" && String(o.deliveredById || "") === String(currentUser.id));
     mios.filter((o) => o.deliveryPayment && o.deliveryPayment.method === "cuenta").forEach((o) => {
       avisos.push(`<div class="recorrido-aviso"><strong>Entregado sin cobrar (a cuenta):</strong> ${nombre(o.clientId)} ${formatMoney(getOrderTotal(o))}${o.deliveryRemitoPhoto ? "" : ` <span class="pill amber">sin foto</span>`}</div>`);
@@ -11339,6 +11345,11 @@
   function bindRecorridoAvisos() {
     document.querySelectorAll("[data-open-charge-next]").forEach((b) => b.addEventListener("click", () => openChargeNextOrderModal()));
     document.querySelectorAll("[data-settle-order]").forEach((b) => b.addEventListener("click", () => openDeliverySettleModal(b.dataset.settleOrder)));
+    document.querySelectorAll("[data-aviso-cierre]").forEach((b) => b.addEventListener("click", () => {
+      ui.ccDate = b.dataset.avisoCierre; ui.ccChecked = null; ui.ccCheckedDate = null;
+      navigate("mi-recorrido/cierre");
+      setTimeout(() => { const box = document.getElementById("cc-orders"); if (box) box.closest(".panel").scrollIntoView(); }, 300);
+    }));
     document.querySelectorAll("[data-aviso-retomar]").forEach((b) => b.addEventListener("click", () => {
       const id = b.dataset.avisoRetomar;
       const route = recorridoMyRoute();
@@ -13893,6 +13904,31 @@
     return out.sort((a, b) => b.exceso - a.exceso);
   }
 
+  // Recuadro del Inicio del gerente/admin: lo que Control marca para revisar, de ayer y de hoy.
+  function controlDashboardHtml() {
+    const hoy = todayISO();
+    const ayer = addDaysISO(hoy, -1);
+    const puntos = [];
+    const entregadosSinRendir = (state.orders || []).filter((o) => (o.date === hoy || o.date === ayer) && o.status === "entregado" && !orderIsSettled(o) && !(o.deliveryPayment && ["transferencia", "cuenta"].includes(o.deliveryPayment.method) && o.deliveryRemitoPhoto));
+    if (entregadosSinRendir.length) puntos.push(entregadosSinRendir.length + " entrega(s) sin pago ni foto");
+    const sinEntregarAyer = (state.orders || []).filter((o) => o.date === ayer && !["cancelado", "anulado", "entregado"].includes(o.status) && o.routeDate === ayer);
+    if (sinEntregarAyer.length) puntos.push(sinEntregarAyer.length + " pedido(s) de ayer sin entregar");
+    const porComprobar = deliveryTransferPendingCount();
+    if (porComprobar) puntos.push(porComprobar + " transferencia(s) por comprobar");
+    const empleados = (state.users || []).filter((u) => u && u.role === "employee" && u.isActive !== false);
+    const sinCierre = empleados.filter((u) => (state.attendance || []).some((a) => a.userId === u.id && a.date === ayer && a.present) && !getCashClosingForDate(u.id, ayer));
+    if (sinCierre.length) puntos.push("sin cierre de caja ayer: " + sinCierre.map((u) => u.name).join(", "));
+    const conDif = getCashClosings().filter((c) => c.date === ayer && Math.abs(Number(c.cashDiff || 0)) >= 1);
+    if (conDif.length) puntos.push("diferencia de caja ayer: " + conDif.map((c) => (c.userName || "") + " " + formatMoney(c.cashDiff)).join(", "));
+    return `<div class="panel ${puntos.length ? "highlight-panel" : ""}" style="margin-bottom:14px">
+      <div class="page-actions" style="justify-content:space-between;align-items:center">
+        <strong style="font-size:15px">${puntos.length ? "&#9888; Control: " + puntos.length + " punto(s) para revisar" : "&#10003; Control: nada para revisar"}</strong>
+        <button class="btn small ${puntos.length ? "yellow" : "ghost"}" type="button" data-route="control">Ir a Control</button>
+      </div>
+      ${puntos.length ? `<ul style="margin:6px 0 0 18px">${puntos.map((p) => `<li>${escapeHtml(p)}</li>`).join("")}</ul>` : ""}
+    </div>`;
+  }
+
   function controlEmailSettingsHtml() {
     const a = state.appSettings || {};
     const managers = (state.users || []).filter((u) => u && u.role === "manager" && u.isActive !== false && u.email).map((u) => u.email);
@@ -13939,12 +13975,12 @@
         ui.controlDebtsLoading = true;
         cloudRequest(config, "/control/client-debts", { method: "GET" })
           .then((r) => (r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status))))
-          .then((j) => { ui.controlDebts = { at: Date.now(), list: j.clients || [], error: "" }; })
-          .catch((e) => { ui.controlDebts = { at: Date.now(), list: [], error: e.message || "error" }; })
+          .then((j) => { ui.controlDebts = { at: Date.now(), list: j.clients || [], cash: j.cash || null, error: "" }; })
+          .catch((e) => { ui.controlDebts = { at: Date.now(), list: [], cash: null, error: e.message || "error" }; })
           .finally(() => { ui.controlDebtsLoading = false; if (getRoute().base === "control" && !hasUnsavedWork()) render(); });
       }
     }
-    return { list: cache ? cache.list : [], loading: !cache, error: cache ? cache.error : "" };
+    return { list: cache ? cache.list : [], cash: cache ? cache.cash : null, loading: !cache, error: cache ? cache.error : "" };
   }
 
   function renderControl() {
@@ -14056,7 +14092,22 @@
         </table></div>
       </div>
       <div class="panel" style="margin-top:14px">
-        <h2 class="page-title" style="font-size:18px">4. Clientes con mas deuda que lo habitual</h2>
+        <h2 class="page-title" style="font-size:18px">4. Caja de cada empleado en los ultimos 30 dias</h2>
+        <p class="muted" style="margin-top:0">Suma de las diferencias de sus cierres: un faltante chico que se repite no se ve mirando un solo dia.</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Empleado</th><th>Cierres</th><th>Dias con diferencia</th><th>Dif. efectivo acumulada</th><th>Dif. cobrado acumulada</th><th>Dias trabajados sin cierre</th></tr></thead>
+          <tbody>${(deudasInfo.cash || []).map((x) => `<tr>
+            <td><strong>${escapeHtml(x.name || "")}</strong></td>
+            <td class="num">${x.cierres}</td>
+            <td class="num">${x.diasConDiferencia}${x.faltantes ? ` <span class="pill red">${x.faltantes} con faltante</span>` : ""}</td>
+            <td class="num"><strong style="color:${Math.abs(x.difCaja) >= 1 ? "var(--red)" : "var(--green)"}">${formatMoney(x.difCaja)}</strong></td>
+            <td class="num" style="color:${Math.abs(x.difCobro) >= 1 ? "var(--red)" : "inherit"}">${formatMoney(x.difCobro)}</td>
+            <td>${x.sinCierre.length ? x.sinCierre.map((d) => `<span class="pill amber">${formatDateShort(d)}</span>`).join(" ") : `<span class="muted">-</span>`}</td>
+          </tr>`).join("") || emptyRow(6, deudasInfo.loading ? "Calculando con el historial del servidor..." : "Sin cierres en los ultimos 30 dias.")}</tbody>
+        </table></div>
+      </div>
+      <div class="panel" style="margin-top:14px">
+        <h2 class="page-title" style="font-size:18px">5. Clientes con mas deuda que lo habitual</h2>
         <p class="muted" style="margin-top:0">Saldo de hoy contra el promedio de su saldo las ultimas 8 semanas, lo que compra por semana y los dias desde el ultimo pago.</p>
         <div class="table-wrap"><table>
           <thead><tr><th>Cliente</th><th>Saldo hoy</th><th>Habitual</th><th>Compra semanal</th><th>Ultimo pago</th><th>Por que</th></tr></thead>
