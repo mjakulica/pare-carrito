@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v59";
+  const APP_VERSION = "v60";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -13689,21 +13689,35 @@
     o.updatedAt = stamp;
   }
 
+  // Palabras de la descripcion del banco que no identifican a nadie.
+  const BANK_WORDS = new Set(["transf", "transferencia", "transferencias", "recibida", "recibido", "inmediata", "desde", "cuenta", "pago", "pagos", "ingreso", "credito", "deposito", "mercado", "mercadopago", "dinero", "envio", "debin", "cuit", "cuil", "cvu", "cbu", "alias", "banco", "bco"]);
+
+  // Lo que se guarda como alias: la descripcion sin numeros ni palabras genericas del banco.
+  function bankAliasFromDescription(desc) {
+    return normalizeText(desc || "").replace(/[0-9]+/g, " ").split(/[^a-z]+/).filter((w) => w.length >= 3 && !BANK_WORDS.has(w) && !["del", "las", "los", "por", "para", "con", "srl", "sas"].includes(w)).join(" ").trim();
+  }
+
+  function cleanBankAliases(list) {
+    return Array.from(new Set((list || []).map((a) => normalizeText(String(a || "")).replace(/\s+/g, " ").trim()).filter((a) => a.length >= 3)));
+  }
+
   // Cruza los ingresos del banco con los remitos por comprobar: mismo monto (lo que falta cobrar o
   // el total), fecha entre el dia anterior al remito y 10 dias despues, y gana el que tiene el
   // nombre del cliente en la descripcion. Cada movimiento y cada remito se usan una sola vez.
   function matchBankMovements(movements) {
     const pendientes = deliveryTransferOrders().filter((o) => deliveryTransferStatus(o) === "pendiente");
-    const palabras = (o) => { const c = getClient(o.clientId); return normalizeText(c ? c.name + " " + (c.businessName || c.razonSocial || "") : "").split(/\s+/).filter((w) => w.length >= 4); };
+    const palabras = (o) => { const c = getClient(o.clientId); return normalizeText(c ? c.name + " " + (c.businessName || c.razonSocial || "") : "").split(/\s+/).filter((w) => w.length >= 4 && !BANK_WORDS.has(w)); };
+    const alias = (o) => { const c = getClient(o.clientId); return c && Array.isArray(c.bankAliases) ? c.bankAliases.map(normalizeText).filter((a) => a.length >= 3) : []; };
     const pares = [];
     movements.forEach((m, mi) => pendientes.forEach((o) => {
       const montos = [orderPendingAmount(o), Number(o.totalAmount || 0)];
       if (!montos.some((x) => x > 0 && Math.abs(x - m.monto) <= 1)) return;
       if (m.fecha < addDaysISO(o.date, -1) || m.fecha > addDaysISO(o.date, 10)) return;
       const desc = normalizeText(m.descripcion || "");
-      const nombre = palabras(o).some((w) => desc.includes(w));
+      const porAlias = alias(o).some((a) => desc.includes(a));
+      const nombre = porAlias || palabras(o).some((w) => desc.includes(w));
       const dias = Math.abs((new Date(m.fecha + "T12:00:00") - new Date(o.date + "T12:00:00")) / 86400000);
-      pares.push({ mi, o, m, nombre, dias });
+      pares.push({ mi, o, m, nombre, porAlias, dias });
     }));
     pares.sort((a, b) => (b.nombre - a.nombre) || (a.dias - b.dias));
     const usadosM = new Set();
@@ -13753,7 +13767,8 @@
             ${matches.length ? `<div class="table-wrap"><table><thead><tr><th></th><th>Banco</th><th>Remito</th></tr></thead><tbody>${matches.map((x, i) => { const c = getClient(x.o.clientId); return `<tr>
               <td><input type="checkbox" data-bank-match="${i}" ${x.seguro ? "checked" : ""} style="width:auto;min-height:auto" /></td>
               <td>${formatDate(x.m.fecha)} · <strong>${formatMoney(x.m.monto)}</strong><br><span class="muted">${escapeHtml(x.m.descripcion || "")}</span></td>
-              <td>${escapeHtml(x.o.clientId)} - ${escapeHtml(c ? c.name : x.o.clientId)}<br><span class="muted">${escapeHtml(x.o.id)} · ${formatDate(x.o.date)}${x.nombre ? " · coincide el nombre" : x.seguro ? "" : " · revisar: hay otro remito con el mismo monto"}</span></td>
+              <td>${escapeHtml(x.o.clientId)} - ${escapeHtml(c ? c.name : x.o.clientId)}<br><span class="muted">${escapeHtml(x.o.id)} · ${formatDate(x.o.date)}${x.porAlias ? " · cuenta conocida del cliente" : x.nombre ? " · coincide el nombre" : x.seguro ? "" : " · revisar: hay otro remito con el mismo monto"}</span>
+                ${!x.nombre && bankAliasFromDescription(x.m.descripcion) ? `<br><label style="font-size:12px;display:inline-flex;gap:4px;align-items:center"><input type="checkbox" data-bank-learn="${i}" checked style="width:auto;min-height:auto" /> Recordar "${escapeHtml(bankAliasFromDescription(x.m.descripcion))}" como cuenta de este cliente</label>` : ""}</td>
             </tr>`; }).join("")}</tbody></table></div>
             <div class="page-actions" style="margin-top:8px"><button class="btn primary" type="button" id="bank-confirm">Marcar como llegadas las tildadas</button></div>` : `<p class="muted">Ningun movimiento coincide en monto y fecha con un remito por comprobar.</p>`}
             ${res.sinRemito.length ? `<details style="margin-top:10px"><summary>${res.sinRemito.length} ingreso(s) sin remito del reparto</summary><ul>${res.sinRemito.map((m) => `<li>${formatDate(m.fecha)} ${formatMoney(m.monto)} <span class="muted">${escapeHtml(m.descripcion || "")}</span></li>`).join("")}</ul></details>` : ""}`;
@@ -13762,6 +13777,17 @@
             const elegidos = Array.from(result.querySelectorAll("[data-bank-match]")).filter((c) => c.checked).map((c) => matches[Number(c.dataset.bankMatch)]);
             if (!elegidos.length) return alert("No hay ninguna tildada.");
             elegidos.forEach((x) => confirmDeliveryTransfer(x.o, x.m.monto, x.m));
+            // Cuentas nuevas del cliente: la proxima vez se reconoce sola.
+            Array.from(result.querySelectorAll("[data-bank-learn]")).filter((c) => c.checked).forEach((c) => {
+              const x = matches[Number(c.dataset.bankLearn)];
+              const tildado = result.querySelector(`[data-bank-match="${c.dataset.bankLearn}"]`);
+              if (!x || !tildado || !tildado.checked) return;
+              const client = getClient(x.o.clientId);
+              const nuevo = bankAliasFromDescription(x.m.descripcion);
+              if (!client || !nuevo) return;
+              client.bankAliases = cleanBankAliases([...(client.bankAliases || []), nuevo]);
+              client.updatedAt = new Date().toISOString();
+            });
             saveState();
             closeModal();
             alert(elegidos.length + " transferencia(s) marcadas como llegadas y registradas en Banco.");
@@ -13867,6 +13893,35 @@
     return out.sort((a, b) => b.exceso - a.exceso);
   }
 
+  function controlEmailSettingsHtml() {
+    const a = state.appSettings || {};
+    const managers = (state.users || []).filter((u) => u && u.role === "manager" && u.isActive !== false && u.email).map((u) => u.email);
+    return `<div class="form-grid">
+      <div class="field span-4"><label><input type="checkbox" data-ctl-email-enabled ${a.controlEmailEnabled !== false ? "checked" : ""} style="width:auto;min-height:auto" /> Enviar el resumen todas las noches</label></div>
+      <div class="field span-2"><label>Mandarlo a</label><input data-ctl-email-to value="${escapeAttr(a.controlEmailTo || "")}" placeholder="${escapeAttr(managers.join(", ") || "correo@...")}" /><span class="muted" style="font-size:12px">Vacio = el correo del gerente${managers.length ? " (" + escapeHtml(managers.join(", ")) + ")" : " (no tiene correo cargado en Usuarios)"}. Para varios, separalos con coma.</span></div>
+      <div class="field"><label>Hora (0 a 23)</label><input data-ctl-email-hour type="number" min="0" max="23" value="${escapeAttr(String(a.controlEmailHour != null && a.controlEmailHour !== "" ? a.controlEmailHour : 21))}" /></div>
+    </div>`;
+  }
+
+  function bindControlEmailSettings() {
+    const guardar = () => { saveState(); };
+    document.querySelectorAll("[data-ctl-email-enabled]").forEach((el) => el.addEventListener("change", () => { state.appSettings.controlEmailEnabled = el.checked; guardar(); }));
+    document.querySelectorAll("[data-ctl-email-to]").forEach((el) => el.addEventListener("change", () => {
+      const lista = el.value.split(/[,;\s]+/).filter(Boolean);
+      const malos = lista.filter((x) => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x));
+      if (malos.length) { alert("Revisa estos correos: " + malos.join(", ")); return; }
+      state.appSettings.controlEmailTo = lista.join(", ");
+      el.value = state.appSettings.controlEmailTo;
+      guardar();
+    }));
+    document.querySelectorAll("[data-ctl-email-hour]").forEach((el) => el.addEventListener("change", () => {
+      const h = Math.round(Number(el.value));
+      if (!(h >= 0 && h <= 23)) { alert("La hora va de 0 a 23."); return; }
+      state.appSettings.controlEmailHour = h;
+      guardar();
+    }));
+  }
+
   function debtReasonText(m) {
     if (m.tipo === "habitual") return "debe " + formatMoney(m.monto) + " mas que lo habitual";
     if (m.tipo === "semanas") return "debe mas de 3 semanas de compras";
@@ -13945,6 +14000,7 @@
       const inp = document.getElementById("control-date");
       if (inp) inp.addEventListener("change", () => { ui.controlDate = inp.value || todayISO(); render(); });
       document.querySelectorAll("[data-control-day]").forEach((b) => b.addEventListener("click", () => { ui.controlDate = addDaysISO(todayISO(), -Number(b.dataset.controlDay)); render(); }));
+      bindControlEmailSettings();
       const send = document.getElementById("control-send-email");
       if (send) send.addEventListener("click", async () => {
         send.disabled = true; send.textContent = "Enviando...";
@@ -13967,6 +14023,10 @@
         <button class="btn small primary" type="button" id="control-send-email" title="Se manda solo todas las noches; con esto se manda ya">Enviar resumen por correo</button></div>`,
       `
       ${avisoVentana}
+      <details class="panel" style="margin-bottom:14px">
+        <summary style="cursor:pointer;font-weight:600">Resumen diario por correo: ${(state.appSettings || {}).controlEmailEnabled === false ? "desactivado" : "todas las noches a las " + ((state.appSettings || {}).controlEmailHour != null && (state.appSettings || {}).controlEmailHour !== "" ? state.appSettings.controlEmailHour : 21) + " h"} (cambiar)</summary>
+        <div style="margin-top:8px">${controlEmailSettingsHtml()}</div>
+      </details>
       <div class="grid three">
         ${metricCard("Pedidos entregados", entregados.length + " de " + orders.length, sinEntregar.length ? sinEntregar.length + " sin marcar entregados" : "Todos entregados")}
         ${metricCard("Transferencias por comprobar", String(porComprobar), noLlegaron.length ? noLlegaron.length + " no llegaron" : "Remitos del reparto")}
@@ -16661,13 +16721,18 @@
             <div class="field span-2"><label>Asunto del correo de mora (usa {cliente})</label><input id="dunning-mail-subject" value="${escapeAttr((state.appSettings && state.appSettings.dunningMailSubject) || "Demora de pago: {cliente}")}" /></div>
             <div class="field span-4"><label>Mensaje de correo de mora (usa {cliente}, {diassinpago} y {saldo})</label><textarea id="dunning-mail-message" rows="2">${escapeHtml((state.appSettings && state.appSettings.dunningMailMessage) || "El cliente {cliente} tiene una demora de pago de {diassinpago} y su saldo es {saldo}.")}</textarea></div>
             <div class="field span-2"><label>Nombre de plantilla Meta (recordatorio de pago)</label><input id="dunning-template" value="${escapeAttr((state.appSettings && state.appSettings.dunningWhatsappTemplate) || "")}" placeholder="ej: recordatorio_pago" /></div>
-            <div class="field span-4"><label><input type="checkbox" id="dunning-unusual-enabled" ${!state.appSettings || state.appSettings.dunningUnusualEnabled !== false ? "checked" : ""} style="width:auto;min-height:auto" /> Con los recordatorios de pago activados, avisar también a los clientes que deben bastante más que lo habitual (una vez por semana, por WhatsApp si hay bot y por correo)</label></div>
-            <div class="field span-4"><label>Mensaje para deuda más alta que lo habitual (usa {cliente} y {saldo})</label><textarea id="dunning-unusual-message" rows="2">${escapeHtml((state.appSettings && state.appSettings.dunningUnusualMessage) || "Hola {cliente}, te escribimos de Pare Carrito: tu saldo es {saldo}, mas alto que lo habitual. Cuando puedas regularizalo. Gracias!")}</textarea></div>
-            <div class="field span-4"><label><input type="checkbox" id="control-email-enabled" ${!state.appSettings || state.appSettings.controlEmailEnabled !== false ? "checked" : ""} style="width:auto;min-height:auto" /> Enviar todas las noches el resumen de Control (faltantes, caja, transferencias, deudas) por correo al gerente</label></div>
-            <div class="field span-2"><label>Correo(s) para el resumen (vacio = el del gerente)</label><input id="control-email-to" value="${escapeAttr((state.appSettings && state.appSettings.controlEmailTo) || "")}" placeholder="gerente@..., otro@..." /></div>
-            <div class="field"><label>Hora del resumen</label><input id="control-email-hour" type="number" min="0" max="23" value="${escapeAttr(String(state.appSettings && state.appSettings.controlEmailHour != null && state.appSettings.controlEmailHour !== "" ? state.appSettings.controlEmailHour : 21))}" /></div>
             <div class="field span-4"><label>Mensaje de aviso de suba de precio (usa {producto}, {porcentaje}, {precioAnterior}, {precioNuevo})</label><textarea id="priceinc-message" rows="2">${escapeHtml(getPriceIncreaseMessageText())}</textarea></div>
             <div class="field span-2"><label>Nombre de plantilla Meta (suba de precio)</label><input id="priceinc-template" value="${escapeAttr((state.appSettings && state.appSettings.priceIncreaseTemplateName) || "")}" placeholder="ej: suba_precio" /></div>
+          </div>
+        </div>` : ""}
+        ${(currentUser.role === "manager" || currentUser.role === "admin") ? `<div class="panel">
+          <h2 class="page-title" style="font-size:18px">Resumen diario de Control (correo)</h2>
+          <p class="muted">Todas las noches llega un correo con los cruces de la página Control: pedidos sin entregar o sin rendir, caja de cada empleado, transferencias por comprobar y clientes con deuda inusual.</p>
+          ${controlEmailSettingsHtml()}
+          <h3 style="font-size:15px;margin:14px 0 4px">Aviso a clientes con deuda más alta que lo habitual</h3>
+          <div class="form-grid">
+            <div class="field span-4"><label><input type="checkbox" id="dunning-unusual-enabled" ${!state.appSettings || state.appSettings.dunningUnusualEnabled !== false ? "checked" : ""} style="width:auto;min-height:auto" /> Con los recordatorios de pago activados, avisar también a los clientes que deben bastante más que lo habitual (una vez por semana, por WhatsApp si hay bot y por correo)</label></div>
+            <div class="field span-4"><label>Mensaje para deuda más alta que lo habitual (usa {cliente} y {saldo})</label><textarea id="dunning-unusual-message" rows="2">${escapeHtml((state.appSettings && state.appSettings.dunningUnusualMessage) || "Hola {cliente}, te escribimos de Pare Carrito: tu saldo es {saldo}, mas alto que lo habitual. Cuando puedas regularizalo. Gracias!")}</textarea></div>
           </div>
         </div>` : ""}
       </div>` : ""}
@@ -16996,12 +17061,7 @@
     if (dnUnusual) dnUnusual.addEventListener("change", () => { state.appSettings.dunningUnusualEnabled = dnUnusual.checked; saveState(); });
     const dnUnusualMsg = document.getElementById("dunning-unusual-message");
     if (dnUnusualMsg) dnUnusualMsg.addEventListener("change", () => { state.appSettings.dunningUnusualMessage = dnUnusualMsg.value.trim(); saveState(); });
-    const ctlEnabled = document.getElementById("control-email-enabled");
-    if (ctlEnabled) ctlEnabled.addEventListener("change", () => { state.appSettings.controlEmailEnabled = ctlEnabled.checked; saveState(); });
-    const ctlTo = document.getElementById("control-email-to");
-    if (ctlTo) ctlTo.addEventListener("change", () => { state.appSettings.controlEmailTo = ctlTo.value.trim(); saveState(); });
-    const ctlHour = document.getElementById("control-email-hour");
-    if (ctlHour) ctlHour.addEventListener("change", () => { const h = Math.max(0, Math.min(23, Math.round(Number(ctlHour.value)))); state.appSettings.controlEmailHour = Number.isFinite(h) ? h : 21; saveState(); });
+    bindControlEmailSettings();
     const dnTpl = document.getElementById("dunning-template");
     if (dnTpl) dnTpl.addEventListener("change", () => { state.appSettings.dunningWhatsappTemplate = dnTpl.value.trim(); saveState(); });
     const piMsg = document.getElementById("priceinc-message");
@@ -18547,6 +18607,7 @@
         <div class="field"><label>ID</label><input id="client-id" value="${escapeAttr(client ? client.id : nextId)}" ${client ? "disabled" : ""} /></div>
         <div class="field span-2"><label>Nombre</label><input id="client-name" value="${escapeAttr(client ? client.name : "")}" required /></div>
         <div class="field"><label>Direccion</label><input id="client-address" value="${escapeAttr(client ? client.address : "")}" /></div>
+        <div class="field span-4"><label>Nombres con los que transfiere (para comprobar con el banco)</label><input id="client-bank-aliases" value="${escapeAttr(client && Array.isArray(client.bankAliases) ? client.bankAliases.join(", ") : "")}" placeholder="ej: perez juan, distribuidora sur srl" /><span class="muted" style="font-size:12px">Si transfiere desde una cuenta con otro nombre, ponelo aca (separados por coma). Tambien se agregan solos al confirmar una transferencia en Comprobar con el banco.</span></div>
         <div class="field"><label>Zona</label><input id="client-zone" value="${escapeAttr(client ? client.zone || "" : "")}" /></div>
         <div class="field"><label>Horario apertura</label><input id="client-opening-time" type="time" value="${escapeAttr(client ? client.openingTime || "" : "")}" /></div>
         <div class="field"><label>Entrega max.</label><input id="client-max-delivery-time" type="time" value="${escapeAttr(client ? client.maxDeliveryTime || "" : "")}" /></div>
@@ -18604,6 +18665,7 @@
             id: idValue,
             name: document.getElementById("client-name").value.trim(),
             address: document.getElementById("client-address").value.trim(),
+            bankAliases: cleanBankAliases(((document.getElementById("client-bank-aliases") || {}).value || "").split(",")),
             zone: document.getElementById("client-zone").value.trim(),
             openingTime: document.getElementById("client-opening-time").value,
             maxDeliveryTime: document.getElementById("client-max-delivery-time").value,
