@@ -1651,7 +1651,8 @@ app.put("/state", authenticate, requireRole(...SYNC_ROLES), async (req, res) => 
       "DELETE FROM state_history WHERE id NOT IN (SELECT id FROM state_history ORDER BY id DESC LIMIT $1)",
       [STATE_HISTORY_KEEP]
     );
-    await mirrorStateToTables(clientDb, cleanData, beforeData);
+    // Reemplazo completo del estado (restaurar un backup, subir todo): el espejo se rehace entero.
+    await mirrorStateToTables(clientDb, cleanData);
     await syncUsersFromState(clientDb, cleanData);
     const afterCounts = {
       orders: Array.isArray(cleanData.orders) ? cleanData.orders.length : 0,
@@ -2008,6 +2009,7 @@ app.post("/orders/customer", authenticate, requireRole("customer"), async (req, 
     }
     const num = (value) => (Number.isFinite(Number(value)) ? Number(value) : 0);
     const data = row.rows[0].data || {};
+    const espejoAntes = { __mirrorMaps: mirrorMaps(data) };
     data.orders = Array.isArray(data.orders) ? data.orders : [];
     data.saldos = Array.isArray(data.saldos) ? data.saldos : [];
     data.caja = Array.isArray(data.caja) ? data.caja : [];
@@ -2068,7 +2070,7 @@ app.post("/orders/customer", authenticate, requireRole("customer"), async (req, 
     const saved = await clientDb.query("UPDATE app_state SET data = $1, updated_at = now(), updated_by = $2 WHERE id = 'main' RETURNING updated_at", [data, req.user.username]);
     await clientDb.query("INSERT INTO state_history (data, updated_by) VALUES ($1, $2)", [data, req.user.username]);
     await clientDb.query("DELETE FROM state_history WHERE id NOT IN (SELECT id FROM state_history ORDER BY id DESC LIMIT $1)", [STATE_HISTORY_KEEP]);
-    await mirrorStateToTables(clientDb, data);
+    await mirrorStateToTables(clientDb, data, espejoAntes);
     await clientDb.query("COMMIT");
     res.json({ ok: true, order, updatedAt: saved.rows[0].updated_at.toISOString() });
   } catch (error) {
@@ -2230,7 +2232,122 @@ app.post("/ocr/order-image", authenticate, requireRole("manager", "admin", "empl
 });
 
 // Espejo relacional: refresco transaccional completo (estados chicos, robustez maxima)
-async function mirrorStateToTables(db, data, beforeData) {
+// Espejo relacional (tablas clients, products, orders, payments...) para los reportes del servidor.
+// Antes, cada vez que cambiaba UN pedido se borraban y volvian a escribir TODOS los pedidos de la
+// historia, renglon por renglon: con meses de pedidos eso eran decenas de miles de escrituras y el
+// guardado de un pedido tardaba 5-10 segundos. Ahora se escriben solo los registros que cambiaron
+// (comparando con la version anterior). El espejo completo queda para el arranque del servidor.
+const MIRROR_KEYS = ["clients", "products", "orders", "purchases", "payments"];
+
+// id -> JSON de cada registro (el primero si hay ids repetidos, como hacia el ON CONFLICT DO NOTHING).
+function mirrorMaps(data) {
+  const out = {};
+  MIRROR_KEYS.forEach((key) => {
+    const map = new Map();
+    (Array.isArray(data && data[key]) ? data[key] : []).forEach((item) => {
+      if (item && item.id && !map.has(String(item.id))) map.set(String(item.id), JSON.stringify(item));
+    });
+    out[key] = map;
+  });
+  return out;
+}
+
+async function mirrorInsertRow(db, key, item) {
+  const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  if (key === "clients") {
+    await db.query(
+      "INSERT INTO clients (id, name, address, phone, payment_type, price_tier, vehicle_id, is_active) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (id) DO NOTHING",
+      [item.id, item.name || "", item.address || "", item.phone || "", item.paymentType || "", item.priceTier || "", item.vehicleId || "", item.isActive !== false]
+    );
+  } else if (key === "products") {
+    await db.query(
+      "INSERT INTO products (id, name, category, unit_type, base_cost, sale_price, is_active) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (id) DO NOTHING",
+      [item.id, item.name || "", item.category || "", item.unitType || "", num(item.baseCost), num(item.salePrice), item.isActive !== false]
+    );
+  } else if (key === "orders") {
+    if (!item.date) return;
+    const o = item;
+    await db.query(
+      "INSERT INTO orders (id, date, client_id, vehicle_id, status, subtotal, iva, total, payment_received, created_by, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT (id) DO NOTHING",
+      [o.id, o.date, o.clientId || "", o.deliveryVehicleId || "", o.status || "", num(o.subtotalAmount), num(o.ivaAmount), num(o.totalAmount), num(o.paymentReceived), o.userId || "", o.createdAt ? new Date(o.createdAt) : null]
+    );
+    let fallback = 0;
+    for (const it of Array.isArray(o.items) ? o.items : []) {
+      if (!it) continue;
+      fallback += 1;
+      await db.query(
+        "INSERT INTO order_items (order_id, item_id, product_id, product_name, unit_type, quantity, unit_price, subtotal) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT DO NOTHING",
+        [o.id, it.id || "it-" + fallback, it.productId || "", it.productName || "", it.unitType || "", num(it.quantity), num(it.unitPrice), num(it.subtotal)]
+      );
+    }
+  } else if (key === "purchases") {
+    if (!item.date) return;
+    const p = item;
+    await db.query(
+      "INSERT INTO purchases (id, date, expense_type, provider_id, provider_name, total_cost, payment_status, recorded_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (id) DO NOTHING",
+      [p.id, p.date, p.expenseType || "", p.providerId || "", p.providerName || "", num(p.totalCost), p.paymentStatus || "", p.recordedBy || ""]
+    );
+    let position = 0;
+    for (const it of Array.isArray(p.items) ? p.items : []) {
+      if (!it) continue;
+      position += 1;
+      await db.query(
+        "INSERT INTO purchase_items (purchase_id, position, product_id, product_name, quantity, unit_cost, total_cost) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING",
+        [p.id, position, it.productId || "", it.productName || "", num(it.quantity), num(it.unitCost), num(it.totalCost)]
+      );
+    }
+  } else if (key === "payments") {
+    const pay = item;
+    await db.query(
+      "INSERT INTO payments (id, date, client_id, amount, method, received_by) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (id) DO NOTHING",
+      [pay.id, pay.date || null, pay.clientId || "", num(pay.amount), pay.method || "", pay.receivedByUserId || ""]
+    );
+  }
+}
+
+// before: el estado anterior, o el resultado de mirrorMaps() tomado antes de modificar los datos
+// (para los que cambian el estado en el lugar). Sin before se reconstruye todo.
+async function mirrorStateToTables(db, data, before) {
+  if (!before) return mirrorStateToTablesFull(db, data);
+  const antes = before.__mirrorMaps ? before.__mirrorMaps : mirrorMaps(before);
+  const despues = mirrorMaps(data);
+  const hijos = { orders: ["order_items", "order_id"], purchases: ["purchase_items", "purchase_id"] };
+  for (const key of MIRROR_KEYS) {
+    const a = antes[key];
+    const d = despues[key];
+    const cambiados = [];
+    d.forEach((json, id) => { if (a.get(id) !== json) cambiados.push(id); });
+    const tocar = cambiados.slice();
+    a.forEach((_, id) => { if (!d.has(id)) tocar.push(id); });
+    if (!tocar.length) continue;
+    if (hijos[key]) await db.query("DELETE FROM " + hijos[key][0] + " WHERE " + hijos[key][1] + " = ANY($1::text[])", [tocar]);
+    await db.query("DELETE FROM " + key + " WHERE id = ANY($1::text[])", [tocar]);
+    for (const id of cambiados) await mirrorInsertRow(db, key, JSON.parse(d.get(id)));
+  }
+}
+
+// Al arrancar el servidor se rehace el espejo completo una vez, por si alguna vez quedo distinto
+// del estado (es la red de seguridad del modo incremental). Bloquea el estado mientras tanto para
+// no cruzarse con un guardado.
+async function rebuildMirrorOnStartup() {
+  const db = await pool.connect();
+  const inicio = Date.now();
+  try {
+    await db.query("BEGIN");
+    const row = await db.query("SELECT data FROM app_state WHERE id = 'main' FOR UPDATE");
+    if (row.rows.length) await mirrorStateToTablesFull(db, row.rows[0].data || {});
+    await db.query("COMMIT");
+    console.log("Espejo de reportes rehecho al arrancar en " + Math.round((Date.now() - inicio) / 100) / 10 + " s.");
+  } catch (error) {
+    await db.query("ROLLBACK").catch(() => {});
+    console.error("No se pudo rehacer el espejo de reportes:", error.message);
+  } finally {
+    db.release();
+  }
+}
+
+async function mirrorStateToTablesFull(db, data) {
+  const beforeData = null;
   const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
   // Solo reconstruye las tablas cuya seccion del estado cambio (evita reescribir miles de filas
   // en cada guardado chico). Si no se pasa beforeData, reconstruye todo (comportamiento previo).
@@ -2924,13 +3041,14 @@ async function withStateExt(updater) {
       return { error: "Sin datos.", status: 404 };
     }
     const data = row.rows[0].data;
+    const espejoAntes = { __mirrorMaps: mirrorMaps(data) };
     const result = await updater(data);
     if (result && result.error) {
       await db.query("ROLLBACK");
       return result;
     }
     await db.query("UPDATE app_state SET data = $1, updated_at = now(), updated_by = 'whatsapp-bot' WHERE id = 'main'", [data]);
-    await mirrorStateToTables(db, data);
+    await mirrorStateToTables(db, data, espejoAntes);
     await db.query("COMMIT");
     return result;
   } catch (error) {
@@ -3647,6 +3765,7 @@ if (require.main === module) {
       initBillingScheduler();
       initDunningScheduler();
       initControlEmailScheduler();
+      rebuildMirrorOnStartup();
       return app.listen(PORT, () => console.log("Pare Carrito SAS API escuchando en puerto " + PORT));
     })
     .catch((error) => {
