@@ -66,6 +66,7 @@ NOTIFY_NUMBERS=549XXXXXXXXXX,549XXXXXXXXXX   # numeros del equipo (sin +, con co
 OWNER_NUMBER=549XXXXXXXXXX                   # tu numero
 OPENROUTER_API_KEY=<tu key de OpenRouter>
 EXTERNAL_API_KEY=<la que ya usa el ERP>      # el bot la usa para hablarle a la API
+BROADCAST_KEY=<una clave larga inventada>    # con esto el ERP manda avisos por el bot
 ```
 
 Formato de números (Argentina): código de país **54** + **9** + característica sin 0 +
@@ -75,6 +76,28 @@ Deploy:
 ```
 cd /opt/pare-carrito && ./deploy.sh
 ```
+
+## 6b) Plantillas de mensajes (para que el sistema pueda escribir primero)
+Fuera de las 24 hs desde el último mensaje del cliente, WhatsApp solo deja mandar **plantillas
+aprobadas**. Todas las del sistema usan **una sola variable `{{1}}`** con el texto completo.
+Crearlas en **WhatsApp Manager → Plantillas de mensajes → Crear**, categoría **Utilidad**, idioma
+**Español (es)**. Meta no aprueba una plantilla que sea solo `{{1}}`: tiene que tener texto fijo
+alrededor, como en estos ejemplos.
+
+| Para qué | Nombre sugerido | Cuerpo |
+|---|---|---|
+| Recordatorio de pago y deuda inusual | `recordatorio_pago` | `Pare Carrito: {{1}}` + `Ante cualquier duda respondé este mensaje.` |
+| Aviso de feriado | `aviso_feriado` | `Pare Carrito informa: {{1}}` |
+| Cambios en un pedido | `pedido_modificado` | `Pare Carrito: {{1}}` + `Si algo no está bien, respondé este mensaje.` |
+| Suba de precio | `suba_precio` | `Pare Carrito informa: {{1}}` |
+| Resumen diario de Control (al gerente) | `resumen_control` | `Resumen del día: {{1}}` + `El detalle llega por correo.` |
+
+Al cargar cada una, Meta pide un **ejemplo** para `{{1}}` (cualquier texto). Cuando estén
+aprobadas, poné los nombres en el ERP: **Configuración → recuadro "Aviso de feriados (WhatsApp)"** (mora, feriados,
+cambios de pedido, suba de precio) y **Configuración → WhatsApp (bot)** (resumen de Control).
+
+En **Configuración → WhatsApp (bot)** del ERP, el botón **Revisar** muestra qué falta configurar
+y **Enviar prueba** manda una plantilla a tu número para confirmar que todo está vinculado.
 
 ## 7) Probar
 1. Desde tu WhatsApp personal, mandá un mensaje al **número de WhatsApp Business** (o, en modo test,

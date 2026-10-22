@@ -1767,20 +1767,86 @@ function controlEmailRecipients(data) {
   return managers.length ? managers : [process.env.MANAGER_EMAIL].filter(Boolean);
 }
 
-async function sendControlDailyEmail(date) {
+async function sendControlDailyEmail(date, opciones = {}) {
   const row = await pool.query("SELECT data FROM app_state WHERE id = 'main'");
   const data = row.rows.length ? row.rows[0].data || {} : {};
   const settings = data.appSettings || {};
   const to = controlEmailRecipients(data);
-  if (!to.length) return { sent: false, reason: "No hay correo del gerente (cargalo en Usuarios o en Configuracion)." };
-  if (settings.mailingEnabled === false) return { sent: false, reason: "Los correos automaticos estan desactivados en Configuracion." };
+  if (opciones.soloWhatsapp || !to.length || settings.mailingEnabled === false) {
+    const today0 = new Date(Date.now() - 3 * 3600 * 1000).toISOString().slice(0, 10);
+    const whatsapp = await sendControlWhatsapp(data, controlDailySummary(data, date, controlClientDebts(data, today0)).linea);
+    return { sent: false, whatsapp, reason: opciones.soloWhatsapp ? "El correo del resumen esta desactivado." : !to.length ? "No hay correo del gerente (cargalo en Usuarios o en Configuracion)." : "Los correos automaticos estan desactivados en Configuracion." };
+  }
   const today = new Date(Date.now() - 3 * 3600 * 1000).toISOString().slice(0, 10);
   const summary = controlDailySummary(data, date, controlClientDebts(data, today));
   const fecha = date.split("-").reverse().join("/");
   const subject = (summary.problemas ? "⚠ Control " + fecha + ": " + summary.problemas + " punto(s) para revisar" : "✔ Control " + fecha + ": todo en orden");
   const sent = await sendMail(to.join(","), subject, summary.html);
-  return { sent, to, problemas: summary.problemas, counts: summary.counts };
+  const whatsapp = await sendControlWhatsapp(data, summary.linea);
+  return { sent, to, problemas: summary.problemas, counts: summary.counts, whatsapp };
 }
+
+// Resumen de Control por WhatsApp (plantilla de Meta con una variable) a los numeros elegidos o al
+// telefono del gerente.
+async function botRequest(path, body) {
+  const botUrl = process.env.BOT_BROADCAST_URL || "";
+  if (!botUrl) return { ok: false, error: "Falta BOT_BROADCAST_URL en el servidor." };
+  const url = path === "/broadcast" ? botUrl : botUrl.replace(/\/broadcast\/?$/, "") + path;
+  try {
+    const r = await fetch(url, body ? { method: "POST", headers: { "content-type": "application/json", "x-broadcast-key": process.env.BROADCAST_KEY || "" }, body: JSON.stringify(body) } : {});
+    const j = await r.json().catch(() => ({}));
+    if (r.status === 401) return { ok: false, error: "El bot rechazo la clave: BROADCAST_KEY falta o no coincide entre la API y el bot." };
+    if (!r.ok) return { ok: false, error: (j && j.error) || "HTTP " + r.status };
+    return { ok: true, ...j };
+  } catch (e) {
+    return { ok: false, error: "No se pudo conectar con el bot (" + e.message + ")." };
+  }
+}
+
+function controlWhatsappNumbers(data) {
+  const settings = data.appSettings || {};
+  const propios = String(settings.controlWhatsappTo || "").split(/[,;\s]+/).map((x) => x.replace(/\D/g, "")).filter((x) => x.length >= 10);
+  if (propios.length) return propios;
+  return (data.users || []).filter((u) => u && u.role === "manager" && u.isActive !== false && u.phone).map((u) => String(u.phone).replace(/\D/g, "")).filter((x) => x.length >= 10);
+}
+
+async function sendControlWhatsapp(data, linea) {
+  const settings = data.appSettings || {};
+  const templateName = String(settings.controlWhatsappTemplate || "").trim();
+  if (!templateName || settings.controlWhatsappEnabled === false || whatsappOff(settings)) return { sent: 0, skipped: "sin plantilla configurada" };
+  const numbers = controlWhatsappNumbers(data);
+  if (!numbers.length) return { sent: 0, skipped: "sin numero (cargalo en Configuracion o en el telefono del gerente)" };
+  const r = await botRequest("/broadcast", { numbers, templateName, lang: settings.controlWhatsappLang || "es", params: [linea] });
+  return r.ok ? { sent: r.sent || 0, failed: r.failed || 0, errors: r.errors || [], numbers } : { sent: 0, error: r.error };
+}
+
+app.get("/whatsapp/status", authenticate, requireRole("manager", "admin"), async (req, res) => {
+  const health = await botRequest("/health");
+  const row = await pool.query("SELECT data->'appSettings' AS s FROM app_state WHERE id = 'main'").catch(() => ({ rows: [] }));
+  const s = (row.rows[0] && row.rows[0].s) || {};
+  res.json({
+    ok: true,
+    botUrl: !!process.env.BOT_BROADCAST_URL,
+    broadcastKey: !!process.env.BROADCAST_KEY,
+    bot: health.ok ? health.configured || {} : null,
+    botError: health.ok ? "" : health.error,
+    webhookUrl: (process.env.API_DOMAIN ? "https://" + process.env.API_DOMAIN : "https://<dominio de la API>") + "/wa/webhook",
+    templates: {
+      mora: s.dunningWhatsappTemplate || "", feriado: s.holidayTemplateName || "", cambioPedido: s.orderChangeTemplateName || "",
+      subaPrecio: s.priceIncreaseTemplateName || "", resumenControl: s.controlWhatsappTemplate || ""
+    }
+  });
+});
+
+app.post("/whatsapp/test", authenticate, requireRole("manager", "admin"), async (req, res) => {
+  const number = String((req.body && req.body.number) || "").replace(/\D/g, "");
+  const templateName = String((req.body && req.body.templateName) || "").trim();
+  if (number.length < 10) return res.status(400).json({ error: "Numero invalido: usa 549 + caracteristica + numero (ej. 5493871234567)." });
+  if (!templateName) return res.status(400).json({ error: "Elegi la plantilla a probar." });
+  const r = await botRequest("/broadcast", { numbers: [number], templateName, lang: (req.body && req.body.lang) || "es", params: ["Prueba de Pare Carrito: si te llega este mensaje, el bot de WhatsApp esta vinculado."] });
+  if (!r.ok) return res.status(502).json({ error: r.error });
+  res.json({ ok: true, sent: r.sent || 0, failed: r.failed || 0, errors: r.errors || [] });
+});
 
 app.post("/control/daily-email", authenticate, requireRole("manager", "admin"), async (req, res) => {
   const date = String((req.body && req.body.date) || new Date(Date.now() - 3 * 3600 * 1000).toISOString().slice(0, 10));
@@ -1803,13 +1869,12 @@ async function initControlEmailScheduler() {
       const art = nowArt();
       const cfg = await pool.query("SELECT data->'appSettings'->>'controlEmailEnabled' AS e, data->'appSettings'->>'controlEmailHour' AS h FROM app_state WHERE id = 'main'").catch(() => ({ rows: [] }));
       const r0 = cfg.rows[0] || {};
-      if (r0.e === "false") return;
       const hora = Number(r0.h) >= 0 && Number(r0.h) <= 23 && r0.h !== null && r0.h !== "" ? Number(r0.h) : 21;
       if (art.hour < hora || controlEmailLastRunDate === art.dateISO) return;
       controlEmailLastRunDate = art.dateISO;
       await pool.query("UPDATE app_state SET data = jsonb_set(COALESCE(data, '{}'), '{controlEmailLastRunDate}', to_jsonb($1::text)) WHERE id = 'main'", [art.dateISO]).catch(() => {});
-      const r = await sendControlDailyEmail(art.dateISO);
-      console.log("Resumen de Control", art.dateISO, r.sent ? "enviado a " + r.to.join(",") : "no enviado: " + (r.reason || "error de correo"));
+      const r = await sendControlDailyEmail(art.dateISO, { soloWhatsapp: r0.e === "false" });
+      console.log("Resumen de Control", art.dateISO, r.sent ? "enviado a " + r.to.join(",") : "correo no enviado: " + (r.reason || "error de correo"), "| WhatsApp:", JSON.stringify(r.whatsapp || {}));
     } catch (e) { console.error("Resumen de Control fallo:", e.message); }
   }, 5 * 60 * 1000);
 }

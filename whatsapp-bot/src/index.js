@@ -27,7 +27,21 @@ async function getProductNames() {
   return productNamesCache.names;
 }
 
-app.get("/health", (_req, res) => res.json({ ok: true }));
+// Estado de la configuracion (solo si/no, nunca las claves): lo muestra el ERP en Configuracion.
+app.get("/health", (_req, res) => res.json({
+  ok: true,
+  configured: {
+    token: !!config.whatsapp.token,
+    phoneNumberId: !!config.whatsapp.phoneNumberId,
+    verifyTokenCustom: config.whatsapp.verifyToken !== "pare-carrito-webhook",
+    appSecret: !!config.whatsapp.appSecret,
+    broadcastKey: !!process.env.BROADCAST_KEY,
+    notifyNumbers: config.notifyNumbers.length,
+    ownerNumber: !!config.ownerNumber,
+    openrouter: !!config.openrouter.apiKey,
+    erpApiKey: !!config.erp.apiKey
+  }
+}));
 
 // Envio masivo por plantilla (lo llama el ERP, ej. aviso de feriado). Auth por clave compartida.
 app.post("/broadcast", async (req, res) => {
@@ -37,11 +51,12 @@ app.post("/broadcast", async (req, res) => {
   if (!Array.isArray(numbers) || !templateName) return res.status(400).json({ error: "Se espera { numbers, templateName }." });
   let sent = 0;
   let failed = 0;
+  const errors = [];
   for (const n of numbers) {
-    const ok = await wa.sendTemplate(n, templateName, lang, params || []);
-    if (ok) sent += 1; else failed += 1;
+    const r = await wa.sendTemplate(n, templateName, lang, params || []);
+    if (r === true) sent += 1; else { failed += 1; if (wa.lastError) errors.push(wa.lastError); }
   }
-  res.json({ ok: true, sent, failed });
+  res.json({ ok: true, sent, failed, errors: errors.slice(0, 3) });
 });
 
 // Verificacion del webhook (Meta).

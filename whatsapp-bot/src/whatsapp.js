@@ -108,12 +108,17 @@ function extractIncomingMessages(payload) {
 async function sendTemplate(to, templateName, lang, bodyParams) {
   if (!config.whatsapp.token || !config.whatsapp.phoneNumberId) {
     console.log("[wa desactivado] plantilla", templateName, "->", to);
+    module.exports.lastError = "Falta WHATSAPP_TOKEN o WHATSAPP_PHONE_NUMBER_ID en el servidor";
     return false;
   }
   const url = `${GRAPH}/${config.whatsapp.apiVersion}/${config.whatsapp.phoneNumberId}/messages`;
+  // Meta rechaza (error 132018) los parametros con saltos de linea, tabs o mas de 4 espacios
+  // seguidos: se pasan a una sola linea.
+  const limpio = (t) => String(t == null ? "" : t).replace(/[\r\n\t]+/g, " · ").replace(/ {2,}/g, " ").trim().slice(0, 1000);
   const components = (bodyParams && bodyParams.length)
-    ? [{ type: "body", parameters: bodyParams.map((t) => ({ type: "text", text: String(t) })) }]
+    ? [{ type: "body", parameters: bodyParams.map((t) => ({ type: "text", text: limpio(t) })) }]
     : [];
+  module.exports.lastError = "";
   try {
     const res = await fetch(url, {
       method: "POST",
@@ -128,11 +133,15 @@ async function sendTemplate(to, templateName, lang, bodyParams) {
     if (!res.ok) {
       const detail = await res.text().catch(() => "");
       console.error("WA template error", res.status, detail.slice(0, 300));
+      let msg = "HTTP " + res.status;
+      try { const j = JSON.parse(detail); if (j && j.error) msg = (j.error.error_user_msg || j.error.message || msg) + (j.error.code ? " (codigo " + j.error.code + ")" : ""); } catch (e) { /* texto plano */ }
+      module.exports.lastError = msg;
       return false;
     }
     return true;
   } catch (error) {
     console.error("WA template exception:", error.message);
+    module.exports.lastError = error.message;
     return false;
   }
 }

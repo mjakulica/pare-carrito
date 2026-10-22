@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v61";
+  const APP_VERSION = "v62";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -13929,6 +13929,90 @@
     </div>`;
   }
 
+  // ===== Bot de WhatsApp: estado de la vinculacion, prueba y resumen diario =====
+  function whatsappBotPanelHtml() {
+    const st = ui.waStatus;
+    const a = state.appSettings || {};
+    const fila = (ok, texto, ayuda) => `<li style="margin:3px 0">${ok ? "&#9989;" : "&#10060;"} ${texto}${!ok && ayuda ? `<br><span class="muted" style="font-size:12px">${ayuda}</span>` : ""}</li>`;
+    let estado = `<p class="muted">Tocá "Revisar" para ver qué está configurado.</p>`;
+    if (st && st.error) estado = `<div class="alert warn">${escapeHtml(st.error)}</div>`;
+    else if (st) {
+      const b = st.bot || {};
+      const tpl = st.templates || {};
+      estado = `<ul style="list-style:none;padding:0;margin:6px 0">
+        ${fila(!!st.bot, "El bot está corriendo en el servidor", escapeHtml(st.botError || ""))}
+        ${fila(!!b.token && !!b.phoneNumberId, "Conectado a Meta (WHATSAPP_TOKEN y WHATSAPP_PHONE_NUMBER_ID)", "Se cargan en el archivo .env del servidor (pasos 2 y 3 de la guía).")}
+        ${fila(st.broadcastKey && !!b.broadcastKey, "Clave para que el sistema mande avisos (BROADCAST_KEY)", "Agregá BROADCAST_KEY=una-clave-larga en el .env del servidor (la usan la API y el bot).")}
+        ${fila(!!b.appSecret, "Firma de Meta verificada (WHATSAPP_APP_SECRET)", "Recomendado: App Settings → Basic → App Secret.")}
+        ${fila(!!b.erpApiKey, "El bot puede cargar pedidos en el sistema (EXTERNAL_API_KEY)", "")}
+        ${fila(!!b.openrouter, "IA para entender los pedidos (OPENROUTER_API_KEY)", "")}
+        ${fila(b.notifyNumbers > 0 && b.ownerNumber, "Números del equipo y del dueño (NOTIFY_NUMBERS y OWNER_NUMBER)", "Reciben las consultas y confirmaciones de pedidos fuera de hora.")}
+      </ul>
+      <p style="font-size:13px;margin:6px 0">Webhook para Meta: <code>${escapeHtml(st.webhookUrl || "")}</code></p>
+      <p class="muted" style="font-size:12px;margin:0">Plantillas cargadas: ${Object.entries({ "mora": tpl.mora, "feriados": tpl.feriado, "cambios de pedido": tpl.cambioPedido, "suba de precio": tpl.subaPrecio, "resumen de Control": tpl.resumenControl }).map(([k, v]) => `${k}: ${v ? "<strong>" + escapeHtml(v) + "</strong>" : "—"}`).join(" · ")}</p>`;
+    }
+    const plantillas = Array.from(new Set([a.dunningWhatsappTemplate, a.holidayTemplateName, a.orderChangeTemplateName, a.priceIncreaseTemplateName, a.controlWhatsappTemplate].filter(Boolean)));
+    return `<div class="panel">
+      <div class="page-actions" style="justify-content:space-between;align-items:center">
+        <h2 class="page-title" style="font-size:18px;margin:0">WhatsApp (bot)</h2>
+        <button class="btn small ghost" type="button" id="wa-status-check">${ui.waStatusLoading ? "Revisando..." : "Revisar"}</button>
+      </div>
+      ${estado}
+      <h3 style="font-size:15px;margin:12px 0 4px">Mensaje de prueba</h3>
+      <div class="form-grid">
+        <div class="field span-2"><label>Número (549 + característica + número)</label><input id="wa-test-number" inputmode="numeric" placeholder="5493871234567" value="${escapeAttr(((state.users || []).find((u) => u.id === currentUser.id) || {}).phone || "")}" /></div>
+        <div class="field"><label>Plantilla</label>${plantillas.length ? `<select id="wa-test-template">${plantillas.map((t) => `<option>${escapeHtml(t)}</option>`).join("")}</select>` : `<input id="wa-test-template" placeholder="nombre de la plantilla" />`}</div>
+        <div class="field"><label>&nbsp;</label><button class="btn primary" type="button" id="wa-test-send">Enviar prueba</button></div>
+      </div>
+      <h3 style="font-size:15px;margin:12px 0 4px">Resumen diario de Control por WhatsApp</h3>
+      <div class="form-grid">
+        <div class="field span-4"><label><input type="checkbox" id="wa-control-enabled" ${a.controlWhatsappEnabled !== false ? "checked" : ""} style="width:auto;min-height:auto" /> Mandar también por WhatsApp el resumen de cada noche (a la misma hora que el correo)</label></div>
+        <div class="field span-2"><label>Plantilla de Meta (con una variable {{1}})</label><input id="wa-control-template" value="${escapeAttr(a.controlWhatsappTemplate || "")}" placeholder="ej: resumen_control" /></div>
+        <div class="field span-2"><label>Números (vacío = teléfono del gerente)</label><input id="wa-control-to" value="${escapeAttr(a.controlWhatsappTo || "")}" placeholder="5493871234567, 5493877654321" /></div>
+      </div>
+    </div>`;
+  }
+
+  function bindWhatsappBotPanel() {
+    const check = document.getElementById("wa-status-check");
+    const cargar = async () => {
+      ui.waStatusLoading = true; render();
+      try {
+        const r = await cloudRequest(getCloudSyncConfig(), "/whatsapp/status", { method: "GET" });
+        const j = await r.json().catch(() => ({}));
+        ui.waStatus = r.ok ? j : { error: j.error || "HTTP " + r.status };
+      } catch (e) { ui.waStatus = { error: "No se pudo consultar: " + e.message }; }
+      ui.waStatusLoading = false; render();
+    };
+    if (check) check.addEventListener("click", cargar);
+    const send = document.getElementById("wa-test-send");
+    if (send) send.addEventListener("click", async () => {
+      const number = document.getElementById("wa-test-number").value;
+      const templateName = document.getElementById("wa-test-template").value;
+      send.disabled = true; send.textContent = "Enviando...";
+      try {
+        const r = await cloudRequest(getCloudSyncConfig(), "/whatsapp/test", { method: "POST", body: JSON.stringify({ number, templateName }) });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(j.error || "HTTP " + r.status);
+        alert(j.sent ? "Enviado. Si no llega en un minuto, revisá que la plantilla esté aprobada en Meta y que el número esté bien." : "Meta no lo aceptó: " + ((j.errors || []).join(" | ") || "sin detalle (mirá los logs del bot)."));
+      } catch (e) { alert("No se pudo enviar: " + e.message); }
+      send.disabled = false; send.textContent = "Enviar prueba";
+    });
+    const en = document.getElementById("wa-control-enabled");
+    if (en) en.addEventListener("change", () => { state.appSettings.controlWhatsappEnabled = en.checked; saveState(); });
+    const tp = document.getElementById("wa-control-template");
+    if (tp) tp.addEventListener("change", () => { state.appSettings.controlWhatsappTemplate = tp.value.trim(); saveState(); });
+    const to = document.getElementById("wa-control-to");
+    if (to) to.addEventListener("change", () => {
+      const nums = to.value.split(/[,;\s]+/).map((x) => x.replace(/\D/g, "")).filter(Boolean);
+      const malos = nums.filter((x) => x.length < 10);
+      if (malos.length) { alert("Revisá estos números (formato 549 + característica + número): " + malos.join(", ")); return; }
+      state.appSettings.controlWhatsappTo = nums.join(", ");
+      to.value = state.appSettings.controlWhatsappTo;
+      saveState();
+    });
+  }
+
   function controlEmailSettingsHtml() {
     const a = state.appSettings || {};
     const managers = (state.users || []).filter((u) => u && u.role === "manager" && u.isActive !== false && u.email).map((u) => u.email);
@@ -16776,6 +16860,7 @@
             <div class="field span-2"><label>Nombre de plantilla Meta (suba de precio)</label><input id="priceinc-template" value="${escapeAttr((state.appSettings && state.appSettings.priceIncreaseTemplateName) || "")}" placeholder="ej: suba_precio" /></div>
           </div>
         </div>` : ""}
+        ${(currentUser.role === "manager" || currentUser.role === "admin") ? whatsappBotPanelHtml() : ""}
         ${(currentUser.role === "manager" || currentUser.role === "admin") ? `<div class="panel">
           <h2 class="page-title" style="font-size:18px">Resumen diario de Control (correo)</h2>
           <p class="muted">Todas las noches llega un correo con los cruces de la página Control: pedidos sin entregar o sin rendir, caja de cada empleado, transferencias por comprobar y clientes con deuda inusual.</p>
@@ -17113,6 +17198,7 @@
     const dnUnusualMsg = document.getElementById("dunning-unusual-message");
     if (dnUnusualMsg) dnUnusualMsg.addEventListener("change", () => { state.appSettings.dunningUnusualMessage = dnUnusualMsg.value.trim(); saveState(); });
     bindControlEmailSettings();
+    bindWhatsappBotPanel();
     const dnTpl = document.getElementById("dunning-template");
     if (dnTpl) dnTpl.addEventListener("change", () => { state.appSettings.dunningWhatsappTemplate = dnTpl.value.trim(); saveState(); });
     const piMsg = document.getElementById("priceinc-message");

@@ -77,7 +77,19 @@ function controlDailySummary(data, date, debts) {
       ${transfSinComp.length ? "<p><b>Pagos por transferencia sin comprobante (" + transfSinComp.length + ")</b></p><ul>" + transfSinComp.map((p) => "<li>" + esc((clientes.get(p.clientId) || {}).name || p.clientId) + " " + money(p.amount) + "</li>").join("") + "</ul>" : ""}`)}
     ${seccion("4. Clientes con más deuda que lo habitual", !deudas.length, deudas.length ? `<table cellpadding="4" style="border-collapse:collapse"><tr style="background:#eef2f6"><th align="left">Cliente</th><th align="right">Saldo</th><th align="right">Habitual</th><th align="left">Por qué</th></tr>${deudas.map((x) => `<tr><td>${esc(x.clientId + " - " + ((clientes.get(x.clientId) || {}).name || ""))}</td><td align="right"><b>${money(x.actual)}</b></td><td align="right">${x.habitual === null ? "-" : money(x.habitual)}</td><td>${esc(x.motivos.map((m) => m.tipo === "habitual" ? "debe " + money(m.monto) + " más que lo habitual" : m.tipo === "semanas" ? "más de 3 semanas de compras" : (m.dias == null ? "sin pagos registrados" : m.dias + " días sin pagar")).join(", "))}</td></tr>`).join("")}</table>` : "<p>Ninguno.</p>")}
   </div>`;
-  return { html, problemas, counts: { pedidos: orders.length, entregados: entregados.length, sinEntregar: sinEntregar.length, salteados: salteados.length, sinRendir: sinRendir.length, aCuenta: aCuenta.length, sinFoto: sinFoto.length, porComprobar: porComprobar.length, noLlegaron: noLlegaron.length, deudas: deudas.length } };
+  // Version de una linea para WhatsApp (las plantillas de Meta no aceptan saltos de linea).
+  const partes = [];
+  if (sinEntregar.length) partes.push(sinEntregar.length + " sin entregar");
+  if (sinRendir.length) partes.push(sinRendir.length + " sin rendir");
+  if (aCuenta.length) partes.push(aCuenta.length + " a cuenta");
+  caja.filter((c) => !c.ok).forEach((c) => partes.push(c.nombre + (c.cierre ? " caja " + money(c.difCaja) : " sin cierre de caja")));
+  if (porComprobar.length) partes.push(porComprobar.length + " transf. por comprobar");
+  if (noLlegaron.length) partes.push(noLlegaron.length + " transf. no llegaron");
+  if (sinFoto.length) partes.push(sinFoto.length + " sin foto de remito");
+  if (deudas.length) partes.push(deudas.length + " clientes con deuda inusual");
+  const fechaCorta = date.slice(8, 10) + "/" + date.slice(5, 7);
+  const linea = "Control " + fechaCorta + ": " + entregados.length + " de " + orders.length + " entregados. " + (partes.length ? "Revisar: " + partes.join(", ") + "." : "Todo en orden.");
+  return { html, linea, problemas, counts: { pedidos: orders.length, entregados: entregados.length, sinEntregar: sinEntregar.length, salteados: salteados.length, sinRendir: sinRendir.length, aCuenta: aCuenta.length, sinFoto: sinFoto.length, porComprobar: porComprobar.length, noLlegaron: noLlegaron.length, deudas: deudas.length } };
 }
 
 // ---------- Movimientos del banco ----------

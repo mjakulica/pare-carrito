@@ -28,6 +28,7 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-gerente123}
       UPLOAD_DIR: /data/uploads
       PUBLIC_URL: ${PUBLIC_URL:-}
+      API_DOMAIN: ${API_DOMAIN:-}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}
