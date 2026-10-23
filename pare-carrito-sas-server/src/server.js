@@ -3085,7 +3085,8 @@ function recomputeOrderTotalsExt(order) {
 }
 
 function genOrderIdExt(data, dateISO) {
-  const compact = dateISO.replace(/-/g, "");
+  // Mismo formato que la web: ORD-2026.10.23-019-XXX (fecha con puntos).
+  const compact = dateISO.replace(/-/g, ".");
   let n = (data.orders || []).filter((o) => o.date === dateISO).length + 1;
   let id;
   do {
