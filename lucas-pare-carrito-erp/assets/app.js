@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v63";
+  const APP_VERSION = "v64";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -5040,7 +5040,8 @@
           <label>Nota</label>
           <input data-note placeholder="comentarios?" value="${escapeAttr(draft.note || "")}" />
         </div>
-        ${options.hideOrderPrices ? `<input type="hidden" data-price value="${formatAmountInput(price)}" />` : `<div class="field order-price-field">
+        ${options.isCustomerOrder ? `<input type="hidden" data-price value="${formatAmountInput(price)}" />
+        <div class="order-ref-price"><strong>${formatMoney(price)}${client && shouldApplyInvoiceVat(client) && getIvaRate(product.ivaType) > 0 ? " + IVA" : ""}</strong><span class="muted">${(() => { const ld = getProductLastPriceUpdate(product.id); return ld ? "Act. " + formatDate(ld) : ""; })()}</span></div>` : options.hideOrderPrices ? `<input type="hidden" data-price value="${formatAmountInput(price)}" />` : `<div class="field order-price-field">
           <label>Precio unitario</label>
           <input data-price value="${formatAmountInput(price)}" inputmode="decimal" />
         </div>`}
@@ -5132,7 +5133,7 @@
     afterRender.push(bindNewOrder);
     return pageShell(
       "Nuevo Pedido",
-      isCustomerOrder ? "Cargue su pedido. Los precios se calculan internamente para la cuenta." : "Carga rápida con favoritos por cliente.",
+      isCustomerOrder ? "Cargue su pedido. Los precios son de referencia." : "Carga rápida con favoritos por cliente.",
       `<button class="btn ghost" data-route="pedidos">${isCustomerOrder ? "Ver mis pedidos" : "Ver pedidos"}</button>${isCustomerOrder ? "" : `<button class="btn ghost" id="order-holidays-btn" type="button">Feriados</button>`}`,
       `
       <form id="new-order-form" class="grid ${isCustomerOrder ? "customer-order-form" : "admin-order-form"}">
@@ -5155,7 +5156,7 @@
             </div>`}
             <div class="field order-notes-field">
               <label>Notas del pedido</label>
-              <textarea id="order-notes" placeholder="Notas generales para reparto o remito"></textarea>
+              <textarea id="order-notes" placeholder="Notas generales para reparto o remito">${escapeHtml(ui.orderNotesDraft || "")}</textarea>
             </div>
             ${showCustomerLateWarning ? `<div class="alert order-late-warning">Los pedidos se toman hasta las 5:30 am, en caso de necesitarlo para hoy, por favor comunicarse al 3874566725</div>` : ""}
             <div class="field order-search-row">
@@ -5189,30 +5190,31 @@
               </div>
             </div>
           </div>
-          ${isCustomerOrder ? "" : `<div class="panel order-whatsapp-panel">
+          <div class="panel order-whatsapp-panel" id="order-whatsapp-panel">
             <div class="field order-whatsapp-field">
               <label>Pegar pedido de WhatsApp</label>
               <textarea id="order-whatsapp-paste" placeholder="Banana 1/2 doc&#10;Cebolla morada 1kg&#10;Uva 500gr">${escapeHtml(ui.orderWhatsappDraft || "")}</textarea>
-              <div class="order-whatsapp-actions">
-                <button class="btn ghost" id="parse-whatsapp-order" type="button">Cargar</button>
-                <button class="btn ghost" id="open-order-aliases" type="button">Ver alias</button>
+              <div class="order-whatsapp-actions ${isCustomerOrder ? "solo-cargar" : ""}">
+                <button class="btn ${isCustomerOrder ? "primary" : "ghost"}" id="parse-whatsapp-order" type="button">Cargar</button>
+                ${isCustomerOrder ? "" : `<button class="btn ghost" id="open-order-aliases" type="button">Ver alias</button>
                 <button class="btn ghost" id="order-image-ocr-button" type="button">Subir imagen</button>
-                <button class="btn ghost" id="new-product-btn" type="button">Nuevo producto</button>
+                <button class="btn ghost" id="new-product-btn" type="button">Nuevo producto</button>`}
               </div>
-              <input type="file" id="order-image-ocr-file" accept="image/*" hidden />
-              <span class="muted" id="order-image-ocr-status"></span>
+              ${isCustomerOrder ? "" : `<input type="file" id="order-image-ocr-file" accept="image/*" hidden />
+              <span class="muted" id="order-image-ocr-status"></span>`}
               <div id="order-parse-warning" class="alert" style="display:none"></div>
             </div>
-          </div>`}
+          </div>
         </div>
           <aside class="panel order-cart-panel" id="order-cart-panel">
             <div class="order-cart-head" data-order-cart-drag>
               <h2 class="page-title" style="font-size:18px">Carrito</h2>
+              ${isCustomerOrder ? `<span class="order-cart-ref">Precios de Referencia</span>` : ""}
               <img class="order-cart-drag-logo" src="./assets/cart-drag-handle.png" alt="" aria-hidden="true" />
             </div>
             <div id="order-cart" class="cart-list"><div class="empty compact">Sin productos agregados.</div></div>
-            ${hideOrderPrices ? "" : `<div class="order-total-summary">
-              <div class="order-total-main"><span>Total</span><strong id="order-total">$0</strong></div>
+            ${hideOrderPrices && !isCustomerOrder ? "" : `<div class="order-total-summary">
+              <div class="order-total-main"><span>${isCustomerOrder ? "Total Estimado" : "Total"}</span><strong id="order-total">$0</strong></div>
               ${client && shouldApplyInvoiceVat(client) ? `<div class="metric-note" id="order-net-total">Subtotal $0</div><div class="metric-note" id="order-vat-total">IVA $0</div>` : ""}
             </div>`}
             <button class="btn primary full" type="submit">Enviar Pedido</button>
@@ -5220,7 +5222,12 @@
         </div>
         ${wholesaleFilterButtons}
         ${categoryFilterButtons}
-        <div class="order-product-count" id="order-product-count">Mostrando ${renderedProductCount} de ${visibleProductCount} producto${visibleProductCount === 1 ? "" : "s"}</div>
+        ${isCustomerOrder ? `<div class="order-count-row">
+          <div class="order-product-count" id="order-product-count">Mostrando ${renderedProductCount} de ${visibleProductCount} producto${visibleProductCount === 1 ? "" : "s"}</div>
+          <div class="order-ref-title">Precios de Referencia</div>
+          <div></div>
+        </div>
+        <div class="order-ref-note">los precios pueden cambiar según el mercado sin previo aviso</div>` : `<div class="order-product-count" id="order-product-count">Mostrando ${renderedProductCount} de ${visibleProductCount} producto${visibleProductCount === 1 ? "" : "s"}</div>`}
         <div class="order-grid ${ui.orderView === "grid" ? "order-grid-cards" : ""}">${productRows}</div>
         <div class="order-load-more-wrap" id="order-load-more-wrap">${renderedProductCount < visibleProductCount ? `<button class="btn ghost small" id="load-more-order-products" type="button">Cargar más</button>` : ""}</div>
       </form>
@@ -5256,25 +5263,31 @@
         panel.style.right = "";
         panel.style.top = "";
       };
+      // Cada vez que se abre Nuevo Pedido el carrito arranca debajo del recuadro de WhatsApp. Se
+      // puede mover, pero ya no se recuerda la posicion de la vez anterior.
+      try { localStorage.removeItem(ORDER_CART_POSITION_KEY); } catch { /* sin almacenamiento */ }
+      let movido = false;
       const applyPosition = () => {
         if (isMobile()) {
           clearDesktopPosition();
+          panel.style.width = "";
           return;
         }
-        let saved = null;
-        try {
-          saved = JSON.parse(localStorage.getItem(ORDER_CART_POSITION_KEY) || "null");
-        } catch {
-          saved = null;
-        }
-        if (!saved || !Number.isFinite(Number(saved.left)) || !Number.isFinite(Number(saved.top))) return;
-        const next = clampPosition(Number(saved.left), Number(saved.top));
-        panel.style.left = next.left + "px";
-        panel.style.top = next.top + "px";
+        if (movido) return;
+        const wa = document.getElementById("order-whatsapp-panel");
+        if (!wa || !document.body.contains(panel)) return;
+        const rect = wa.getBoundingClientRect();
+        if (!rect.width) return;
+        // Debajo del recuadro de WhatsApp; al bajar por los productos sube con la pagina hasta
+        // quedar fijo arriba (debajo de la barra superior) y sigue acompañando la lista.
+        panel.style.width = Math.max(300, Math.round(rect.width)) + "px";
+        panel.style.left = Math.round(rect.left) + "px";
+        panel.style.top = Math.max(82, Math.round(rect.bottom + 10)) + "px";
         panel.style.right = "auto";
       };
       applyPosition();
       window.addEventListener("resize", applyPosition, { passive: true });
+      window.addEventListener("scroll", applyPosition, { passive: true });
       handle.addEventListener("pointerdown", (event) => {
         if (isMobile() || event.button !== 0) return;
         event.preventDefault();
@@ -5295,12 +5308,7 @@
           handle.removeEventListener("pointerup", stop);
           handle.removeEventListener("pointercancel", stop);
           panel.classList.remove("dragging");
-          const rect = panel.getBoundingClientRect();
-          try {
-            localStorage.setItem(ORDER_CART_POSITION_KEY, JSON.stringify({ left: Math.round(rect.left), top: Math.round(rect.top) }));
-          } catch {
-            // Si localStorage esta bloqueado, el carrito sigue funcionando sin recordar posicion.
-          }
+          movido = true;
         };
         handle.addEventListener("pointermove", move);
         handle.addEventListener("pointerup", stop);
@@ -5332,7 +5340,7 @@
       const items = collectOrderDraftItems(client, false);
       const subtotalTotal = items.reduce((sum, item) => sum + item.subtotal, 0);
       const vatTotal = items.reduce((sum, item) => sum + item.ivaAmount, 0);
-      document.getElementById("order-cart").innerHTML = renderOrderCart(items, { showPrices: !hideOrderPrices, showIva: client && shouldApplyInvoiceVat(client) });
+      document.getElementById("order-cart").innerHTML = renderOrderCart(items, { showPrices: !hideOrderPrices || isCustomerOrder, showIva: client && shouldApplyInvoiceVat(client) });
       const netTotal = document.getElementById("order-net-total");
       const vatTotalNode = document.getElementById("order-vat-total");
       const orderTotal = document.getElementById("order-total");
@@ -5713,12 +5721,22 @@
       }
       const client = getClient(clientSelect.value);
       if (!client) return alert("Seleccione un cliente.");
-      const items = collectOrderDraftItems(client, true);
+      // En el paso "Revisar" del cliente todavia no se guardan las preferencias (ultima compra).
+      const items = collectOrderDraftItems(client, !(isCustomerOrder && !ui.orderReviewConfirmed));
       if (!items.length) return alert("Ingrese al menos un producto con cantidad.");
       const subtotalAmount = items.reduce((sum, item) => sum + item.subtotal, 0);
       const ivaAmount = items.reduce((sum, item) => sum + item.ivaAmount, 0);
       const date = document.getElementById("order-date").value || todayISO();
       if (isCustomerOrder && date < getCustomerMinOrderDate()) return alert("Seleccione una fecha permitida para el pedido.");
+      // El cliente ve el pedido completo y lo confirma antes de que se envie.
+      if (isCustomerOrder && !ui.orderReviewConfirmed) {
+        ui.orderNotesDraft = document.getElementById("order-notes").value;
+        ui.selectedDate = date;
+        openOrderReviewModal(client, items, date, ui.orderNotesDraft);
+        return;
+      }
+      ui.orderReviewConfirmed = false;
+      ui.orderNotesDraft = "";
       const order = {
         id: currentUser.role === "example" ? nextDatedId("EJ", state.exampleOrders || []) : nextDatedId("ORD", (state.orders || []).concat(state.deletedOrders || [])),
         userId: currentUser.id,
@@ -5944,6 +5962,44 @@
       });
     });
     return items;
+  }
+
+  function openOrderReviewModal(client, items, date, notes) {
+    const conIva = client && shouldApplyInvoiceVat(client);
+    const subtotal = items.reduce((sum, item) => sum + item.subtotal, 0);
+    const iva = items.reduce((sum, item) => sum + item.ivaAmount, 0);
+    const envio = Math.max(0, Number(client.shippingFee || 0) || 0);
+    const total = subtotal + iva + envio + (conIva ? envio * 0.105 : 0);
+    const body = `
+      <div class="order-review">
+        <div style="margin-bottom:8px"><strong>${escapeHtml(client.name)}</strong> · entrega ${formatDate(date)}</div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Producto</th><th class="num">Cantidad</th><th class="num">Precio ref.</th><th class="num">Subtotal</th></tr></thead>
+          <tbody>${items.map((item) => `<tr>
+            <td>${escapeHtml(item.productName)}${item.note ? `<br><small class="muted">${escapeHtml(item.note)}</small>` : ""}</td>
+            <td class="num">${formatNumber(item.quantity)} ${escapeHtml(item.unitType || "")}</td>
+            <td class="num">${formatMoney(item.unitPrice)}</td>
+            <td class="num">${formatMoney(item.subtotal)}</td>
+          </tr>`).join("")}</tbody>
+        </table></div>
+        ${conIva ? `<div class="order-review-line"><span>Subtotal</span><span>${formatMoney(subtotal)}</span></div><div class="order-review-line"><span>IVA</span><span>${formatMoney(iva)}</span></div>` : ""}
+        ${envio ? `<div class="order-review-line"><span>Envío</span><span>${formatMoney(envio)}</span></div>` : ""}
+        <div class="order-review-line total"><span>Total Estimado</span><strong>${formatMoney(total)}</strong></div>
+        ${notes ? `<div class="note-text" style="margin-top:8px">Notas: ${escapeHtml(notes)}</div>` : ""}
+        <p class="muted" style="font-size:12px;margin:8px 0 0">Precios de referencia: pueden cambiar según el mercado sin previo aviso.</p>
+      </div>`;
+    showModal("Revisar", body, () => {
+      const ok = document.getElementById("modal-save");
+      if (ok) ok.addEventListener("click", () => {
+        ui.orderReviewConfirmed = true;
+        closeModal();
+        setTimeout(() => {
+          const f = document.getElementById("new-order-form");
+          if (!f) { ui.orderReviewConfirmed = false; return; }
+          if (f.requestSubmit) f.requestSubmit(); else f.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+        }, 0);
+      });
+    }, { saveLabel: "Confirmar pedido", cancelLabel: "Volver", className: "wide" });
   }
 
   function renderOrderCart(items, options) {
