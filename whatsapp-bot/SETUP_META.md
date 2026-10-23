@@ -100,6 +100,28 @@ En **Configuración → WhatsApp (bot)** del ERP, el botón **Revisar** muestra 
 y **Enviar prueba** manda una plantilla a tu número para confirmar que todo está vinculado.
 
 ## 7) Probar
+### Administrar las plantillas desde el ERP
+
+En **Configuración → Plantillas de WhatsApp**, pulsá **Consultar Meta**. El editor permite
+consultar estado y motivo de rechazo, crear plantillas y enviar cambios de texto y ejemplo.
+La vista previa reemplaza `{{1}}` por un ejemplo ficticio. Los cambios solo se envían al pulsar
+el botón de envío; consultar o escribir en el editor no modifica Meta ni manda mensajes a clientes.
+
+En el mismo `.env` del servidor agregá `WHATSAPP_BUSINESS_ACCOUNT_ID=<WABA ID>` y recreá
+`api` y `whatsapp-bot` tras desplegar esta versión. Es el ID de la **cuenta** de WhatsApp,
+no el Phone Number ID ni el ID del portfolio comercial. La cuenta se muestra en el editor:
+verificá que sea la de prueba o la de producción que querés administrar.
+El token del bot debe tener `whatsapp_business_management` y acceso a esa WABA.
+El token y la clave interna no se entregan al navegador.
+
+El editor conserva una sola variable posicional `{{1}}` en el cuerpo y un pie opcional.
+Las plantillas con imágenes, encabezados, botones u otras variables se consultan pero se editan
+en WhatsApp Manager, para no perder componentes. Meta bloquea la edición mientras están en revisión;
+solo se habilita para estados `APPROVED`, `REJECTED` y `PAUSED`. El cambio de categoría se envía
+solo para plantillas rechazadas. Para otra categoría cuando no sea editable, creá una plantilla
+nueva con otro nombre y actualizá el nombre del aviso en el ERP cuando corresponda.
+La respuesta de Meta y la consulta posterior determinan el estado; guardar no implica aprobación.
+
 1. Desde tu WhatsApp personal, mandá un mensaje al **número de WhatsApp Business** (o, en modo test,
    agregá tu número como "destinatario de prueba" en API Setup).
 2. Como tu número personal probablemente **no** es un cliente del ERP, el bot va a avisarte a vos

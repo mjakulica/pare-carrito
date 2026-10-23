@@ -4,6 +4,7 @@
 const { spawn } = require("child_process");
 const path = require("path");
 const assert = require("assert");
+const jwt = require("jsonwebtoken");
 
 const PORT = Number(process.env.SMOKE_PORT || 3999);
 const BASE = "http://127.0.0.1:" + PORT;
@@ -72,6 +73,15 @@ async function pedir(metodo, ruta, token, cuerpo) {
     const sinToken = await pedir("GET", "/state", null);
     assert.strictEqual(sinToken.status, 401, "sin token deberia dar 401");
     console.log("ok  sin token -> 401");
+
+    for (const [method, route] of [["GET", "/whatsapp/templates"], ["POST", "/whatsapp/templates"], ["POST", "/whatsapp/templates/123"]]) {
+      assert.strictEqual((await pedir(method, route, null, method === "POST" ? {} : undefined)).status, 401);
+      for (const role of ["employee", "customer", "example", "contador"]) {
+        const limited = jwt.sign({ id: "prueba-roles", username: "prueba-roles", role }, process.env.JWT_SECRET, { expiresIn: "1m" });
+        assert.strictEqual((await pedir(method, route, limited, method === "POST" ? {} : undefined)).status, 403, role + " no debe gestionar plantillas");
+      }
+    }
+    console.log("ok  gestión de plantillas protegida por sesión y rol");
   } catch (error) {
     fallo = error;
   } finally {
