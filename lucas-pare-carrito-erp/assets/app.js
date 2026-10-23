@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v65";
+  const APP_VERSION = "v66";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -5041,7 +5041,7 @@
           <input data-note placeholder="comentarios?" value="${escapeAttr(draft.note || "")}" />
         </div>
         ${options.isCustomerOrder ? `<input type="hidden" data-price value="${formatAmountInput(price)}" />
-        <div class="order-ref-price"><strong>${formatMoney(price)}${client && shouldApplyInvoiceVat(client) && getIvaRate(product.ivaType) > 0 ? " + IVA" : ""}</strong><span class="muted">${(() => { const ld = getProductLastPriceUpdate(product.id); return ld ? "Act. " + formatDate(ld) : ""; })()}</span></div>` : options.hideOrderPrices ? `<input type="hidden" data-price value="${formatAmountInput(price)}" />` : `<div class="field order-price-field">
+        <div class="order-ref-price"><strong>${formatMoney(price)}${client && shouldApplyInvoiceVat(client) && getIvaRate(product.ivaType) > 0 ? " + IVA" : ""}</strong><span class="muted">${(() => { const ld = getProductLastPriceUpdate(product.id); return ld ? "desde " + formatDate(ld) : ""; })()}</span></div>` : options.hideOrderPrices ? `<input type="hidden" data-price value="${formatAmountInput(price)}" />` : `<div class="field order-price-field">
           <label>Precio unitario</label>
           <input data-price value="${formatAmountInput(price)}" inputmode="decimal" />
         </div>`}
