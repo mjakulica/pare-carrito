@@ -130,6 +130,12 @@ La respuesta de Meta y la consulta posterior determinan el estado; guardar no im
    (campo teléfono) y mandá "pasame 2 cajones de tomate y 1 de banana".
 4. Revisá los logs del bot: `docker compose logs -f whatsapp-bot`.
 
+Si Meta rechaza un celular argentino `549...` con el código `131030` (fuera de la
+lista permitida), el bot reintenta una vez con `54...`. Esto cubre la diferencia
+observada entre el remitente del webhook y el número admitido en las pruebas.
+Se aplica a textos y plantillas, sin cambiar el teléfono con el que se busca al
+cliente. No reintenta mensajes aceptados, errores de red ni otros rechazos.
+
 ---
 
 ## Notas / límites

@@ -5,6 +5,29 @@ const { config } = require("./config");
 
 const GRAPH = "https://graph.facebook.com";
 
+// La lista de destinatarios de prueba puede guardar un celular argentino con 54
+// aunque el webhook lo identifique con 549. Solo reintentamos tras un rechazo
+// explicito 131030: nunca ante un timeout, un envio aceptado u otro error.
+async function postMessage(url, payload) {
+  async function attempt(body) {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer " + config.whatsapp.token },
+      body: JSON.stringify(body)
+    });
+    const detail = res.ok ? "" : await res.text().catch(() => "");
+    return { res, detail };
+  }
+  let result = await attempt(payload);
+  let code;
+  try { code = JSON.parse(result.detail).error?.code; } catch { /* respuesta no JSON */ }
+  if (result.res.status === 400 && code === 131030 && /^549\d{10}$/.test(payload.to)) {
+    console.info("WA: reintento con formato argentino 54 tras rechazo 131030.");
+    result = await attempt({ ...payload, to: "54" + payload.to.slice(3) });
+  }
+  return result;
+}
+
 // Envia un mensaje de texto a un numero (formato internacional sin +).
 async function sendText(to, body) {
   if (!config.whatsapp.token || !config.whatsapp.phoneNumberId) {
@@ -13,21 +36,13 @@ async function sendText(to, body) {
   }
   const url = `${GRAPH}/${config.whatsapp.apiVersion}/${config.whatsapp.phoneNumberId}/messages`;
   try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: "Bearer " + config.whatsapp.token
-      },
-      body: JSON.stringify({
-        messaging_product: "whatsapp",
-        to: String(to).replace(/[^\d]/g, ""),
-        type: "text",
-        text: { body: String(body).slice(0, 4096) }
-      })
+    const { res, detail } = await postMessage(url, {
+      messaging_product: "whatsapp",
+      to: String(to).replace(/[^\d]/g, ""),
+      type: "text",
+      text: { body: String(body).slice(0, 4096) }
     });
     if (!res.ok) {
-      const detail = await res.text().catch(() => "");
       console.error("WA send error", res.status, detail.slice(0, 300));
       return false;
     }
@@ -120,18 +135,13 @@ async function sendTemplate(to, templateName, lang, bodyParams) {
     : [];
   module.exports.lastError = "";
   try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "content-type": "application/json", authorization: "Bearer " + config.whatsapp.token },
-      body: JSON.stringify({
-        messaging_product: "whatsapp",
-        to: String(to).replace(/[^\d]/g, ""),
-        type: "template",
-        template: { name: templateName, language: { code: lang || "es" }, components }
-      })
+    const { res, detail } = await postMessage(url, {
+      messaging_product: "whatsapp",
+      to: String(to).replace(/[^\d]/g, ""),
+      type: "template",
+      template: { name: templateName, language: { code: lang || "es" }, components }
     });
     if (!res.ok) {
-      const detail = await res.text().catch(() => "");
       console.error("WA template error", res.status, detail.slice(0, 300));
       let msg = "HTTP " + res.status;
       try { const j = JSON.parse(detail); if (j && j.error) msg = (j.error.error_user_msg || j.error.message || msg) + (j.error.code ? " (codigo " + j.error.code + ")" : ""); } catch (e) { /* texto plano */ }
