@@ -509,6 +509,58 @@ app.post("/auth/recover", async (req, res) => {
   res.json({ ok: true, message: "Si el usuario existe y tiene correo registrado, le envíamos las instrucciones." });
 });
 
+// Datos propios desde Configuracion (cualquier rol): nombre, correo, telefono y contraseña. Va directo
+// al servidor y actualiza a la vez el usuario del estado y el de la tabla de acceso. Antes se cambiaba
+// solo en el dispositivo: el cliente no sincroniza usuarios, y para el equipo el cambio se perdia si
+// otro dispositivo habia guardado justo antes (el parche desactualizado no modifica usuarios).
+app.post("/auth/profile", authenticate, async (req, res) => {
+  const b = req.body || {};
+  const userId = String(req.user.sub || "");
+  const newPassword = b.newPassword == null ? "" : String(b.newPassword);
+  if (newPassword && newPassword.length < 6) return res.status(400).json({ error: "La contraseña nueva debe tener al menos 6 caracteres." });
+  const clientDb = await pool.connect();
+  try {
+    await clientDb.query("BEGIN");
+    const acceso = await clientDb.query("SELECT id, password_hash FROM users WHERE id = $1 FOR UPDATE", [userId]);
+    if (!acceso.rows.length) { await clientDb.query("ROLLBACK"); return res.status(404).json({ error: "Usuario no encontrado." }); }
+    if (newPassword) {
+      const actualOk = acceso.rows[0].password_hash && await bcrypt.compare(String(b.currentPassword || ""), acceso.rows[0].password_hash);
+      if (!actualOk) { await clientDb.query("ROLLBACK"); return res.status(400).json({ error: "La contraseña actual no es correcta." }); }
+    }
+    const stateRow = await clientDb.query("SELECT data FROM app_state WHERE id = 'main' FOR UPDATE");
+    const data = stateRow.rows.length ? stateRow.rows[0].data || {} : {};
+    const stateUser = (data.users || []).find((u) => u && String(u.id) === userId);
+    const cambios = {};
+    if (typeof b.name === "string" && b.name.trim()) cambios.name = b.name.trim().slice(0, 120);
+    if (typeof b.email === "string") cambios.email = b.email.trim().slice(0, 160);
+    if (typeof b.phone === "string") cambios.phone = b.phone.trim().slice(0, 40);
+    if (cambios.email && stateUser) {
+      const otro = (data.users || []).find((u) => u && String(u.id) !== userId && String(u.email || "").toLowerCase() === cambios.email.toLowerCase() && !(u.role === "customer" && stateUser.role === "customer"));
+      if (otro) { await clientDb.query("ROLLBACK"); return res.status(400).json({ error: "Ese correo ya esta usado por otro usuario." }); }
+    }
+    if (newPassword) cambios.password = newPassword;
+    if (stateUser) {
+      Object.assign(stateUser, cambios, { updatedAt: new Date().toISOString() });
+      await clientDb.query("UPDATE app_state SET data = $1, updated_at = now(), updated_by = $2 WHERE id = 'main'", [data, req.user.username]);
+    }
+    if (newPassword) {
+      const hash = await bcrypt.hash(newPassword, 10);
+      await clientDb.query("UPDATE users SET password_hash = $1, password_fingerprint = $2, updated_at = now() WHERE id = $3", [hash, fingerprint(newPassword), userId]);
+    }
+    if (cambios.name || cambios.email !== undefined) {
+      await clientDb.query("UPDATE users SET name = COALESCE($1, name), email = COALESCE($2, email), updated_at = now() WHERE id = $3", [cambios.name || null, cambios.email !== undefined ? cambios.email : null, userId]);
+    }
+    await clientDb.query("COMMIT");
+    res.json({ ok: true, passwordChanged: !!newPassword, user: stateUser ? { id: stateUser.id, name: stateUser.name, email: stateUser.email || "", phone: stateUser.phone || "" } : null });
+  } catch (error) {
+    await clientDb.query("ROLLBACK").catch(() => {});
+    console.error("auth/profile:", error.message);
+    res.status(500).json({ error: "No se pudieron guardar los datos." });
+  } finally {
+    clientDb.release();
+  }
+});
+
 app.post("/auth/reset", async (req, res) => {
   const { token, password } = req.body || {};
   if (!token || !password) return res.status(400).json({ error: "Faltan datos." });
