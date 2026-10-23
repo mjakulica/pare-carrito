@@ -4320,11 +4320,11 @@ tr:last-child td {
 .order-whatsapp-actions.solo-cargar { grid-template-columns: minmax(0, 1fr); }
 .order-ref-price { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 13px; }
 .order-ref-price .muted { font-size: 11px; white-space: nowrap; }
-.order-cart-head { position: relative; }
-.order-cart-ref { position: absolute; left: 50%; transform: translateX(-50%); font-weight: 700; font-size: 13px; white-space: nowrap; pointer-events: none; }
+.order-cart-head.con-ref { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; }
+.order-cart-ref { font-weight: 800; font-size: 26px; line-height: 1.1; text-align: center; pointer-events: none; }
 .order-count-row { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; }
 .order-count-row .order-product-count { margin: 0; }
-.order-ref-title { font-weight: 800; font-size: 16px; text-align: center; }
+.order-ref-title { font-weight: 800; font-size: 32px; line-height: 1.15; text-align: center; }
 .order-ref-note { text-align: center; font-size: 12px; color: var(--muted); margin: 2px 0 8px; }
 .order-review-line { display: flex; justify-content: space-between; padding: 3px 0; }
 .order-review-line.total { border-top: 1px solid var(--line); margin-top: 4px; padding-top: 6px; font-size: 16px; }
