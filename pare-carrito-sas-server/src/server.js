@@ -375,7 +375,50 @@ app.post("/auth/login", async (req, res) => {
   if (!user.is_active) {
     return res.status(403).json({ error: "Su cuenta queda pendiente de aprobación, por favor comunicarse con administración para empezar a trabajar con nosotros.", pending: true });
   }
-  res.json({ token: signToken(user), role: user.role, name: user.name, username: user.username, expiresIn: JWT_EXPIRES });
+  // La web ya no ve las contraseñas: el aviso de "use una contraseña propia" lo decide el servidor.
+  const defaultPassword = ["manager", "admin", "employee", "contador"].includes(user.role) && DEFAULT_PASSWORDS.includes(String(password));
+  res.json({ token: signToken(user), role: user.role, name: user.name, username: user.username, expiresIn: JWT_EXPIRES, defaultPassword });
+});
+
+// Vincular otra cuenta de cliente (Configuracion del cliente): se verifica la contraseña de esa
+// cuenta en el servidor, ya que la web no tiene las contraseñas.
+app.post("/auth/link-account", authenticate, requireRole("customer", "example"), async (req, res) => {
+  const username = String((req.body && req.body.username) || "").trim().toLowerCase();
+  const password = String((req.body && req.body.password) || "");
+  const unlinkClientId = String((req.body && req.body.unlinkClientId) || "");
+  const clientDb = await pool.connect();
+  try {
+    await clientDb.query("BEGIN");
+    const stateRow = await clientDb.query("SELECT data FROM app_state WHERE id = 'main' FOR UPDATE");
+    const data = stateRow.rows.length ? stateRow.rows[0].data || {} : {};
+    const yo = (data.users || []).find((u) => u && String(u.id) === String(req.user.sub));
+    if (!yo) { await clientDb.query("ROLLBACK"); return res.status(404).json({ error: "Usuario no encontrado." }); }
+    let ids = Array.from(new Set([...(yo.linkedClientIds || []), yo.clientId].filter(Boolean)));
+    if (unlinkClientId) {
+      if (unlinkClientId === yo.clientId) { await clientDb.query("ROLLBACK"); return res.status(400).json({ error: "No se puede desvincular la cuenta principal." }); }
+      ids = ids.filter((id) => id !== unlinkClientId);
+    } else {
+      const { rows } = await clientDb.query("SELECT * FROM users WHERE role = 'customer' AND lower(username) = $1", [username]);
+      const otro = rows[0];
+      if (!otro || !otro.password_hash || !otro.client_id || !(await bcrypt.compare(password, otro.password_hash))) {
+        await clientDb.query("ROLLBACK");
+        return res.status(400).json({ error: "Usuario o contraseña de la cuenta vinculada incorrectos." });
+      }
+      ids = Array.from(new Set([...ids, otro.client_id]));
+    }
+    yo.linkedClientIds = ids;
+    yo.updatedAt = new Date().toISOString();
+    await clientDb.query("UPDATE app_state SET data = $1, updated_at = now(), updated_by = $2 WHERE id = 'main'", [data, req.user.username]);
+    await clientDb.query("UPDATE users SET linked_client_ids = $1, updated_at = now() WHERE id = $2", [JSON.stringify(ids), yo.id]);
+    await clientDb.query("COMMIT");
+    res.json({ ok: true, linkedClientIds: ids });
+  } catch (error) {
+    await clientDb.query("ROLLBACK").catch(() => {});
+    console.error("auth/link-account:", error.message);
+    res.status(500).json({ error: "No se pudo vincular la cuenta." });
+  } finally {
+    clientDb.release();
+  }
 });
 
 // ---------- Registro de clientes y recuperación de contraseña ----------
@@ -419,7 +462,7 @@ app.post("/auth/register", async (req, res) => {
     notes: String(b.notes || "").trim()
   };
   const user = {
-    id: "USR-REG-" + Date.now(), name: client.name, username, password: String(b.password), role: "customer",
+    id: "USR-REG-" + Date.now(), name: client.name, username, role: "customer", passwordSetAt: new Date().toISOString(),
     clientId, linkedClientIds: [clientId], email: client.email, phone: client.phone,
     isActive: false, pendingApproval: true, registeredAt: new Date().toISOString()
   };
@@ -444,7 +487,7 @@ app.post("/auth/register", async (req, res) => {
     current.users.push(user);
     await clientDb.query("UPDATE app_state SET data = $1, updated_at = now(), updated_by = 'registro-web' WHERE id = 'main'", [current]);
     await clientDb.query("INSERT INTO state_history (data, updated_by) VALUES ($1, 'registro-web')", [current]);
-    await syncUsersFromState(clientDb, { users: [user] });
+    await syncUsersFromState(clientDb, { users: [user] }, new Map([[String(user.id), String(b.password)]]));
     await clientDb.query("COMMIT");
   } catch (error) {
     await clientDb.query("ROLLBACK").catch(() => {});
@@ -538,8 +581,9 @@ app.post("/auth/profile", authenticate, async (req, res) => {
       const otro = (data.users || []).find((u) => u && String(u.id) !== userId && String(u.email || "").toLowerCase() === cambios.email.toLowerCase() && !(u.role === "customer" && stateUser.role === "customer"));
       if (otro) { await clientDb.query("ROLLBACK"); return res.status(400).json({ error: "Ese correo ya esta usado por otro usuario." }); }
     }
-    if (newPassword) cambios.password = newPassword;
     if (stateUser) {
+      delete stateUser.password;
+      if (newPassword) cambios.passwordSetAt = new Date().toISOString();
       Object.assign(stateUser, cambios, { updatedAt: new Date().toISOString() });
       await clientDb.query("UPDATE app_state SET data = $1, updated_at = now(), updated_by = $2 WHERE id = 'main'", [data, req.user.username]);
     }
@@ -579,7 +623,8 @@ app.post("/auth/reset", async (req, res) => {
       const data = stateRow.rows[0].data;
       const stateUser = (data.users || []).find((u) => u.id === reset.user_id);
       if (stateUser) {
-        stateUser.password = String(password);
+        delete stateUser.password;
+        stateUser.passwordSetAt = new Date().toISOString();
         await clientDb.query("UPDATE app_state SET data = $1, updated_at = now(), updated_by = 'reset-password' WHERE id = 'main'", [data]);
       }
     }
@@ -1616,7 +1661,7 @@ app.get("/state", authenticate, requireRole(...STATE_READ_ROLES), async (req, re
   const customDays = Number(req.query.days || 0) > 0 ? Number(req.query.days) : 0;
   const presetName = requested === "full" ? "" : (requested || STATE_WINDOW_DEFAULT);
   const built = buildWindowedState(clean, presetName, customDays);
-  res.json({ data: built.data, window: built.window, updatedAt: rows[0].updated_at.toISOString() });
+  res.json({ data: stripPasswordsForClient(built.data), window: built.window, updatedAt: rows[0].updated_at.toISOString() });
 });
 
 app.get("/product-history", authenticate, requireRole("manager", "admin"), async (req, res) => {
@@ -1692,6 +1737,7 @@ app.put("/state", authenticate, requireRole(...SYNC_ROLES), async (req, res) => 
     const margenPut = enforceMinMarginOnServer(beforeData, cleanData);
     const repreciadosPut = margenPut + repriceOrdersOnServer(beforeData, cleanData, new Date().toISOString())
       + normalizeOrdersOnServer(beforeData, cleanData, new Date().toISOString());
+    const clavesPut = takeUserPasswords(cleanData, beforeData);
     const saved = await clientDb.query(
       `INSERT INTO app_state (id, data, updated_at, updated_by) VALUES ('main', $1, now(), $2)
        ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, updated_at = EXCLUDED.updated_at, updated_by = EXCLUDED.updated_by
@@ -1705,7 +1751,7 @@ app.put("/state", authenticate, requireRole(...SYNC_ROLES), async (req, res) => 
     );
     // Reemplazo completo del estado (restaurar un backup, subir todo): el espejo se rehace entero.
     await mirrorStateToTables(clientDb, cleanData);
-    await syncUsersFromState(clientDb, cleanData);
+    await syncUsersFromState(clientDb, cleanData, clavesPut);
     const afterCounts = {
       orders: Array.isArray(cleanData.orders) ? cleanData.orders.length : 0,
       clients: Array.isArray(cleanData.clients) ? cleanData.clients.length : 0,
@@ -2058,15 +2104,16 @@ app.post("/state/patch", authenticate, requireRole(...PATCH_SYNC_ROLES), async (
     const margenCorregidos = enforceMinMarginOnServer(beforeData, nextData);
     const repreciados = margenCorregidos + repriceOrdersOnServer(beforeData, nextData, new Date().toISOString())
       + normalizeOrdersOnServer(beforeData, nextData, new Date().toISOString());
+    const clavesPatch = takeUserPasswords(nextData, beforeData);
     const saved = await clientDb.query(
       "UPDATE app_state SET data = $1, updated_at = now(), updated_by = $2 WHERE id = 'main' RETURNING updated_at",
       [nextData, req.user.username]
     );
-    await clientDb.query("INSERT INTO state_operations (operation_id, operation_type, base_updated_at, applied_by, patch) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (operation_id) DO NOTHING", [String(body.operationId), String(body.operationType || "patch"), body.baseUpdatedAt, req.user.username, body.patch]);
+    await clientDb.query("INSERT INTO state_operations (operation_id, operation_type, base_updated_at, applied_by, patch) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (operation_id) DO NOTHING", [String(body.operationId), String(body.operationType || "patch"), body.baseUpdatedAt, req.user.username, patchWithoutPasswords(body.patch)]);
     await clientDb.query("INSERT INTO state_history (data, updated_by) VALUES ($1, $2)", [nextData, req.user.username]);
     await clientDb.query("DELETE FROM state_history WHERE id NOT IN (SELECT id FROM state_history ORDER BY id DESC LIMIT $1)", [STATE_HISTORY_KEEP]);
     await mirrorStateToTables(clientDb, nextData, beforeData);
-    await syncUsersFromState(clientDb, nextData);
+    await syncUsersFromState(clientDb, nextData, clavesPatch);
     await clientDb.query("COMMIT");
     syncSheetsFromStateDiff(beforeData, nextData);
     const demora = Date.now() - inicioPatch;
@@ -2534,14 +2581,60 @@ async function mirrorStateToTablesFull(db, data) {
   }
 }
 
-// Usuarios del ERP -> usuarios reales con hash bcrypt (la gestion sigue en la página Usuarios)
-async function syncUsersFromState(db, data) {
+// ---------- Contraseñas: solo cifradas en la tabla users, nunca en el estado ----------
+// El estado viaja a los dispositivos del equipo (y se copia en el historial): antes llevaba la
+// contraseña de cada usuario en texto. Ahora la contraseña solo existe como hash bcrypt en la tabla
+// users. Cuando el gerente pone una contraseña en Usuarios/Empleados, llega en el parche, se cifra
+// aca y se saca del estado antes de guardarlo.
+const DEFAULT_PASSWORDS = ["gerente123", "admin123", "empleado123", "cliente123", "ejemplo123"];
+
+// Saca las contraseñas de los usuarios del estado y devuelve las que hay que aplicar. Se acepta una
+// contraseña solo si es un usuario nuevo o si viene marcada como puesta recien (passwordSetAt mas
+// nuevo que el guardado): un dispositivo con una version vieja todavia tiene en su copia las
+// contraseñas anteriores y no tiene que poder volverlas atras.
+function takeUserPasswords(data, before) {
+  const claves = new Map();
+  const antes = new Map(((before && Array.isArray(before.users)) ? before.users : []).filter(Boolean).map((u) => [String(u.id), u]));
+  for (const u of Array.isArray(data && data.users) ? data.users : []) {
+    if (!u || typeof u !== "object" || !Object.prototype.hasOwnProperty.call(u, "password")) continue;
+    const pw = String(u.password == null ? "" : u.password);
+    delete u.password;
+    if (!pw) continue;
+    const prev = antes.get(String(u.id));
+    const marcada = u.passwordSetAt && (!prev || String(u.passwordSetAt) > String(prev.passwordSetAt || ""));
+    if (!prev || marcada) claves.set(String(u.id), pw);
+  }
+  if (data && Array.isArray(data.users)) data.usersSinClave = true;
+  return claves;
+}
+
+// Copia sin contraseñas (para guardar el parche en el registro de operaciones).
+function patchWithoutPasswords(patch) {
+  const users = patch && patch.arrays && patch.arrays.users;
+  if (!users || !Array.isArray(users.upsert)) return patch;
+  return { ...patch, arrays: { ...patch.arrays, users: { ...users, upsert: users.upsert.map((u) => { if (!u || typeof u !== "object") return u; const { password, ...resto } = u; return resto; }) } } };
+}
+
+function stripPasswordsForClient(data) {
+  if (!data || !Array.isArray(data.users)) return data;
+  return { ...data, usersSinClave: true, users: data.users.map((u) => { if (!u || typeof u !== "object") return u; const { password, passwordHash, ...resto } = u; return resto; }) };
+}
+
+// Usuarios del ERP -> tabla users (acceso con hash bcrypt). claves: contraseñas a aplicar (de
+// takeUserPasswords). Sin contraseña nueva se actualizan solo los datos y se conserva el hash.
+async function syncUsersFromState(db, data, claves) {
   for (const u of Array.isArray(data.users) ? data.users : []) {
-    if (!u || !u.id || !u.username || !u.password) continue;
-    const fp = fingerprint(u.password);
+    if (!u || !u.id || !u.username) continue;
+    // Compatibilidad: un usuario que todavia trae la contraseña adentro (estado viejo) la aporta.
+    const pw = (claves && claves.get(String(u.id))) || (u.password ? String(u.password) : "");
+    const fp = pw ? fingerprint(pw) : "";
     const existing = await db.query("SELECT password_fingerprint FROM users WHERE id = $1", [u.id]);
-    const needsHash = !existing.rows.length || existing.rows[0].password_fingerprint !== fp;
-    const hash = needsHash ? await bcrypt.hash(String(u.password), 10) : null;
+    if (!existing.rows.length && !pw) {
+      console.warn("Usuario " + u.username + " sin contraseña y sin acceso creado: no puede iniciar sesion hasta que le pongan una.");
+      continue;
+    }
+    const needsHash = !!pw && (!existing.rows.length || existing.rows[0].password_fingerprint !== fp);
+    const hash = needsHash ? await bcrypt.hash(pw, 10) : null;
     await db.query(
       `INSERT INTO users (id, username, name, email, role, password_hash, password_fingerprint, client_id, linked_client_ids, is_active, updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, now())
@@ -2553,6 +2646,46 @@ async function syncUsersFromState(db, data) {
          is_active = EXCLUDED.is_active, updated_at = now()`,
       [u.id, u.username, u.name || "", u.email || "", u.role || "employee", hash || "", fp, u.clientId || null, JSON.stringify(u.linkedClientIds || []), u.isActive !== false, hash]
     );
+  }
+}
+
+// Una sola vez: saca las contraseñas que quedaban en el estado, en el historial de copias y en el
+// registro de operaciones. Antes crea el acceso de quien no lo tenga.
+async function migratePasswordsOutOfState() {
+  const db = await pool.connect();
+  try {
+    await db.query("BEGIN");
+    const row = await db.query("SELECT data FROM app_state WHERE id = 'main' FOR UPDATE");
+    if (!row.rows.length) { await db.query("ROLLBACK"); return; }
+    const data = row.rows[0].data || {};
+    const conClave = (data.users || []).filter((u) => u && u.password);
+    if (conClave.length || !data.usersSinClave) {
+      // Solo se crean los accesos que faltan: el hash de la tabla es el que vale para entrar.
+      for (const u of conClave) {
+        const ex = await db.query("SELECT 1 FROM users WHERE id = $1", [u.id]);
+        if (!ex.rows.length) await syncUsersFromState(db, { users: [u] });
+      }
+      (data.users || []).forEach((u) => { if (u) delete u.password; });
+      data.usersSinClave = true;
+      await db.query("UPDATE app_state SET data = $1, updated_at = now(), updated_by = 'seguridad-claves' WHERE id = 'main'", [data]);
+    }
+    await db.query("COMMIT");
+    if (conClave.length) console.log("Seguridad: se sacaron " + conClave.length + " contraseña(s) del estado.");
+  } catch (error) {
+    await db.query("ROLLBACK").catch(() => {});
+    console.error("No se pudieron sacar las contraseñas del estado:", error.message);
+    return;
+  } finally {
+    db.release();
+  }
+  try {
+    const h = await pool.query(`UPDATE state_history SET data = jsonb_set(data, '{users}', COALESCE((SELECT jsonb_agg(u - 'password') FROM jsonb_array_elements(data->'users') u), '[]'::jsonb))
+      WHERE jsonb_typeof(data->'users') = 'array' AND EXISTS (SELECT 1 FROM jsonb_array_elements(data->'users') u WHERE u ? 'password')`);
+    const o = await pool.query(`UPDATE state_operations SET patch = jsonb_set(patch, '{arrays,users,upsert}', COALESCE((SELECT jsonb_agg(u - 'password') FROM jsonb_array_elements(patch->'arrays'->'users'->'upsert') u), '[]'::jsonb))
+      WHERE jsonb_typeof(patch->'arrays'->'users'->'upsert') = 'array' AND EXISTS (SELECT 1 FROM jsonb_array_elements(patch->'arrays'->'users'->'upsert') u WHERE u ? 'password')`);
+    if (h.rowCount || o.rowCount) console.log("Seguridad: contraseñas sacadas de " + h.rowCount + " copia(s) del historial y " + o.rowCount + " operacion(es).");
+  } catch (error) {
+    console.error("No se pudieron limpiar las contraseñas del historial:", error.message);
   }
 }
 
@@ -3883,7 +4016,7 @@ if (require.main === module) {
       initBillingScheduler();
       initDunningScheduler();
       initControlEmailScheduler();
-      rebuildMirrorOnStartup();
+      migratePasswordsOutOfState().finally(() => rebuildMirrorOnStartup());
       return app.listen(PORT, () => console.log("Pare Carrito SAS API escuchando en puerto " + PORT));
     })
     .catch((error) => {

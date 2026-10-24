@@ -1032,7 +1032,10 @@
   function normalizeLoadedState(loaded, seeded) {
     expandCompactOrders(loaded);
     const users = Array.isArray(loaded.users) ? loaded.users.slice() : [];
-    seeded.users.forEach((defaultUser) => {
+    // Datos del servidor: las contraseñas no viajan (solo existen cifradas en el servidor). No se
+    // rellenan las de fabrica ni se agregan los usuarios de ejemplo: se los mandaria al servidor.
+    const sinClaves = !!loaded.usersSinClave;
+    if (!sinClaves) seeded.users.forEach((defaultUser) => {
       const existing = users.find((user) => user.username === defaultUser.username || user.id === defaultUser.id);
       if (existing) {
         Object.assign(existing, {
@@ -1046,11 +1049,12 @@
       }
     });
     users.forEach((user) => {
-      if (user.role === "manager" && !user.password) user.password = "gerente123";
-      if (user.role === "admin" && !user.password) user.password = "admin123";
-      if (user.role === "employee" && !user.password) user.password = "empleado123";
-      if (user.role === "customer" && !user.password) user.password = "cliente123";
-      if (user.role === "example" && !user.password) user.password = "ejemplo123";
+      if (sinClaves) delete user.password;
+      else if (user.role === "manager" && !user.password) user.password = "gerente123";
+      if (!sinClaves && user.role === "admin" && !user.password) user.password = "admin123";
+      if (!sinClaves && user.role === "employee" && !user.password) user.password = "empleado123";
+      if (!sinClaves && user.role === "customer" && !user.password) user.password = "cliente123";
+      if (!sinClaves && user.role === "example" && !user.password) user.password = "ejemplo123";
       user.email = user.email || "";
       user.phone = user.phone || "";
       if (user.role === "employee" && !user.hourlyRate) user.hourlyRate = 2500;
@@ -2861,7 +2865,8 @@
     if (!currentUser || ui.modal) return;
     if (!["manager", "admin", "employee", "contador"].includes(currentUser.role)) return;
     const stateUser = state.users.find((item) => item.id === currentUser.id);
-    if (!stateUser || !DEFAULT_PASSWORDS.includes(String(stateUser.password || ""))) return;
+    const conServidor = cloudSyncReady(getCloudSyncConfig());
+    if (conServidor ? !ui.mustChangePassword : (!stateUser || !DEFAULT_PASSWORDS.includes(String(stateUser.password || "")))) return;
     if (window.__pcForcePwdOpen) return;
     window.__pcForcePwdOpen = true;
     showModal(
@@ -2881,14 +2886,25 @@
           if (p1.length < 8) return alert("La contraseña debe tener al menos 8 caracteres.");
           if (DEFAULT_PASSWORDS.includes(p1)) return alert("Elija una contraseña distinta a las contraseñas por defecto.");
           if (p1 !== p2) return alert("Las contraseñas no coinciden.");
+          const config = getCloudSyncConfig();
+          if (cloudSyncReady(config)) {
+            // Con servidor la contraseña se cambia ahi (la web no guarda contraseñas).
+            const actual = ui.loginPasswordForChange || config.password || "";
+            cloudRequest(config, "/auth/profile", { method: "POST", body: JSON.stringify({ currentPassword: actual, newPassword: p1 }) })
+              .then((r) => r.json().then((j) => ({ r, j })).catch(() => ({ r, j: {} })))
+              .then(({ r, j }) => {
+                if (!r.ok) throw new Error(j.error || "HTTP " + r.status);
+                if (config.username && config.username === currentUser.username) { config.password = p1; saveCloudSyncConfig(config); }
+                ui.mustChangePassword = false; ui.loginPasswordForChange = "";
+                window.__pcForcePwdOpen = false;
+                closeModal();
+                alert("Contraseña actualizada correctamente.");
+              })
+              .catch((e) => alert("No se pudo cambiar la contraseña: " + e.message));
+            return;
+          }
           const stateUser = state.users.find((item) => item.id === currentUser.id);
           if (stateUser) stateUser.password = p1;
-          const config = getCloudSyncConfig();
-          if (config.username && config.username === currentUser.username) {
-            config.password = p1;
-            config.jwt = "";
-            saveCloudSyncConfig(config);
-          }
           saveState();
           window.__pcForcePwdOpen = false;
           closeModal();
@@ -3146,6 +3162,8 @@
           config.jwt = serverResult.payload.token;
           if (config.auto !== false) config.auto = true;
           saveCloudSyncConfig(config);
+          ui.mustChangePassword = !!serverResult.payload.defaultPassword;
+          ui.loginPasswordForChange = ui.mustChangePassword ? password : "";
           if (["manager", "admin", "employee", "contador"].includes(serverResult.payload.role)) {
             await cloudPull(false, true);
           }
@@ -3155,7 +3173,7 @@
           setTimeout(() => { refreshDeviceVersions(); }, 1500);
           let user = state.users.find((item) => item.isActive !== false && (item.username.toLowerCase() === username || String(item.email || "").toLowerCase() === username));
           if (!user) {
-            user = { id: "USR-REMOTE-" + Date.now(), username, name: serverResult.payload.name || username, role: serverResult.payload.role, password, isActive: true };
+            user = { id: "USR-REMOTE-" + Date.now(), username, name: serverResult.payload.name || username, role: serverResult.payload.role, isActive: true };
             state.users.push(user);
             writeLocalStateSnapshot(state, "No se pudo guardar el usuario remoto en localStorage.");
           }
@@ -17335,11 +17353,12 @@
       const currentPassword = (document.getElementById("settings-current-password") || {}).value || "";
       if (password && password.length < 6) return alert("La contraseña nueva debe tener al menos 6 caracteres.");
       if (password && !currentPassword) return alert("Para cambiar la contraseña escribí también la contraseña actual.");
+      const config = getCloudSyncConfig();
       const aplicarLocal = () => {
         const enEstado = (state.users || []).find((u) => u.id === currentUser.id);
-        [currentUser, enEstado].filter(Boolean).forEach((u) => { u.name = name; u.email = email; u.phone = phone; if (password) u.password = password; });
+        // Con servidor la contraseña solo queda (cifrada) en el servidor, no en el navegador.
+        [currentUser, enEstado].filter(Boolean).forEach((u) => { u.name = name; u.email = email; u.phone = phone; if (password && !cloudSyncReady(config)) u.password = password; });
       };
-      const config = getCloudSyncConfig();
       if (!cloudSyncReady(config)) {
         // Sin servidor (uso local): se guarda en este navegador como antes.
         aplicarLocal();
@@ -17356,6 +17375,8 @@
         const j = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(j.error || "HTTP " + r.status);
         aplicarLocal();
+        if (password && config.username && config.username === currentUser.username) { config.password = password; saveCloudSyncConfig(config); }
+        if (password) { ui.mustChangePassword = false; }
         setCurrentUser(currentUser);
         alert(j.passwordChanged ? "Configuracion guardada. La contraseña nueva ya esta activa." : "Configuracion guardada.");
         if (canReadCloudState()) cloudPull(false, true).catch(() => {});
@@ -17365,16 +17386,38 @@
       if (boton) { boton.disabled = false; boton.textContent = "Guardar configuración"; }
       render();
     });
-    document.querySelectorAll("[data-link-client]").forEach((button) => button.addEventListener("click", () => {
+    // Vincular / desvincular cuentas de cliente: se verifica y se guarda en el servidor (la web no
+    // tiene las contraseñas de las otras cuentas). Sin servidor, como antes.
+    const vincular = async (body) => {
+      const config = getCloudSyncConfig();
+      const r = await cloudRequest(config, "/auth/link-account", { method: "POST", body: JSON.stringify(body) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || "HTTP " + r.status);
+      currentUser.linkedClientIds = j.linkedClientIds || currentUser.linkedClientIds;
+      const enEstado = (state.users || []).find((u) => u.id === currentUser.id);
+      if (enEstado && enEstado !== currentUser) enEstado.linkedClientIds = currentUser.linkedClientIds;
+      setCurrentUser(currentUser);
+    };
+    document.querySelectorAll("[data-link-client]").forEach((button) => button.addEventListener("click", async () => {
       const username = document.getElementById("settings-link-username").value.trim().toLowerCase();
       const password = document.getElementById("settings-link-password").value;
+      if (cloudSyncReady(getCloudSyncConfig())) {
+        try { await vincular({ username, password }); alert("Cuenta vinculada."); } catch (e) { return alert(e.message); }
+        render();
+        return;
+      }
       const linkedUser = state.users.find((user) => user.role === "customer" && user.username.toLowerCase() === username && user.password === password && user.clientId);
       if (!linkedUser) return alert("Usuario o contraseña de la cuenta vinculada incorrectos.");
       currentUser.linkedClientIds = Array.from(new Set([...(currentUser.linkedClientIds || []), currentUser.clientId, linkedUser.clientId].filter(Boolean)));
       saveState();
       render();
     }));
-    document.querySelectorAll("[data-unlink-client]").forEach((button) => button.addEventListener("click", () => {
+    document.querySelectorAll("[data-unlink-client]").forEach((button) => button.addEventListener("click", async () => {
+      if (cloudSyncReady(getCloudSyncConfig())) {
+        try { await vincular({ unlinkClientId: button.dataset.unlinkClient }); } catch (e) { return alert(e.message); }
+        render();
+        return;
+      }
       currentUser.linkedClientIds = (currentUser.linkedClientIds || []).filter((id) => id !== button.dataset.unlinkClient);
       saveState();
       render();
@@ -19454,7 +19497,7 @@
       <form id="employee-form" class="form-grid">
         <div class="field span-2"><label>Nombre</label><input id="employee-name" value="${escapeAttr(employee ? employee.name : "")}" required /></div>
         <div class="field"><label>Usuario</label><input id="employee-username" value="${escapeAttr(employee ? employee.username : "")}" required /></div>
-        <div class="field"><label>Contrasena</label><input id="employee-password" value="${escapeAttr(employee ? employee.password : generatePassword())}" required /></div>
+        <div class="field"><label>Contrasena</label><input id="employee-password" value="${escapeAttr(employee ? "" : generatePassword())}" ${employee ? `placeholder="Dejar vacio para no cambiarla"` : "required"} autocomplete="new-password" /></div>
         <div class="field span-2"><label>Correo</label><input id="employee-email" type="email" value="${escapeAttr(employee ? employee.email || "" : "")}" /></div>
         <div class="field"><label>Telefono</label><input id="employee-phone" value="${escapeAttr(employee ? employee.phone || "" : "")}" /></div>
         <div class="field"><label>Valor hora</label><input id="employee-hourly-rate" inputmode="decimal" value="${formatAmountInput(employee ? employee.hourlyRate || 2500 : 2500)}" /></div>
@@ -19475,7 +19518,7 @@
             id: employee ? employee.id : nextUserId(),
             name: document.getElementById("employee-name").value.trim(),
             username,
-            password: document.getElementById("employee-password").value || generatePassword(),
+            ...passwordFieldPayload(document.getElementById("employee-password").value, !employee),
             role: "employee",
             email,
             phone: document.getElementById("employee-phone").value.trim(),
@@ -19533,6 +19576,13 @@
     );
   }
 
+  // Contraseña escrita en Usuarios/Empleados: se manda marcada como puesta recien (el servidor la
+  // cifra y no la guarda en los datos). Vacia en un usuario existente = no se cambia.
+  function passwordFieldPayload(value, esNuevo) {
+    const pw = String(value || "") || (esNuevo ? generatePassword() : "");
+    return pw ? { password: pw, passwordSetAt: new Date().toISOString() } : {};
+  }
+
   async function notifyNewUser(payload) {
     if (!payload.email) return;
     const base = await findServerBase();
@@ -19567,7 +19617,7 @@
       <form id="user-form" class="form-grid">
         <div class="field span-2"><label>Nombre</label><input id="user-name" value="${escapeAttr(user ? user.name : "")}" required /></div>
         <div class="field"><label>Usuario</label><input id="user-username" value="${escapeAttr(user ? user.username : "")}" required /></div>
-        <div class="field"><label>Contrasena</label><input id="user-password" value="${escapeAttr(user ? user.password : generatePassword())}" required /></div>
+        <div class="field"><label>Contrasena</label><input id="user-password" value="${escapeAttr(user ? "" : generatePassword())}" ${user ? `placeholder="Dejar vacio para no cambiarla"` : "required"} autocomplete="new-password" /></div>
         <div class="field"><label>Rol</label><select id="user-role">${roleOptions}</select></div>
         <div class="field span-2"><label>Correo</label><input id="user-email" type="email" value="${escapeAttr(user ? user.email || "" : "")}" /></div>
         <div class="field"><label>Telefono</label><input id="user-phone" value="${escapeAttr(user ? user.phone || "" : "")}" /></div>
@@ -19619,7 +19669,7 @@
             id: user ? user.id : nextUserId(),
             name: document.getElementById("user-name").value.trim(),
             username,
-            password: document.getElementById("user-password").value || generatePassword(),
+            ...passwordFieldPayload(document.getElementById("user-password").value, !user),
             role,
             email,
             phone: document.getElementById("user-phone").value.trim(),
@@ -20351,6 +20401,7 @@
       existing.email = client.email || existing.email || "";
       existing.phone = client.phone || existing.phone || "";
       existing.password = password;
+      existing.passwordSetAt = new Date().toISOString();
       existing.linkedClientIds = Array.from(new Set([client.id, ...(existing.linkedClientIds || [])]));
       existing.isActive = true;
       return password;
