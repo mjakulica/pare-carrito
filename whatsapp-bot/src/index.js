@@ -6,10 +6,18 @@ const wa = require("./whatsapp");
 const ai = require("./ai");
 const erp = require("./erp");
 const flow = require("./orderFlow");
+const { createTemplateService, createTemplateRouter } = require("./templates");
 
 const app = express();
 app.use(express.json({
   verify: (req, _res, buf) => { req.rawBody = buf; }
+}));
+
+app.use("/templates", createTemplateRouter({
+  service: createTemplateService({ token: config.whatsapp.token,
+    wabaId: process.env.WHATSAPP_BUSINESS_ACCOUNT_ID || "",
+    apiVersion: process.env.WHATSAPP_MANAGEMENT_API_VERSION || "v26.0" }),
+  broadcastKey: process.env.BROADCAST_KEY || ""
 }));
 
 // Cache simple de nombres de productos para ayudar a la IA.

@@ -1891,10 +1891,10 @@ async function botRequest(path, body) {
   if (!botUrl) return { ok: false, error: "Falta BOT_BROADCAST_URL en el servidor." };
   const url = path === "/broadcast" ? botUrl : botUrl.replace(/\/broadcast\/?$/, "") + path;
   try {
-    const r = await fetch(url, body ? { method: "POST", headers: { "content-type": "application/json", "x-broadcast-key": process.env.BROADCAST_KEY || "" }, body: JSON.stringify(body) } : {});
+    const r = await fetch(url, { headers: { "content-type": "application/json", "x-broadcast-key": process.env.BROADCAST_KEY || "" }, ...(body ? { method: "POST", body: JSON.stringify(body) } : {}) });
     const j = await r.json().catch(() => ({}));
     if (r.status === 401) return { ok: false, error: "El bot rechazo la clave: BROADCAST_KEY falta o no coincide entre la API y el bot." };
-    if (!r.ok) return { ok: false, error: (j && j.error) || "HTTP " + r.status };
+    if (!r.ok) return { ok: false, status: r.status, error: (j && j.error) || "HTTP " + r.status };
     return { ok: true, ...j };
   } catch (e) {
     return { ok: false, error: "No se pudo conectar con el bot (" + e.message + ")." };
@@ -1935,6 +1935,18 @@ app.get("/whatsapp/status", authenticate, requireRole("manager", "admin"), async
     }
   });
 });
+
+// Gestión de plantillas: el token de Meta permanece en el bot, detrás de la clave interna.
+const templateProxy = (req, res) => {
+  res.set("Cache-Control", "no-store");
+  const id = req.params.id;
+  if (id && !/^\d+$/.test(id)) return res.status(400).json({ error: "ID de plantilla inválido." });
+  return botRequest("/templates" + (id ? "/" + id : ""), req.method === "POST" ? (req.body || {}) : undefined)
+    .then(r => res.status(r.ok ? 200 : (r.status || 502)).json(r));
+};
+app.get("/whatsapp/templates", authenticate, requireRole("manager", "admin"), templateProxy);
+app.post("/whatsapp/templates", authenticate, requireRole("manager", "admin"), templateProxy);
+app.post("/whatsapp/templates/:id", authenticate, requireRole("manager", "admin"), templateProxy);
 
 app.post("/whatsapp/test", authenticate, requireRole("manager", "admin"), async (req, res) => {
   const number = String((req.body && req.body.number) || "").replace(/\D/g, "");
