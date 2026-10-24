@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v70";
+  const APP_VERSION = "v71";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -1733,7 +1733,8 @@
     try {
       if (clientProblemsSent >= 30) return false;
       const config = getCloudSyncConfig();
-      if (!currentUser || !cloudSyncReady(config)) return false;
+      // Tambien durante el ingreso (todavia sin usuario elegido) si ya hay sesion en el servidor.
+      if ((!currentUser && !config.jwt) || !cloudSyncReady(config)) return false;
       clientProblemsSent += 1;
       cloudRequest(config, "/client-log", { method: "POST", body: JSON.stringify({
         kind: String(kind || "error").slice(0, 40),
@@ -2581,7 +2582,13 @@
         return;
       }
       if (!response.ok) throw new Error("HTTP " + response.status + (await readCloudErrorDetail(response)));
-      const payload = await response.json();
+      // El tiempo maximo de cloudRequest corta solo hasta que el servidor empieza a responder: si
+      // los datos llegan muy lento (celular con poca señal o poca memoria) la pantalla quedaba en
+      // "Cargando datos del servidor" para siempre. Ahora la lectura tambien tiene tope.
+      const payload = await Promise.race([
+        response.json(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("los datos tardaron demasiado en llegar")), 120000))
+      ]);
       if (!payload || typeof payload.data !== "object") throw new Error("respuesta inválida");
       stateWindow = payload.window || null;
       const remoteUpdated = String(payload.updatedAt || "");
@@ -2644,7 +2651,8 @@
       } else {
         ui.syncWarning = "";
       }
-      backupLocalState("antes de descarga de nube");
+      // El respaldo y la copia local nunca frenan la descarga (celular sin espacio o sin memoria).
+      try { backupLocalState("antes de descarga de nube"); } catch (e) { console.warn("Respaldo local:", e.message); }
       const backupIndexBeforeOverwrite = 0; // backupLocalState inserts at index 0
       const localOrdersBefore = Array.isArray(state.orders) ? state.orders.length : 0;
       const remoteState = normalizeLoadedState({ ...seedState(), ...payload.data }, seedState());
@@ -2668,7 +2676,7 @@
       state = debeFusionar
         ? normalizeLoadedState({ ...seedState(), ...mergeCloudStates(remoteState, state) }, seedState())
         : remoteState;
-      writeLocalStateSnapshot(state, "No se pudo guardar la descarga de nube en localStorage.");
+      try { writeLocalStateSnapshot(state, "No se pudo guardar la descarga de nube en localStorage."); } catch (e) { console.warn("Copia local:", e.message); }
       ui.serverLoadedThisSession = true;
       if (ui.storageProblem && !storageProblemReported) {
         storageProblemReported = reportClientProblem("almacenamiento", "El navegador no tiene espacio: " + (ui.storageProblemDetail || "")) === true;
@@ -2716,7 +2724,13 @@
       errorConfig.lastError = "Descarga fallida " + formatTimestampShort(new Date().toISOString()) + ": " + error.message;
       saveCloudSyncConfig(errorConfig);
       console.warn("Sincronización: " + error.message);
+      // Cualquier falla (tambien despues de recibir los datos) se marca como falla: asi la pantalla
+      // pasa a "Sin conexion" con Reintentar en vez de quedar en "Cargando" sin fin, y se avisa al
+      // servidor para poder ver la causa en los registros.
+      if (!ui.serverLoadedThisSession) ui.lastServerFailAt = Date.now();
+      try { reportClientProblem("descarga", (isLogin ? "al abrir: " : "") + String(error && error.message || error) + (error && error.stack ? " | " + String(error.stack).split("\n").slice(0, 3).join(" / ") : "")); } catch (e) { /* sin registro */ }
       if (manual) alert("No se pudo descargar de la nube: " + error.message);
+      scheduleServerGateRender();
     } finally {
       if (ui.syncDownloading) {
         ui.syncDownloading = false;
