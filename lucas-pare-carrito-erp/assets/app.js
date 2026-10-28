@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v72";
+  const APP_VERSION = "v73";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -1716,12 +1716,45 @@
       try {
         detail = (await response.json()).error || "";
       } catch {}
-      throw new Error(detail || "no se pudo iniciar sesión en el servidor (HTTP " + response.status + ")");
+      const error = new Error(detail || "no se pudo iniciar sesión en el servidor (HTTP " + response.status + ")");
+      error.status = response.status;
+      throw error;
     }
     const payload = await response.json();
     config.jwt = payload.token;
     saveCloudSyncConfig(config);
     return payload;
+  }
+
+  // Reingreso automatico cuando vence la sesion (12 h). Un solo intento a la vez para todo el equipo, y
+  // si la contraseña guardada ya no sirve (se cambio en otro equipo) no se reintenta: antes cada
+  // sincronizacion volvia a probar la clave vieja hasta que el servidor bloqueaba al usuario para todos.
+  let autoLoginPromise = null;
+  function autoRelogin(config) {
+    if (!config.password) return Promise.reject(forceLoginAgain(config, "La sesión venció. Ingrese de nuevo."));
+    if (!autoLoginPromise) {
+      autoLoginPromise = cloudLogin(config).catch((error) => {
+        if (error && (error.status === 401 || error.status === 429)) {
+          throw forceLoginAgain(config, error.status === 401
+            ? "La contraseña guardada en este equipo ya no es válida (se cambió). Ingrese con la contraseña actual."
+            : error.message);
+        }
+        throw error;
+      }).finally(() => { autoLoginPromise = null; });
+    }
+    return autoLoginPromise;
+  }
+
+  function forceLoginAgain(config, message) {
+    config.password = "";
+    config.jwt = "";
+    saveCloudSyncConfig(config);
+    ui.loginNotice = message;
+    if (currentUser) {
+      setCurrentUser(null);
+      try { render(); } catch {}
+    }
+    return new Error(message);
   }
 
   const CLOUD_REQUEST_TIMEOUT_MS = 45000;
@@ -1756,7 +1789,7 @@
 
   async function cloudRequest(config, path, options, retried) {
     const useJwt = !!config.username;
-    if (useJwt && !config.jwt) await cloudLogin(config);
+    if (useJwt && !config.jwt) await autoRelogin(config);
     // Corte por tiempo: una conexion colgada tiene que fallar y no dejar la app esperando.
     const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
     const timer = controller ? setTimeout(() => controller.abort(), CLOUD_REQUEST_TIMEOUT_MS) : null;
@@ -1782,7 +1815,7 @@
     }
     markServerContact(response.status < 500);
     if (response.status === 401 && useJwt && !retried) {
-      await cloudLogin(config);
+      await autoRelogin(config);
       return cloudRequest(config, path, options, true);
     }
     return response;
@@ -2987,6 +3020,7 @@
       `;
     } else {
       body = `
+        ${ui.loginNotice ? `<div class="alert" style="margin-bottom:12px">${escapeHtml(ui.loginNotice)}</div>` : ""}
         <form id="login-form" class="grid">
           <div class="field">
             <label>Usuario</label>
@@ -3175,6 +3209,7 @@
           config.username = username;
           config.password = password;
           config.jwt = serverResult.payload.token;
+          ui.loginNotice = "";
           if (config.auto !== false) config.auto = true;
           saveCloudSyncConfig(config);
           ui.mustChangePassword = !!serverResult.payload.defaultPassword;

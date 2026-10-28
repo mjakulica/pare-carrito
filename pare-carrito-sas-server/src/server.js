@@ -362,11 +362,21 @@ app.post("/auth/login", async (req, res) => {
   );
   const user = rows[0];
   if (!user || !user.password_hash || !(await bcrypt.compare(String(password), user.password_hash))) {
+    // Solo cuentan contraseñas distintas: un equipo que reintenta sola la misma clave vieja no tiene que
+    // bloquear al usuario en todos los demas equipos. Adivinar claves sigue limitado a 5 intentos.
     const previous = loginAttempts.get(attemptKey) || { count: 0 };
+    const tried = crypto.createHash("sha256").update(String(password)).digest("hex");
+    previous.tried = previous.tried || new Set();
+    if (previous.tried.has(tried)) {
+      loginAttempts.set(attemptKey, previous);
+      return res.status(401).json({ error: "Usuario o contraseña incorrectos." });
+    }
+    previous.tried.add(tried);
     previous.count += 1;
     if (previous.count >= LOGIN_MAX_ATTEMPTS) {
       previous.blockedUntil = Date.now() + LOGIN_BLOCK_MS;
       previous.count = 0;
+      previous.tried = new Set();
     }
     loginAttempts.set(attemptKey, previous);
     return res.status(401).json({ error: "Usuario o contraseña incorrectos." });
