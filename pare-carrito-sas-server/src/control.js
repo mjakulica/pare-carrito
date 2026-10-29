@@ -122,6 +122,10 @@ function controlPaymentChecks(data, date) {
       add("cobrado_sin_pago", "medio", o.clientId, "El pedido " + o.id + " de " + nombre(o.clientId) + " figura cobrado (" + money(recibido) + ") pero ningún pago lo tiene marcado.", [o.id]);
     }
     const dp = o.deliveryPayment;
+    const rev = o.transferReview;
+    if (o.date === date && dp && dp.method === "transferencia" && Number(dp.transferAmount) > 0 && rev && rev.status === "ok" && Math.abs(Number(rev.amount || 0) - Number(dp.transferAmount)) > 1) {
+      add("transferencia_distinta", "medio", o.clientId, "En el reparto se declaró una transferencia de " + money(dp.transferAmount) + " de " + nombre(o.clientId) + " (" + o.id + ") y llegaron " + money(rev.amount) + ".", [o.id]);
+    }
     if (o.date === date && dp && dp.method === "efectivo" && Number(dp.amount || 0) > 0) {
       const registrado = susPagos.filter((p) => p.method === "efectivo").reduce((s, p) => s + Number(p.amount || 0), 0);
       if (!susPagos.length) {

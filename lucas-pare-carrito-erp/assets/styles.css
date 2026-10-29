@@ -4341,3 +4341,6 @@ tr:last-child td {
 .rep-previo input { width: auto; min-height: auto; }
 .rep-previo span { flex: 1; }
 .recorrido-pay small { font-weight: 400; opacity: .8; }
+.order-parse-list { margin: 0; padding: 0; list-style: none; }
+.order-parse-list li { position: relative; padding-left: 16px; margin: 3px 0; }
+.order-parse-list li::before { content: "•"; position: absolute; left: 2px; font-weight: 700; }

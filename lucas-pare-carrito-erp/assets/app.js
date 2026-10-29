@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v74";
+  const APP_VERSION = "v75";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -5954,7 +5954,7 @@
     (parsed.warnings || []).forEach((aviso) => avisos.push("Pedido en unidades -> " + aviso));
     if (avisos.length) {
       warningBox.style.display = "block";
-      warningBox.innerHTML = avisos.map((aviso) => `<div>${escapeHtml(aviso)}</div>`).join("");
+      warningBox.innerHTML = `<ul class="order-parse-list">${avisos.map((aviso) => `<li>${escapeHtml(aviso)}</li>`).join("")}</ul>`;
     } else {
       warningBox.style.display = "none";
       warningBox.textContent = "";
@@ -11692,7 +11692,7 @@
           <button type="button" class="recorrido-pay ${pago.method === "transferencia" ? "active" : ""}" data-rep-method="transferencia">&#127974; Transferencia</button>
           <button type="button" class="recorrido-pay ${pago.method === "cuenta" ? "active" : ""}" data-rep-method="cuenta">&#128221; No pago (cuenta)</button>
         </div>
-        ${pago.method === "efectivo" ? repartoAlcanceHtml(pago, pendiente, previo) : ""}
+        ${pago.method === "efectivo" || pago.method === "transferencia" ? repartoAlcanceHtml(pago, pendiente, previo) : ""}
         ${necesitaFoto ? `<div style="margin-top:10px">
           <p class="muted" style="margin:0 0 6px">Saca una foto del remito ${pago.method === "transferencia" ? "(el gerente comprueba la transferencia con esta foto)" : "firmado"}.</p>
           <button class="btn ${pago.photo ? "ghost" : "blue"}" type="button" id="rep-photo-btn">&#128247; ${pago.photo ? "Cambiar foto" : "Sacar foto del remito"}</button>
@@ -11736,8 +11736,9 @@
         ${previo.pedidos.map((o) => `<label class="rep-previo"><input type="checkbox" data-rep-previo="${escapeAttr(o.id)}" ${elegidos.has(o.id) ? "checked" : ""} /> <span>${formatDate(o.date)} · ${escapeHtml(o.id)}</span> <strong>${formatMoney(resto(o))}</strong></label>`).join("")}
         ${previo.sinPedido > 0.5 ? `<label class="rep-previo"><input type="checkbox" data-rep-previo="__saldo" ${elegidos.has("__saldo") || pago.previos === null ? "checked" : ""} /> <span>Saldo sin pedido</span> <strong>${formatMoney(previo.sinPedido)}</strong></label>` : ""}
       </div>` : ""}
-      <div class="field" style="margin-top:10px;max-width:260px"><label>${pago.alcance === "parcial" ? "Cuanto pago en efectivo" : "Monto cobrado en efectivo"}</label><input id="rep-amount" inputmode="decimal" value="${escapeAttr(pago.amount)}" /></div>
+      <div class="field" style="margin-top:10px;max-width:260px"><label>${pago.method === "transferencia" ? (pago.alcance === "parcial" ? "Cuanto transfirio" : "Monto que transfirio") : pago.alcance === "parcial" ? "Cuanto pago en efectivo" : "Monto cobrado en efectivo"}</label><input id="rep-amount" inputmode="decimal" value="${escapeAttr(pago.amount)}" /></div>
       ${pago.alcance === "parcial" ? `<p class="muted" style="margin:4px 0 0">La diferencia queda en la cuenta del cliente.</p>` : ""}
+      ${pago.method === "transferencia" ? `<p class="muted" style="margin:4px 0 0">El gerente lo comprueba contra el banco con este monto.</p>` : ""}
     </div>`;
   }
 
@@ -11817,9 +11818,10 @@
       if (!method) return alert("Marca como pago: efectivo, transferencia o no pago.");
       let monto = 0;
       let ordenesPago = [order.id];
-      if (method === "efectivo") {
+      const conMonto = method === "efectivo" || method === "transferencia";
+      if (conMonto) {
         monto = parseAmount(pago.amount);
-        if (!(monto > 0)) return alert("Pone el monto que cobraste en efectivo.");
+        if (!(monto > 0)) return alert(method === "transferencia" ? "Pone el monto que transfirio." : "Pone el monto que cobraste en efectivo.");
         if (pago.alcance === "saldo") {
           const elegidos = new Set(pago.previos || []);
           ordenesPago = [order.id].concat(previo.pedidos.filter((o) => elegidos.has(o.id)).map((o) => o.id));
@@ -11846,7 +11848,9 @@
         recordPayment({ clientId: order.clientId, orderIds: ordenesPago, amount: monto, method: "efectivo", receivedByUserId: currentUser.id, notes: "Cobrado en el reparto" + (ordenesPago.length > 1 || monto > pendiente + 1 ? " (con saldo anterior)" : monto < pendiente - 1 ? " (pago parcial)" : "") });
       }
       if (pago.photo) order.deliveryRemitoPhoto = pago.photo;
-      order.deliveryPayment = { method, amount: monto, ...(method === "efectivo" && pago.alcance !== "pedido" ? { alcance: pago.alcance } : {}), ...(ordenesPago.length > 1 ? { orderIds: ordenesPago } : {}), at: stamp, by: currentUser.name || "", byId: currentUser.id, ...(pago.sinFoto && !pago.photo ? { sinFoto: true } : {}) };
+      // En transferencia el monto declarado va aparte (amount sigue siendo lo cobrado en mano): el pago
+      // se registra cuando el gerente comprueba que llego.
+      order.deliveryPayment = { method, amount: method === "efectivo" ? monto : 0, ...(method === "transferencia" ? { transferAmount: monto } : {}), ...(conMonto && pago.alcance !== "pedido" ? { alcance: pago.alcance } : {}), ...(ordenesPago.length > 1 ? { orderIds: ordenesPago } : {}), at: stamp, by: currentUser.name || "", byId: currentUser.id, ...(pago.sinFoto && !pago.photo ? { sinFoto: true } : {}) };
       order.status = "entregado";
       delete order.routeSkippedAt;
       order.deliveredAt = stamp;
@@ -13829,6 +13833,20 @@
     return Math.max(0, Number(order.totalAmount || 0) - Number(order.paymentReceived || 0));
   }
 
+  // Lo que el empleado dijo que transfirieron (puede incluir saldo anterior o ser parcial); en
+  // remitos de antes, lo que falta cobrar del pedido.
+  function deliveryTransferExpected(order) {
+    const dp = order.deliveryPayment || {};
+    return Number(dp.transferAmount) > 0 ? Number(dp.transferAmount) : orderPendingAmount(order);
+  }
+
+  function deliveryTransferScopeText(order) {
+    const dp = order.deliveryPayment || {};
+    if (dp.alcance === "saldo" || (Array.isArray(dp.orderIds) && dp.orderIds.length > 1)) return "pedido + saldo anterior";
+    if (dp.alcance === "parcial") return "pago parcial";
+    return "";
+  }
+
   // Transferencias que el mismo cliente cargo desde su cuenta cerca de la fecha del remito: ayudan a
   // comprobar sin abrir el banco.
   function clientTransfersNear(order) {
@@ -13853,11 +13871,11 @@
       return `<tr>
         <td>${formatDate(o.date)}<br><span class="muted">${escapeHtml(o.id)}</span></td>
         <td><strong>${escapeHtml(o.clientId)} - ${escapeHtml(c ? c.name : o.clientId)}</strong>${cercanas.length ? `<br><span class="pill blue">El cliente cargo ${cercanas.length} transferencia(s): ${cercanas.map((t) => formatMoney(t.amount) + " el " + formatDateShort(t.date)).join(", ")}</span>` : ""}</td>
-        <td class="num">${formatMoney(getOrderTotal(o))}${pendiente < Number(o.totalAmount || 0) - 0.5 ? `<br><span class="muted">falta ${formatMoney(pendiente)}</span>` : ""}</td>
+        <td class="num">${formatMoney(getOrderTotal(o))}${pendiente < Number(o.totalAmount || 0) - 0.5 ? `<br><span class="muted">falta ${formatMoney(pendiente)}</span>` : ""}${Number(o.deliveryPayment.transferAmount) > 0 && Math.abs(Number(o.deliveryPayment.transferAmount) - pendiente) > 0.5 ? `<br><span class="pill blue">Transfirio ${formatMoney(o.deliveryPayment.transferAmount)}${deliveryTransferScopeText(o) ? " · " + deliveryTransferScopeText(o) : ""}</span>` : ""}</td>
         <td>${escapeHtml(o.deliveryPayment.by || "")}<br><span class="muted">${formatTimestampShort(o.deliveryPayment.at)}</span></td>
         <td>${foto ? `<button class="btn small ghost" type="button" data-dt-photo="${escapeAttr(o.id)}">Ver foto</button>` : `<span class="pill amber">Sin foto</span>`}</td>
         <td class="page-actions">${filtro === "pendiente"
-          ? `<button class="btn small primary" type="button" data-dt-ok="${escapeAttr(o.id)}">${pendiente > 0.5 ? "Llego" : "Verificado"}</button><button class="btn small danger" type="button" data-dt-no="${escapeAttr(o.id)}">No llego</button>`
+          ? `<button class="btn small primary" type="button" data-dt-ok="${escapeAttr(o.id)}">${deliveryTransferExpected(o) > 0.5 ? "Llego" : "Verificado"}</button><button class="btn small danger" type="button" data-dt-no="${escapeAttr(o.id)}">No llego</button>`
           : `<span class="muted">${escapeHtml(review.by || "")} ${review.at ? formatTimestampShort(review.at) : ""}${review.amount ? " - " + formatMoney(review.amount) : ""}</span><button class="btn small ghost" type="button" data-dt-undo="${escapeAttr(o.id)}">Volver a pendiente</button>`}</td>
       </tr>`;
     }).join("");
@@ -13884,9 +13902,13 @@
   function confirmDeliveryTransfer(o, amount, bank) {
     const stamp = new Date().toISOString();
     let paymentId = "";
-    if (amount > 0 && orderPendingAmount(o) > 0.5) {
+    const dp = o.deliveryPayment || {};
+    const declarado = Number(dp.transferAmount) > 0;
+    if (amount > 0 && (orderPendingAmount(o) > 0.5 || declarado)) {
+      // Solo los pedidos que siguen debiendo: uno ya pagado se llevaria todo el monto.
+      const ids = (Array.isArray(dp.orderIds) && dp.orderIds.length ? dp.orderIds : [o.id]).filter((id) => { const x = getOrder(id); return x && orderPendingAmount(x) > 0.5; });
       const pago = recordPayment({
-        clientId: o.clientId, orderIds: [o.id], amount, method: "transferencia", receivedByUserId: currentUser.id,
+        clientId: o.clientId, orderIds: ids, amount, method: "transferencia", receivedByUserId: currentUser.id,
         notes: "Transferencia comprobada del remito " + o.id + " (reparto " + (o.deliveryPayment.by || "") + ")" + (bank ? " - banco " + formatDateShort(bank.fecha) + " " + (bank.descripcion || "") : ""),
         transferProofKey: o.deliveryRemitoPhoto && o.deliveryRemitoPhoto.key || "",
         transferProofFile: o.deliveryRemitoPhoto && !o.deliveryRemitoPhoto.key ? o.deliveryRemitoPhoto.data || "" : ""
@@ -13918,7 +13940,7 @@
     const alias = (o) => { const c = getClient(o.clientId); return c && Array.isArray(c.bankAliases) ? c.bankAliases.map(normalizeText).filter((a) => a.length >= 3) : []; };
     const pares = [];
     movements.forEach((m, mi) => pendientes.forEach((o) => {
-      const montos = [orderPendingAmount(o), Number(o.totalAmount || 0)];
+      const montos = [deliveryTransferExpected(o), orderPendingAmount(o), Number(o.totalAmount || 0)];
       if (!montos.some((x) => x > 0 && Math.abs(x - m.monto) <= 1)) return;
       if (m.fecha < addDaysISO(o.date, -1) || m.fecha > addDaysISO(o.date, 10)) return;
       const desc = normalizeText(m.descripcion || "");
@@ -14017,10 +14039,11 @@
     document.querySelectorAll("[data-dt-ok]").forEach((b) => b.addEventListener("click", () => {
       const o = getOrder(b.dataset.dtOk);
       if (!o) return;
-      const pendiente = orderPendingAmount(o);
+      const pendiente = deliveryTransferExpected(o);
       let amount = 0;
       if (pendiente > 0.5) {
-        const valor = prompt("Monto que llego por transferencia de " + ((getClient(o.clientId) || {}).name || o.clientId) + " (remito " + o.id + "):", formatAmountInput(pendiente));
+        const alcance = deliveryTransferScopeText(o);
+        const valor = prompt("Monto que llego por transferencia de " + ((getClient(o.clientId) || {}).name || o.clientId) + " (remito " + o.id + (alcance ? ", " + alcance : "") + "):", formatAmountInput(pendiente));
         if (valor === null) return;
         amount = parseAmount(valor);
         if (!(amount > 0)) return alert("Monto invalido.");
