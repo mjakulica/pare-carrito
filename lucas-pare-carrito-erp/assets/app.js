@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v73";
+  const APP_VERSION = "v74";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -11655,10 +11655,12 @@
     const total = getOrderTotal(order);
     const pendiente = Math.max(0, Number(order.totalAmount || 0) - Number(order.paymentReceived || 0));
     const esReposicion = orderIsReplacement(order) || !(total > 0);
-    if (!ui.repartoPago || ui.repartoPago.orderId !== order.id) ui.repartoPago = { orderId: order.id, method: esReposicion ? "reposicion" : "", amount: pendiente > 0 ? formatAmountInput(pendiente) : "", photo: null, sinFoto: false };
+    if (!ui.repartoPago || ui.repartoPago.orderId !== order.id) ui.repartoPago = { orderId: order.id, method: esReposicion ? "reposicion" : "", alcance: "pedido", amount: pendiente > 0 ? formatAmountInput(pendiente) : "", previos: null, photo: null, sinFoto: false };
     const pago = ui.repartoPago;
     const recordatorios = recorridoReminders(order);
     const saldo = getClientBalance(order.clientId);
+    const previo = repartoSaldoAnterior(order, pendiente);
+    if (!pago.previos) pago.previos = previo.pedidos.map((o) => o.id);
     const siguientes = pendientes.slice(1, 4);
     const telefono = client && client.phone ? String(client.phone).replace(/[^\d+]/g, "") : "";
     const mapa = client && client.address ? "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(client.address) : "";
@@ -11690,7 +11692,7 @@
           <button type="button" class="recorrido-pay ${pago.method === "transferencia" ? "active" : ""}" data-rep-method="transferencia">&#127974; Transferencia</button>
           <button type="button" class="recorrido-pay ${pago.method === "cuenta" ? "active" : ""}" data-rep-method="cuenta">&#128221; No pago (cuenta)</button>
         </div>
-        ${pago.method === "efectivo" ? `<div class="field" style="margin-top:10px;max-width:260px"><label>Monto cobrado en efectivo</label><input id="rep-amount" inputmode="decimal" value="${escapeAttr(pago.amount)}" /></div>` : ""}
+        ${pago.method === "efectivo" ? repartoAlcanceHtml(pago, pendiente, previo) : ""}
         ${necesitaFoto ? `<div style="margin-top:10px">
           <p class="muted" style="margin:0 0 6px">Saca una foto del remito ${pago.method === "transferencia" ? "(el gerente comprueba la transferencia con esta foto)" : "firmado"}.</p>
           <button class="btn ${pago.photo ? "ghost" : "blue"}" type="button" id="rep-photo-btn">&#128247; ${pago.photo ? "Cambiar foto" : "Sacar foto del remito"}</button>
@@ -11708,8 +11710,62 @@
       <div class="page-actions" style="margin-top:12px"><button class="btn ghost" type="button" data-recorrido-step="ruta">Editar la ruta</button></div>`;
   }
 
+  // Lo que el cliente debia antes de este pedido: pedidos anteriores sin pagar (los que tiene este
+  // equipo) y saldo sin pedido. deuda = saldo de la cuenta sin contar este pedido.
+  function repartoSaldoAnterior(order, pendiente) {
+    const pedidos = (state.orders || []).filter((o) => o.clientId === order.clientId && o.id !== order.id && !["cancelado", "anulado"].includes(o.status) && !o.exampleOnly && String(o.date || "") <= String(order.date || todayISO()) && Number(o.totalAmount || 0) - Number(o.paymentReceived || 0) > 0.5)
+      .sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")) || String(a.id).localeCompare(String(b.id)));
+    const deuda = Math.max(0, getClientBalance(order.clientId) - pendiente);
+    const enPedidos = pedidos.reduce((s, o) => s + Math.max(0, Number(o.totalAmount || 0) - Number(o.paymentReceived || 0)), 0);
+    return { pedidos, deuda, sinPedido: Math.max(0, deuda - enPedidos) };
+  }
+
+  function repartoAlcanceHtml(pago, pendiente, previo) {
+    const opcion = (valor, texto, detalle) => `<button type="button" class="recorrido-pay ${pago.alcance === valor ? "active" : ""}" data-rep-alcance="${valor}">${texto}${detalle ? `<br><small>${detalle}</small>` : ""}</button>`;
+    const resto = (o) => Math.max(0, Number(o.totalAmount || 0) - Number(o.paymentReceived || 0));
+    const elegidos = new Set(pago.previos || []);
+    return `<div style="margin-top:12px">
+      <div style="font-weight:700;margin-bottom:6px">¿Que pago?</div>
+      <div class="recorrido-pay-options">
+        ${opcion("pedido", "Este pedido", formatMoney(pendiente))}
+        ${previo.deuda > 0.5 ? opcion("saldo", "Pedido + saldo anterior", "debe " + formatMoney(previo.deuda) + " de antes") : ""}
+        ${opcion("parcial", "Pago parcial", "menos que el pedido")}
+      </div>
+      ${pago.alcance === "saldo" ? `<div class="rep-previos" style="margin-top:10px">
+        <div class="muted" style="margin-bottom:4px">Saldo anterior que paga (destilda lo que no pago):</div>
+        ${previo.pedidos.map((o) => `<label class="rep-previo"><input type="checkbox" data-rep-previo="${escapeAttr(o.id)}" ${elegidos.has(o.id) ? "checked" : ""} /> <span>${formatDate(o.date)} · ${escapeHtml(o.id)}</span> <strong>${formatMoney(resto(o))}</strong></label>`).join("")}
+        ${previo.sinPedido > 0.5 ? `<label class="rep-previo"><input type="checkbox" data-rep-previo="__saldo" ${elegidos.has("__saldo") || pago.previos === null ? "checked" : ""} /> <span>Saldo sin pedido</span> <strong>${formatMoney(previo.sinPedido)}</strong></label>` : ""}
+      </div>` : ""}
+      <div class="field" style="margin-top:10px;max-width:260px"><label>${pago.alcance === "parcial" ? "Cuanto pago en efectivo" : "Monto cobrado en efectivo"}</label><input id="rep-amount" inputmode="decimal" value="${escapeAttr(pago.amount)}" /></div>
+      ${pago.alcance === "parcial" ? `<p class="muted" style="margin:4px 0 0">La diferencia queda en la cuenta del cliente.</p>` : ""}
+    </div>`;
+  }
+
+  function repartoMontoSugerido(pago, pendiente, previo) {
+    if (pago.alcance === "parcial") return "";
+    if (pago.alcance !== "saldo") return pendiente > 0 ? formatAmountInput(pendiente) : "";
+    const elegidos = new Set(pago.previos || []);
+    const dePedidos = previo.pedidos.filter((o) => elegidos.has(o.id)).reduce((s, o) => s + Math.max(0, Number(o.totalAmount || 0) - Number(o.paymentReceived || 0)), 0);
+    return formatAmountInput(pendiente + dePedidos + (elegidos.has("__saldo") ? previo.sinPedido : 0));
+  }
+
   function bindRecorridoReparto(order, pendiente) {
     const pago = ui.repartoPago;
+    const previo = repartoSaldoAnterior(order, pendiente);
+    document.querySelectorAll("[data-rep-alcance]").forEach((b) => b.addEventListener("click", () => {
+      pago.alcance = b.dataset.repAlcance;
+      if (pago.alcance === "saldo") pago.previos = previo.pedidos.map((o) => o.id).concat(previo.sinPedido > 0.5 ? ["__saldo"] : []);
+      pago.amount = repartoMontoSugerido(pago, pendiente, previo);
+      render();
+      if (pago.alcance === "parcial") { const el = document.getElementById("rep-amount"); if (el) el.focus(); }
+    }));
+    document.querySelectorAll("[data-rep-previo]").forEach((c) => c.addEventListener("change", () => {
+      const set = new Set(pago.previos || []);
+      if (c.checked) set.add(c.dataset.repPrevio); else set.delete(c.dataset.repPrevio);
+      pago.previos = Array.from(set);
+      pago.amount = repartoMontoSugerido(pago, pendiente, previo);
+      render();
+    }));
     document.querySelectorAll("[data-rep-method]").forEach((b) => b.addEventListener("click", () => {
       pago.method = b.dataset.repMethod;
       render();
@@ -11760,10 +11816,26 @@
       const method = pago.method;
       if (!method) return alert("Marca como pago: efectivo, transferencia o no pago.");
       let monto = 0;
+      let ordenesPago = [order.id];
       if (method === "efectivo") {
         monto = parseAmount(pago.amount);
         if (!(monto > 0)) return alert("Pone el monto que cobraste en efectivo.");
-        if (pendiente > 0 && monto < pendiente - 1 && !confirm("Cobraste " + formatMoney(monto) + " y el pedido es de " + formatMoney(pendiente) + ". ¿Queda la diferencia en la cuenta del cliente?")) return;
+        if (pago.alcance === "saldo") {
+          const elegidos = new Set(pago.previos || []);
+          ordenesPago = [order.id].concat(previo.pedidos.filter((o) => elegidos.has(o.id)).map((o) => o.id));
+        }
+        const esperado = parseAmount(repartoMontoSugerido(pago.alcance === "parcial" ? { ...pago, alcance: "pedido" } : pago, pendiente, previo));
+        if (monto < esperado - 1 && !confirm("Cobraste " + formatMoney(monto) + " y " + (pago.alcance === "saldo" ? "lo marcado suma " : "el pedido es de ") + formatMoney(esperado) + ". ¿Queda la diferencia en la cuenta del cliente?")) return;
+        if (monto > esperado + 1) {
+          const debe = pendiente + previo.deuda;
+          if (monto > debe + 1) {
+            if (!confirm("Cobraste " + formatMoney(monto) + " y el cliente debe en total " + formatMoney(debe) + ". Quedan " + formatMoney(monto - debe) + " a favor del cliente. ¿Es correcto?")) return;
+          } else if (pago.alcance !== "saldo") {
+            if (!confirm("Cobraste " + formatMoney(monto) + ", mas que este pedido (" + formatMoney(pendiente) + "). ¿Pago tambien saldo anterior? Se descuenta de su cuenta.")) return;
+          }
+          // Lo de mas paga primero los pedidos anteriores sin pagar (del mas viejo al mas nuevo).
+          if (pago.alcance !== "saldo") ordenesPago = [order.id].concat(previo.pedidos.map((o) => o.id));
+        }
       }
       if ((method === "transferencia" || method === "cuenta") && !pago.photo && !pago.sinFoto) {
         return alert("Saca la foto del remito (o tilda que no podes sacarla).");
@@ -11771,10 +11843,10 @@
       entregado.disabled = true;
       const stamp = new Date().toISOString();
       if (method === "efectivo") {
-        recordPayment({ clientId: order.clientId, orderIds: [order.id], amount: monto, method: "efectivo", receivedByUserId: currentUser.id, notes: "Cobrado en el reparto" });
+        recordPayment({ clientId: order.clientId, orderIds: ordenesPago, amount: monto, method: "efectivo", receivedByUserId: currentUser.id, notes: "Cobrado en el reparto" + (ordenesPago.length > 1 || monto > pendiente + 1 ? " (con saldo anterior)" : monto < pendiente - 1 ? " (pago parcial)" : "") });
       }
       if (pago.photo) order.deliveryRemitoPhoto = pago.photo;
-      order.deliveryPayment = { method, amount: monto, at: stamp, by: currentUser.name || "", byId: currentUser.id, ...(pago.sinFoto && !pago.photo ? { sinFoto: true } : {}) };
+      order.deliveryPayment = { method, amount: monto, ...(method === "efectivo" && pago.alcance !== "pedido" ? { alcance: pago.alcance } : {}), ...(ordenesPago.length > 1 ? { orderIds: ordenesPago } : {}), at: stamp, by: currentUser.name || "", byId: currentUser.id, ...(pago.sinFoto && !pago.photo ? { sinFoto: true } : {}) };
       order.status = "entregado";
       delete order.routeSkippedAt;
       order.deliveredAt = stamp;
@@ -14176,21 +14248,24 @@
 
   // Los dispositivos tienen pocos dias de saldos: el promedio de 8 semanas lo calcula el servidor.
   // Sin servidor (uso local) se calcula aca con lo que haya.
-  function controlDebtList() {
+  // Deudas, caja de 30 dias y montos que no coinciden: se calculan en el servidor con todo el
+  // historial (este equipo tiene solo los ultimos dias).
+  function controlDebtList(date) {
     const config = getCloudSyncConfig();
-    if (!cloudSyncReady(config)) return { list: clientDebtOutliers(), loading: false };
-    const cache = ui.controlDebts;
+    if (!cloudSyncReady(config)) return { list: clientDebtOutliers(), loading: false, checks: null };
+    const dia = date || todayISO();
+    const cache = ui.controlDebts && ui.controlDebts.date === dia ? ui.controlDebts : null;
     if (!cache || Date.now() - cache.at > 5 * 60 * 1000) {
       if (!ui.controlDebtsLoading) {
         ui.controlDebtsLoading = true;
-        cloudRequest(config, "/control/client-debts", { method: "GET" })
+        cloudRequest(config, "/control/client-debts?date=" + encodeURIComponent(dia), { method: "GET" })
           .then((r) => (r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status))))
-          .then((j) => { ui.controlDebts = { at: Date.now(), list: j.clients || [], cash: j.cash || null, error: "" }; })
-          .catch((e) => { ui.controlDebts = { at: Date.now(), list: [], cash: null, error: e.message || "error" }; })
+          .then((j) => { ui.controlDebts = { at: Date.now(), date: dia, list: j.clients || [], cash: j.cash || null, checks: Array.isArray(j.checks) ? j.checks : null, error: "" }; })
+          .catch((e) => { ui.controlDebts = { at: Date.now(), date: dia, list: [], cash: null, checks: null, error: e.message || "error" }; })
           .finally(() => { ui.controlDebtsLoading = false; if (getRoute().base === "control" && !hasUnsavedWork()) render(); });
       }
     }
-    return { list: cache ? cache.list : [], cash: cache ? cache.cash : null, loading: !cache, error: cache ? cache.error : "" };
+    return { list: cache ? cache.list : [], cash: cache ? cache.cash : null, checks: cache ? cache.checks : null, loading: !cache, error: cache ? cache.error : "" };
   }
 
   function renderControl() {
@@ -14240,9 +14315,13 @@
     const avisoVentana = corteDia && date < corteDia
       ? `<div class="alert warn" style="margin-bottom:14px">Este equipo tiene cargados los datos desde el ${formatDate(corteDia)}: para un dia anterior los cruces pueden salir incompletos. Usa "Cargar historial" arriba para traer todo.</div>`
       : "";
-    const deudasInfo = controlDebtList();
+    const deudasInfo = controlDebtList(date);
     const deudas = deudasInfo.list.map((x) => ({ ...x, client: getClient(x.clientId) || { id: x.clientId, name: x.clientId } }));
+    const montos = deudasInfo.checks || [];
+    const montosRevisar = montos.filter((c) => c.nivel !== "info");
     afterRender.push(() => {
+      const recalc = document.getElementById("control-recalc");
+      if (recalc) recalc.addEventListener("click", () => { ui.controlDebts = null; render(); });
       const inp = document.getElementById("control-date");
       if (inp) inp.addEventListener("change", () => { ui.controlDate = inp.value || todayISO(); render(); });
       document.querySelectorAll("[data-control-day]").forEach((b) => b.addEventListener("click", () => { ui.controlDate = addDaysISO(todayISO(), -Number(b.dataset.controlDay)); render(); }));
@@ -14277,6 +14356,17 @@
         ${metricCard("Pedidos entregados", entregados.length + " de " + orders.length, sinEntregar.length ? sinEntregar.length + " sin marcar entregados" : "Todos entregados")}
         ${metricCard("Transferencias por comprobar", String(porComprobar), noLlegaron.length ? noLlegaron.length + " no llegaron" : "Remitos del reparto")}
         ${metricCard("Clientes con deuda inusual", deudasInfo.loading ? "..." : String(deudas.length), "Contra su promedio de 8 semanas")}
+      </div>
+      <div class="panel control-montos" style="margin-top:14px">
+        <div class="page-actions" style="justify-content:space-between">
+          <h2 class="page-title" style="font-size:18px">Montos que no coinciden ${deudasInfo.loading ? "" : ok(!montosRevisar.length)}</h2>
+          <button class="btn small ghost" type="button" id="control-recalc">Volver a calcular</button>
+        </div>
+        <p class="muted" style="margin-top:0">Cobros contra lo que debia el cliente, los pedidos marcados y la cuenta corriente.</p>
+        ${deudasInfo.loading ? `<p class="muted">Calculando con el historial del servidor...</p>`
+          : deudasInfo.checks === null ? `<p class="muted">${deudasInfo.error ? "No se pudo calcular: " + escapeHtml(deudasInfo.error) : "Se calcula en el servidor: hace falta conexion."}</p>`
+          : montos.length ? `<ul class="control-checks">${montos.map((c) => `<li class="control-check ${escapeAttr(c.nivel)}"><span class="pill ${c.nivel === "alto" ? "red" : c.nivel === "medio" ? "amber" : "gray"}">${c.nivel === "alto" ? "Revisar" : c.nivel === "medio" ? "Mirar" : "Info"}</span> ${escapeHtml(c.texto)}</li>`).join("")}</ul>`
+          : `<p>Todos los cobros del dia coinciden con los saldos y los pedidos.</p>`}
       </div>
       <div class="grid two" style="margin-top:14px">
         <div class="panel">
@@ -24606,6 +24696,9 @@
       allocations.push({ clientId: order.clientId, order, amount: applied });
       remaining -= applied;
     });
+    // Lo que pagaron de mas sobre los pedidos marcados (saldo anterior sin pedido, o a favor) tambien
+    // se descuenta de la cuenta: antes entraba en la caja pero no en el saldo del cliente.
+    if (allocations.length && remaining > 0.005) allocations.push({ clientId: payment.clientId, order: null, amount: remaining });
     // Pago al grupo: si no se eligieron pedidos y vino la lista de cuentas del grupo, la plata se
     // reparte entre las cuentas que deben, de mayor a menor deuda, hasta que se acaba. Lo que
     // sobre (pagaron de mas) queda en la cuenta elegida, como en un pago comun.

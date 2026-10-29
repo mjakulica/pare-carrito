@@ -4332,3 +4332,12 @@ tr:last-child td {
   .order-count-row { grid-template-columns: 1fr; text-align: center; }
   .order-count-row > div:last-child { display: none; }
 }
+
+.control-checks { list-style: none; margin: 8px 0 0; padding: 0; }
+.control-check { padding: 6px 0; border-top: 1px solid var(--line, #e3e8ef); line-height: 1.4; }
+.control-check:first-child { border-top: 0; }
+.control-check.info { color: var(--muted, #5d6b7e); font-size: 13px; }
+.rep-previo { display: flex; gap: 8px; align-items: center; padding: 6px 0; border-top: 1px solid var(--line, #e3e8ef); }
+.rep-previo input { width: auto; min-height: auto; }
+.rep-previo span { flex: 1; }
+.recorrido-pay small { font-weight: 400; opacity: .8; }

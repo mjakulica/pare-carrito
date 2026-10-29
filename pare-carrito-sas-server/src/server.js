@@ -10,7 +10,7 @@ const { Pool } = require("pg");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { billingConfig, nowArt, computeDueInvoices, runBilling, regeneratePdf, emitCreditNote, creditNoteTypeFor } = require("./billing");
-const { controlDailySummary, parseBankText, parseBankJson } = require("./control");
+const { controlDailySummary, controlPaymentChecks, parseBankText, parseBankJson } = require("./control");
 const { syncSheetsFromStateDiff, pushPrecio } = require("./sheetsSync");
 
 const PORT = Number(process.env.PORT || 3000);
@@ -1859,7 +1859,8 @@ app.get("/control/client-debts", authenticate, requireRole("manager", "admin"), 
     const row = await pool.query("SELECT data FROM app_state WHERE id = 'main'");
     const data = row.rows.length ? row.rows[0].data || {} : {};
     const today = new Date(Date.now() - 3 * 3600 * 1000).toISOString().slice(0, 10);
-    res.json({ ok: true, today, clients: controlClientDebts(data, today), cash: controlCashHistory(data, today) });
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || "")) ? String(req.query.date) : today;
+    res.json({ ok: true, today, date, clients: controlClientDebts(data, today), cash: controlCashHistory(data, today), checks: controlPaymentChecks(data, date) });
   } catch (error) {
     console.error("control/client-debts:", error.message);
     res.status(500).json({ error: "No se pudo calcular." });
