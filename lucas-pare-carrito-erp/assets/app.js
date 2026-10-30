@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v75";
+  const APP_VERSION = "v76";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -11373,15 +11373,71 @@
     const paso = RECORRIDO_PASOS.find((p) => p.key === step);
     afterRender.push(() => {
       document.querySelectorAll("[data-recorrido-step]").forEach((b) => b.addEventListener("click", () => goRecorridoStep(b.dataset.recorridoStep)));
+      document.querySelectorAll("[data-recorrido-orders]").forEach((b) => b.addEventListener("click", () => openRecorridoOrderPicker(b.dataset.recorridoOrders)));
       document.querySelectorAll("[data-recorrido-stock]").forEach((b) => b.addEventListener("click", () => goRecorridoPage("stock", "Cargar el stock", "Conta lo que hay y guardalo producto por producto.", "stock", "mi-recorrido/" + (step || ""), "Volver a Mi recorrido")));
     });
     return pageShell(
       paso ? "Mi recorrido: " + paso.label : "Mi recorrido",
       paso ? paso.detalle : "Todo el dia, paso a paso. Toca un paso para ir directo.",
-      step ? `<button class="btn ghost" type="button" data-route="mi-recorrido">Inicio del recorrido</button>` : "",
+      `<div class="page-actions recorrido-order-actions">
+        <button class="btn yellow" type="button" data-recorrido-orders="agregar">&#10133; Agregar productos</button>
+        <button class="btn blue" type="button" data-recorrido-orders="editar">&#9998; Editar pedidos</button>
+        ${step ? `<button class="btn ghost" type="button" data-route="mi-recorrido">Inicio del recorrido</button>` : ""}
+      </div>`,
       `${step ? renderRecorridoStepper(step) : ""}${body}`,
       "mi-recorrido"
     );
+  }
+
+  // Agregar productos / Editar pedidos desde Mi recorrido: se elige el pedido de hoy del cliente y se
+  // abre el mismo cuadro de edicion de la pagina Pedidos (cantidades, quitar y agregar productos).
+  function openRecorridoOrderPicker(modo) {
+    const hoy = todayISO();
+    const ruta = recorridoMyRoute().map((o) => o.id);
+    const posicion = (o) => { const i = ruta.indexOf(o.id); return i < 0 ? 9999 : i; };
+    const pedidos = (state.orders || []).filter((o) => o && o.date === hoy && !["cancelado", "anulado"].includes(o.status) && !o.exampleOnly)
+      .sort((a, b) => posicion(a) - posicion(b) || String(a.clientId).localeCompare(String(b.clientId), undefined, { numeric: true }));
+    const filas = pedidos.map((o) => {
+      const c = getClient(o.clientId);
+      const items = (o.items || []).map((it) => formatNumber(it.quantity) + " " + it.productName).join(", ");
+      return `<button type="button" class="recorrido-pick-order" data-pick-order="${escapeAttr(o.id)}" data-pick-text="${escapeAttr(normalizeText(o.clientId + " " + (c ? c.name : "") + " " + o.id))}">
+        <strong>${escapeHtml(o.clientId)} - ${escapeHtml(c ? c.name : o.clientId)}</strong>${o.status === "entregado" ? ` <span class="pill green">Entregado</span>` : ""}
+        <span class="muted">${escapeHtml(o.id)} · ${(o.items || []).length} producto(s)</span>
+        <span class="recorrido-pick-items">${escapeHtml(items)}</span>
+      </button>`;
+    }).join("");
+    showModal(modo === "agregar" ? "Agregar productos: elegí el pedido" : "Editar pedidos: elegí el pedido", `
+      <div class="field"><label>Buscar cliente</label><input id="pick-order-search" placeholder="Nombre o número" autocomplete="off" /></div>
+      <div class="recorrido-pick-list">${filas || `<p class="muted">No hay pedidos de hoy.</p>`}</div>
+      <p class="muted" id="pick-order-empty" style="display:none">Ningún pedido de hoy coincide.</p>
+      <p class="muted" style="margin-bottom:0">¿El cliente no tiene pedido hoy? <button class="btn small ghost" type="button" id="pick-order-new">Hacer un pedido nuevo</button></p>`, () => {
+      const search = document.getElementById("pick-order-search");
+      if (search) search.addEventListener("input", () => {
+        const q = normalizeText(search.value).trim();
+        let visibles = 0;
+        document.querySelectorAll("[data-pick-order]").forEach((b) => { const ver = !q || b.dataset.pickText.includes(q); b.style.display = ver ? "" : "none"; if (ver) visibles += 1; });
+        const vacio = document.getElementById("pick-order-empty");
+        if (vacio) vacio.style.display = visibles ? "none" : "";
+      });
+      const nuevo = document.getElementById("pick-order-new");
+      if (nuevo) nuevo.addEventListener("click", () => { ui.modal = null; navigate("nuevo-pedido"); });
+      document.querySelectorAll("[data-pick-order]").forEach((b) => b.addEventListener("click", () => {
+        const id = b.dataset.pickOrder;
+        openOrderForm(id);
+        if (!ui.modal) return;
+        ui.modal.title = (modo === "agregar" ? "Agregar productos a " : "Editar ") + ((getClient((getOrder(id) || {}).clientId) || {}).name || id);
+        if (modo === "agregar") {
+          // Abre directo un renglon para buscar el producto nuevo.
+          const bindOriginal = ui.modal.bind;
+          ui.modal.bind = () => {
+            if (bindOriginal) bindOriginal();
+            const add = document.getElementById("order-add-product-btn");
+            if (add && !document.querySelector("[data-add-row]")) add.click();
+          };
+        }
+        render();
+      }));
+    }, { hideSave: true, cancelLabel: "Cerrar" });
   }
 
   function recorridoStepState(paso, done) {
@@ -11657,10 +11713,18 @@
     const esReposicion = orderIsReplacement(order) || !(total > 0);
     if (!ui.repartoPago || ui.repartoPago.orderId !== order.id) ui.repartoPago = { orderId: order.id, method: esReposicion ? "reposicion" : "", alcance: "pedido", amount: pendiente > 0 ? formatAmountInput(pendiente) : "", previos: null, photo: null, sinFoto: false };
     const pago = ui.repartoPago;
+    // Si el pedido cambio (Agregar productos / Editar pedidos), el monto propuesto sigue al pedido.
+    if (pago.basePendiente == null) pago.basePendiente = pendiente;
+    if (Math.abs(pago.basePendiente - pendiente) > 0.005) {
+      pago.basePendiente = pendiente;
+      if (pago.alcance !== "parcial") pago.amount = "";
+      pago.pendienteCambio = true;
+    }
     const recordatorios = recorridoReminders(order);
     const saldo = getClientBalance(order.clientId);
     const previo = repartoSaldoAnterior(order, pendiente);
     if (!pago.previos) pago.previos = previo.pedidos.map((o) => o.id);
+    if (pago.pendienteCambio) { pago.pendienteCambio = false; if (pago.alcance !== "parcial") pago.amount = repartoMontoSugerido(pago, pendiente, previo); }
     const siguientes = pendientes.slice(1, 4);
     const telefono = client && client.phone ? String(client.phone).replace(/[^\d+]/g, "") : "";
     const mapa = client && client.address ? "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(client.address) : "";

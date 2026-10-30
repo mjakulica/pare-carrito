@@ -4344,3 +4344,8 @@ tr:last-child td {
 .order-parse-list { margin: 0; padding: 0; list-style: none; }
 .order-parse-list li { position: relative; padding-left: 16px; margin: 3px 0; }
 .order-parse-list li::before { content: "•"; position: absolute; left: 2px; font-weight: 700; }
+.recorrido-order-actions { flex-wrap: wrap; }
+.recorrido-pick-list { display: grid; gap: 8px; max-height: 55vh; overflow-y: auto; margin: 8px 0; }
+.recorrido-pick-order { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; padding: 10px 12px; border: 1px solid var(--line, #d9e0e8); border-radius: 10px; background: var(--panel, #fff); color: inherit; font: inherit; cursor: pointer; }
+.recorrido-pick-order:hover, .recorrido-pick-order:focus { border-color: var(--green, #0c7a52); }
+.recorrido-pick-items { font-size: 13px; color: var(--muted, #5d6b7e); }
