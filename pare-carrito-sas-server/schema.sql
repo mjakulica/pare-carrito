@@ -176,3 +176,14 @@ CREATE TABLE IF NOT EXISTS device_versions (
   last_seen TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (username, device)
 );
+
+-- Correcciones automaticas de datos (filas de saldo duplicadas, aperturas guardadas por error):
+-- que se corrigio, cuando y en que escritura, para que el gerente lo pueda revisar.
+CREATE TABLE IF NOT EXISTS maintenance_log (
+  id BIGSERIAL PRIMARY KEY,
+  at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  kind TEXT NOT NULL,
+  updated_by TEXT,
+  summary JSONB,
+  detail JSONB
+);

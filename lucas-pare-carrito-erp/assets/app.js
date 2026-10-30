@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v78";
+  const APP_VERSION = "v79";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -1503,6 +1503,10 @@
     return String(item.id || "");
   }
 
+  function isOpeningRow(row) {
+    return !!(row && (row.__opening || /^(SAL|CAJ|PLED)-APERTURA-/.test(String(row.id || ""))));
+  }
+
   function buildStatePatch(baseData, nextData) {
     const base = stripHistoryForSync(baseData || {});
     const next = stripHistoryForSync(nextData || {});
@@ -1511,12 +1515,14 @@
       const baseMap = new Map();
       (Array.isArray(base[key]) ? base[key] : []).forEach((item) => {
         const id = patchKeyForItem(key, item);
-        if (id) baseMap.set(id, JSON.stringify(item));
+        if (id && !isOpeningRow(item)) baseMap.set(id, JSON.stringify(item));
       });
       const nextMap = new Map();
       (Array.isArray(next[key]) ? next[key] : []).forEach((item) => {
         const id = patchKeyForItem(key, item);
-        if (id) nextMap.set(id, item);
+        // La fila de "Saldo anterior" la arma el servidor para este equipo: nunca se envia (si se
+        // enviaba quedaba guardada como real y la siguiente apertura la volvia a sumar).
+        if (id && !isOpeningRow(item)) nextMap.set(id, item);
       });
       const upsert = [];
       const deleted = [];
@@ -14479,6 +14485,66 @@
     return { list: cache ? cache.list : [], cash: cache ? cache.cash : null, checks: cache ? cache.checks : null, loading: !cache, error: cache ? cache.error : "" };
   }
 
+  // Correcciones automaticas de la cuenta corriente y pedidos que parecen cargados dos veces.
+  function controlRepairsInfo() {
+    const config = getCloudSyncConfig();
+    if (!cloudSyncReady(config)) return null;
+    const cache = ui.controlRepairs;
+    if ((!cache || Date.now() - cache.at > 5 * 60 * 1000) && !ui.controlRepairsLoading) {
+      ui.controlRepairsLoading = true;
+      cloudRequest(config, "/admin/repairs", { method: "GET" })
+        .then((r) => (r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status))))
+        .then((j) => { ui.controlRepairs = { at: Date.now(), logs: j.logs || [], repetidos: j.pedidosRepetidos || [] }; })
+        .catch((e) => { ui.controlRepairs = { at: Date.now(), logs: [], repetidos: [], error: e.message }; })
+        .finally(() => { ui.controlRepairsLoading = false; if (getRoute().base === "control" && !hasUnsavedWork()) render(); });
+    }
+    return cache || null;
+  }
+
+  function controlRepairsHtml() {
+    const info = controlRepairsInfo();
+    if (!info) return "";
+    const nombre = (id) => { const c = getClient(id); return escapeHtml(id) + " - " + escapeHtml(c ? c.name : id); };
+    const logs = (info.logs || []).filter((l) => l.summary && (l.summary.aperturas || l.summary.pedidos || l.summary.pagos));
+    const repetidos = info.repetidos || [];
+    afterRender.push(() => {
+      document.querySelectorAll("[data-dup-delete]").forEach((b) => b.addEventListener("click", () => {
+        const ids = b.dataset.dupDelete.split(",").filter(Boolean);
+        const faltan = ids.filter((id) => !getOrder(id));
+        if (faltan.length) return alert("Este equipo no tiene cargados " + faltan.join(", ") + ". Usá \"Cargar historial\" arriba y volvé a intentar.");
+        if (!confirm("Eliminar " + ids.length + " pedido(s) repetido(s): " + ids.join(", ") + "?\nQuedan en la papelera de Pedidos y se pueden restaurar.")) return;
+        ids.forEach((id) => deleteOrder(id));
+        saveState();
+        ui.controlRepairs = null;
+        render();
+      }));
+    });
+    // Por cada grupo se deja el primero (o el entregado) y se eliminan los demas.
+    const sobrantes = (g) => { const keep = (g.entregados && g.entregados[0]) || g.ids[0]; return g.ids.filter((id) => id !== keep); };
+    const todos = repetidos.flatMap(sobrantes);
+    const porCliente = new Map();
+    logs.forEach((l) => (((l.detail || {}).pedidos) || []).concat(((l.detail || {}).pagos) || []).forEach((x) => {
+      const r = porCliente.get(x.clientId) || { filas: 0, monto: 0 };
+      r.filas += (x.quitadas || []).length; r.monto += Number(x.antes || 0) - Number(x.despues || 0);
+      porCliente.set(x.clientId, r);
+    }));
+    const aperturas = logs.flatMap((l) => ((l.detail || {}).aperturas || []).filter((a) => a.coleccion === "saldos"));
+    if (!logs.length && !repetidos.length) return "";
+    return `<div class="panel" style="margin-top:14px">
+      <h2 class="page-title" style="font-size:18px">Duplicados en la cuenta corriente</h2>
+      ${logs.length ? `<p class="muted" style="margin-top:0">El sistema corrigio solo filas de saldo repetidas (un mismo pedido o pago sumado dos veces) y filas de "Saldo anterior" que se habian guardado como reales. Antes de corregir se guardo una copia.</p>
+        <ul style="margin:6px 0 0 18px">${logs.slice(0, 5).map((l) => `<li>${formatTimestampShort(l.at)}: ${l.summary.pedidosFilasQuitadas || 0} fila(s) de pedidos repetidas (${formatMoney(l.summary.pedidosMonto || 0)})${l.summary.pagos ? ", " + l.summary.pagos + " pago(s) repetido(s) (" + formatMoney(-(l.summary.pagosMonto || 0)) + ")" : ""}${l.summary.aperturas ? ", " + l.summary.aperturas + " fila(s) de saldo anterior" : ""}</li>`).join("")}</ul>
+        ${porCliente.size || aperturas.length ? `<details style="margin-top:8px"><summary>Ver por cliente (${new Set([...porCliente.keys(), ...aperturas.map((a) => a.clientId)]).size})</summary>
+          <div class="table-wrap"><table><thead><tr><th>Cliente</th><th>Filas repetidas quitadas</th><th>Monto quitado</th><th>Saldo anterior guardado por error</th></tr></thead><tbody>
+          ${Array.from(new Set([...porCliente.keys(), ...aperturas.map((a) => a.clientId)])).map((id) => { const r = porCliente.get(id) || { filas: 0, monto: 0 }; const ap = aperturas.filter((a) => a.clientId === id).reduce((s, a) => s + a.amount, 0); return `<tr><td>${nombre(id)}</td><td class="num">${r.filas}</td><td class="num">${formatMoney(r.monto)}</td><td class="num">${ap ? formatMoney(ap) : "-"}</td></tr>`; }).join("")}
+          </tbody></table></div></details>` : ""}` : ""}
+      ${repetidos.length ? `<div style="margin-top:12px"><strong>Pedidos que parecen cargados dos veces (${repetidos.length})</strong>
+        <p class="muted" style="margin:4px 0 6px">Mismo cliente, mismo dia y mismos productos. Se deja uno (el entregado, si hay) y se eliminan los otros.</p>
+        <ul style="margin:0 0 0 18px">${repetidos.map((g) => `<li>${nombre(g.clientId)} · ${formatDate(g.fecha)} · ${formatMoney(g.total)} · ${g.ids.map(escapeHtml).join(", ")} <button class="btn small danger" type="button" data-dup-delete="${escapeAttr(sobrantes(g).join(","))}">Eliminar ${escapeHtml(sobrantes(g).join(", "))}</button></li>`).join("")}</ul>
+        ${repetidos.length > 1 ? `<div class="page-actions" style="margin-top:8px"><button class="btn danger" type="button" data-dup-delete="${escapeAttr(todos.join(","))}">Eliminar los ${todos.length} repetidos</button></div>` : ""}</div>` : ""}
+    </div>`;
+  }
+
   function renderControl() {
     if (!ui.controlDate || ui.controlDate > todayISO()) ui.controlDate = todayISO();
     const date = ui.controlDate;
@@ -14568,6 +14634,7 @@
         ${metricCard("Transferencias por comprobar", String(porComprobar), noLlegaron.length ? noLlegaron.length + " no llegaron" : "Remitos del reparto")}
         ${metricCard("Clientes con deuda inusual", deudasInfo.loading ? "..." : String(deudas.length), "Contra su promedio de 8 semanas")}
       </div>
+      ${controlRepairsHtml()}
       <div class="panel control-montos" style="margin-top:14px">
         <div class="page-actions" style="justify-content:space-between">
           <h2 class="page-title" style="font-size:18px">Montos que no coinciden ${deudasInfo.loading ? "" : ok(!montosRevisar.length)}</h2>
@@ -20628,8 +20695,13 @@
         if (payment) entry.clientId = payment.clientId;
       }
     });
+    // Con la vista rapida el equipo tiene 15 dias de pedidos pero 7 de saldos: la fila de un pedido
+    // anterior al corte esta adentro del "Saldo anterior" y no hay que crearla de nuevo (se creaba
+    // en cada carga, se enviaba al servidor y el pedido quedaba sumado dos veces).
+    const corteSaldos = saldos.reduce((max, entry) => (isOpeningRow(entry) && String(entry.date || "") > max ? String(entry.date || "") : max), "") || balanceWindowCutoff();
     orders.forEach((order) => {
       const existing = saldos.find((entry) => entry.relatedEntityId === order.id && entry.relatedEntityType === "order" && entry.type === "pedido");
+      if (!existing && corteSaldos && String(order.date || "") < corteSaldos) return;
       if (existing) {
         existing.clientId = existing.clientId || order.clientId;
         existing.date = existing.date || order.date || todayISO();
@@ -24301,6 +24373,13 @@
 
   function updateOrderAccounting(order) {
     let entry = state.saldos.find((item) => item.relatedEntityId === order.id && item.relatedEntityType === "order" && item.type === "pedido");
+    // Pedido anterior a los dias de saldos que tiene este equipo: su fila esta en el servidor (adentro
+    // del "Saldo anterior" de aca). No se crea otra: el servidor ajusta esa fila al total del pedido.
+    const corte = (state.saldos || []).reduce((max, item) => (isOpeningRow(item) && String(item.date || "") > max ? String(item.date || "") : max), "") || balanceWindowCutoff();
+    if (!entry && corte && String(order.date || "") < corte) {
+      recomputeClientSaldoBalances(order.clientId);
+      return;
+    }
     if (!entry) {
       addSaldoEntry({
         clientId: order.clientId,

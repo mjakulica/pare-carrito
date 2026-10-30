@@ -11,6 +11,7 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { billingConfig, nowArt, computeDueInvoices, runBilling, regeneratePdf, emitCreditNote, creditNoteTypeFor } = require("./billing");
 const { controlDailySummary, controlPaymentChecks, parseBankText, parseBankJson } = require("./control");
+const { repairAccounting, repairSummary, isOpeningRow, alignChangedOrderSaldos } = require("./dataRepair");
 const { syncSheetsFromStateDiff, pushPrecio } = require("./sheetsSync");
 
 const PORT = Number(process.env.PORT || 3000);
@@ -1053,6 +1054,8 @@ function applyArrayPatch(target, key, changes) {
   (Array.isArray(changes && changes.upsert) ? changes.upsert : []).forEach((item) => {
     const id = patchKeyForItem(key, item);
     if (!id) return;
+    // La fila de "Saldo anterior" la arma el servidor para la ventana del celular: nunca se guarda.
+    if (WINDOW_COLLECTIONS.includes(key) && isOpeningRow(item)) return;
     // No dejar que una copia MAS VIEJA pise una MAS NUEVA: si ambas tienen updatedAt y la que
     // llega es anterior a la guardada, se ignora. Evita que un dispositivo con datos
     // desactualizados revierta cambios ya confirmados (ej. precios actualizados por una compra
@@ -1487,7 +1490,7 @@ function cutoffDate(days) {
 function stripOpeningRows(data) {
   const clean = { ...(data || {}) };
   WINDOW_COLLECTIONS.forEach((key) => {
-    if (Array.isArray(clean[key])) clean[key] = clean[key].filter((row) => !(row && row.__opening));
+    if (Array.isArray(clean[key])) clean[key] = clean[key].filter((row) => !isOpeningRow(row));
   });
   return clean;
 }
@@ -1563,10 +1566,10 @@ function buildWindowedState(data, presetName, customDays) {
     cutoffs[key] = cutoffDate(days);
     // Una fila sin fecha reconocible viaja siempre entera: es preferible mandar de mas a que
     // desaparezca del sistema sin que nadie se entere.
-    out[key] = source[key].filter((row) => { const d = recordDate(row); return !d || d >= cutoffs[key]; });
+    out[key] = source[key].filter((row) => { const d = recordDate(row); return !isOpeningRow(row) && (!d || d >= cutoffs[key]); });
   });
   // Las filas sin fecha tampoco cuentan para los saldos de apertura: ya viajan enteras.
-  const before = (key) => (source[key] || []).filter((row) => { const d = recordDate(row); return d && d < cutoffs[key]; });
+  const before = (key) => (source[key] || []).filter((row) => { const d = recordDate(row); return !isOpeningRow(row) && d && d < cutoffs[key]; });
 
   // Saldo de cada cliente anterior al corte, en una sola fila.
   const byClient = {};
@@ -1747,6 +1750,9 @@ app.put("/state", authenticate, requireRole(...SYNC_ROLES), async (req, res) => 
     const margenPut = enforceMinMarginOnServer(beforeData, cleanData);
     const repreciadosPut = margenPut + repriceOrdersOnServer(beforeData, cleanData, new Date().toISOString())
       + normalizeOrdersOnServer(beforeData, cleanData, new Date().toISOString());
+    alignChangedOrderSaldos(beforeData, cleanData);
+    const reparoPut = repairAccounting(cleanData);
+    if (reparoPut.changed) await logRepair(clientDb, "escritura", req.user.username, reparoPut.report);
     const clavesPut = takeUserPasswords(cleanData, beforeData);
     const saved = await clientDb.query(
       `INSERT INTO app_state (id, data, updated_at, updated_by) VALUES ('main', $1, now(), $2)
@@ -1773,7 +1779,7 @@ app.put("/state", authenticate, requireRole(...SYNC_ROLES), async (req, res) => 
     );
     await clientDb.query("COMMIT");
     syncSheetsFromStateDiff(beforeData, cleanData);
-    res.json({ ok: true, updatedAt: saved.rows[0].updated_at.toISOString(), serverChanged: repreciadosPut > 0, repriced: repreciadosPut });
+    res.json({ ok: true, updatedAt: saved.rows[0].updated_at.toISOString(), serverChanged: repreciadosPut > 0 || reparoPut.changed, repriced: repreciadosPut });
   } catch (error) {
     await clientDb.query("ROLLBACK").catch(() => {});
     console.error("PUT /state:", error);
@@ -2127,6 +2133,9 @@ app.post("/state/patch", authenticate, requireRole(...PATCH_SYNC_ROLES), async (
     const margenCorregidos = enforceMinMarginOnServer(beforeData, nextData);
     const repreciados = margenCorregidos + repriceOrdersOnServer(beforeData, nextData, new Date().toISOString())
       + normalizeOrdersOnServer(beforeData, nextData, new Date().toISOString());
+    const alineados = alignChangedOrderSaldos(beforeData, nextData);
+    const reparoPatch = repairAccounting(nextData);
+    if (reparoPatch.changed) await logRepair(clientDb, "escritura", req.user.username, reparoPatch.report);
     const clavesPatch = takeUserPasswords(nextData, beforeData);
     const saved = await clientDb.query(
       "UPDATE app_state SET data = $1, updated_at = now(), updated_by = $2 WHERE id = 'main' RETURNING updated_at",
@@ -2145,7 +2154,7 @@ app.post("/state/patch", authenticate, requireRole(...PATCH_SYNC_ROLES), async (
     // equipo NO queda al dia: tiene que bajar el estado (si se marcara al dia, nunca recibiria lo
     // que cargaron los demas).
     // Si el servidor reprecio pedidos, el equipo tampoco queda al dia: tiene que bajar el resultado.
-    res.json({ ok: true, updatedAt: saved.rows[0].updated_at.toISOString(), staleBase: storedIso !== String(body.baseUpdatedAt) || repreciados > 0, repriced: repreciados });
+    res.json({ ok: true, updatedAt: saved.rows[0].updated_at.toISOString(), staleBase: storedIso !== String(body.baseUpdatedAt) || repreciados > 0 || reparoPatch.changed || alineados > 0, repriced: repreciados });
   } catch (error) {
     await clientDb.query("ROLLBACK").catch(() => {});
     console.error("POST /state/patch:", error);
@@ -2674,6 +2683,52 @@ async function syncUsersFromState(db, data, claves) {
 
 // Una sola vez: saca las contraseñas que quedaban en el estado, en el historial de copias y en el
 // registro de operaciones. Antes crea el acceso de quien no lo tenga.
+// ---------- Reparacion de la cuenta corriente (ver dataRepair.js) ----------
+async function logRepair(db, kind, by, report) {
+  const resumen = repairSummary(report);
+  const { pedidosRepetidos, ...detalle } = report;
+  await db.query("INSERT INTO maintenance_log (kind, updated_by, summary, detail) VALUES ($1, $2, $3, $4)", [kind, by || "sistema", resumen, detalle]);
+  console.log("Reparacion de saldos (" + kind + (by ? ", " + by : "") + "): " + JSON.stringify(resumen));
+}
+
+async function repairAccountingOnStartup() {
+  const db = await pool.connect();
+  try {
+    await db.query("BEGIN");
+    const row = await db.query("SELECT data FROM app_state WHERE id = 'main' FOR UPDATE");
+    if (!row.rows.length) { await db.query("ROLLBACK"); return; }
+    const original = row.rows[0].data || {};
+    const copia = JSON.parse(JSON.stringify(original));
+    const result = repairAccounting(copia);
+    if (!result.changed) { await db.query("ROLLBACK"); return; }
+    // Copia de antes, por si hay que volver atras (queda en el historial del estado).
+    await db.query("INSERT INTO state_history (data, updated_by) VALUES ($1, $2)", [original, "copia-antes-de-reparar-saldos"]);
+    await db.query("UPDATE app_state SET data = $1, updated_at = now(), updated_by = 'reparacion-saldos' WHERE id = 'main'", [result.data]);
+    await db.query("INSERT INTO state_history (data, updated_by) VALUES ($1, $2)", [result.data, "reparacion-saldos"]);
+    await logRepair(db, "inicio", "reparacion-saldos", result.report);
+    await db.query("COMMIT");
+  } catch (error) {
+    await db.query("ROLLBACK").catch(() => {});
+    console.error("No se pudo reparar la cuenta corriente:", error.message);
+  } finally {
+    db.release();
+  }
+}
+
+// Lo que se corrigio (para el gerente) y los pedidos que parecen cargados dos veces.
+app.get("/admin/repairs", authenticate, requireRole("manager", "admin"), async (req, res) => {
+  try {
+    const logs = await pool.query("SELECT id, at, kind, updated_by, summary, detail FROM maintenance_log ORDER BY id DESC LIMIT 30");
+    const row = await pool.query("SELECT data FROM app_state WHERE id = 'main'");
+    const data = row.rows.length ? row.rows[0].data || {} : {};
+    const { report } = repairAccounting(JSON.parse(JSON.stringify({ orders: data.orders || [] })));
+    res.json({ ok: true, logs: logs.rows, pedidosRepetidos: report.pedidosRepetidos });
+  } catch (error) {
+    console.error("admin/repairs:", error.message);
+    res.status(500).json({ error: "No se pudo leer." });
+  }
+});
+
 async function migratePasswordsOutOfState() {
   const db = await pool.connect();
   try {
@@ -4039,7 +4094,7 @@ if (require.main === module) {
       initBillingScheduler();
       initDunningScheduler();
       initControlEmailScheduler();
-      migratePasswordsOutOfState().finally(() => rebuildMirrorOnStartup());
+      migratePasswordsOutOfState().finally(() => repairAccountingOnStartup()).finally(() => rebuildMirrorOnStartup());
       return app.listen(PORT, () => console.log("Pare Carrito SAS API escuchando en puerto " + PORT));
     })
     .catch((error) => {
