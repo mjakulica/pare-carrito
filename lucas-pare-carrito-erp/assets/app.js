@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v77";
+  const APP_VERSION = "v78";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -11666,7 +11666,6 @@
     const siguiente = estados.find((e) => !e.st.ok);
     afterRender.push(bindRecorridoAvisos);
     return `
-      ${recorridoShareHtml(true)}
       ${renderRecorridoAvisos()}
       ${siguiente ? `<div class="panel recorrido-next"><div class="muted">Te toca</div><div style="font-size:20px;font-weight:700;margin:4px 0 10px">${escapeHtml(siguiente.paso.label)}</div><button class="btn primary big" type="button" data-recorrido-step="${siguiente.paso.key}">Seguir &rarr;</button></div>`
         : `<div class="panel recorrido-next"><div style="font-size:20px;font-weight:700">Terminaste el dia &#127881;</div><div class="muted">Todo cargado. Buen trabajo.</div></div>`}
@@ -11770,7 +11769,6 @@
     const otrosEnRuta = recorridoTodayOrders().filter((o) => !enRuta.has(o.id) && o.routeDate === today && o.routeBy && String(o.routeBy) !== recorridoOwnerId());
     const compartida = recorridoOwnerId() !== String(currentUser.id);
     return `
-      ${recorridoShareHtml(true)}
       <div class="panel">
         <h2 class="page-title" style="font-size:18px">${compartida ? "Ruta de " + escapeHtml(recorridoOwnerName(recorridoOwnerId())) : "Tu ruta"} (${route.length})</h2>
         <p class="muted" style="margin-top:0">Ordena con las flechas. La podes cambiar en cualquier momento, tambien en el camino.</p>
@@ -11786,6 +11784,7 @@
           </div>`).join("") || `<div class="empty compact">Todavia no agregaste pedidos. Agregalos abajo en el orden en que los vas a entregar.</div>`}
         </div>
       </div>
+      <div style="margin-top:14px">${recorridoShareHtml(true)}</div>
       <div class="panel" style="margin-top:14px">
         <div class="page-actions" style="justify-content:space-between;align-items:flex-end">
           <div><h2 class="page-title" style="font-size:18px;margin:0">Pedidos de hoy para agregar (${disponibles.length})</h2><div class="muted" style="font-size:12px">${ultimo.size ? "Ordenados como en la última ruta." : "Ordenados por número de cliente."}</div></div>
@@ -11847,9 +11846,7 @@
     const mapa = client && client.address ? "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(client.address) : "";
     const necesitaFoto = pago.method === "transferencia" || pago.method === "cuenta";
     afterRender.push(() => bindRecorridoReparto(order, pendiente));
-    const compartido = recorridoOwnerId() !== String(currentUser.id) || recorridoMembers(currentUser.id).length;
     return `
-      ${compartido ? recorridoShareHtml(false) : ""}
       <div class="recorrido-progress"><div style="width:${Math.round(((posicion - 1) / route.length) * 100)}%"></div></div>
       <div class="muted" style="margin:6px 0 10px">Pedido ${posicion} de ${route.length}</div>
       <div class="panel recorrido-order">
