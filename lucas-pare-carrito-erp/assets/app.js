@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v76";
+  const APP_VERSION = "v77";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -11150,7 +11150,7 @@
     if (resetBtn) resetBtn.addEventListener("click", (ev) => {
       ev.stopPropagation();
       const dayKey = employeeChecklistDayKey();
-      if (currentUser) state.checklistLog = getChecklistLog().filter((e) => !(e.dayKey === dayKey && String(e.userId) === String(currentUser.id)));
+      if (currentUser) state.checklistLog = getChecklistLog().filter((e) => !(e.dayKey === dayKey && String(e.userId) === String(currentUser.id) && e.key !== RECORRIDO_SHARE_KEY));
       saveState();
       render();
     });
@@ -11225,11 +11225,122 @@
     return (state.orders || []).filter((o) => o.date === today && !["cancelado", "anulado"].includes(o.status));
   }
 
-  // Ruta del empleado: los pedidos de hoy que puso en su ruta, en orden.
+  // ---- Recorrido compartido ----
+  // Cuando salen juntos, uno arma la ruta y el otro "se suma": los dos ven y manejan la misma ruta
+  // (la del dueño, routeBy) y lo que entrega cada uno se actualiza en los dos celulares. Cada vez que
+  // alguien se suma o se va queda un registro nuevo del dia en checklistLog; vale el ultimo.
+  const RECORRIDO_SHARE_KEY = "ruta-compartida";
+
+  function recorridoShareEntry(userId) {
+    const today = todayISO();
+    return getChecklistLog().filter((e) => e && e.key === RECORRIDO_SHARE_KEY && e.dayKey === today && String(e.userId) === String(userId))
+      .sort((a, b) => String(a.at || "").localeCompare(String(b.at || ""))).pop() || null;
+  }
+
+  function recorridoJoinedOwnerId(userId) {
+    const e = recorridoShareEntry(userId);
+    return e && e.ownerId && String(e.ownerId) !== String(userId) ? String(e.ownerId) : "";
+  }
+
+  // Dueño de la ruta que maneja este usuario hoy: la suya o la del compañero al que se sumo.
+  function recorridoOwnerId(userId) {
+    const id = String(userId || (currentUser && currentUser.id) || "");
+    return recorridoJoinedOwnerId(id) || id;
+  }
+
+  function recorridoOwnerName(ownerId) {
+    const u = getUser(ownerId);
+    if (u) return u.name || u.username;
+    const o = (state.orders || []).find((x) => String(x.routeBy || "") === String(ownerId) && x.routeByName);
+    return o ? o.routeByName : "otro";
+  }
+
+  // Quienes se sumaron a la ruta de ownerId hoy.
+  function recorridoMembers(ownerId) {
+    const today = todayISO();
+    const ids = new Set(getChecklistLog().filter((e) => e && e.key === RECORRIDO_SHARE_KEY && e.dayKey === today).map((e) => String(e.userId)));
+    return Array.from(ids).filter((id) => id !== String(ownerId) && recorridoJoinedOwnerId(id) === String(ownerId));
+  }
+
+  // Rutas de hoy de otros a las que este usuario se puede sumar.
+  function recorridoOtherRoutes() {
+    const today = todayISO();
+    const mine = recorridoOwnerId();
+    const porDueno = new Map();
+    recorridoTodayOrders().forEach((o) => {
+      if (o.routeDate !== today || !o.routeBy || !(Number(o.routeSeq) > 0)) return;
+      const id = String(o.routeBy);
+      if (id === mine || id === String(currentUser.id) || recorridoJoinedOwnerId(id)) return;
+      if (!porDueno.has(id)) porDueno.set(id, { ownerId: id, name: o.routeByName || recorridoOwnerName(id), total: 0, entregados: 0 });
+      const r = porDueno.get(id);
+      r.total += 1;
+      if (o.status === "entregado") r.entregados += 1;
+    });
+    return Array.from(porDueno.values());
+  }
+
+  function setRecorridoShare(ownerId) {
+    const today = todayISO();
+    const at = new Date().toISOString();
+    getChecklistLog().push({ id: today + "|" + currentUser.id + "|" + RECORRIDO_SHARE_KEY + "|" + at, dayKey: today, userId: currentUser.id, userName: currentUser.name || "", key: RECORRIDO_SHARE_KEY, ownerId: ownerId ? String(ownerId) : "", ownerName: ownerId ? recorridoOwnerName(ownerId) : "", at });
+  }
+
+  function joinRecorrido(ownerId) {
+    if (recorridoMembers(currentUser.id).length) {
+      return alert("Hay compañeros sumados a tu recorrido (" + recorridoMembers(currentUser.id).map(recorridoOwnerName).join(", ") + "). Para sumarte a otro, primero tienen que salir ellos.");
+    }
+    const propios = recorridoMyRoute();
+    const nombre = recorridoOwnerName(ownerId);
+    if (propios.length && !confirm("Tenés " + propios.length + " pedido(s) en tu ruta. Se pasan al final de la ruta de " + nombre + ". ¿Sumarte?")) return;
+    if (!propios.length && !confirm("¿Sumarte al recorrido de " + nombre + "? Van a ver y manejar la misma ruta.")) return;
+    const ids = propios.map((o) => o.id);
+    setRecorridoShare(ownerId);
+    if (ids.length) saveRecorridoRoute([...recorridoMyRoute().map((o) => o.id), ...ids]);
+    else saveState();
+    ui.repartoPago = null;
+    render();
+  }
+
+  function leaveRecorrido() {
+    const nombre = recorridoOwnerName(recorridoOwnerId());
+    if (!confirm("¿Dejar el recorrido de " + nombre + "? La ruta queda con " + nombre + " y vos armás la tuya.")) return;
+    setRecorridoShare("");
+    saveState();
+    ui.repartoPago = null;
+    render();
+  }
+
+  function recorridoShareHtml(conRutas) {
+    const owner = recorridoOwnerId();
+    const joined = owner !== String(currentUser.id);
+    afterRender.push(() => {
+      document.querySelectorAll("[data-recorrido-join]").forEach((b) => b.addEventListener("click", () => joinRecorrido(b.dataset.recorridoJoin)));
+      document.querySelectorAll("[data-recorrido-leave]").forEach((b) => b.addEventListener("click", leaveRecorrido));
+    });
+    if (joined) {
+      const otros = recorridoMembers(owner).filter((id) => id !== String(currentUser.id)).map(recorridoOwnerName);
+      return `<div class="panel recorrido-share joined">
+        <div><strong>&#129309; Vas en el recorrido de ${escapeHtml(recorridoOwnerName(owner))}</strong>${otros.length ? ` <span class="muted">con ${escapeHtml(otros.join(", "))}</span>` : ""}
+        <div class="muted" style="font-size:13px">La ruta es la misma: lo que entrega cada uno se actualiza en los dos celulares.</div></div>
+        <button class="btn small ghost" type="button" data-recorrido-leave>Dejar este recorrido</button>
+      </div>`;
+    }
+    const miembros = recorridoMembers(owner).map(recorridoOwnerName);
+    const otras = conRutas ? recorridoOtherRoutes() : [];
+    if (!miembros.length && !otras.length) return "";
+    return `<div class="panel recorrido-share">
+      ${miembros.length ? `<div><strong>&#129309; ${escapeHtml(miembros.join(", "))} ${miembros.length > 1 ? "se sumaron" : "se sumó"} a tu recorrido.</strong><div class="muted" style="font-size:13px">Ven y manejan la misma ruta.</div></div>` : ""}
+      ${otras.length ? `<div style="width:100%"><strong>¿Salen juntos?</strong> <span class="muted">Sumate al recorrido de un compañero:</span>
+        ${otras.map((r) => `<div class="recorrido-share-row"><span>${escapeHtml(r.name)} <span class="muted">· ${r.total} pedido(s), ${r.entregados} entregado(s)</span></span><button class="btn small primary" type="button" data-recorrido-join="${escapeAttr(r.ownerId)}">Sumarme</button></div>`).join("")}</div>` : ""}
+    </div>`;
+  }
+
+  // Ruta del empleado: los pedidos de hoy de su ruta (o la del compañero al que se sumo), en orden.
   function recorridoMyRoute() {
     const today = todayISO();
+    const owner = recorridoOwnerId();
     return recorridoTodayOrders()
-      .filter((o) => o.routeDate === today && String(o.routeBy || "") === String(currentUser.id) && Number(o.routeSeq) > 0)
+      .filter((o) => o.routeDate === today && String(o.routeBy || "") === owner && Number(o.routeSeq) > 0)
       .sort((a, b) => Number(a.routeSeq) - Number(b.routeSeq));
   }
 
@@ -11237,14 +11348,17 @@
     const today = todayISO();
     const stamp = new Date().toISOString();
     const keep = new Set(orderIds);
+    // En un recorrido compartido la ruta sigue siendo del dueño, la arme quien la arme.
+    const owner = recorridoOwnerId();
+    const ownerName = owner === String(currentUser.id) ? currentUser.name || "" : recorridoOwnerName(owner);
     orderIds.forEach((id, index) => {
       const order = getOrder(id);
       if (!order) return;
-      if (order.routeSeq === index + 1 && order.routeDate === today && String(order.routeBy) === String(currentUser.id)) return;
+      if (order.routeSeq === index + 1 && order.routeDate === today && String(order.routeBy) === owner) return;
       order.routeSeq = index + 1;
       order.routeDate = today;
-      order.routeBy = currentUser.id;
-      order.routeByName = currentUser.name || "";
+      order.routeBy = owner;
+      order.routeByName = ownerName;
       order.updatedAt = stamp;
     });
     recorridoMyRoute().forEach((order) => {
@@ -11552,6 +11666,7 @@
     const siguiente = estados.find((e) => !e.st.ok);
     afterRender.push(bindRecorridoAvisos);
     return `
+      ${recorridoShareHtml(true)}
       ${renderRecorridoAvisos()}
       ${siguiente ? `<div class="panel recorrido-next"><div class="muted">Te toca</div><div style="font-size:20px;font-weight:700;margin:4px 0 10px">${escapeHtml(siguiente.paso.label)}</div><button class="btn primary big" type="button" data-recorrido-step="${siguiente.paso.key}">Seguir &rarr;</button></div>`
         : `<div class="panel recorrido-next"><div style="font-size:20px;font-weight:700">Terminaste el dia &#127881;</div><div class="muted">Todo cargado. Buen trabajo.</div></div>`}
@@ -11652,10 +11767,12 @@
         navigate("mi-recorrido/reparto");
       });
     });
-    const otrosEnRuta = recorridoTodayOrders().filter((o) => !enRuta.has(o.id) && o.routeDate === today && o.routeBy && String(o.routeBy) !== String(currentUser.id));
+    const otrosEnRuta = recorridoTodayOrders().filter((o) => !enRuta.has(o.id) && o.routeDate === today && o.routeBy && String(o.routeBy) !== recorridoOwnerId());
+    const compartida = recorridoOwnerId() !== String(currentUser.id);
     return `
+      ${recorridoShareHtml(true)}
       <div class="panel">
-        <h2 class="page-title" style="font-size:18px">Tu ruta (${route.length})</h2>
+        <h2 class="page-title" style="font-size:18px">${compartida ? "Ruta de " + escapeHtml(recorridoOwnerName(recorridoOwnerId())) : "Tu ruta"} (${route.length})</h2>
         <p class="muted" style="margin-top:0">Ordena con las flechas. La podes cambiar en cualquier momento, tambien en el camino.</p>
         <div class="recorrido-route-list">
           ${route.map((o, i) => `<div class="recorrido-route-row ${o.status === "entregado" ? "done" : ""}">
@@ -11730,7 +11847,9 @@
     const mapa = client && client.address ? "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(client.address) : "";
     const necesitaFoto = pago.method === "transferencia" || pago.method === "cuenta";
     afterRender.push(() => bindRecorridoReparto(order, pendiente));
+    const compartido = recorridoOwnerId() !== String(currentUser.id) || recorridoMembers(currentUser.id).length;
     return `
+      ${compartido ? recorridoShareHtml(false) : ""}
       <div class="recorrido-progress"><div style="width:${Math.round(((posicion - 1) / route.length) * 100)}%"></div></div>
       <div class="muted" style="margin:6px 0 10px">Pedido ${posicion} de ${route.length}</div>
       <div class="panel recorrido-order">
@@ -11878,6 +11997,14 @@
     });
     const entregado = document.getElementById("rep-entregado");
     if (entregado) entregado.addEventListener("click", () => {
+      // Recorrido compartido: si el compañero ya lo entrego (llego por la sincronizacion), no se
+      // vuelve a cobrar.
+      const actual = getOrder(order.id) || order;
+      if (actual.status === "entregado") {
+        alert("Este pedido ya lo marcó entregado " + (actual.deliveredBy || "otro") + ".");
+        ui.repartoPago = null;
+        return render();
+      }
       const method = pago.method;
       if (!method) return alert("Marca como pago: efectivo, transferencia o no pago.");
       let monto = 0;
