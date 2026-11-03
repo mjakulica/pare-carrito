@@ -4,7 +4,8 @@
   const labels = { APPROVED: "Aprobada", PENDING: "En revisión", REJECTED: "Rechazada", PAUSED: "Pausada", DISABLED: "Deshabilitada", IN_APPEAL: "En apelación", PENDING_DELETION: "Pendiente de eliminación" };
   const blank = () => ({ name: "", language: "es", category: "UTILITY", body: "Pare Carrito: {{1}} Ante cualquier duda respondé este mensaje.", sample: "", footer: "" });
   const model = { account: null, templates: [], selected: "", draft: blank(), busy: false, error: "", notice: "", dirty: false };
-  let host, request;
+  // readOnly: solo consultar (cuenta de revision de Meta); basePath: ruta del servidor a consultar.
+  let host, request, readOnly = false, basePath = "/whatsapp/templates";
   function selected() { return model.templates.find(t => t.id === model.selected); }
   function select(id) {
     model.selected = id;
@@ -21,25 +22,25 @@
   function render() {
     if (!host || !host.isConnected) return;
     const t = selected();
-    const locked = model.busy || !model.account || (t && !t.canEdit);
+    const locked = readOnly || model.busy || !model.account || (t && !t.canEdit);
     const disabled = locked ? "disabled" : "";
     host.innerHTML = `<div class="page-actions" style="justify-content:space-between;align-items:center">
       <h2 class="page-title" style="font-size:18px;margin:0">Plantillas de WhatsApp</h2>
       <button type="button" class="btn small ghost" data-wa-refresh ${model.busy ? "disabled" : ""}>${model.busy ? "Consultando…" : "Consultar Meta"}</button>
     </div>
-    <p class="muted">Creá y editá el texto fijo de los mensajes. Meta decide su aprobación y categoría. Los cambios se envían solo al pulsar el botón de envío.</p>
+    <p class="muted">${readOnly ? "Plantillas y estados de aprobación que devuelve la WhatsApp Business Platform para la cuenta configurada (solo consulta). / Templates and approval statuses returned by the WhatsApp Business Platform (read-only)." : "Creá y editá el texto fijo de los mensajes. Meta decide su aprobación y categoría. Los cambios se envían solo al pulsar el botón de envío."}</p>
     ${model.account ? `<p><strong>Cuenta: ${escape(model.account.name)}</strong> · WABA ${escape(model.account.id)}</p>` : `<p class="muted">Consultá Meta para cargar la cuenta configurada en el servidor y sus plantillas.</p>`}
     ${model.error ? `<div class="alert warn" role="alert">${escape(model.error)}</div>` : ""}
     ${model.notice ? `<p role="status">${escape(model.notice)}</p>` : ""}
     <div class="form-grid">
       <div class="field span-3"><label for="wa-template-select">Plantilla existente</label><select id="wa-template-select" ${model.busy ? "disabled" : ""}>
-        <option value="">Nueva plantilla</option>${model.templates.map(x => `<option value="${escape(x.id)}" ${x.id === model.selected ? "selected" : ""}>${escape(x.name)} · ${escape(x.language)} · ${escape(labels[x.status] || x.status)}</option>`).join("")}</select></div>
-      <div class="field"><label>&nbsp;</label><button type="button" class="btn ghost" data-wa-new ${model.busy ? "disabled" : ""}>Nueva plantilla</button></div>
+        <option value="">${readOnly ? "Elegí una plantilla" : "Nueva plantilla"}</option>${model.templates.map(x => `<option value="${escape(x.id)}" ${x.id === model.selected ? "selected" : ""}>${escape(x.name)} · ${escape(x.language)} · ${escape(labels[x.status] || x.status)}</option>`).join("")}</select></div>
+      ${readOnly ? "" : `<div class="field"><label>&nbsp;</label><button type="button" class="btn ghost" data-wa-new ${model.busy ? "disabled" : ""}>Nueva plantilla</button></div>`}
     </div>
     ${t ? `<p><strong>Estado en Meta: ${escape(labels[t.status] || t.status)}</strong> · ${escape(t.category === "UTILITY" ? "Utilidad" : t.category === "MARKETING" ? "Marketing" : t.category)}</p>
       ${t.rejectedReason && t.rejectedReason !== "NONE" ? `<div class="alert warn">Motivo informado por Meta: ${escape(t.rejectedReason)}</div>` : ""}
-      ${t.readOnlyReason ? `<p class="muted">${escape(t.readOnlyReason)}</p>` : ""}` : ""}
-    <form data-wa-template-form>
+      ${t.readOnlyReason && !readOnly ? `<p class="muted">${escape(t.readOnlyReason)}</p>` : ""}` : ""}
+    ${readOnly ? (t ? `<h3 style="font-size:15px">Texto de la plantilla</h3><div style="background:#edf7ef;border:1px solid #c7dfce;border-radius:12px;padding:16px;white-space:pre-wrap;overflow-wrap:anywhere">${escape(t.body)}${t.footer ? `<br><small class="muted">${escape(t.footer)}</small>` : ""}</div>` : "") + (model.account ? `<div class="table-wrap" style="margin-top:12px"><table><thead><tr><th>Nombre</th><th>Idioma</th><th>Categoría</th><th>Estado en Meta</th></tr></thead><tbody>${model.templates.map((x) => `<tr><td><strong>${escape(x.name)}</strong></td><td>${escape(x.language)}</td><td>${escape(x.category)}</td><td>${escape(labels[x.status] || x.status)}</td></tr>`).join("") || `<tr><td colspan="4" class="muted">Sin plantillas.</td></tr>`}</tbody></table></div>` : "") : `<form data-wa-template-form>
       <div class="form-grid">
         <div class="field span-2"><label for="wa-template-name">Nombre</label><input id="wa-template-name" name="name" value="${escape(model.draft.name)}" pattern="[a-z0-9_]+" maxlength="512" required ${t ? "readonly" : ""} ${disabled} placeholder="ej: pedido_modificado" /></div>
         <div class="field"><label for="wa-template-language">Idioma</label><input id="wa-template-language" name="language" value="${escape(model.draft.language)}" pattern="[a-z]{2,3}(_[A-Z]{2})?" required ${t ? "readonly" : ""} ${disabled} placeholder="es" /></div>
@@ -55,11 +56,12 @@
       <p class="muted">${t ? "Meta puede limitar la frecuencia de edición. El nombre y el idioma no se pueden cambiar; para otra combinación creá una plantilla nueva. La categoría solo se puede cambiar aquí si la plantilla está rechazada; en otros estados creá una nueva con otro nombre." : "La plantilla se creará en la cuenta indicada arriba. Elegí Utilidad para avisos sobre pedidos, pagos o entregas; Marketing para promociones."}</p>
       <button class="btn primary" type="submit" ${disabled}>${model.busy ? "Procesando…" : t ? "Enviar cambios a Meta" : "Crear y enviar a Meta"}</button>
       <p class="muted">Para usar una plantilla nueva en los avisos del ERP, cargá su nombre en el campo correspondiente de Configuración.</p>
-    </form>`;
-    preview();
+    </form>`}`;
     host.querySelector("[data-wa-refresh]").addEventListener("click", load);
-    host.querySelector("[data-wa-new]").addEventListener("click", () => { select(""); model.error = ""; model.notice = ""; render(); });
     host.querySelector("#wa-template-select").addEventListener("change", e => { select(e.target.value); model.error = ""; model.notice = ""; render(); });
+    if (readOnly) return;
+    preview();
+    host.querySelector("[data-wa-new]").addEventListener("click", () => { select(""); model.error = ""; model.notice = ""; render(); });
     host.querySelector("form").addEventListener("input", e => {
       if (!Object.hasOwn(model.draft, e.target.name)) return;
       model.draft[e.target.name] = e.target.value; model.dirty = true; preview();
@@ -70,7 +72,7 @@
     host.querySelector("form").addEventListener("submit", save);
   }
   async function api(path, body) {
-    const r = await request("/whatsapp/templates" + path, body ? { method: "POST", body: JSON.stringify(body) } : { method: "GET" });
+    const r = await request(basePath + path, body ? { method: "POST", body: JSON.stringify(body) } : { method: "GET" });
     const j = await r.json().catch(() => ({}));
     if (!r.ok || !j.ok) throw new Error(j.error || "No se pudo consultar Meta (HTTP " + r.status + ").");
     return j;
@@ -91,7 +93,7 @@
   }
   async function save(e) {
     e.preventDefault();
-    if (model.busy || !model.account || (selected() && !selected().canEdit)) return;
+    if (readOnly || model.busy || !model.account || (selected() && !selected().canEdit)) return;
     model.busy = true; model.error = ""; model.notice = ""; render();
     try {
       const j = await api(model.selected ? "/" + encodeURIComponent(model.selected) : "", { ...model.draft, accountId: model.account.id });
@@ -105,6 +107,6 @@
   }
   root.WhatsAppTemplates = {
     html: () => '<section id="wa-template-manager" class="panel" aria-label="Administrar plantillas de WhatsApp"></section>',
-    mount: options => { host = document.getElementById("wa-template-manager"); request = options.request; render(); }
+    mount: options => { host = document.getElementById("wa-template-manager"); request = options.request; readOnly = !!options.readOnly; basePath = options.basePath || "/whatsapp/templates"; render(); }
   };
 })(window);

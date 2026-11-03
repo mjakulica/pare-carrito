@@ -253,11 +253,30 @@ function authenticate(req, res, next) {
   if (!token) return res.status(401).json({ error: "Falta el token. Inicie sesión en /auth/login." });
   try {
     req.user = jwt.verify(token, JWT_SECRET);
-    recordDeviceVersion(req);
-    next();
   } catch {
     return res.status(401).json({ error: "Token inválido o vencido. Vuelva a iniciar sesión." });
   }
+  // El revisor de Meta solo puede usar la demo de WhatsApp: cualquier otra ruta se rechaza aca,
+  // asi ningun dato del sistema le llega aunque la ruta no pida un rol.
+  if (req.user.role === REVIEWER_ROLE) {
+    if (!REVIEWER_PATHS.has(req.path)) return res.status(403).json({ error: "Esta cuenta de revisión solo puede usar la demo de WhatsApp." });
+    return reviewerStillValid(req.user.sub)
+      .then((valido) => (valido ? next() : res.status(401).json({ error: "El acceso de revisión venció o fue desactivado." })))
+      .catch(() => res.status(503).json({ error: "No se pudo verificar el acceso." }));
+  }
+  recordDeviceVersion(req);
+  next();
+}
+
+// ---------- Revisor de Meta ----------
+const REVIEWER_ROLE = "revisor";
+const REVIEWER_USER_ID = "USR-REVISOR-META";
+const REVIEWER_USERNAME = "revisor.meta";
+const REVIEWER_PATHS = new Set(["/revisor/info", "/revisor/test", "/revisor/templates"]);
+
+async function reviewerStillValid(userId) {
+  const { rows } = await pool.query("SELECT u.is_active, r.expires_at FROM users u JOIN reviewer_access r ON r.user_id = u.id WHERE u.id = $1", [String(userId || "")]);
+  return !!(rows[0] && rows[0].is_active && new Date(rows[0].expires_at).getTime() > Date.now());
 }
 
 function requireRole(...roles) {
@@ -383,6 +402,11 @@ app.post("/auth/login", async (req, res) => {
     return res.status(401).json({ error: "Usuario o contraseña incorrectos." });
   }
   loginAttempts.delete(attemptKey);
+  if (user.role === REVIEWER_ROLE) {
+    if (!user.is_active || !(await reviewerStillValid(user.id).catch(() => false))) return res.status(403).json({ error: "Este acceso de revisión venció o fue desactivado." });
+    await pool.query("UPDATE reviewer_access SET last_login_at = now() WHERE user_id = $1", [user.id]).catch(() => {});
+    return res.json({ token: jwt.sign({ sub: user.id, username: user.username, role: user.role, name: user.name }, JWT_SECRET, { expiresIn: "4h" }), role: user.role, name: user.name, username: user.username, expiresIn: "4h", defaultPassword: false });
+  }
   if (!user.is_active) {
     return res.status(403).json({ error: "Su cuenta queda pendiente de aprobación, por favor comunicarse con administración para empezar a trabajar con nosotros.", pending: true });
   }
@@ -1973,6 +1997,96 @@ app.post("/whatsapp/test", authenticate, requireRole("manager", "admin"), async 
   const r = await botRequest("/broadcast", { numbers: [number], templateName, lang: (req.body && req.body.lang) || "es", params: ["Prueba de Pare Carrito: si te llega este mensaje, el bot de WhatsApp esta vinculado."] });
   if (!r.ok) return res.status(502).json({ error: r.error });
   res.json({ ok: true, sent: r.sent || 0, failed: r.failed || 0, errors: r.errors || [] });
+});
+
+// Alta, cambio de contraseña, vencimiento y baja del acceso del revisor (gerente/admin).
+app.get("/admin/meta-reviewer", authenticate, requireRole("manager", "admin"), async (req, res) => {
+  const { rows } = await pool.query("SELECT u.is_active, r.expires_at, r.last_login_at, r.tests_sent, r.updated_at FROM users u JOIN reviewer_access r ON r.user_id = u.id WHERE u.id = $1", [REVIEWER_USER_ID]);
+  const r = rows[0];
+  res.json({ ok: true, username: REVIEWER_USERNAME, exists: !!r, active: !!(r && r.is_active && new Date(r.expires_at).getTime() > Date.now()), enabled: !!(r && r.is_active), expiresAt: r ? r.expires_at : null, lastLoginAt: r ? r.last_login_at : null, testsSent: r ? r.tests_sent : 0 });
+});
+
+app.post("/admin/meta-reviewer", authenticate, requireRole("manager", "admin"), async (req, res) => {
+  const body = req.body || {};
+  const password = typeof body.password === "string" ? body.password : "";
+  const enabled = body.enabled !== false;
+  const days = Math.max(1, Math.min(60, Math.round(Number(body.days) || 30)));
+  if (password && password.length < 10) return res.status(400).json({ error: "La contraseña del revisor tiene que tener al menos 10 caracteres." });
+  const existing = await pool.query("SELECT 1 FROM users WHERE id = $1", [REVIEWER_USER_ID]);
+  if (!existing.rows.length && !password) return res.status(400).json({ error: "Poné una contraseña para crear el acceso." });
+  const taken = await pool.query("SELECT 1 FROM users WHERE lower(username) = lower($1) AND id <> $2", [REVIEWER_USERNAME, REVIEWER_USER_ID]);
+  if (taken.rows.length) return res.status(409).json({ error: "Ya existe otro usuario llamado " + REVIEWER_USERNAME + "." });
+  const hash = password ? await bcrypt.hash(password, 10) : null;
+  await pool.query(
+    `INSERT INTO users (id, username, name, email, role, password_hash, password_fingerprint, is_active, updated_at)
+     VALUES ($1, $2, 'Revisor Meta', '', $3, $4, '', $5, now())
+     ON CONFLICT (id) DO UPDATE SET role = EXCLUDED.role, is_active = EXCLUDED.is_active, password_hash = COALESCE($6, users.password_hash), updated_at = now()`,
+    [REVIEWER_USER_ID, REVIEWER_USERNAME, REVIEWER_ROLE, hash || "", enabled, hash]
+  );
+  await pool.query(
+    `INSERT INTO reviewer_access (user_id, expires_at, created_by, updated_at) VALUES ($1, now() + ($2 || ' days')::interval, $3, now())
+     ON CONFLICT (user_id) DO UPDATE SET expires_at = CASE WHEN $4 THEN now() + ($2 || ' days')::interval ELSE reviewer_access.expires_at END, created_by = EXCLUDED.created_by, updated_at = now()`,
+    [REVIEWER_USER_ID, String(days), req.user.username, enabled]
+  );
+  console.log("Acceso del revisor de Meta " + (enabled ? "activado por " + days + " dias" : "desactivado") + " por " + req.user.username + (password ? " (contraseña nueva)" : "") + ".");
+  res.json({ ok: true });
+});
+
+// Lo que ve el revisor: si el bot esta conectado (sin datos secretos), las plantillas y ejemplos
+// con datos ficticios de los avisos que manda el sistema.
+const REVIEWER_DEMO = {
+  negocio: "Pare Carrito SAS (distribuidora de frutas y verduras)",
+  clientes: [
+    { nombre: "Almacén Demo Norte", telefono: "+54 9 387 000-0001" },
+    { nombre: "Verdulería Ejemplo", telefono: "+54 9 387 000-0002" }
+  ],
+  avisos: [
+    { clave: "pedido", titulo: "Pedido recibido por WhatsApp", texto: "El cliente escribe su pedido (\"2 kg de tomate, 1 cajón de banana\"), el sistema lo interpreta y responde con el resumen para confirmar." },
+    { clave: "cambioPedido", titulo: "Cambio en un pedido", texto: "Si al preparar el pedido se agrega o se quita un producto, el cliente recibe un aviso con el cambio." },
+    { clave: "mora", titulo: "Recordatorio de saldo", texto: "Recordatorio amable al cliente con saldo pendiente, con el monto adeudado." },
+    { clave: "feriado", titulo: "Aviso de feriado", texto: "Aviso a los clientes de los días sin reparto." },
+    { clave: "subaPrecio", titulo: "Aviso de cambio de precios", texto: "Aviso cuando cambia el precio de productos que el cliente compra seguido." },
+    { clave: "resumenControl", titulo: "Resumen diario para el gerente", texto: "Resumen nocturno para el gerente: pedidos entregados, caja y transferencias por revisar." }
+  ]
+};
+
+const reviewerTests = [];
+app.get("/revisor/info", authenticate, requireRole(REVIEWER_ROLE), async (req, res) => {
+  const health = await botRequest("/health");
+  const list = await botRequest("/templates");
+  const templates = list.ok && Array.isArray(list.templates)
+    ? list.templates.filter((t) => t && t.name).map((t) => ({ name: t.name, language: t.language, category: t.category, status: t.status, body: t.body, variables: (String(t.body || "").match(/\{\{[^{}]*\}\}/g) || []).length }))
+    : [];
+  const c = health.ok ? health.configured || {} : {};
+  res.json({ ok: true, demo: REVIEWER_DEMO, bot: { connected: !!health.ok, whatsapp: !!(c.token && c.phoneNumberId), webhook: !!c.appSecret }, templates, limits: { perHour: 5, perDay: 20 } });
+});
+
+// Plantillas y estados en Meta, solo lectura (mismo formato que /whatsapp/templates).
+app.get("/revisor/templates", authenticate, requireRole(REVIEWER_ROLE), async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  const r = await botRequest("/templates");
+  res.status(r.ok ? 200 : (r.status || 502)).json(r);
+});
+
+app.post("/revisor/test", authenticate, requireRole(REVIEWER_ROLE), async (req, res) => {
+  const number = String((req.body && req.body.number) || "").replace(/\D/g, "");
+  const templateName = String((req.body && req.body.templateName) || "").trim();
+  if (number.length < 10 || number.length > 15) return res.status(400).json({ error: "Enter the number with country code, digits only (e.g. 15551234567)." });
+  const now = Date.now();
+  while (reviewerTests.length && now - reviewerTests[0] > 24 * 3600 * 1000) reviewerTests.shift();
+  if (reviewerTests.length >= 20 || reviewerTests.filter((t) => now - t < 3600 * 1000).length >= 5) return res.status(429).json({ error: "Test message limit reached (5 per hour, 20 per day). Please try again later." });
+  const list = await botRequest("/templates");
+  // Cualquier plantilla de la cuenta: Meta decide si la acepta (y la pagina muestra la respuesta).
+  const t = list.ok && Array.isArray(list.templates) ? list.templates.find((x) => x && x.name === templateName) : null;
+  if (!t) return res.status(400).json({ error: "Elegí una plantilla de la lista. / Choose a template from the list." });
+  const n = (String(t.body || "").match(/\{\{[^{}]*\}\}/g) || []).length;
+  const params = Array.from({ length: n }, () => "Mensaje de prueba de Pare Carrito para la revisión de Meta");
+  reviewerTests.push(now);
+  const r = await botRequest("/broadcast", { numbers: [number], templateName, lang: t.language || "es", params });
+  await pool.query("UPDATE reviewer_access SET tests_sent = tests_sent + 1 WHERE user_id = $1", [req.user.sub]).catch(() => {});
+  console.log("Revisor de Meta: prueba '" + templateName + "' a ..." + number.slice(-4) + (r.ok && r.sent ? " enviada" : " fallida: " + (r.error || (r.errors || []).join(" "))));
+  if (!r.ok) return res.status(502).json({ error: r.error });
+  res.json({ ok: true, sent: r.sent || 0, errors: r.errors || [] });
 });
 
 app.post("/control/daily-email", authenticate, requireRole("manager", "admin"), async (req, res) => {
@@ -4072,7 +4186,7 @@ async function bootstrap() {
   await pool.query(schema);
   try {
     await pool.query("ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check");
-    await pool.query("ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('manager','admin','employee','customer','contador','example','proveedor'))");
+    await pool.query("ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('manager','admin','employee','customer','contador','example','proveedor','revisor'))");
   } catch (error) {
     console.warn("No se pudo actualizar la restriccion de roles:", error.message);
   }

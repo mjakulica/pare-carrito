@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS users (
   username TEXT NOT NULL UNIQUE,
   name TEXT NOT NULL DEFAULT '',
   email TEXT,
-  role TEXT NOT NULL CHECK (role IN ('manager','admin','employee','customer','contador','example','proveedor')),
+  role TEXT NOT NULL CHECK (role IN ('manager','admin','employee','customer','contador','example','proveedor','revisor')),
   password_hash TEXT NOT NULL,
   password_fingerprint TEXT NOT NULL DEFAULT '',
   client_id TEXT,
@@ -186,4 +186,14 @@ CREATE TABLE IF NOT EXISTS maintenance_log (
   updated_by TEXT,
   summary JSONB,
   detail JSONB
+);
+
+-- Acceso del revisor de Meta (rol "revisor"): solo ve la demo de WhatsApp y vence solo.
+CREATE TABLE IF NOT EXISTS reviewer_access (
+  user_id TEXT PRIMARY KEY,
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_by TEXT,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_login_at TIMESTAMPTZ,
+  tests_sent INT NOT NULL DEFAULT 0
 );

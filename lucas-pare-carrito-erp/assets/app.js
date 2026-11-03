@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v79";
+  const APP_VERSION = "v80";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -362,7 +362,7 @@
     { id: "proveedores", label: "Proveedores", icon: "PV", roles: ["manager", "admin", "employee", "contador", "proveedor"] },
     { id: "mis-costos", label: "Mis Precios", icon: "$", roles: ["proveedor"] },
     { id: "usuarios", label: "Usuarios", icon: "US", roles: ["manager"] },
-    { id: "configuracion", label: "Configuración", icon: "CF", roles: ["manager", "admin", "employee", "customer", "contador", "example", "proveedor"] },
+    { id: "configuracion", label: "Configuración", icon: "CF", roles: ["manager", "admin", "employee", "customer", "contador", "example", "proveedor", "revisor"] },
     { id: "backup", label: "Backup", icon: "BK", roles: ["manager", "admin"] }
   ];
 
@@ -1646,6 +1646,7 @@
   }
 
   function queueCurrentStatePatch() {
+    if (currentUser && currentUser.role === "revisor") return false;
     const config = getCloudSyncConfig();
     if (!lastSyncedState && config.url && (config.lastSync || !canWriteFullCloudSync())) return queueSessionRecordsPatch();
     if (!config.lastSync || !lastSyncedState) return false;
@@ -3497,7 +3498,8 @@
       proveedores: renderProviders,
       "mis-costos": renderProviderCosts,
       usuarios: renderUsers,
-      configuracion: renderSettings,
+      // El revisor de Meta ve en Configuracion solo la seccion WhatsApp (demo, sin datos reales).
+      configuracion: () => (currentUser.role === "revisor" ? renderReviewerDemo() : renderSettings()),
       backup: renderBackup
     };
     return (pages[route.base] || renderDashboard)();
@@ -14344,6 +14346,142 @@
   }
 
   // ===== Bot de WhatsApp: estado de la vinculacion, prueba y resumen diario =====
+  // ---- Revisor de Meta ----
+  // Pagina unica de la cuenta de revision (en ingles, para el revisor de Meta): muestra como usa el
+  // sistema WhatsApp con datos ficticios y deja mandar un mensaje de prueba con una plantilla
+  // aprobada. El servidor no le manda ningun dato real.
+  function renderReviewerDemo() {
+    const info = ui.reviewerInfo;
+    if (!info && !ui.reviewerInfoLoading) {
+      ui.reviewerInfoLoading = true;
+      cloudRequest(getCloudSyncConfig(), "/revisor/info", { method: "GET" })
+        .then((r) => r.json().then((j) => (r.ok ? j : Promise.reject(new Error(j.error || "HTTP " + r.status)))))
+        .then((j) => { ui.reviewerInfo = j; })
+        .catch((e) => { ui.reviewerInfo = { error: e.message }; })
+        .finally(() => { ui.reviewerInfoLoading = false; render(); });
+    }
+    afterRender.push(() => {
+      if (window.WhatsAppTemplates && document.getElementById("wa-template-manager")) window.WhatsAppTemplates.mount({ request: (path, options) => cloudRequest(getCloudSyncConfig(), path, options), readOnly: true, basePath: "/revisor/templates" });
+      const send = document.getElementById("wa-test-send");
+      if (send) send.addEventListener("click", async () => {
+        const number = document.getElementById("wa-test-number").value;
+        const templateName = document.getElementById("wa-test-template").value;
+        ui.reviewerNumber = number;
+        ui.reviewerTemplate = templateName;
+        send.disabled = true;
+        document.getElementById("wa-test-result").textContent = "Enviando... / Sending...";
+        try {
+          const r = await cloudRequest(getCloudSyncConfig(), "/revisor/test", { method: "POST", body: JSON.stringify({ number, templateName }) });
+          const j = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(j.error || "HTTP " + r.status);
+          ui.reviewerResult = j.sent
+            ? { ok: true, text: "Meta aceptó el envío de \"" + templateName + "\" a " + number + ". / Meta accepted the request." }
+            : { ok: false, text: "Meta no aceptó el envío / Meta rejected the request: " + ((j.errors || []).join(" ") || "sin detalle") };
+        } catch (e) { ui.reviewerResult = { ok: false, text: "No se pudo enviar / Could not send: " + e.message }; }
+        render();
+      });
+    });
+    const d = (info && info.demo) || {};
+    const ok = (v) => (v ? "&#9989;" : "&#10060;");
+    const plantillas = (info && info.templates) || [];
+    const elegida = ui.reviewerTemplate || (plantillas.find((t) => t.name === "recordatorio_pago") || plantillas[0] || {}).name || "";
+    const estados = { APPROVED: "Aprobada", PENDING: "En revisión", REJECTED: "Rechazada", PAUSED: "Pausada", DISABLED: "Deshabilitada" };
+    const res = ui.reviewerResult;
+    return pageShell(
+      "Configuración",
+      "Review account for Meta App Review: this account only sees the WhatsApp settings below; it cannot see or change real business data.",
+      "",
+      !info ? `<div class="panel">Cargando... / Loading...</div>` : info.error ? `<div class="alert warn">${escapeHtml(info.error)}</div>` : `
+      <div class="panel">
+        <h2 class="page-title" style="font-size:18px;margin:0">WhatsApp (bot)</h2>
+        <ul style="list-style:none;padding:0;margin:6px 0">
+          <li style="margin:3px 0">${ok(info.bot && info.bot.connected)} El bot está corriendo en el servidor <span class="muted">/ WhatsApp service running</span></li>
+          <li style="margin:3px 0">${ok(info.bot && info.bot.whatsapp)} Conectado a Meta <span class="muted">/ Connected to the WhatsApp Business Platform (Cloud API)</span></li>
+          <li style="margin:3px 0">${ok(info.bot && info.bot.webhook)} Firma de Meta verificada <span class="muted">/ Webhook signature verification</span></li>
+        </ul>
+        <h3 style="font-size:15px;margin:12px 0 4px">Mensaje de prueba <span class="muted" style="font-weight:400">/ Test message</span></h3>
+        <div class="form-grid">
+          <div class="field span-2"><label>Número (código de país + número) / Test recipient</label><input id="wa-test-number" inputmode="numeric" placeholder="5493871234567" value="${escapeAttr(ui.reviewerNumber || "")}" /></div>
+          <div class="field"><label>Plantilla / Template</label><select id="wa-test-template">${plantillas.map((t) => `<option value="${escapeAttr(t.name)}" ${t.name === elegida ? "selected" : ""}>${escapeHtml(t.name)}${t.status && t.status !== "APPROVED" ? " (" + escapeHtml(estados[t.status] || t.status) + ")" : ""}</option>`).join("")}</select></div>
+          <div class="field"><label>&nbsp;</label><button class="btn primary" type="button" id="wa-test-send" ${plantillas.length ? "" : "disabled"}>Enviar prueba</button></div>
+        </div>
+        <p id="wa-test-result" style="margin:6px 0 0;${res ? "font-weight:600;color:" + (res.ok ? "var(--green)" : "var(--red)") : ""}">${res ? escapeHtml(res.text) : `<span class="muted">Límite: ${escapeHtml(String((info.limits || {}).perHour || 5))} por hora. / Limit: ${escapeHtml(String((info.limits || {}).perHour || 5))} per hour.</span>`}</p>
+      </div>
+      ${window.WhatsAppTemplates ? `<div style="margin-top:14px">${window.WhatsAppTemplates.html()}</div>` : ""}
+      <div class="panel" style="margin-top:14px">
+        <h2 class="page-title" style="font-size:18px">Cómo usa WhatsApp el sistema <span class="muted" style="font-weight:400;font-size:14px">/ How the ERP uses WhatsApp</span></h2>
+        <p class="muted" style="margin-top:0">${escapeHtml(d.negocio || "")}. Customers are produce stores that order every day. Sample customers (fictitious): ${(d.clientes || []).map((c) => escapeHtml(c.nombre)).join(", ")}.</p>
+        <ul style="margin:6px 0 0 18px">${(d.avisos || []).map((x) => `<li style="margin:4px 0"><strong>${escapeHtml(x.titulo)}</strong> — <span class="muted">${escapeHtml(x.texto)}</span></li>`).join("")}</ul>
+      </div>`,
+      "configuracion"
+    );
+  }
+
+  function metaReviewerPanelHtml() {
+    const st = ui.metaReviewer;
+    if (!st && !ui.metaReviewerLoading) {
+      ui.metaReviewerLoading = true;
+      cloudRequest(getCloudSyncConfig(), "/admin/meta-reviewer", { method: "GET" })
+        .then((r) => r.json().then((j) => (r.ok ? j : Promise.reject(new Error(j.error || "HTTP " + r.status)))))
+        .then((j) => { ui.metaReviewer = j; })
+        .catch((e) => { ui.metaReviewer = { error: e.message }; })
+        .finally(() => { ui.metaReviewerLoading = false; refreshMetaReviewerPanel(); });
+    }
+    const estado = !st ? "Cargando..." : st.error ? "No se pudo consultar: " + escapeHtml(st.error)
+      : !st.exists ? "Todavía no está creado."
+      : st.active ? `<strong style="color:var(--green)">Activo</strong> hasta el ${formatTimestampShort(st.expiresAt)}`
+      : `<strong style="color:var(--red)">${st.enabled ? "Vencido" : "Desactivado"}</strong>`;
+    return `<div class="panel" style="margin-top:14px" id="mr-panel">
+      <h2 class="page-title" style="font-size:18px">Acceso para el revisor de Meta</h2>
+      <p class="muted" style="margin-top:0">Usuario <code>${escapeHtml((st && st.username) || "revisor.meta")}</code>: solo ve una página de demostración de WhatsApp con datos ficticios y puede mandar mensajes de prueba con las plantillas aprobadas (5 por hora). El servidor no le da ningún dato del sistema y el acceso vence solo.</p>
+      <p style="margin:6px 0">Estado: ${estado}${st && st.exists ? ` · último ingreso: ${st.lastLoginAt ? formatTimestampShort(st.lastLoginAt) : "nunca"} · pruebas enviadas: ${Number(st.testsSent || 0)}` : ""}</p>
+      <div class="form-grid">
+        <div class="field span-2"><label>Contraseña nueva (mínimo 10; vacío = no cambiarla)</label><input id="mr-pass" type="password" autocomplete="new-password" /></div>
+        <div class="field"><label>Repetir contraseña</label><input id="mr-pass2" type="password" autocomplete="new-password" /></div>
+        <div class="field"><label>Días de acceso</label><input id="mr-days" inputmode="numeric" value="30" /></div>
+      </div>
+      <div class="page-actions" style="margin-top:8px">
+        <button class="btn primary" type="button" id="mr-save">${st && st.exists ? "Activar / renovar" : "Crear acceso"}</button>
+        ${st && st.exists && st.enabled ? `<button class="btn danger" type="button" id="mr-off">Desactivar</button>` : ""}
+      </div>
+    </div>`;
+  }
+
+  // Configuracion no se redibuja mientras tiene campos a medio cargar: el panel se actualiza solo.
+  function refreshMetaReviewerPanel() {
+    const panel = document.getElementById("mr-panel");
+    if (!panel) return;
+    panel.outerHTML = metaReviewerPanelHtml();
+    bindMetaReviewerPanel();
+  }
+
+  function bindMetaReviewerPanel() {
+    const guardar = async (body, okMsg) => {
+      try {
+        const r = await cloudRequest(getCloudSyncConfig(), "/admin/meta-reviewer", { method: "POST", body: JSON.stringify(body) });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(j.error || "HTTP " + r.status);
+        ui.metaReviewer = null;
+        alert(okMsg);
+        refreshMetaReviewerPanel();
+      } catch (e) { alert("No se pudo guardar: " + e.message); }
+    };
+    const save = document.getElementById("mr-save");
+    if (save) save.addEventListener("click", () => {
+      const p1 = document.getElementById("mr-pass").value;
+      const p2 = document.getElementById("mr-pass2").value;
+      if (p1 !== p2) return alert("Las contraseñas no coinciden.");
+      if (p1 && p1.length < 10) return alert("Usá al menos 10 caracteres.");
+      const days = Number(document.getElementById("mr-days").value) || 30;
+      guardar({ password: p1, days, enabled: true }, "Acceso del revisor activo por " + Math.min(60, Math.max(1, Math.round(days))) + " días. Cargá el usuario revisor.meta y la contraseña directamente en Meta.");
+    });
+    const off = document.getElementById("mr-off");
+    if (off) off.addEventListener("click", () => {
+      if (!confirm("¿Desactivar el acceso del revisor de Meta? No va a poder entrar más.")) return;
+      guardar({ enabled: false }, "Acceso del revisor desactivado.");
+    });
+  }
+
   function whatsappBotPanelHtml() {
     const st = ui.waStatus;
     const a = state.appSettings || {};
@@ -14384,10 +14522,11 @@
         <div class="field span-2"><label>Plantilla de Meta (con una variable {{1}})</label><input id="wa-control-template" value="${escapeAttr(a.controlWhatsappTemplate || "")}" placeholder="ej: resumen_control" /></div>
         <div class="field span-2"><label>Números (vacío = teléfono del gerente)</label><input id="wa-control-to" value="${escapeAttr(a.controlWhatsappTo || "")}" placeholder="5493871234567, 5493877654321" /></div>
       </div>
-    </div>${window.WhatsAppTemplates ? window.WhatsAppTemplates.html() : ""}`;
+    </div>${["manager", "admin"].includes(currentUser.role) ? metaReviewerPanelHtml() : ""}${window.WhatsAppTemplates ? window.WhatsAppTemplates.html() : ""}`;
   }
 
   function bindWhatsappBotPanel() {
+    bindMetaReviewerPanel();
     if (window.WhatsAppTemplates) window.WhatsAppTemplates.mount({ request: (path, options) => cloudRequest(getCloudSyncConfig(), path, options) });
     const check = document.getElementById("wa-status-check");
     const cargar = async () => {
@@ -20615,6 +20754,8 @@
   }
 
   function canAccess(route) {
+    // El revisor de Meta solo ve la demo de WhatsApp (el servidor tampoco le da ningun otro dato).
+    if (currentUser.role === "revisor") return route === "configuracion";
     if (route === "vehiculos-print") return ["manager", "admin", "employee"].includes(currentUser.role);
     if (route === "dividir-print") return ["manager", "admin", "employee"].includes(currentUser.role);
     if (route === "remito-print") return ["manager", "admin", "employee"].includes(currentUser.role);
@@ -20624,6 +20765,7 @@
   }
 
   function roleHome() {
+    if (currentUser && currentUser.role === "revisor") return "configuracion";
     return "dashboard";
   }
 
@@ -20635,7 +20777,8 @@
       customer: "Cliente",
       contador: "Contador",
       example: "Ejemplo",
-      proveedor: "Proveedor"
+      proveedor: "Proveedor",
+      revisor: "Revisor Meta"
     }[role] || role;
   }
 
