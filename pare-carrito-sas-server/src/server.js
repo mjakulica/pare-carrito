@@ -2068,6 +2068,20 @@ app.get("/revisor/templates", authenticate, requireRole(REVIEWER_ROLE), async (r
   res.status(r.ok ? 200 : (r.status || 502)).json(r);
 });
 
+// Crear una plantilla nueva (no editar las existentes, que usa el sistema): hasta 5 por dia.
+const reviewerCreates = [];
+app.post("/revisor/templates", authenticate, requireRole(REVIEWER_ROLE), async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  const now = Date.now();
+  while (reviewerCreates.length && now - reviewerCreates[0] > 24 * 3600 * 1000) reviewerCreates.shift();
+  if (reviewerCreates.length >= 5) return res.status(429).json({ error: "Límite de 5 plantillas nuevas por día. / Limit of 5 new templates per day." });
+  const body = req.body || {};
+  const r = await botRequest("/templates", { name: body.name, language: body.language, category: body.category, body: body.body, sample: body.sample, footer: body.footer, accountId: body.accountId });
+  if (r.ok) reviewerCreates.push(now);
+  console.log("Revisor de Meta: plantilla nueva '" + String(body.name || "").slice(0, 60) + "' " + (r.ok ? "enviada a Meta" : "rechazada: " + (r.error || "")));
+  res.status(r.ok ? 200 : (r.status || 502)).json(r);
+});
+
 app.post("/revisor/test", authenticate, requireRole(REVIEWER_ROLE), async (req, res) => {
   const number = String((req.body && req.body.number) || "").replace(/\D/g, "");
   const templateName = String((req.body && req.body.templateName) || "").trim();
