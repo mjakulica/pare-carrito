@@ -197,3 +197,31 @@ CREATE TABLE IF NOT EXISTS reviewer_access (
   last_login_at TIMESTAMPTZ,
   tests_sent INT NOT NULL DEFAULT 0
 );
+
+-- Bandeja de WhatsApp: pedidos, agregados y cancelaciones que llegan al bot. No se cargan solos:
+-- los carga una persona desde Nuevo Pedido (con el mismo "Pegar pedido como texto").
+CREATE TABLE IF NOT EXISTS whatsapp_inbox (
+  id BIGSERIAL PRIMARY KEY,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  phone TEXT NOT NULL,
+  profile_name TEXT,
+  client_id TEXT,
+  kind TEXT NOT NULL,
+  text TEXT NOT NULL,
+  items JSONB,
+  order_id TEXT,
+  candidates JSONB,
+  status TEXT NOT NULL DEFAULT 'pendiente',
+  handled_by TEXT,
+  handled_at TIMESTAMPTZ,
+  result_order_id TEXT
+);
+CREATE INDEX IF NOT EXISTS whatsapp_inbox_status ON whatsapp_inbox (status, created_at);
+
+-- Conversacion para identificar un numero que no esta en Clientes.
+CREATE TABLE IF NOT EXISTS whatsapp_identify (
+  phone TEXT PRIMARY KEY,
+  stage TEXT NOT NULL,
+  candidate_id TEXT,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

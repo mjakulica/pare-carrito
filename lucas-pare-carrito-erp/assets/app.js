@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v81";
+  const APP_VERSION = "v82";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -5208,11 +5208,19 @@
       : "";
 
     afterRender.push(bindNewOrder);
+    if (!isCustomerOrder && WA_INBOX_ROLES.includes(currentUser.role)) {
+      afterRender.push(() => refreshWhatsappInbox(false));
+      // Mientras Nuevo Pedido esta abierto, la bandeja se mira sola cada minuto.
+      if (!ui.waInboxTimer) ui.waInboxTimer = setInterval(() => {
+        if (currentUser && WA_INBOX_ROLES.includes(currentUser.role) && getRoute().base === "nuevo-pedido") refreshWhatsappInbox(false);
+      }, 60000);
+    }
     return pageShell(
       "Nuevo Pedido",
       isCustomerOrder ? "Cargue su pedido. Los precios son de referencia." : "Carga rápida con favoritos por cliente.",
       `<button class="btn ghost" data-route="pedidos">${isCustomerOrder ? "Ver mis pedidos" : "Ver pedidos"}</button>${isCustomerOrder ? "" : `<button class="btn ghost" id="order-holidays-btn" type="button">Feriados</button>`}`,
       `
+      ${!isCustomerOrder && WA_INBOX_ROLES.includes(currentUser.role) ? `<div id="wa-inbox">${whatsappInboxHtml()}</div>` : ""}
       <form id="new-order-form" class="grid ${isCustomerOrder ? "customer-order-form" : "admin-order-form"}">
         <div class="order-main-layout">
         <div class="panel order-main-panel">
@@ -5915,6 +5923,7 @@
         alert(resultado === "pendiente"
           ? "El pedido de " + client.name + " (" + order.id + ") se esta terminando de enviar. No cierres la app hasta que diga \"Guardado\" arriba."
           : "Pedido guardado: " + order.id);
+        if (ui.inboxLoading) finishWhatsappInboxItem(ui.inboxLoading.id, order.id);
       }
       ui.selectedClientId = "";
       ui.orderProductFilter = "";
@@ -5925,6 +5934,147 @@
       render();
     });
     recalc();
+    // Viene de la bandeja de WhatsApp: el texto ya esta pegado y el cliente elegido, se lee solo.
+    if (ui.inboxAutoParse) {
+      ui.inboxAutoParse = false;
+      setTimeout(() => { const b = document.getElementById("parse-whatsapp-order"); if (b) b.click(); }, 60);
+    }
+  }
+
+  // ---- Bandeja de WhatsApp ----
+  // Lo que llega al bot (pedidos, agregados, cancelaciones y numeros sin vincular) queda aca para
+  // que lo cargue el gerente o un empleado con el mismo "Pegar pedido como texto".
+  const WA_INBOX_ROLES = ["manager", "admin", "employee"];
+  const WA_INBOX_KIND = { pedido: "Pedido nuevo", agregar: "Agregar a su pedido de hoy", cancelar: "Sacar de su pedido de hoy", identificar: "Número sin vincular" };
+
+  function refreshWhatsappInbox(force) {
+    const cache = ui.waInbox;
+    if (!force && cache && Date.now() - cache.at < 45000) return paintWhatsappInbox();
+    if (ui.waInboxLoading) return;
+    const config = getCloudSyncConfig();
+    if (!cloudSyncReady(config)) return;
+    ui.waInboxLoading = true;
+    cloudRequest(config, "/inbox", { method: "GET" })
+      .then((r) => r.json().then((j) => (r.ok ? j : Promise.reject(new Error(j.error || "HTTP " + r.status)))))
+      .then((j) => { ui.waInbox = { at: Date.now(), items: j.items || [], error: "" }; })
+      .catch((e) => { ui.waInbox = { at: Date.now(), items: (cache && cache.items) || [], error: e.message }; })
+      .finally(() => { ui.waInboxLoading = false; paintWhatsappInbox(); });
+  }
+
+  // Se actualiza solo el recuadro (no la pagina): no se pierde lo que se esta cargando.
+  function paintWhatsappInbox() {
+    const box = document.getElementById("wa-inbox");
+    if (!box) return;
+    box.innerHTML = whatsappInboxHtml();
+    bindWhatsappInbox();
+    // El recuadro cambia de alto: el carrito se vuelve a ubicar debajo de "Pegar pedido como texto".
+    window.dispatchEvent(new Event("resize"));
+  }
+
+  function waInboxPendientes() {
+    return ((ui.waInbox && ui.waInbox.items) || []).filter((x) => x.status === "pendiente");
+  }
+
+  function formatWaPhone(phone) {
+    const d = String(phone || "").replace(/\D/g, "");
+    return d.length > 6 ? "+" + d.slice(0, d.length - 6) + " " + d.slice(-6, -3) + "-" + d.slice(-3) : d;
+  }
+
+  function whatsappInboxHtml() {
+    const pend = waInboxPendientes();
+    const err = ui.waInbox && ui.waInbox.error;
+    if (!pend.length && !ui.inboxLoading) return err ? `<div class="alert warn" style="margin-bottom:12px">Bandeja de WhatsApp: ${escapeHtml(err)}</div>` : "";
+    const hace = (iso) => { const m = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000)); return m < 60 ? "hace " + m + " min" : m < 1440 ? "hace " + Math.round(m / 60) + " h" : formatTimestampShort(iso); };
+    const clienteBox = (x) => `<span class="wa-inbox-link"><input list="wa-inbox-clients" data-wa-client-input="${x.id}" placeholder="Buscar cliente por nombre o número" autocomplete="off" /><button class="btn small primary" type="button" data-wa-link="${x.id}">Vincular</button></span>`;
+    const fila = (x) => {
+      const c = x.client_id ? getClient(x.client_id) : null;
+      const quien = c ? `<strong>${escapeHtml(c.id)} - ${escapeHtml(c.name)}</strong>` : `<strong>Sin vincular: ${escapeHtml(formatWaPhone(x.phone))}</strong>${x.profile_name ? ` <span class="muted">(${escapeHtml(x.profile_name)})</span>` : ""}`;
+      const candidatos = (Array.isArray(x.candidates) ? x.candidates : []).filter((k) => getClient(k.id));
+      let acciones = "";
+      if (x.kind === "pedido" && x.client_id) acciones = `<button class="btn small primary" type="button" data-wa-load="${x.id}">Cargar en Nuevo Pedido</button>`;
+      else if (x.kind === "agregar" || x.kind === "cancelar") acciones = (x.client_id && x.order_id && getOrder(x.order_id) ? `<button class="btn small primary" type="button" data-wa-open-order="${escapeAttr(x.order_id)}">Abrir su pedido de hoy</button>` : x.client_id ? `<button class="btn small primary" type="button" data-wa-load="${x.id}">Cargar como pedido nuevo</button>` : "") + `<button class="btn small ghost" type="button" data-wa-done="${x.id}">Hecho</button>`;
+      if (!x.client_id) acciones = (candidatos.length ? candidatos.map((k) => `<button class="btn small blue" type="button" data-wa-link="${x.id}" data-wa-client="${escapeAttr(k.id)}">Es ${escapeHtml(k.name)}${k.address ? " (" + escapeHtml(k.address) + ")" : ""}</button>`).join("") : "") + clienteBox(x);
+      return `<div class="wa-inbox-item ${ui.inboxLoading && ui.inboxLoading.id === x.id ? "active" : ""}">
+        <div class="wa-inbox-head">${quien} <span class="pill ${x.kind === "identificar" || !x.client_id ? "amber" : x.kind === "pedido" ? "green" : "blue"}">${escapeHtml(WA_INBOX_KIND[x.kind] || x.kind)}</span> <span class="muted">${escapeHtml(hace(x.created_at))}</span></div>
+        <div class="wa-inbox-text">${escapeHtml(x.text)}</div>
+        <div class="page-actions wa-inbox-actions">${acciones}<button class="btn small ghost" type="button" data-wa-discard="${x.id}">Descartar</button></div>
+      </div>`;
+    };
+    const cargando = ui.inboxLoading;
+    return `<div class="panel wa-inbox" style="margin-bottom:14px">
+      <div class="page-actions" style="justify-content:space-between;align-items:center">
+        <h2 class="page-title" style="font-size:18px;margin:0">&#128172; Pedidos de WhatsApp por cargar (${pend.length})</h2>
+        <button class="btn small ghost" type="button" data-wa-refresh-inbox>${ui.waInboxLoading ? "Actualizando..." : "Actualizar"}</button>
+      </div>
+      ${cargando ? `<div class="alert" style="margin:8px 0">Cargando el pedido de WhatsApp de <strong>${escapeHtml(cargando.name)}</strong>: revisá los productos y tocá Enviar. Al guardarlo queda marcado como cargado y se le avisa al cliente. <button class="btn small ghost" type="button" data-wa-cancel-load>No es este</button></div>` : ""}
+      <datalist id="wa-inbox-clients">${activeClients().map((c) => `<option value="${escapeAttr(c.id + " - " + c.name)}"></option>`).join("")}</datalist>
+      <div class="wa-inbox-list">${pend.map(fila).join("")}</div>
+    </div>`;
+  }
+
+  async function waInboxPost(path, body) {
+    const r = await cloudRequest(getCloudSyncConfig(), path, { method: "POST", body: JSON.stringify(body || {}) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || "HTTP " + r.status);
+    return j;
+  }
+
+  async function finishWhatsappInboxItem(id, orderId) {
+    ui.inboxLoading = null;
+    try { await waInboxPost("/inbox/" + id + "/done", { orderId }); } catch (e) { alert("El pedido se guardó, pero no se pudo marcar el mensaje de WhatsApp como cargado: " + e.message); }
+    refreshWhatsappInbox(true);
+  }
+
+  function bindWhatsappInbox() {
+    const item = (id) => waInboxPendientes().find((x) => String(x.id) === String(id));
+    document.querySelectorAll("[data-wa-refresh-inbox]").forEach((b) => b.addEventListener("click", () => refreshWhatsappInbox(true)));
+    document.querySelectorAll("[data-wa-cancel-load]").forEach((b) => b.addEventListener("click", () => { ui.inboxLoading = null; paintWhatsappInbox(); }));
+    document.querySelectorAll("[data-wa-load]").forEach((b) => b.addEventListener("click", () => {
+      const x = item(b.dataset.waLoad);
+      const c = x && getClient(x.client_id);
+      if (!c) return alert("Ese cliente no está cargado en este equipo.");
+      if (hasUnsavedWork() && Object.keys(ui.orderDraft || {}).length && !confirm("Hay productos cargados en el pedido de la pantalla. ¿Reemplazarlos por el pedido de WhatsApp de " + c.name + "?")) return;
+      ui.inboxLoading = { id: x.id, name: c.name };
+      ui.selectedClientId = c.id;
+      ui.orderDraft = {};
+      ui.orderWhatsappDraft = x.text;
+      ui.inboxAutoParse = true;
+      render();
+      const paste = document.getElementById("order-whatsapp-paste");
+      if (paste) paste.scrollIntoView({ behavior: "smooth", block: "center" });
+    }));
+    document.querySelectorAll("[data-wa-open-order]").forEach((b) => b.addEventListener("click", () => openOrderForm(b.dataset.waOpenOrder)));
+    document.querySelectorAll("[data-wa-done]").forEach((b) => b.addEventListener("click", async () => {
+      b.disabled = true;
+      try { await waInboxPost("/inbox/" + b.dataset.waDone + "/done", {}); } catch (e) { alert(e.message); }
+      refreshWhatsappInbox(true);
+    }));
+    document.querySelectorAll("[data-wa-discard]").forEach((b) => b.addEventListener("click", async () => {
+      if (!confirm("¿Descartar este mensaje? No se le avisa nada al cliente.")) return;
+      b.disabled = true;
+      try { await waInboxPost("/inbox/" + b.dataset.waDiscard + "/discard", {}); } catch (e) { alert(e.message); }
+      if (ui.inboxLoading && String(ui.inboxLoading.id) === String(b.dataset.waDiscard)) ui.inboxLoading = null;
+      refreshWhatsappInbox(true);
+    }));
+    document.querySelectorAll("[data-wa-link]").forEach((b) => b.addEventListener("click", async () => {
+      let clientId = b.dataset.waClient || "";
+      if (!clientId) {
+        const input = document.querySelector(`[data-wa-client-input="${b.dataset.waLink}"]`);
+        const found = input ? findClientByInput(input.value) : null;
+        if (!found) return alert("Elegí el cliente de la lista.");
+        clientId = found.id;
+      }
+      const c = getClient(clientId);
+      const x = item(b.dataset.waLink);
+      if (!confirm("¿Vincular el número " + formatWaPhone(x && x.phone) + " a " + (c ? c.name : clientId) + "? Se agrega a sus teléfonos y se le avisa por WhatsApp.")) return;
+      b.disabled = true;
+      try {
+        await waInboxPost("/inbox/" + b.dataset.waLink + "/link", { clientId });
+        // El telefono nuevo tambien en este equipo (el servidor ya lo guardo).
+        if (c && x) { const d = String(x.phone); if (!(c.phones || []).includes(d)) c.phones = (c.phones || []).concat([d]); }
+      } catch (e) { alert("No se pudo vincular: " + e.message); }
+      refreshWhatsappInbox(true);
+    }));
   }
 
   function applyParsedOrderToRows(parsed, searchInput, warningBox) {

@@ -12,6 +12,7 @@ const jwt = require("jsonwebtoken");
 const { billingConfig, nowArt, computeDueInvoices, runBilling, regeneratePdf, emitCreditNote, creditNoteTypeFor } = require("./billing");
 const { controlDailySummary, controlPaymentChecks, parseBankText, parseBankJson } = require("./control");
 const { repairAccounting, repairSummary, isOpeningRow, alignChangedOrderSaldos } = require("./dataRepair");
+const { matchClients } = require("./whatsappInbox");
 const { syncSheetsFromStateDiff, pushPrecio } = require("./sheetsSync");
 
 const PORT = Number(process.env.PORT || 3000);
@@ -3564,6 +3565,115 @@ app.get("/external/products/names", externalAuth, async (req, res) => {
   const stored = await loadStateData();
   if (!stored) return res.status(404).json({ error: "Sin datos." });
   res.json({ products: (stored.data.products || []).filter((p) => p.isActive !== false).map((p) => p.name) });
+});
+
+// ---------- Bandeja de WhatsApp ----------
+const INBOX_KINDS = new Set(["pedido", "agregar", "cancelar", "identificar"]);
+const phoneDigits = (v) => String(v || "").replace(/\D/g, "");
+
+// El bot deja lo que llega (pedido, agregar, cancelar, o un numero a identificar).
+app.post("/external/inbox", externalAuth, async (req, res) => {
+  const b = req.body || {};
+  const phone = phoneDigits(b.phone);
+  const kind = String(b.kind || "");
+  if (!phone || !INBOX_KINDS.has(kind) || !String(b.text || "").trim()) return res.status(400).json({ error: "Se espera { phone, kind, text }." });
+  const { rows } = await pool.query(
+    "INSERT INTO whatsapp_inbox (phone, profile_name, client_id, kind, text, items, order_id, candidates) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id",
+    [phone, String(b.profileName || "").slice(0, 120), b.clientId ? String(b.clientId) : null, kind, String(b.text).slice(0, 4000), JSON.stringify(Array.isArray(b.items) ? b.items : []), b.orderId ? String(b.orderId) : null, JSON.stringify(Array.isArray(b.candidates) ? b.candidates : [])]
+  );
+  res.json({ ok: true, id: rows[0].id });
+});
+
+// Estado de la conversacion para identificar un numero (vence a los 7 dias).
+app.get("/external/identify/:phone", externalAuth, async (req, res) => {
+  const { rows } = await pool.query("SELECT stage, candidate_id FROM whatsapp_identify WHERE phone = $1 AND updated_at > now() - interval '7 days'", [phoneDigits(req.params.phone)]);
+  res.json({ ok: true, stage: rows[0] ? rows[0].stage : "", candidateId: rows[0] ? rows[0].candidate_id : "" });
+});
+
+app.post("/external/identify/:phone", externalAuth, async (req, res) => {
+  const phone = phoneDigits(req.params.phone);
+  const stage = String((req.body && req.body.stage) || "");
+  if (!stage) await pool.query("DELETE FROM whatsapp_identify WHERE phone = $1", [phone]);
+  else await pool.query("INSERT INTO whatsapp_identify (phone, stage, candidate_id, updated_at) VALUES ($1,$2,$3,now()) ON CONFLICT (phone) DO UPDATE SET stage = EXCLUDED.stage, candidate_id = EXCLUDED.candidate_id, updated_at = now()", [phone, stage, (req.body && req.body.candidateId) || null]);
+  res.json({ ok: true });
+});
+
+// Clientes parecidos a lo que dijo ("vivre bar, belgrano 1234").
+app.post("/external/clients/match", externalAuth, async (req, res) => {
+  const stored = await loadStateData();
+  if (!stored) return res.status(404).json({ error: "Sin datos." });
+  res.json({ ok: true, candidates: matchClients(stored.data.clients || [], String((req.body && req.body.text) || "")) });
+});
+
+// Agrega el numero a los telefonos del cliente y le asigna los mensajes que esperaban.
+async function linkPhoneToClient(phone, clientId, by) {
+  const out = await withStateExt((data) => {
+    const client = (data.clients || []).find((c) => c && c.id === clientId);
+    if (!client) return { error: "Cliente no encontrado.", status: 404 };
+    const tiene = [client.phone].concat(Array.isArray(client.phones) ? client.phones : []).some((ph) => { const d = phoneDigits(ph); return d && (d === phone || d.slice(-8) === phone.slice(-8)); });
+    if (!tiene) {
+      client.phones = (Array.isArray(client.phones) ? client.phones : []).concat([phone]);
+      client.updatedAt = new Date().toISOString();
+    }
+    return { ok: true, clientId: client.id, name: client.name || client.id };
+  });
+  if (out.error) return out;
+  await pool.query("UPDATE whatsapp_inbox SET client_id = $1 WHERE phone = $2 AND client_id IS NULL AND status = 'pendiente'", [clientId, phone]);
+  await pool.query("UPDATE whatsapp_inbox SET status = 'resuelto', handled_by = $1, handled_at = now() WHERE phone = $2 AND kind = 'identificar' AND status = 'pendiente'", [by, phone]);
+  await pool.query("DELETE FROM whatsapp_identify WHERE phone = $1", [phone]);
+  console.log("WhatsApp: numero ..." + phone.slice(-4) + " vinculado al cliente " + clientId + " (" + by + ").");
+  return out;
+}
+
+app.post("/external/clients/:id/link-phone", externalAuth, async (req, res) => {
+  const out = await linkPhoneToClient(phoneDigits(req.body && req.body.phone), String(req.params.id), "el cliente por WhatsApp");
+  if (out.error) return res.status(out.status || 500).json({ error: out.error });
+  res.json(out);
+});
+
+// Mensaje de texto al cliente por el bot (dentro de las 24 h de su ultimo mensaje).
+async function inboxNotify(phone, text) {
+  const r = await botRequest("/send", { to: phone, text });
+  if (!r.ok) console.warn("WhatsApp: no se pudo avisar al cliente ..." + String(phone).slice(-4) + ": " + r.error);
+  return r.ok;
+}
+
+// Para el personal (gerente, admin y empleados): lo pendiente y lo resuelto en las ultimas horas.
+const INBOX_ROLES = ["manager", "admin", "employee"];
+app.get("/inbox", authenticate, requireRole(...INBOX_ROLES), async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT id, created_at, phone, profile_name, client_id, kind, text, items, order_id, candidates, status, handled_by, handled_at, result_order_id
+     FROM whatsapp_inbox WHERE (status = 'pendiente' AND created_at > now() - interval '7 days') OR handled_at > now() - interval '12 hours'
+     ORDER BY created_at ASC LIMIT 200`
+  );
+  res.json({ ok: true, items: rows });
+});
+
+app.post("/inbox/:id/done", authenticate, requireRole(...INBOX_ROLES), async (req, res) => {
+  const orderId = String((req.body && req.body.orderId) || "");
+  const { rows } = await pool.query("UPDATE whatsapp_inbox SET status = 'cargado', handled_by = $1, handled_at = now(), result_order_id = $2 WHERE id = $3 AND status = 'pendiente' RETURNING phone, kind", [req.user.name || req.user.username, orderId || null, req.params.id]);
+  if (!rows.length) return res.status(409).json({ error: "Ese mensaje ya lo resolvio otra persona." });
+  if (req.body && req.body.notify !== false) {
+    const texto = rows[0].kind === "pedido" ? "¡Listo! Tu pedido quedó cargado. Gracias." : "¡Listo! Ya hicimos el cambio en tu pedido. Gracias.";
+    await inboxNotify(rows[0].phone, texto);
+  }
+  res.json({ ok: true });
+});
+
+app.post("/inbox/:id/discard", authenticate, requireRole(...INBOX_ROLES), async (req, res) => {
+  const { rows } = await pool.query("UPDATE whatsapp_inbox SET status = 'descartado', handled_by = $1, handled_at = now() WHERE id = $2 AND status = 'pendiente' RETURNING id", [req.user.name || req.user.username, req.params.id]);
+  if (!rows.length) return res.status(409).json({ error: "Ese mensaje ya lo resolvio otra persona." });
+  res.json({ ok: true });
+});
+
+app.post("/inbox/:id/link", authenticate, requireRole(...INBOX_ROLES), async (req, res) => {
+  const clientId = String((req.body && req.body.clientId) || "");
+  const { rows } = await pool.query("SELECT phone FROM whatsapp_inbox WHERE id = $1", [req.params.id]);
+  if (!rows.length || !clientId) return res.status(400).json({ error: "Falta el cliente." });
+  const out = await linkPhoneToClient(rows[0].phone, clientId, req.user.name || req.user.username);
+  if (out.error) return res.status(out.status || 500).json({ error: out.error });
+  await inboxNotify(rows[0].phone, "¡Gracias! Ya registramos este número para " + out.name + ".");
+  res.json({ ok: true, clientId: out.clientId, name: out.name, phone: rows[0].phone });
 });
 
 app.post("/external/orders", externalAuth, async (req, res) => {

@@ -57,4 +57,26 @@ function listProductNames() {
   return erpRequest("GET", "/external/products/names").then((r) => (Array.isArray(r.products) ? r.products : []));
 }
 
-module.exports = { erpRequest, findClientByPhone, getTodayOrder, createOrder, addItems, cancelItems, listProductNames };
+// Bandeja de WhatsApp: lo que llega queda para que lo cargue una persona.
+function inbox(entry) {
+  return erpRequest("POST", "/external/inbox", entry);
+}
+
+// Conversacion para identificar un numero que no esta en Clientes.
+function getIdentify(phone) {
+  return erpRequest("GET", "/external/identify/" + encodeURIComponent(phone));
+}
+
+function setIdentify(phone, data) {
+  return erpRequest("POST", "/external/identify/" + encodeURIComponent(phone), data || {});
+}
+
+function matchClients(text) {
+  return erpRequest("POST", "/external/clients/match", { text });
+}
+
+function linkPhone(clientId, phone) {
+  return erpRequest("POST", "/external/clients/" + encodeURIComponent(clientId) + "/link-phone", { phone });
+}
+
+module.exports = { erpRequest, findClientByPhone, getTodayOrder, createOrder, addItems, cancelItems, listProductNames, inbox, getIdentify, setIdentify, matchClients, linkPhone };

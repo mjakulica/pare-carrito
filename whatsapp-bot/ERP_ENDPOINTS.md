@@ -54,3 +54,24 @@ Lista de nombres de productos activos (para ayudar a la IA a matchear).
 - IVA: `Number(product.ivaType)` solo si el cliente `needsInvoice`; si no, 0.
 - Los items de `round: 2` llevan `segundaRonda: true` para distinguirlos en remitos / "Dividir compras".
 - Toda escritura impacta `app_state` y re-espeja a las tablas en la misma transacción (`withStateExt`).
+
+## Bandeja de WhatsApp (desde v82)
+
+El bot ya no carga pedidos solo: todo lo que llega queda en la bandeja y lo carga una persona desde
+Nuevo Pedido (gerente, admin o empleados), con el mismo "Pegar pedido como texto".
+
+| Metodo | Ruta | Para que |
+|---|---|---|
+| POST | `/external/inbox` | `{ phone, profileName, clientId?, kind: pedido/agregar/cancelar/identificar, text, items?, orderId?, candidates? }` |
+| GET | `/external/identify/:phone` | Etapa de la conversacion con un numero desconocido (`esperando_datos`, `confirmando`, `personal`) |
+| POST | `/external/identify/:phone` | `{ stage, candidateId? }` (stage vacio = cerrar) |
+| POST | `/external/clients/match` | `{ text }` -> clientes parecidos por nombre y direccion, con puntaje |
+| POST | `/external/clients/:id/link-phone` | `{ phone }` -> agrega el numero a los telefonos del cliente |
+
+El ERP le pide al bot `POST /send { to, text }` (con `x-broadcast-key`) para avisarle al cliente que su
+pedido quedo cargado o que su numero quedo registrado.
+
+Numero desconocido: si el mensaje parece un pedido, se guarda y se le pregunta de que negocio es; con
+un candidato claro se le pide confirmar ("¿Sos X? SI/NO") y se vincula; si no, lo vincula una persona.
+Si el mensaje no parece un pedido, no se contesta nada (con la coexistencia llegan tambien los
+mensajes de contactos personales).

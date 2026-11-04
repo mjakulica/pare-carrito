@@ -7,6 +7,7 @@ const ai = require("./ai");
 const erp = require("./erp");
 const flow = require("./orderFlow");
 const { createTemplateService, createTemplateRouter } = require("./templates");
+const { createInboxFlow } = require("./inboxFlow");
 
 const app = express();
 app.use(express.json({
@@ -67,6 +68,17 @@ app.post("/broadcast", async (req, res) => {
   res.json({ ok: true, sent, failed, errors: errors.slice(0, 3) });
 });
 
+// Texto libre a un cliente (lo usa el ERP para confirmar que su pedido quedo cargado). Meta solo lo
+// permite dentro de las 24 h del ultimo mensaje del cliente.
+app.post("/send", async (req, res) => {
+  const broadcastKey = process.env.BROADCAST_KEY || "";
+  if (!broadcastKey || req.get("x-broadcast-key") !== broadcastKey) return res.sendStatus(401);
+  const { to, text } = req.body || {};
+  if (!to || !text) return res.status(400).json({ error: "Se espera { to, text }." });
+  const ok = await wa.sendText(String(to), String(text).slice(0, 1000));
+  res.status(ok ? 200 : 502).json(ok ? { ok: true } : { error: "WhatsApp no acepto el mensaje." });
+});
+
 // Verificacion del webhook (Meta).
 app.get("/webhook", (req, res) => {
   const challenge = wa.verifyWebhook(req.query);
@@ -90,6 +102,8 @@ app.post("/webhook", async (req, res) => {
   }
 });
 
+const inboxFlow = createInboxFlow({ wa, erp, ai, getProductNames });
+
 async function handleMessage(msg) {
   const from = String(msg.from || "").replace(/[^\d]/g, "");
   const text = String(msg.text || "").trim();
@@ -109,46 +123,15 @@ async function handleMessage(msg) {
     const r = await erp.findClientByPhone(from);
     client = r && r.client ? r.client : null;
   } catch (e) {
+    // Sin respuesta del sistema no se sabe si es cliente: no se le pregunta "de que negocio sos".
     console.warn("findClientByPhone:", e.message);
-  }
-
-  if (!client) {
-    await wa.notifyOwner(`Mensaje de un numero no reconocido (${from}):\n"${text}"`);
-    await wa.sendText(from, "Hola! No tengo tu numero asociado a una cuenta. Avise a administracion para activarte y empezar a hacer pedidos.");
+    await wa.notifyTeam(`El sistema no respondio al buscar el numero ${from}. Mensaje: "${text}"`);
     return;
   }
 
-  // 3) Clasificar la intencion.
-  const names = await getProductNames();
-  const parsed = await ai.classifyMessage(text, names);
-  const ctx = { clientPhone: from, clientName: client.name || msg.name || "cliente", clientId: client.id, text };
-
-  if (parsed.intent === "saludo") {
-    await wa.sendText(from, `Hola ${ctx.clientName}! Pasame tu pedido cuando quieras.`);
-    return;
-  }
-  if (parsed.intent === "consulta") {
-    await flow.handleConsulta(ctx);
-    return;
-  }
-  if (parsed.intent === "pedido_nuevo") {
-    await flow.handleNewOrder({ ...ctx, items: parsed.items });
-    return;
-  }
-  if (parsed.intent === "agregar" || parsed.intent === "cancelar") {
-    let order = null;
-    try {
-      const r = await erp.getTodayOrder(client.id);
-      order = r && r.order ? r.order : null;
-    } catch (e) {
-      console.warn("getTodayOrder:", e.message);
-    }
-    if (parsed.intent === "agregar") await flow.handleAdd({ ...ctx, order, items: parsed.items });
-    else await flow.handleCancel({ ...ctx, order, items: parsed.items });
-    return;
-  }
-  // fallback
-  await flow.handleConsulta(ctx);
+  // 3) Todo va a la bandeja de WhatsApp del sistema (ver inboxFlow.js).
+  if (client) await inboxFlow.handleKnown({ from, text, profileName: msg.name || "", client });
+  else await inboxFlow.handleUnknown({ from, text, profileName: msg.name || "" });
 }
 
 app.listen(config.port, () => {
