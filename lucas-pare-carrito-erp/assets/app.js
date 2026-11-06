@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v97";
+  const APP_VERSION = "v98";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -22698,6 +22698,26 @@
           warnings.push(product.name + ": pidieron \"" + line.trim() + "\" (" + parsed.requestedUnit + ") y este producto se vende por " + (product.unitType || "unidad") + ". Revisa la cantidad.");
         }
       }
+      // Frutas y verduras que se cuentan ("6 pomelos", "Limones 15") sin unidad escrita: son unidades,
+      // salvo que el cliente pida ese producto solo por jaula/cajon/bolsa y nunca por unidad.
+      if (!parsed.requestedUnit) {
+        const pieza = countedPieceVariant(product, parsed.quantity, line, clientId);
+        if (pieza) {
+          product = pieza.product;
+          if (pieza.kg) {
+            const porPieza = convertExplicitUnitsToKg("1 unidad " + line, product, parsed.quantity, parsed.unitType, parsed.note || "");
+            if (porPieza) {
+              items.push({ product, quantity: porPieza.quantity, unitType: porPieza.unitType, note: porPieza.note });
+              warnings.push(porPieza.warning);
+              return;
+            }
+          } else {
+            items.push({ product, quantity: pieza.quantity, unitType: product.unitType, note: [pieza.nota, parsed.note || ""].filter(Boolean).join(" - ") });
+            if (pieza.warning) warnings.push(pieza.warning);
+            return;
+          }
+        }
+      }
       const porUnidad = convertExplicitUnitsToKg(line, product, parsed.quantity, parsed.unitType, parsed.note || "");
       if (porUnidad) {
         items.push({ product, quantity: porUnidad.quantity, unitType: porUnidad.unitType, note: porUnidad.note });
@@ -23353,6 +23373,54 @@
   // Otra variante del mismo producto (Zanahoria Kg / Atado / Bolsa / Unidad) que se venda en la
   // unidad pedida. Primero una que coincida exacto; para "unidad" sirve tambien una por kg (se pasa a
   // kg con el peso por unidad).
+  // Productos que el cliente cuenta por pieza: "6 pomelos" son 6 pomelos, no 6 jaulas ni 6 kg.
+  const COUNTED_PIECE_ROOTS = ["pomelo", "naranja", "zanahoria", "limon", "manzana", "morron", "pera", "zapallito", "palta", "berenjena", "kiwi", "mandarina", "durazno", "mango", "pepino", "choclo", "anana", "melon", "repollo", "coliflor", "brocoli", "lechuga", "pimiento"];
+  const BULK_UNITS = ["jaula", "jaulas", "cajon", "cajones", "caja", "cajas", "bolsa", "bolsas"];
+  function productBase(p) {
+    return singularizeParsedProductText(stripTrailingProductUnitWords(normalizeText(p.name)));
+  }
+  function countedPieceVariant(product, quantity, line, clientId) {
+    const q = Number(quantity || 0);
+    if (!product || !(q >= 1) || Math.abs(q - Math.round(q)) > 1e-9) return null;
+    const plano = normalizeText(line);
+    if (EXPLICIT_WEIGHT_RE.test(plano)) return null; // dijo kilos
+    const base = productBase(product);
+    if (!base) return null;
+    const primera = base.split(" ")[0];
+    const hermanos = activeProducts().filter((p) => p.id === product.id || parsedBaseEquivalent(productBase(p), base));
+    const unidadDe = (p) => normalizeText(p.unitType || "");
+    const porUnidad = hermanos.find((p) => ["unidad", "unidades", "u"].includes(unidadDe(p)));
+    const contable = COUNTED_PIECE_ROOTS.some((r) => primera === r || primera.startsWith(r)) || !!porUnidad;
+    if (!contable) return null;
+    const unidadActual = unidadDe(product);
+    // Historial del cliente con este producto (pedidos y favoritos): si solo lo pide por bulto y
+    // nunca por unidad (ni por kg/docena), se respeta el bulto que pide (el mas pedido).
+    if (clientId) {
+      const ids = new Set(hermanos.map((p) => p.id));
+      const veces = new Map();
+      (state.orders || []).forEach((o) => { if (o && o.clientId === clientId && !o.exampleOnly) (o.items || []).forEach((it) => { if (ids.has(it.productId)) veces.set(it.productId, (veces.get(it.productId) || 0) + 1); }); });
+      (state.preferences || []).forEach((pref) => { if (pref && pref.clientId === clientId && ids.has(pref.productId) && !veces.has(pref.productId)) veces.set(pref.productId, 0); });
+      const usados = Array.from(veces.keys()).map((id) => getProduct(id)).filter(Boolean);
+      if (usados.length && usados.every((p) => BULK_UNITS.includes(unidadDe(p)))) {
+        if (BULK_UNITS.includes(unidadActual)) return null;
+        const fav = usados.sort((a, b) => (veces.get(b.id) || 0) - (veces.get(a.id) || 0))[0];
+        return { product: fav, quantity: q };
+      }
+    }
+    if (["unidad", "unidades", "u"].includes(unidadActual)) return null; // ya es por unidad
+    const etiqueta = q + (q === 1 ? " unidad" : " unidades");
+    if (porUnidad) return { product: porUnidad, quantity: q };
+    const docena = hermanos.find((p) => ["docena", "docenas"].includes(unidadDe(p)));
+    if (unidadActual === "docena" || unidadActual === "docenas" || (BULK_UNITS.includes(unidadActual) && docena)) {
+      const p = unidadActual.startsWith("docena") ? product : docena;
+      const dz = Math.round((q / 12) * 1000) / 1000;
+      return { product: p, quantity: dz, nota: etiqueta, warning: p.name + ": " + etiqueta + " = " + formatNumber(dz) + " docena." };
+    }
+    const kgP = unidadActual === "kg" ? product : hermanos.find((p) => unidadDe(p) === "kg");
+    if (kgP && pieceWeightKg(kgP) > 0) return { product: kgP, kg: true };
+    return null;
+  }
+
   function productVariantForUnit(product, unit) {
     if (!product || !unit) return null;
     const base = singularizeParsedProductText(stripTrailingProductUnitWords(normalizeText(product.name)));
