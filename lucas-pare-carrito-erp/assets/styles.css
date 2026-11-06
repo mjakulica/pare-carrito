@@ -4404,3 +4404,9 @@ tr:last-child td {
 .alias-fix-box { background: #eaf5ee; border: 1px solid #b9dcc6; border-radius: 8px; padding: 10px 12px; margin: 10px 0; }
 .alias-fix-list { max-height: 45vh; overflow-y: auto; }
 .alias-fix-list .alias-check-sug { display: flex; gap: 8px; align-items: flex-start; margin: 4px 0; }
+.alias-check-table tr.ac-no td { background: #fdecec; }
+.alias-check-table tr.ac-cant td { background: #fff4e5; }
+.alias-errors { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; background: #fdecec; border: 1px solid #f1b5b5; color: #7a1d1d; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
+.alias-errors.zero { background: #eaf5ee; border-color: #b9dcc6; color: #17412d; }
+.alias-errors strong { font-size: 18px; }
+.ac-fix select { margin-top: 4px; min-height: 32px; font-size: 13px; }

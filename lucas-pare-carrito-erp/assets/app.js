@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v95";
+  const APP_VERSION = "v96";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -21214,7 +21214,7 @@
     const clientesConTel = new Set([...porTel.values(), ...porGrupo.values(), ...porAgenda.values()]);
     const pedidos = (state.orders || []).filter((o) => o && String(o.date || "") >= desde && !["cancelado", "anulado"].includes(o.status) && !o.exampleOnly && !o.deletedAt)
       .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.clientId).localeCompare(String(b.clientId)));
-    const res = { desde, archivo: j.archivo || {}, total: pedidos.length, ok: [], alias: [], editado: [], sinMensaje: [], sinTelefono: [], sinProductos: [] };
+    const res = { desde, archivo: j.archivo || {}, total: pedidos.length, ok: [], alias: [], editado: [], revisados: [], sinMensaje: [], sinTelefono: [], sinProductos: [] };
     pedidos.forEach((o) => {
       if (!clientesConTel.has(o.clientId)) { res.sinTelefono.push(o); return; }
       if (!(o.items || []).length) { res.sinProductos.push(o); return; }
@@ -21264,9 +21264,12 @@
       const difAlias = difEditado.length ? [] : difPedido;
       // Primero lo que sale contra el pedido cargado (es lo correcto); despues, contra el texto guardado.
       const sugerencias = (difAlias.length || pw.unmatched.length) ? suggestAliasesFromOrder(W, o) : [];
-      (T ? suggestAliasesFromEdit(W, T, o.clientId) : []).forEach((x) => { if (!sugerencias.some((y) => normalizeText(y.alias) === normalizeText(x.alias))) sugerencias.push(x); });
-      const fila = { order: o, W, T, wAt: mejor.t, difAlias, difEditado, unmatched: pw.unmatched, sugerencias };
-      if (difAlias.length || (pw.unmatched.length && difPedido.length)) res.alias.push(fila);
+      // Las de la correccion del texto, solo si ese producto quedo en el pedido.
+      (T && (difAlias.length || pw.unmatched.length) ? suggestAliasesFromEdit(W, T, o.clientId) : []).forEach((x) => { if (P.has(x.productId) && !sugerencias.some((y) => normalizeText(y.alias) === normalizeText(x.alias))) sugerencias.push(x); });
+      const fila = { order: o, W, T, wAt: mejor.t, difAlias, difEditado, unmatched: pw.unmatched, sugerencias, explica: explainMessageVsOrder(W, o) };
+      // Revisado a mano ("fue un cambio en el pedido"), con el mismo mensaje: ya no cuenta como error.
+      if ((difAlias.length || (pw.unmatched.length && difPedido.length)) && o.aliasCheckOk && o.aliasCheckOk.w === normalizeText(W).slice(0, 400)) res.revisados.push(fila);
+      else if (difAlias.length || (pw.unmatched.length && difPedido.length)) res.alias.push(fila);
       else if (difEditado.length) res.editado.push(fila);
       else res.ok.push(fila);
     });
@@ -21292,17 +21295,24 @@
       <div class="alias-check-texts"><div><div class="muted">Mensaje original de WhatsApp (${new Date(f.wAt).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })})</div><pre>${escapeHtml(f.W)}</pre></div>
       <div><div class="muted">Texto guardado en el pedido</div><pre>${escapeHtml(f.T || "(el pedido no se cargó con texto)")}</pre></div></div>
       ${f.unmatched.length ? `<p><strong>Renglones del mensaje que no se reconocen:</strong> ${f.unmatched.map((u) => `"${escapeHtml(u)}"`).join(", ")}</p>` : ""}
-      ${f.difAlias.length ? `<p style="margin-bottom:4px"><strong>Lo que da el mensaje original con los alias de hoy, contra el pedido cargado:</strong></p>${tabla(f.difAlias, "Mensaje", "Pedido")}` : ""}
+      ${f.difAlias.length && f.explica ? `<p style="margin-bottom:4px"><strong>Renglón por renglón, cómo lo lee hoy el sistema:</strong></p>
+        <table class="alias-check-table"><thead><tr><th>Escribió</th><th>El sistema entiende</th><th></th></tr></thead><tbody>${f.explica.filas.map((x) => `<tr class="ac-${x.estado}"><td>${escapeHtml(x.line)}</td><td>${x.entiende ? escapeHtml(x.entiende) : "<em>—</em>"}</td><td>${x.estado === "ok" ? "&#9989;" : (x.estado === "cant" ? "&#9888;&#65039; " : "&#10060; ") + escapeHtml(x.detalle) + (tipo === "alias" ? `<div class="ac-fix"><select data-ac-line="${escapeAttr(f.order.id)}" data-ac-text="${escapeAttr(x.line)}"><option value="">Este renglón es...</option>${(f.order.items || []).map((it) => { const p = getProduct(it.productId); return `<option value="${escapeAttr(it.productId)}">${escapeHtml(p ? p.name : it.productName || it.productId)}${it.note ? " (" + escapeHtml(it.note) + ")" : ""}</option>`; }).join("")}</select></div>` : "")}</td></tr>`).join("")}</tbody></table>
+        ${f.explica.faltan.length ? `<p style="margin:4px 0"><strong>En el pedido, pero no sale del mensaje:</strong> ${f.explica.faltan.map(escapeHtml).join(", ")}</p>` : ""}` : ""}
       ${f.difEditado.length ? `<p style="margin-bottom:4px"><strong>Modificado en el sistema después de cargarlo</strong> <span class="muted">(o un alias nuevo cambió la lectura del texto guardado)</span>:</p>${tabla(f.difEditado, "Texto guardado", "Pedido hoy")}` : ""}
-      ${f.sugerencias.length ? `<p style="margin-bottom:4px"><strong>Alias que lo arreglan (para este cliente):</strong></p><ul class="order-parse-list">${f.sugerencias.map((x) => `<li>"${escapeHtml(x.alias)}" → ${escapeHtml(x.productName)} <span class="muted">(escribió "${escapeHtml(x.from)}")</span></li>`).join("")}</ul>` : ""}
+      ${tipo === "alias" ? `<div class="page-actions" style="margin:6px 0"><button class="btn small ghost" type="button" data-ac-ok="${escapeAttr(f.order.id)}">No es error de alias: fue un cambio en el pedido</button></div><p class="muted" style="font-size:12px;margin:0 0 6px">Elegí en cada renglón marcado de qué producto del pedido se trata (guarda el alias para este cliente). Si la diferencia es porque se cambió el pedido (no había, se reemplazó, cambió la cantidad), tocá "No es error de alias".</p>` : ""}
+      ${f.sugerencias.length ? `<p style="margin-bottom:4px"><strong>Alias que lo arreglan (para este cliente):</strong></p><ul class="order-parse-list">${f.sugerencias.map((x) => `<li>"${escapeHtml(x.alias)}" → ${escapeHtml(x.productName)}${x.nota ? " (nota: " + escapeHtml(x.nota) + ")" : ""} <span class="muted">(escribió "${escapeHtml(x.from)}")</span></li>`).join("")}</ul>` : ""}
     </details>`;
     // Todos los alias propuestos, sin repetir (por cliente y texto). Si el mismo texto de un cliente
     // apunta a productos distintos en distintos pedidos, gana el que mas se repite.
     const porClave = new Map();
     res.alias.forEach((f) => f.sugerencias.forEach((x) => {
       const k = f.order.clientId + "|" + normalizeText(x.alias);
-      const g = porClave.get(k) || { clientId: f.order.clientId, alias: x.alias, votos: new Map(), ejemplo: x.from };
+      const g = porClave.get(k) || { clientId: f.order.clientId, alias: x.alias, votos: new Map(), ejemplo: x.from, seguro: true, porEdicion: false, nota: "" };
       g.votos.set(x.productId, (g.votos.get(x.productId) || 0) + 1);
+      if (x.seguro === false) g.seguro = false;
+      if (x.seguro === undefined) g.porEdicion = true; // salio de la correccion del texto
+      if (x.nota) g.nota = x.nota;
+      if (x.seguro === false && x.cantidadMensaje !== undefined) g.cantidades = "escribió " + formatAmountInput(x.cantidadMensaje) + ", en el pedido " + formatAmountInput(x.cantidadPedido);
       porClave.set(k, g);
     }));
     porClave.forEach((g) => {
@@ -21310,12 +21320,21 @@
       const total = Array.from(g.votos.values()).reduce((a, b) => a + b, 0);
       const p = getProduct(productId);
       n += 1;
-      sugerencias.push({ clientId: g.clientId, alias: g.alias, productId, productName: p ? p.name : productId, from: g.ejemplo, pedidos: votos, dudoso: votos < total });
+      sugerencias.push({ clientId: g.clientId, alias: g.alias, productId, productName: p ? p.name : productId, from: g.ejemplo, pedidos: votos, dudoso: votos < total || !g.seguro, motivo: votos < total ? "en otros pedidos dio otro producto" : !g.seguro ? "la cantidad no coincide (" + (g.cantidades || "") + ")" : "", nota: g.nota });
     });
     sugerencias.sort((a, b) => String(a.clientId).localeCompare(String(b.clientId)) || a.alias.localeCompare(b.alias));
     const sinArreglo = res.alias.filter((f) => !f.sugerencias.length).length;
+    // Alias guardados en los ultimos 7 dias (para deshacer uno mal aprendido).
+    const hace7 = Date.now() - 7 * 86400000;
+    const recientes = (state.clientProductAliases || []).filter((x) => x && x.learnedAt && new Date(x.learnedAt).getTime() >= hace7)
+      .sort((a, b) => String(b.learnedAt).localeCompare(String(a.learnedAt)));
     const arch = res.archivo || {};
+    const pendientesErr = res.alias.length;
     ui.modal.body = `
+      <div class="alias-errors ${pendientesErr ? "" : "zero"}">${pendientesErr
+        ? `<strong>${pendientesErr} error(es) pendiente(s)</strong> <span>de ${res.total - res.sinMensaje.length - res.sinTelefono.length - res.sinProductos.length} pedido(s) comparados. Hay que llegar a 0: guardá los alias seguros, elegí el producto en cada renglón marcado o marcá "No es error de alias" cuando fue un cambio en el pedido.</span>`
+        : `<strong>&#9989; 0 errores</strong> <span>Todos los pedidos comparados dan lo mismo que su mensaje de WhatsApp${res.revisados.length ? " (" + res.revisados.length + " revisados a mano como cambios en el pedido)" : ""}.</span>`}
+        <button class="btn small ghost" type="button" id="alias-check-again" style="margin-left:auto">Volver a comprobar</button></div>
       <div class="grid three" style="margin-bottom:10px">
         ${metricCard("Correctos", String(res.ok.length), "El mensaje original da exactamente el pedido")}
         ${metricCard("Alias a revisar", String(res.alias.length), "El mensaje original todavía no da el pedido")}
@@ -21325,24 +21344,58 @@
       ${!Number(arch.n || 0) ? `<div class="alert warn">Todavía no hay mensajes guardados. Vinculá el WhatsApp por QR en Configuración (si ya estaba vinculado, desvinculalo y volvé a escanear para que mande el historial).</div>` : ""}
       ${res.sinTelefono.length ? `<p class="muted" style="font-size:12px">Para comparar más pedidos, cargá los teléfonos de los clientes y sus grupos: Clientes → Vincular teléfonos y grupos.</p>` : ""}
       ${sugerencias.length ? `<div class="alias-fix-box">
-        <strong>Se pueden arreglar solos: ${sugerencias.length} alias nuevos</strong>
-        <p class="muted" style="margin:2px 0 6px;font-size:13px">Sale de comparar cada mensaje original con el pedido que quedó cargado (que ya está corregido). Cada alias vale solo para ese cliente. Destildá alguno si no corresponde.</p>
-        <div class="alias-fix-list">${sugerencias.map((x, i) => { const c = getClient(x.clientId); return `<label class="alias-check-sug"><input type="checkbox" data-alias-sug="${i}" ${x.dudoso ? "" : "checked"} style="width:auto;min-height:auto" /> <span><strong>${escapeHtml(x.clientId)} - ${escapeHtml(c ? c.name : "")}</strong>: "${escapeHtml(x.alias)}" → ${escapeHtml(x.productName)} <span class="muted">(${x.pedidos} pedido${x.pedidos === 1 ? "" : "s"}${x.dudoso ? "; en otros pedidos dio otro producto, revisalo" : ""})</span></span></label>`; }).join("")}</div>
-        <div class="page-actions" style="margin-top:8px"><button class="btn primary" type="button" id="alias-check-save">Arreglar automáticamente (${sugerencias.length})</button></div>
+        <strong>Alias propuestos: ${sugerencias.filter((x) => !x.dudoso).length} seguros${sugerencias.some((x) => x.dudoso) ? " y " + sugerencias.filter((x) => x.dudoso).length + " para revisar" : ""}</strong>
+        <p class="muted" style="margin:2px 0 6px;font-size:13px">Salen de comparar cada mensaje original con el pedido que quedó cargado (que ya está corregido). Solo se proponen si lo que escribió el cliente se parece al nombre del producto. Vienen tildados los seguros (mismo producto y misma cantidad); los dudosos vienen destildados. Cada alias vale solo para ese cliente.</p>
+        <div class="alias-fix-list">${sugerencias.map((x, i) => { const c = getClient(x.clientId); return `<label class="alias-check-sug"><input type="checkbox" data-alias-sug="${i}" ${x.dudoso ? "" : "checked"} style="width:auto;min-height:auto" /> <span><strong>${escapeHtml(x.clientId)} - ${escapeHtml(c ? c.name : "")}</strong>: "${escapeHtml(x.alias)}" → ${escapeHtml(x.productName)} ${x.nota ? " <span class=\"muted\">(\"" + escapeHtml(x.nota) + "\" queda como nota)</span>" : ""} <span class="muted">(${x.pedidos} pedido${x.pedidos === 1 ? "" : "s"}; escribió "${escapeHtml(x.from)}")</span>${x.dudoso ? `<br><span style="color:#9a5b00;font-size:13px">&#9888;&#65039; Revisalo: ${escapeHtml(x.motivo)}. Tildalo solo si es correcto.</span>` : ""}</span></label>`; }).join("")}</div>
+        <div class="page-actions" style="margin-top:8px"><button class="btn primary" type="button" id="alias-check-save">Guardar los tildados y volver a comprobar</button></div>
         ${sinArreglo ? `<p class="muted" style="font-size:12px;margin:6px 0 0">${sinArreglo} pedido(s) no se pueden arreglar solos (no hay un producto del pedido con la misma cantidad para emparejar): están abajo para revisarlos a mano.</p>` : ""}
       </div>` : ""}
+      ${recientes.length ? `<details class="alias-recent" style="margin:10px 0"><summary><strong>Alias guardados en los últimos 7 días (${recientes.length})</strong> <span class="muted">— borrá los que estén mal</span></summary>
+        <ul class="order-parse-list">${recientes.map((x) => { const c = getClient(x.clientId); const p = getProduct(x.productId); return `<li>${escapeHtml(x.clientId)} - ${escapeHtml(c ? c.name : "")}: "${escapeHtml(x.alias)}" → ${escapeHtml(p ? p.name : x.productId)} <span class="muted">(${escapeHtml(formatTimestampShort(x.learnedAt))}${x.learnedBy ? ", " + escapeHtml(x.learnedBy) : ""}${x.source === "comprobar" ? ", desde Comprobar alias" : ""})</span> <button class="btn small danger" type="button" data-alias-del="${escapeAttr(x.clientId + "|" + x.alias)}">Borrar</button></li>`; }).join("")}</ul></details>` : ""}
       ${res.alias.length ? `<h3 style="font-size:16px">Alias a revisar (${res.alias.length})</h3>${res.alias.map((f) => bloque(f, "alias")).join("")}` : ""}
       ${res.editado.length ? `<h3 style="font-size:16px">Modificados después de cargarlos (${res.editado.length})</h3>${res.editado.map((f) => bloque(f, "editado")).join("")}` : ""}
       ${res.sinMensaje.length ? `<details style="margin-top:10px"><summary>Pedidos sin mensaje de WhatsApp encontrado (${res.sinMensaje.length})</summary><ul>${res.sinMensaje.map((o) => `<li>${formatDate(o.date)} · ${nombre(o)} <span class="muted">${escapeHtml(o.id)}</span></li>`).join("")}</ul></details>` : ""}
 `;
     ui.modal.bind = () => {
+      const again = document.getElementById("alias-check-again");
+      if (again) again.addEventListener("click", () => openAliasCheck());
+      document.querySelectorAll("[data-ac-line]").forEach((sel) => sel.addEventListener("change", () => {
+        if (!sel.value) return;
+        const o = getOrder(sel.dataset.acLine);
+        const pa = o ? parseOrderLine(sel.dataset.acText, o.clientId) : null;
+        const alias = pa ? String(pa.name || "").split(/\s+/).filter((w) => !ALIAS_NOTE_WORDS.has(normalizeText(w))).join(" ").trim() : "";
+        const p = getProduct(sel.value);
+        if (!o || !alias || !aliasWords(alias).length) { alert("Ese renglón no tiene un nombre de producto para aprender (es solo una cantidad o una unidad). Si es un cambio del pedido, usá \"No es error de alias\"."); sel.value = ""; return; }
+        if (!confirm('Guardar para ' + ((getClient(o.clientId) || {}).name || o.clientId) + ': "' + alias + '" → ' + (p ? p.name : sel.value) + "?")) { sel.value = ""; return; }
+        const r = saveClientAlias(o.clientId, sel.value, alias);
+        if (r) r.alias.source = "comprobar";
+        saveState();
+        sel.closest("td").innerHTML = `&#9989; Guardado: "${escapeHtml(alias)}" → ${escapeHtml(p ? p.name : "")}`;
+      }));
+      document.querySelectorAll("[data-ac-ok]").forEach((btn) => btn.addEventListener("click", () => {
+        const f = res.alias.find((x) => x.order.id === btn.dataset.acOk);
+        const o = f && getOrder(f.order.id);
+        if (!o) return;
+        o.aliasCheckOk = { w: normalizeText(f.W).slice(0, 400), at: new Date().toISOString(), by: currentUser ? currentUser.name || currentUser.username || "" : "" };
+        o.updatedAt = new Date().toISOString();
+        saveState();
+        btn.closest("details").innerHTML = `<p class="muted" style="margin:6px">&#9989; ${escapeHtml(o.id)}: marcado como cambio en el pedido (no cuenta como error).</p>`;
+      }));
+      document.querySelectorAll("[data-alias-del]").forEach((btn) => btn.addEventListener("click", () => {
+        const [cid, ...rest] = btn.dataset.aliasDel.split("|");
+        const alias = rest.join("|");
+        state.clientProductAliases = (state.clientProductAliases || []).filter((x) => !(x.clientId === cid && x.alias === alias));
+        saveState();
+        btn.closest("li").innerHTML = `<span class="muted">Borrado: "${escapeHtml(alias)}"</span>`;
+      }));
       const b = document.getElementById("alias-check-save");
       if (b) b.addEventListener("click", () => {
         let guardados = 0;
         document.querySelectorAll("[data-alias-sug]").forEach((c) => {
           if (!c.checked) return;
           const x = sugerencias[Number(c.dataset.aliasSug)];
-          if (x && saveClientAlias(x.clientId, x.productId, x.alias)) guardados += 1;
+          const r = x && saveClientAlias(x.clientId, x.productId, x.alias);
+          if (r) { r.alias.source = "comprobar"; guardados += 1; }
         });
         if (guardados) saveState();
         alert(guardados ? guardados + " alias guardados. Vuelvo a comprobar con los alias nuevos." : "No había alias nuevos para guardar.");
@@ -22451,15 +22504,46 @@
     return out;
   }
 
-  // Alias que salen de comparar el mensaje original con el pedido cargado (que ya esta corregido):
-  // cada renglon del mensaje que no da un producto del pedido se empareja con el producto del pedido
-  // que quedo sin explicar y tiene la misma cantidad (si hay varios, el de nombre mas parecido).
+  // Alias que salen de comparar el mensaje original con el pedido cargado (que ya esta corregido).
+  // Reglas estrictas: un error de alias cuesta plata, asi que solo se propone un alias si
+  //  - lo escrito se parece al nombre del producto (comparte una palabra: "limones" / Limon Docena,
+  //    "manzanaroja" / Manzana Roja). Que solo coincida la cantidad NO alcanza ("banana" no puede
+  //    ser Palta).
+  //  - no es solo una unidad ("atado", "cajon"...).
+  // seguro: ademas coincide la cantidad y es el unico producto parecido sin explicar. Si no, va
+  // destildado para que lo mire una persona.
+  // Las palabras que en el pedido quedaron como nota ("lindos" en Limon Jaula (lindos)) no van al alias.
+  const ALIAS_UNIT_WORDS = new Set(["kg", "kgs", "kilo", "kilos", "k", "gr", "grs", "gramos", "unidad", "unidades", "uni", "un", "u", "docena", "docenas", "doc", "atado", "atados", "cajon", "cajones", "caja", "cajas", "bolsa", "bolsas", "bolsita", "jaula", "jaulas", "maple", "maples", "bandeja", "bandejas", "cabeza", "cabezas", "planta", "plantas", "medio", "media", "de", "del", "la", "el", "los", "las", "y", "con", "para"]);
+  // Palabras que describen como lo quiere (van a la nota del producto, nunca al alias).
+  const ALIAS_NOTE_WORDS = new Set(["lindo", "lindos", "linda", "lindas", "maduro", "maduros", "madura", "maduras", "grande", "grandes", "chico", "chicos", "chica", "chicas", "mediano", "medianos", "mediana", "medianas", "firme", "firmes", "bueno", "buenos", "buena", "buenas", "pinton", "pintones", "pintona", "pintonas", "verdecito", "verdecitos", "verdecita", "verdecitas", "duro", "duros", "dura", "duras", "blando", "blandos", "blanda", "blandas", "bien", "parejo", "parejos", "pareja", "parejas", "seleccionado", "seleccionados", "seleccionada", "seleccionadas", "elegido", "elegidos", "elegida", "elegidas"]);
+  function productRoot(name) {
+    return aliasWords(name)[0] || "";
+  }
+  function aliasWords(x) {
+    return normalizeText(x).split(" ").filter((w) => w && !ALIAS_UNIT_WORDS.has(w) && !/^\d/.test(w));
+  }
+  function wordsLookAlike(a, b) {
+    if (a === b) return true;
+    const n = Math.min(a.length, b.length);
+    if (n < 3) return false;
+    const pre = n >= 5 ? 4 : n; // "limones"/"limon", "manzanaroja"/"manzana", "papas"/"papa"
+    return a.slice(0, pre) === b.slice(0, pre);
+  }
+  function aliasSimilarity(alias, productName) {
+    const A = aliasWords(alias), B = aliasWords(productName);
+    return A.filter((w) => B.some((v) => wordsLookAlike(w, v) || (w.length >= 6 && (w.startsWith(v) || v.startsWith(w))))).length;
+  }
+
   function suggestAliasesFromOrder(text, order) {
     const out = [];
     if (!order || !text) return out;
     const clientId = order.clientId;
     const pendientes = new Map();
-    (order.items || []).forEach((it) => pendientes.set(it.productId, (pendientes.get(it.productId) || 0) + Number(it.quantity || 0)));
+    const notas = new Map();
+    (order.items || []).forEach((it) => {
+      pendientes.set(it.productId, (pendientes.get(it.productId) || 0) + Number(it.quantity || 0));
+      if (it.note) notas.set(it.productId, (notas.get(it.productId) || "") + " " + it.note);
+    });
     const renglones = [];
     orderTextLines(text).forEach((line) => {
       const pa = parseOrderLine(line, clientId);
@@ -22470,20 +22554,65 @@
       if (!pa || !pa.name) return;
       renglones.push({ line, alias: String(pa.name).trim(), qty: it ? Number(it.quantity) : Number(pa.quantity || 0), qtyLinea: Number(pa.quantity || 0) });
     });
-    const palabras = (x) => normalizeText(x).split(" ").filter((w) => w.length >= 3);
-    const parecido = (a, b) => { const A = palabras(a), B = palabras(b); return A.filter((w) => B.some((v) => v.slice(0, 4) === w.slice(0, 4))).length; };
+    const raices = new Set(activeProducts().map((p) => productRoot(p.name)).filter((w) => w.length >= 3));
     renglones.forEach((r) => {
-      if (normalizeText(r.alias).length < 3 || /^\d/.test(r.alias)) return;
-      const cands = Array.from(pendientes.entries()).filter(([, q]) => Math.abs(q - r.qty) < 0.001 || Math.abs(q - r.qtyLinea) < 0.001).map(([id]) => getProduct(id)).filter(Boolean);
+      // Las palabras que describen ("lindos", "maduras") van a la nota, no al alias.
+      const notaEscrita = String(r.alias).split(/\s+/).filter((w) => ALIAS_NOTE_WORDS.has(normalizeText(w))).join(" ");
+      r.alias = String(r.alias).split(/\s+/).filter((w) => !ALIAS_NOTE_WORDS.has(normalizeText(w))).join(" ").trim();
+      r.notaEscrita = notaEscrita;
+      if (!aliasWords(r.alias).length) return; // solo unidades, numeros o descripciones
+      const cands = Array.from(pendientes.keys()).map((id) => getProduct(id)).filter(Boolean)
+        .map((p) => ({ p, sim: aliasSimilarity(r.alias, p.name), q: pendientes.get(p.id) }))
+        .filter((c) => c.sim > 0)
+        .sort((a, b) => b.sim - a.sim);
       if (!cands.length) return;
-      cands.sort((a, b) => parecido(r.alias, b.name) - parecido(r.alias, a.name));
-      if (cands.length > 1 && parecido(r.alias, cands[0].name) === parecido(r.alias, cands[1].name)) return; // no se sabe cual
-      const producto = cands[0];
+      if (cands.length > 1 && cands[0].sim === cands[1].sim) {
+        // Varios parecidos ("limon" con Limon Jaula y Limon Docena en el pedido): decide la cantidad.
+        const igual = cands.filter((c) => c.sim === cands[0].sim && (Math.abs(c.q - r.qty) < 0.001 || Math.abs(c.q - r.qtyLinea) < 0.001));
+        if (igual.length !== 1) return;
+        cands.unshift(igual[0]);
+      }
+      const { p: producto, q } = cands[0];
+      // Si lo escrito nombra a otro producto del catalogo ("banana", "frutilla"), no es un alias de
+      // este: fue un cambio o un reemplazo en el pedido.
+      const raizDestino = productRoot(producto.name);
+      if (aliasWords(r.alias).some((w) => raices.has(w) && !wordsLookAlike(w, raizDestino) && !aliasWords(producto.name).some((v) => wordsLookAlike(w, v)))) return;
+      const mismaCantidad = Math.abs(q - r.qty) < 0.001 || Math.abs(q - r.qtyLinea) < 0.001;
+      // Sacar las palabras que quedaron como nota del producto en el pedido.
+      const notaWords = new Set(normalizeText(notas.get(producto.id) || "").split(" ").filter(Boolean));
+      const alias = String(r.alias).split(/\s+/).filter((w) => !notaWords.has(normalizeText(w))).join(" ").trim();
+      if (!aliasWords(alias).length) return;
       pendientes.delete(producto.id);
-      if (out.some((x) => normalizeText(x.alias) === normalizeText(r.alias))) return;
-      out.push({ alias: r.alias, productId: producto.id, productName: producto.name, from: r.line, to: formatAmountInput(r.qtyLinea || r.qty) + " " + producto.name });
+      if (out.some((x) => normalizeText(x.alias) === normalizeText(alias))) return;
+      out.push({ alias, productId: producto.id, productName: producto.name, from: r.line, to: formatAmountInput(q) + " " + producto.name, seguro: mismaCantidad, nota: r.notaEscrita || (notaWords.size ? String(notas.get(producto.id)).trim() : ""), cantidadMensaje: r.qtyLinea || r.qty, cantidadPedido: q });
     });
     return out;
+  }
+
+  // Renglon por renglon: lo que escribio el cliente, lo que entiende el sistema hoy y si coincide con
+  // el pedido cargado. Al final, lo del pedido que no sale del mensaje.
+  function explainMessageVsOrder(text, order) {
+    const clientId = order.clientId;
+    const pendientes = new Map();
+    (order.items || []).forEach((it) => pendientes.set(it.productId, (pendientes.get(it.productId) || 0) + Number(it.quantity || 0)));
+    const filas = orderTextLines(text).map((line) => {
+      const r = parseWhatsappOrder(line, clientId);
+      if (!r.items.length) return { line, entiende: "", estado: "no", detalle: "no lo reconoce" };
+      const partes = r.items.map((it) => {
+        const q = pendientes.get(it.product.id);
+        let estado = "no";
+        let detalle = "no está en el pedido";
+        if (q !== undefined) {
+          if (Math.abs(q - it.quantity) < 0.001 || q > it.quantity) { estado = "ok"; detalle = ""; pendientes.set(it.product.id, q - it.quantity); if (pendientes.get(it.product.id) < 0.001) pendientes.delete(it.product.id); }
+          else { estado = "cant"; detalle = "en el pedido quedó " + formatAmountInput(q); pendientes.delete(it.product.id); }
+        }
+        return { txt: formatAmountInput(it.quantity) + " " + it.product.name, estado, detalle };
+      });
+      const estado = partes.every((x) => x.estado === "ok") ? "ok" : partes.some((x) => x.estado === "no") ? "no" : "cant";
+      return { line, entiende: partes.map((x) => x.txt).join(" + "), estado, detalle: partes.map((x) => x.detalle).filter(Boolean).join("; ") };
+    });
+    const faltan = Array.from(pendientes.entries()).filter(([, q]) => q > 0.001).map(([id, q]) => { const p = getProduct(id); return formatAmountInput(q) + " " + (p ? p.name : id); });
+    return { filas, faltan };
   }
 
   function saveClientAlias(clientId, productId, alias) {
@@ -23304,7 +23433,7 @@
     if (!clean) return true;
     // Saludo o presentacion sin ninguna cantidad ("hola buenas para mañna pedimos", "te paso el
     // pedido de hoy"): no es un producto, aunque tenga errores de tipeo que el limpiador no conoce.
-    if (!/\d/.test(clean) && !/(^|\s)(un|una|medio|media|par|cuarto)(\s|$)/.test(clean) && /(^|\s)(hola+|buen[oa]s+|buen|dias?|tardes?|noches?|pedimos|pedido|pedidos|pido|pedir|hacerte|haceme|ma[nñ]+a?n?a|manana|hoy|gracias|porfa|favor)(\s|$)/.test(clean)) return true;
+    if (!/\d/.test(clean) && !/(^|\s)(un|una|medio|media|par|cuarto)(\s|$)/.test(clean) && /(^|\s)(hola+|buen[oa]s+|buen|dias?|tardes?|noches?|pedimos|pedido|pedidos|pido|pedir|hacerte|haceme|ma[nñ]+a?n?a|manana|hoy|gracias|porfa|favor|lunes|martes|miercoles|jueves|viernes|sabado|domingo|semana|entrega|entregar)(\s|$)/.test(clean)) return true;
     if (/^(pedido|pedidos)\s*(\d{1,2}[\/-]\d{1,2}(?:[\/-]\d{2,4})?)?$/.test(clean)) return true;
     if (/^(lista|listado)\s+(de\s+)?(verduras|frutas|productos)$/.test(clean)) return true;
     if (/^(fecha|cliente|total|subtotal|observaciones|nota|notas)\b/.test(clean)) return true;
