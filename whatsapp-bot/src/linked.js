@@ -154,9 +154,10 @@ async function connect() {
     try { version = (await fetchLatestBaileysVersion()).version; } catch (e) { /* la que trae la libreria */ }
     const logger = (await import("pino")).default({ level: "silent" });
     info.status = "conectando";
-    // Historial completo al vincular (como WhatsApp de escritorio): sirve para el archivo de 90 dias y
-    // para comprobar los alias contra los pedidos de los ultimos 30 dias.
-    sock = makeWASocket({ auth: state, version, logger, browser: B.Browsers ? B.Browsers.macOS("Desktop") : ["Pare Carrito", "Desktop", "1.0"], markOnlineOnConnect: false, syncFullHistory: true });
+    // Se pide el historial completo al vincular (archivo de 90 dias y comprobar alias de 30 dias).
+    // Ojo: presentarse como "Mac OS Desktop" junto con syncFullHistory hace que WhatsApp corte la
+    // conexion (error 428) antes de dar el QR; como Chrome funciona.
+    sock = makeWASocket({ auth: state, version, logger, browser: B.Browsers ? B.Browsers.ubuntu("Chrome") : ["Pare Carrito", "Chrome", "1.0"], markOnlineOnConnect: false, syncFullHistory: true });
     sock.ev.on("creds.update", saveCreds);
     sock.ev.on("connection.update", async (u) => {
       if (u.qr) {
