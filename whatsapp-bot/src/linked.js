@@ -19,6 +19,37 @@ let onMessage = null;
 let jids = {};
 try { jids = JSON.parse(fs.readFileSync(JIDS_FILE, "utf8")) || {}; } catch (e) { jids = {}; }
 
+// Contactos de la agenda del celular vinculado (nombre como esta guardado). Se usan solo cuando el
+// gerente pide vincular telefonos a clientes; se guardan en el servidor propio para no perderlos al
+// reiniciar el bot.
+const CONTACTS_FILE = path.join(path.dirname(DIR), "wa-linked-contacts.json");
+let contacts = {};
+try { contacts = JSON.parse(fs.readFileSync(CONTACTS_FILE, "utf8")) || {}; } catch (e) { contacts = {}; }
+let contactsTimer = null;
+function addContacts(list) {
+  let cambio = false;
+  for (const c of list || []) {
+    if (!c || !c.id) continue;
+    const jid = String(c.id);
+    if (!jid.endsWith("@s.whatsapp.net")) continue; // grupos, canales y contactos sin numero visible
+    const phone = digits(jid);
+    const name = String(c.name || c.verifiedName || "").trim();
+    const notify = String(c.notify || "").trim();
+    const prev = contacts[phone] || {};
+    const next = { phone, name: name || prev.name || "", notify: notify || prev.notify || "" };
+    if (!next.name && !next.notify) continue;
+    if (prev.name !== next.name || prev.notify !== next.notify) { contacts[phone] = next; cambio = true; }
+  }
+  if (cambio) {
+    clearTimeout(contactsTimer);
+    contactsTimer = setTimeout(() => { try { fs.writeFileSync(CONTACTS_FILE, JSON.stringify(contacts)); } catch (e) { /* se recalcula */ } }, 2000);
+  }
+}
+
+function listContacts() {
+  return Object.values(contacts).filter((c) => c.name || c.notify);
+}
+
 const digits = (jid) => String(jid || "").split("@")[0].split(":")[0].replace(/\D/g, "");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -81,6 +112,9 @@ async function connect() {
         } else info.status = "apagado";
       }
     });
+    sock.ev.on("contacts.upsert", (list) => addContacts(list));
+    sock.ev.on("contacts.update", (list) => addContacts(list));
+    sock.ev.on("messaging-history.set", (h) => addContacts(h && h.contacts));
     sock.ev.on("messages.upsert", async ({ messages, type }) => {
       if (type !== "notify") return;
       for (const m of messages || []) {
@@ -130,6 +164,9 @@ async function stop() {
   sock = null;
   if (s) { try { await s.logout(); } catch (e) { try { s.end(); } catch (e2) { /* cerrado */ } } }
   fs.rmSync(DIR, { recursive: true, force: true });
+  // Al desvincular se borran tambien los contactos del celular.
+  contacts = {};
+  try { fs.unlinkSync(CONTACTS_FILE); } catch (e) { /* no habia */ }
   Object.assign(info, { status: "apagado", qr: "", me: "", connectedAt: "" });
   return status();
 }
@@ -156,4 +193,4 @@ async function sendText(phone, text) {
   }
 }
 
-module.exports = { init, startLinking, stop, status, isConnected, sendText };
+module.exports = { init, startLinking, stop, status, isConnected, sendText, addContacts, listContacts };

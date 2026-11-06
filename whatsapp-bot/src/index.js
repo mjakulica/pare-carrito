@@ -88,6 +88,7 @@ const linkedAuth = (req, res, next) => {
 };
 app.get("/linked/status", linkedAuth, (req, res) => res.json({ ok: true, ...linked.status() }));
 app.post("/linked/start", linkedAuth, async (req, res) => res.json({ ok: true, ...(await linked.startLinking()) }));
+app.get("/linked/contacts", linkedAuth, (req, res) => res.json({ ok: true, connected: linked.isConnected(), contacts: linked.listContacts() }));
 app.post("/linked/stop", linkedAuth, async (req, res) => res.json({ ok: true, ...(await linked.stop()) }));
 
 // Verificacion del webhook (Meta).

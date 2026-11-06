@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v83";
+  const APP_VERSION = "v84";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -7123,7 +7123,7 @@
     return pageShell(
       "Clientes",
       "Alta, edición, saldos y vehículo asignado.",
-      `<button class="btn primary" data-add-client>Agregar cliente</button>`,
+      `<button class="btn primary" data-add-client>Agregar cliente</button>${["manager", "admin"].includes(currentUser.role) ? `<button class="btn ghost" type="button" data-link-phones>Vincular teléfonos desde contactos</button>` : ""}`,
       `
       ${renderTabs()}
       ${renderDuplicateClientIdsWarning()}
@@ -20839,8 +20839,112 @@
     `;
   }
 
+  // ---- Vincular telefonos de clientes desde la agenda ----
+  // Del WhatsApp vinculado por QR o de un archivo de contactos (.vcf): se comparan los nombres de la
+  // agenda con los clientes y el gerente confirma cuales vincular. Los demas contactos no se guardan.
+  function parseVcf(text) {
+    const out = [];
+    String(text || "").replace(/\r/g, "").replace(/\n[ \t]/g, "").split(/BEGIN:VCARD/i).forEach((card) => {
+      const fn = (card.match(/^FN[^:\n]*:(.*)$/im) || [])[1] || "";
+      const nField = ((card.match(/^N[;:][^\n]*$/im) || [])[0] || "").replace(/^N[^:]*:/i, "").split(";").filter(Boolean).reverse().join(" ");
+      const org = (card.match(/^ORG[^:\n]*:(.*)$/im) || [])[1] || "";
+      const name = [fn || nField, org].filter(Boolean).join(" ").replace(/\\,/g, ",").trim();
+      (card.match(/^(?:item\d+\.)?TEL[^:\n]*:(.*)$/gim) || []).forEach((line) => {
+        const phone = line.replace(/^[^:]*:/, "").trim();
+        if (phone) out.push({ name, phone });
+      });
+    });
+    return out;
+  }
+
+  function openLinkPhonesModal() {
+    let datos = null;
+    const pintar = () => {
+      const box = document.getElementById("lp-result");
+      if (!box) return;
+      if (!datos) { box.innerHTML = ""; return; }
+      if (datos.error) { box.innerHTML = `<div class="alert warn">${escapeHtml(datos.error)}</div>`; return; }
+      const sug = datos.suggestions || [];
+      box.innerHTML = `<p class="muted" style="margin:8px 0">${datos.total || 0} teléfono(s) leídos · ${sug.length} parecen clientes · ${datos.yaVinculados || 0} ya estaban vinculados · ${datos.sinParecido || 0} no se parecen a ningún cliente (no se guardan).</p>
+        ${sug.length ? `<datalist id="lp-clients">${activeClients().map((c) => `<option value="${escapeAttr(c.id + " - " + c.name)}"></option>`).join("")}</datalist>
+        <div class="table-wrap"><table><thead><tr><th></th><th>Contacto en el celular</th><th>Cliente</th></tr></thead><tbody>
+        ${sug.map((x, i) => `<tr>
+          <td><input type="checkbox" data-lp-check="${i}" ${x.suggested ? "checked" : ""} style="width:auto;min-height:auto" /></td>
+          <td><strong>${escapeHtml(x.name || x.notify || "")}</strong>${x.name && x.notify && x.notify !== x.name ? ` <span class="muted">(${escapeHtml(x.notify)})</span>` : ""}<br><span class="muted">${escapeHtml(formatWaPhone(x.phone))}</span></td>
+          <td><select data-lp-client="${i}">${x.candidates.map((k) => `<option value="${escapeAttr(k.id)}" ${k.id === x.suggested ? "selected" : ""}>${escapeHtml(k.id + " - " + k.name)}${k.address ? " (" + escapeHtml(k.address) + ")" : ""}</option>`).join("")}<option value="">Otro cliente...</option></select>
+            <input list="lp-clients" data-lp-other="${i}" placeholder="Buscar otro cliente" style="display:none;margin-top:4px" /></td>
+        </tr>`).join("")}
+        </tbody></table></div>
+        <p class="muted" style="font-size:12px">Tildados: los que coinciden claro. Revisá los demás, elegí el cliente y tildalos si corresponde.</p>` : `<p>No hay contactos nuevos para vincular.</p>`}`;
+      box.querySelectorAll("[data-lp-client]").forEach((sel) => sel.addEventListener("change", () => {
+        const other = box.querySelector(`[data-lp-other="${sel.dataset.lpClient}"]`);
+        if (other) other.style.display = sel.value ? "none" : "";
+        const chk = box.querySelector(`[data-lp-check="${sel.dataset.lpClient}"]`);
+        if (chk) chk.checked = true;
+      }));
+    };
+    const pedir = async (path, body, boton) => {
+      if (boton) { boton.disabled = true; }
+      datos = { total: 0, suggestions: [] };
+      document.getElementById("lp-result").innerHTML = `<p class="muted">Comparando con los clientes...</p>`;
+      try {
+        const r = await cloudRequest(getCloudSyncConfig(), path, body ? { method: "POST", body: JSON.stringify(body) } : { method: "GET" });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(j.error || "HTTP " + r.status);
+        if (j.connected === false && !j.total) throw new Error("El WhatsApp vinculado no está conectado. Vinculalo en Configuración o usá un archivo de contactos.");
+        datos = j;
+      } catch (e) { datos = { error: e.message }; }
+      if (boton) boton.disabled = false;
+      pintar();
+    };
+    showModal("Vincular teléfonos desde contactos", `
+      <p class="muted" style="margin-top:0">Se comparan los nombres de tu agenda con los clientes para cargarles el teléfono de WhatsApp. Así el bot los reconoce cuando escriben. Revisás la lista antes de guardar; los contactos personales no se guardan.</p>
+      <div class="page-actions">
+        <button class="btn primary" type="button" id="lp-from-wa">Traer del WhatsApp vinculado</button>
+        <label class="btn ghost" style="cursor:pointer">Subir archivo de contactos (.vcf)<input type="file" id="lp-file" accept=".vcf,text/vcard,text/x-vcard" hidden /></label>
+      </div>
+      <p class="muted" style="font-size:12px;margin:6px 0 0">Archivo .vcf: en Android, app Contactos → menú → Exportar (o Administrar contactos → Exportar a archivo); en iPhone, desde iCloud.com → Contactos → Exportar vCard.</p>
+      <div id="lp-result" style="margin-top:10px"></div>`, () => {
+      const wa = document.getElementById("lp-from-wa");
+      if (wa) wa.addEventListener("click", () => pedir("/whatsapp/linked/contacts", null, wa));
+      const file = document.getElementById("lp-file");
+      if (file) file.addEventListener("change", async () => {
+        const f = file.files && file.files[0];
+        if (!f) return;
+        const contactos = parseVcf(await f.text());
+        if (!contactos.length) { datos = { error: "El archivo no tiene contactos con teléfono (¿es un .vcf?)." }; return pintar(); }
+        pedir("/clients/phone-suggestions", { contacts: contactos });
+      });
+      const save = document.getElementById("modal-save");
+      if (save) save.addEventListener("click", async () => {
+        const sug = (datos && datos.suggestions) || [];
+        const links = [];
+        document.querySelectorAll("[data-lp-check]").forEach((chk) => {
+          if (!chk.checked) return;
+          const i = Number(chk.dataset.lpCheck);
+          const sel = document.querySelector(`[data-lp-client="${i}"]`);
+          let clientId = sel ? sel.value : "";
+          if (!clientId) { const o = document.querySelector(`[data-lp-other="${i}"]`); const found = o ? findClientByInput(o.value) : null; clientId = found ? found.id : ""; }
+          if (clientId && sug[i]) links.push({ clientId, phone: sug[i].phone });
+        });
+        if (!links.length) return alert("No hay ninguno tildado con cliente elegido.");
+        save.disabled = true;
+        try {
+          const r = await cloudRequest(getCloudSyncConfig(), "/clients/link-phones", { method: "POST", body: JSON.stringify({ links }) });
+          const j = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(j.error || "HTTP " + r.status);
+          // Tambien en este equipo, sin esperar la proxima descarga.
+          links.forEach((l) => { const c = getClient(l.clientId); if (c && !(c.phones || []).includes(l.phone)) c.phones = (c.phones || []).concat([l.phone]); });
+          alert("Listo: " + j.linked + " teléfono(s) vinculados a sus clientes.");
+          closeModal();
+        } catch (e) { save.disabled = false; alert("No se pudo guardar: " + e.message); }
+      });
+    }, { saveLabel: "Vincular tildados" });
+  }
+
   function bindCommon() {
     bindRecorridoGuide();
+    document.querySelectorAll("[data-link-phones]").forEach((b) => b.addEventListener("click", openLinkPhonesModal));
     sendSharedTexts();
     document.querySelectorAll("[data-billing-dismiss]").forEach((button) => button.addEventListener("click", () => {
       const kind = button.dataset.billingDismiss.split("|")[0];

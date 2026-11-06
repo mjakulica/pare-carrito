@@ -12,7 +12,7 @@ const jwt = require("jsonwebtoken");
 const { billingConfig, nowArt, computeDueInvoices, runBilling, regeneratePdf, emitCreditNote, creditNoteTypeFor } = require("./billing");
 const { controlDailySummary, controlPaymentChecks, parseBankText, parseBankJson } = require("./control");
 const { repairAccounting, repairSummary, isOpeningRow, alignChangedOrderSaldos } = require("./dataRepair");
-const { matchClients } = require("./whatsappInbox");
+const { matchClients, phoneSuggestions, normalizeArPhone } = require("./whatsappInbox");
 const { syncSheetsFromStateDiff, pushPrecio } = require("./sheetsSync");
 
 const PORT = Number(process.env.PORT || 3000);
@@ -3705,6 +3705,45 @@ app.post("/whatsapp/linked/:action", authenticate, requireRole("manager", "admin
   const r = await botRequest("/linked/" + req.params.action, {});
   console.log("WhatsApp vinculado: " + (req.params.action === "start" ? "vincular" : "desvincular") + " por " + req.user.username + ".");
   res.status(r.ok ? 200 : 502).json(r);
+});
+
+// Vincular telefonos a clientes desde la agenda (del WhatsApp vinculado o de un archivo .vcf). El
+// gerente revisa las sugerencias antes de guardar; los contactos que no son clientes no se guardan.
+app.get("/whatsapp/linked/contacts", authenticate, requireRole("manager", "admin"), async (req, res) => {
+  const r = await botRequest("/linked/contacts");
+  if (!r.ok) return res.status(502).json({ error: r.error || "El bot no respondió." });
+  const stored = await loadStateData();
+  res.json({ ok: true, connected: !!r.connected, total: (r.contacts || []).length, ...phoneSuggestions(stored ? stored.data.clients || [] : [], r.contacts || []) });
+});
+
+app.post("/clients/phone-suggestions", authenticate, requireRole("manager", "admin"), async (req, res) => {
+  const contacts = Array.isArray(req.body && req.body.contacts) ? req.body.contacts.slice(0, 5000) : [];
+  const stored = await loadStateData();
+  res.json({ ok: true, total: contacts.length, ...phoneSuggestions(stored ? stored.data.clients || [] : [], contacts) });
+});
+
+app.post("/clients/link-phones", authenticate, requireRole("manager", "admin"), async (req, res) => {
+  const links = (Array.isArray(req.body && req.body.links) ? req.body.links : []).map((l) => ({ clientId: String(l.clientId || ""), phone: normalizeArPhone(l.phone) })).filter((l) => l.clientId && l.phone);
+  if (!links.length) return res.status(400).json({ error: "No hay teléfonos para vincular." });
+  const out = await withStateExt((data) => {
+    let n = 0;
+    const stamp = new Date().toISOString();
+    for (const l of links) {
+      const client = (data.clients || []).find((c) => c && c.id === l.clientId);
+      if (!client) continue;
+      const tiene = [client.phone].concat(Array.isArray(client.phones) ? client.phones : []).some((ph) => { const d = phoneDigits(ph); return d && d.slice(-8) === l.phone.slice(-8); });
+      if (tiene) continue;
+      client.phones = (Array.isArray(client.phones) ? client.phones : []).concat([l.phone]);
+      client.updatedAt = stamp;
+      n += 1;
+    }
+    return { ok: true, linked: n };
+  });
+  if (out.error) return res.status(out.status || 500).json({ error: out.error });
+  // Los mensajes de la bandeja que esperaban con esos numeros pasan a su cliente.
+  for (const l of links) await pool.query("UPDATE whatsapp_inbox SET client_id = $1 WHERE client_id IS NULL AND status = 'pendiente' AND right(phone, 8) = right($2, 8) AND phone <> ''", [l.clientId, l.phone]);
+  console.log("Telefonos vinculados a clientes desde la agenda: " + out.linked + " (" + req.user.username + ").");
+  res.json(out);
 });
 
 app.post("/external/orders", externalAuth, async (req, res) => {

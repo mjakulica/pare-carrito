@@ -70,7 +70,7 @@ function createInboxFlow({ wa, erp, ai, getProductNames, channel }) {
       const r = await erp.matchClients(text).catch(() => ({ candidates: [] }));
       const candidates = (r && r.candidates) || [];
       const [a, b] = candidates;
-      const claro = a && a.score >= 0.8 && !(b && b.score > a.score - 0.3) ? a : null;
+      const claro = a && a.score >= 0.8 && !(b && b.score > a.score - 0.3 + 1e-9) ? a : null;
       if (claro) {
         await erp.setIdentify(from, { stage: "confirmando", candidateId: claro.id });
         await wa.sendText(from, `¿Sos ${claro.name}${claro.address ? " (" + claro.address + ")" : ""}? Respondé SI o NO.`);

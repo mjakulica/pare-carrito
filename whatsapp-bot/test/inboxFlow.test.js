@@ -82,3 +82,17 @@ test("WhatsApp vinculado por QR: la bandeja guarda el canal para contestar por e
   await flow.handleKnown({ from: "549111", text: "2 kg papa", client: { id: "010" } });
   assert.equal(inbox[0].channel, "linked");
 });
+
+test("contactos del WhatsApp vinculado: guarda nombre de agenda por número, ignora grupos y sin nombre", () => {
+  process.env.WA_LINKED_DIR = require("path").join(require("os").tmpdir(), "wa-linked-test-" + Date.now(), "auth");
+  delete require.cache[require.resolve("../src/linked")];
+  const linked = require("../src/linked");
+  linked.addContacts([
+    { id: "5493871234567@s.whatsapp.net", name: "Vivré Juan", notify: "Juan" },
+    { id: "120363000@g.us", name: "Grupo familia" },
+    { id: "5493879999999@s.whatsapp.net" },
+    { id: "123456789@lid", name: "Oculto" }
+  ]);
+  linked.addContacts([{ id: "5493871234567@s.whatsapp.net", notify: "Juancito" }]);
+  assert.deepEqual(linked.listContacts(), [{ phone: "5493871234567", name: "Vivré Juan", notify: "Juancito" }]);
+});

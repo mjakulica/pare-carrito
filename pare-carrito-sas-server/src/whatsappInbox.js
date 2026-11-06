@@ -34,7 +34,8 @@ function close(a, b) {
 }
 
 // Puntaje: nombre (hasta 1) + direccion (0.85 con calle y numero, 0.25 solo la calle).
-function scoreClient(client, text) {
+// nameOnly: para nombres de agenda ("Vivré Juan"), donde una palabra como "Belgrano" no es la direccion.
+function scoreClient(client, text, nameOnly) {
   const dichos = words(text);
   if (!dichos.length) return 0;
   const nombre = words(client.name || "").concat(words(client.businessName || client.razonSocial || "")).filter((w) => !/^\d+$/.test(w));
@@ -47,6 +48,11 @@ function scoreClient(client, text) {
   // Numeros del nombre ("Estacion Buenos Aires 2"): si los dice suma, si no los dice resta.
   const numerosNombre = words(client.name || "").filter((w) => /^\d+$/.test(w));
   if (numerosNombre.length && scoreNombre > 0) scoreNombre += numerosNombre.every((n) => dichos.includes(n)) ? 0.15 : -0.15;
+  // Dijo un numero de sucursal ("... 2") y este cliente no tiene numero en el nombre: es otro.
+  else if (nameOnly && scoreNombre > 0 && dichos.some((w) => /^\d{1,3}$/.test(w))) scoreNombre -= 0.15;
+  // Agendado exactamente con el nombre del cliente: gana sobre los parecidos.
+  if (nameOnly && words(client.name || "").join(" ") === dichos.join(" ")) scoreNombre += 0.2;
+  if (nameOnly) return Math.round(scoreNombre * 100) / 100;
   const dir = words(client.address || "");
   let scoreDir = 0;
   if (dir.length) {
@@ -60,10 +66,10 @@ function scoreClient(client, text) {
   return Math.round((scoreNombre + scoreDir) * 100) / 100;
 }
 
-function matchClients(clients, text, limit) {
+function matchClients(clients, text, limit, nameOnly) {
   return (clients || [])
     .filter((c) => c && c.id && c.isActive !== false)
-    .map((c) => ({ id: c.id, name: c.name || "", address: c.address || "", score: scoreClient(c, text) }))
+    .map((c) => ({ id: c.id, name: c.name || "", address: c.address || "", score: scoreClient(c, text, nameOnly) }))
     .filter((c) => c.score >= 0.25)
     .sort((a, b) => b.score - a.score)
     .slice(0, limit || 5);
@@ -73,8 +79,50 @@ function matchClients(clients, text, limit) {
 function clearCandidate(candidates) {
   const [a, b] = candidates || [];
   if (!a || a.score < 0.8) return null;
-  if (b && b.score > a.score - 0.3) return null;
+  if (b && b.score > a.score - 0.3 + 1e-9) return null;
   return a;
 }
 
-module.exports = { matchClients, clearCandidate, scoreClient, norm };
+// Telefono de agenda a formato de WhatsApp de Argentina (549 + caracteristica + numero):
+// "+54 9 387 123-4567", "0387 15 123-4567", "387 4123456"... Devuelve "" si no se puede.
+function normalizeArPhone(raw) {
+  let d = String(raw || "").replace(/\D/g, "");
+  if (!d) return "";
+  if (d.startsWith("00")) d = d.slice(2);
+  if (d.startsWith("54")) {
+    d = d.slice(2);
+    if (d.startsWith("9")) d = d.slice(1);
+  } else if (d.length > 13) return d; // otro pais: se deja como viene
+  if (d.startsWith("0")) d = d.slice(1);
+  // "15" del celular despues de la caracteristica (2 a 4 digitos): queda un numero de 10 digitos.
+  if (d.length === 12) {
+    for (const k of [2, 3, 4]) if (d.slice(k, k + 2) === "15") { d = d.slice(0, k) + d.slice(k + 2); break; }
+  }
+  return d.length === 10 ? "549" + d : "";
+}
+
+// Que contactos de la agenda parecen ser clientes que todavia no tienen ese numero cargado.
+function phoneSuggestions(clients, contacts) {
+  const tail = (x) => String(x || "").replace(/\D/g, "").slice(-8);
+  const ya = new Map();
+  (clients || []).forEach((c) => [c && c.phone].concat(c && Array.isArray(c.phones) ? c.phones : []).forEach((ph) => { const t = tail(ph); if (t.length === 8) ya.set(t, c.id); }));
+  const vistos = new Set();
+  const out = [];
+  let yaVinculados = 0;
+  let sinParecido = 0;
+  for (const k of contacts || []) {
+    const phone = normalizeArPhone(k && k.phone);
+    if (!phone || vistos.has(phone)) continue;
+    vistos.add(phone);
+    if (ya.has(tail(phone))) { yaVinculados += 1; continue; }
+    const texto = [k.name, k.notify].filter(Boolean).join(" ");
+    const candidates = matchClients(clients, texto, 3, true);
+    if (!candidates.length || candidates[0].score < 0.5) { sinParecido += 1; continue; }
+    const claro = clearCandidate(candidates);
+    out.push({ phone, name: String(k.name || ""), notify: String(k.notify || ""), candidates, suggested: claro ? claro.id : "" });
+  }
+  out.sort((a, b) => (b.suggested ? 1 : 0) - (a.suggested ? 1 : 0) || b.candidates[0].score - a.candidates[0].score);
+  return { suggestions: out, yaVinculados, sinParecido };
+}
+
+module.exports = { matchClients, clearCandidate, scoreClient, norm, normalizeArPhone, phoneSuggestions };
