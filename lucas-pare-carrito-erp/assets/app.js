@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v98";
+  const APP_VERSION = "v99";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -21148,6 +21148,34 @@
     );
   }
 
+  // Cambios del pedido en palabras: sacado, agregado, otra cantidad; y "cambiado" si se saco uno y se
+  // agrego otro del mismo tipo (puede esconder un error de alias o un reemplazo).
+  function classifyOrderChanges(difs) {
+    const fmt = (id, q) => { const p = getProduct(id); return formatAmountInput(q) + " " + (p ? p.name : id); };
+    const sacados = difs.filter((d) => d.a > 0 && !(d.b > 0));
+    const agregados = difs.filter((d) => d.b > 0 && !(d.a > 0));
+    const cantidad = difs.filter((d) => d.a > 0 && d.b > 0);
+    const raiz = (id) => { const p = getProduct(id); return p ? productRoot(p.name) : ""; };
+    const cambiados = [];
+    sacados.slice().forEach((s1) => {
+      const par = agregados.find((a1) => raiz(a1.productId) && raiz(a1.productId) === raiz(s1.productId)) || (sacados.length === 1 && agregados.length === 1 ? agregados[0] : null);
+      if (!par) return;
+      cambiados.push({ de: s1, a: par });
+      sacados.splice(sacados.indexOf(s1), 1);
+      agregados.splice(agregados.indexOf(par), 1);
+    });
+    return { sacados, agregados, cantidad, cambiados, fmt };
+  }
+  function describeOrderChanges(difs) {
+    const c = classifyOrderChanges(difs);
+    return [
+      ...c.cambiados.map((x) => `&#128260; <strong>Cambiado</strong>: ${escapeHtml(c.fmt(x.de.productId, x.de.a))} → ${escapeHtml(c.fmt(x.a.productId, x.a.b))}`),
+      ...c.sacados.map((x) => `&#10134; <strong>Se sacó</strong>: ${escapeHtml(c.fmt(x.productId, x.a))}`),
+      ...c.agregados.map((x) => `&#10133; <strong>Se agregó</strong>: ${escapeHtml(c.fmt(x.productId, x.b))}`),
+      ...c.cantidad.map((x) => { const p = getProduct(x.productId); return `&#9998;&#65039; <strong>Otra cantidad</strong>: ${escapeHtml(p ? p.name : x.productId)} ${escapeHtml(formatAmountInput(x.a))} → ${escapeHtml(formatAmountInput(x.b))}`; })
+    ];
+  }
+
   // ---- Comprobar alias contra los pedidos de los ultimos 30 dias ----
   // Por cada pedido: W = mensaje original del WhatsApp (archivo), T = texto guardado en el pedido (ya
   // corregido) y P = el pedido como esta hoy. Se leen W y T con los alias de HOY:
@@ -21300,7 +21328,8 @@
       ${f.difAlias.length && f.explica ? `<p style="margin-bottom:4px"><strong>Renglón por renglón, cómo lo lee hoy el sistema:</strong></p>
         <table class="alias-check-table"><thead><tr><th>Escribió</th><th>El sistema entiende</th><th></th></tr></thead><tbody>${f.explica.filas.map((x) => `<tr class="ac-${x.estado}"><td>${escapeHtml(x.line)}</td><td>${x.entiende ? escapeHtml(x.entiende) : "<em>—</em>"}</td><td>${x.estado === "ok" ? "&#9989;" : (x.estado === "cant" ? "&#9888;&#65039; " : "&#10060; ") + escapeHtml(x.detalle) + (tipo === "alias" ? `<div class="ac-fix"><select data-ac-line="${escapeAttr(f.order.id)}" data-ac-text="${escapeAttr(x.line)}"><option value="">Este renglón es...</option>${(f.order.items || []).map((it) => { const p = getProduct(it.productId); return `<option value="${escapeAttr(it.productId)}">${escapeHtml(p ? p.name : it.productName || it.productId)}${it.note ? " (" + escapeHtml(it.note) + ")" : ""}</option>`; }).join("")}</select></div>` : "")}</td></tr>`).join("")}</tbody></table>
         ${f.explica.faltan.length ? `<p style="margin:4px 0"><strong>En el pedido, pero no sale del mensaje:</strong> ${f.explica.faltan.map(escapeHtml).join(", ")}</p>` : ""}` : ""}
-      ${f.difEditado.length ? `<p style="margin-bottom:4px"><strong>Modificado en el sistema después de cargarlo</strong> <span class="muted">(o un alias nuevo cambió la lectura del texto guardado)</span>:</p>${tabla(f.difEditado, "Texto guardado", "Pedido hoy")}` : ""}
+      ${f.difEditado.length ? `<p style="margin-bottom:4px"><strong>Qué cambió entre el texto cargado y el pedido de hoy:</strong></p><ul class="order-parse-list">${describeOrderChanges(f.difEditado).map((x) => `<li>${x}</li>`).join("")}</ul>
+        <p class="muted" style="font-size:12px;margin:2px 0 0">El mensaje del cliente da lo mismo que el texto cargado, así que los alias están bien. Revisá que el cambio haya sido a propósito (no había, se reemplazó, el cliente pidió otra cosa después).</p>` : ""}
       ${tipo === "alias" ? `<div class="page-actions" style="margin:6px 0"><button class="btn small ghost" type="button" data-ac-ok="${escapeAttr(f.order.id)}">No es error de alias: fue un cambio en el pedido</button></div><p class="muted" style="font-size:12px;margin:0 0 6px">Elegí en cada renglón marcado de qué producto del pedido se trata (guarda el alias para este cliente). Si la diferencia es porque se cambió el pedido (no había, se reemplazó, cambió la cantidad), tocá "No es error de alias".</p>` : ""}
       ${f.sugerencias.length ? `<p style="margin-bottom:4px"><strong>Alias que lo arreglan (para este cliente):</strong></p><ul class="order-parse-list">${f.sugerencias.map((x) => `<li>"${escapeHtml(x.alias)}" → ${escapeHtml(x.productName)}${x.nota ? " (nota: " + escapeHtml(x.nota) + ")" : ""} <span class="muted">(escribió "${escapeHtml(x.from)}")</span></li>`).join("")}</ul>` : ""}
     </details>`;
@@ -21341,8 +21370,8 @@
         <button class="btn small ghost" type="button" id="alias-check-again" style="margin-left:auto">Volver a comprobar</button></div>
       <div class="grid three" style="margin-bottom:10px">
         ${metricCard("Correctos", String(res.ok.length), "El mensaje original da exactamente el pedido")}
-        ${metricCard("Alias a revisar", String(res.alias.length), "El mensaje original todavía no da el pedido")}
-        ${metricCard("Modificados después", String(res.editado.length), "Alias bien; el pedido se cambió en el sistema")}
+        <a href="#" data-ac-go="alias" class="ac-card-link">${metricCard("Alias a revisar", String(res.alias.length), "Tocá para ver la lista")}</a>
+        <a href="#" data-ac-go="editado" class="ac-card-link">${metricCard("Modificados después", String(res.editado.length), "Tocá para ver qué cambió en cada uno")}</a>
       </div>
       <p class="muted" style="margin-top:0">${res.total} pedido(s) desde el ${formatDate(res.desde)}. Sin mensaje de WhatsApp encontrado: ${res.sinMensaje.length} · clientes sin teléfono ni grupo vinculado: ${res.sinTelefono.length}${res.sinProductos.length ? " · sin detalle de productos: " + res.sinProductos.length : ""}. Archivo de WhatsApp: ${Number(arch.n || 0)} mensajes${arch.desde ? " desde el " + formatDate(String(arch.desde).slice(0, 10)) : ""}.</p>
       ${!Number(arch.n || 0) ? `<div class="alert warn">Todavía no hay mensajes guardados. Vinculá el WhatsApp por QR en Configuración (si ya estaba vinculado, desvinculalo y volvé a escanear para que mande el historial).</div>` : ""}
@@ -21356,11 +21385,19 @@
       </div>` : ""}
       ${recientes.length ? `<details class="alias-recent" style="margin:10px 0"><summary><strong>Alias guardados en los últimos 7 días (${recientes.length})</strong> <span class="muted">— borrá los que estén mal</span></summary>
         <ul class="order-parse-list">${recientes.map((x) => { const c = getClient(x.clientId); const p = getProduct(x.productId); return `<li>${escapeHtml(x.clientId)} - ${escapeHtml(c ? c.name : "")}: "${escapeHtml(x.alias)}" → ${escapeHtml(p ? p.name : x.productId)} <span class="muted">(${escapeHtml(formatTimestampShort(x.learnedAt))}${x.learnedBy ? ", " + escapeHtml(x.learnedBy) : ""}${x.source === "comprobar" ? ", desde Comprobar alias" : ""})</span> <button class="btn small danger" type="button" data-alias-del="${escapeAttr(x.clientId + "|" + x.alias)}">Borrar</button></li>`; }).join("")}</ul></details>` : ""}
-      ${res.alias.length ? `<h3 style="font-size:16px">Alias a revisar (${res.alias.length})</h3>${res.alias.map((f) => bloque(f, "alias")).join("")}` : ""}
-      ${res.editado.length ? `<h3 style="font-size:16px">Modificados después de cargarlos (${res.editado.length})</h3>${res.editado.map((f) => bloque(f, "editado")).join("")}` : ""}
+      ${res.alias.length ? `<h3 style="font-size:16px" id="ac-sec-alias">Alias a revisar (${res.alias.length})</h3>${res.alias.map((f) => bloque(f, "alias")).join("")}` : ""}
+      ${res.editado.length ? (() => {
+        const tipos = res.editado.map((f) => ({ f, c: classifyOrderChanges(f.difEditado) }));
+        const n = (k) => tipos.filter((t) => t.c[k].length).length;
+        tipos.sort((x, y) => (y.c.cambiados.length ? 1 : 0) - (x.c.cambiados.length ? 1 : 0));
+        return `<h3 style="font-size:16px" id="ac-sec-editado">Modificados después de cargarlos (${res.editado.length})</h3>
+          <p class="muted" style="margin-top:0">En estos el mensaje da lo mismo que el texto que se cargó; después se cambió el pedido en el sistema. Con producto cambiado por otro: <strong>${n("cambiados")}</strong> (revisalos primero, están arriba) · se sacó algo: ${n("sacados")} · se agregó algo: ${n("agregados")} · otra cantidad: ${n("cantidad")}.</p>
+          ${tipos.map((t) => bloque(t.f, "editado")).join("")}`;
+      })() : ""}
       ${res.sinMensaje.length ? `<details style="margin-top:10px"><summary>Pedidos sin mensaje de WhatsApp encontrado (${res.sinMensaje.length})</summary><ul>${res.sinMensaje.map((o) => `<li>${formatDate(o.date)} · ${nombre(o)} <span class="muted">${escapeHtml(o.id)}</span></li>`).join("")}</ul></details>` : ""}
 `;
     ui.modal.bind = () => {
+      document.querySelectorAll("[data-ac-go]").forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); const t = document.getElementById("ac-sec-" + a.dataset.acGo); if (t) t.scrollIntoView({ behavior: "smooth", block: "start" }); }));
       const again = document.getElementById("alias-check-again");
       if (again) again.addEventListener("click", () => openAliasCheck());
       document.querySelectorAll("[data-ac-line]").forEach((sel) => sel.addEventListener("change", () => {
@@ -22700,6 +22737,18 @@
       }
       // Frutas y verduras que se cuentan ("6 pomelos", "Limones 15") sin unidad escrita: son unidades,
       // salvo que el cliente pida ese producto solo por jaula/cajon/bolsa y nunca por unidad.
+      // "500 tomate", "*250 de ajo": un numero grande sin unidad en algo que se vende por kg son
+      // gramos (nadie pide 500 kg de tomate a la verduleria).
+      if (!parsed.requestedUnit && Number(parsed.quantity) >= 50 && !EXPLICIT_WEIGHT_RE.test(normalizeText(line)) && !EXPLICIT_UNITS_RE.test(normalizeText(line))) {
+        const kgP = String(product.unitType || "").toLowerCase() === "kg" ? product : productVariantForUnit(product, "kg");
+        if (kgP && String(kgP.unitType || "").toLowerCase() === "kg") {
+          const kg = Math.round(Number(parsed.quantity)) / 1000;
+          const gr = String(Math.round(Number(parsed.quantity))) + " gr";
+          items.push({ product: kgP, quantity: kg, unitType: "kg", note: [gr, parsed.note || ""].filter(Boolean).join(" - ") });
+          warnings.push(kgP.name + ": pidieron \"" + line.trim() + "\" sin unidad; se tomó como " + gr + " = " + formatAmountInput(kg) + " kg.");
+          return;
+        }
+      }
       if (!parsed.requestedUnit) {
         const pieza = countedPieceVariant(product, parsed.quantity, line, clientId);
         if (pieza) {

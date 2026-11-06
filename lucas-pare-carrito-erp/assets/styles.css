@@ -4410,3 +4410,5 @@ tr:last-child td {
 .alias-errors.zero { background: #eaf5ee; border-color: #b9dcc6; color: #17412d; }
 .alias-errors strong { font-size: 18px; }
 .ac-fix select { margin-top: 4px; min-height: 32px; font-size: 13px; }
+.ac-card-link { text-decoration: none; color: inherit; display: block; }
+.ac-card-link .card { cursor: pointer; border-color: #9fc7b0; }
