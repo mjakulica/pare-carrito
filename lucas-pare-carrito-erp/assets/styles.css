@@ -4394,3 +4394,5 @@ tr:last-child td {
 .alias-check-table th, .alias-check-table td { padding: 3px 10px 3px 0; text-align: left; }
 .alias-check-sug { display: block; padding: 3px 0; font-size: 13px; }
 @media (max-width: 760px) { .alias-check-texts { grid-template-columns: 1fr; } }
+.wa-receive-only { background: #eaf5ee; border: 1px solid #b9dcc6; border-radius: 8px; padding: 8px 10px; margin: 8px 0; }
+.wa-receive-only.off { background: #fff6e5; border-color: #f2c94c; }

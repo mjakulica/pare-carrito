@@ -76,6 +76,7 @@ app.post("/send", async (req, res) => {
   if (!broadcastKey || req.get("x-broadcast-key") !== broadcastKey) return res.sendStatus(401);
   const { to, text, channel } = req.body || {};
   if (!to || !text) return res.status(400).json({ error: "Se espera { to, text }." });
+  if (channel === "linked" && linked.receiveOnly()) return res.json({ ok: true, skipped: "solo recibir" });
   const ok = channel === "linked" ? await linked.sendText(String(to), String(text).slice(0, 1000)) : await wa.sendText(String(to), String(text).slice(0, 1000));
   res.status(ok ? 200 : 502).json(ok ? { ok: true } : { error: "WhatsApp no acepto el mensaje." });
 });
@@ -89,6 +90,7 @@ const linkedAuth = (req, res, next) => {
 app.get("/linked/status", linkedAuth, (req, res) => res.json({ ok: true, ...linked.status() }));
 app.post("/linked/start", linkedAuth, async (req, res) => res.json({ ok: true, ...(await linked.startLinking()) }));
 app.get("/linked/contacts", linkedAuth, (req, res) => res.json({ ok: true, connected: linked.isConnected(), contacts: linked.listContacts() }));
+app.post("/linked/mode", linkedAuth, (req, res) => res.json({ ok: true, ...linked.setReceiveOnly(!!(req.body && req.body.receiveOnly)) }));
 app.post("/linked/stop", linkedAuth, async (req, res) => res.json({ ok: true, ...(await linked.stop()) }));
 
 // Verificacion del webhook (Meta).
@@ -117,7 +119,7 @@ app.post("/webhook", async (req, res) => {
 const inboxFlow = createInboxFlow({ wa, erp, ai, getProductNames, channel: "cloud" });
 // Mismo flujo para el WhatsApp vinculado por QR, contestando por ese mismo WhatsApp.
 const linkedWa = { sendText: (to, t) => linked.sendText(to, t), notifyTeam: (t) => wa.notifyTeam(t), notifyOwner: (t) => wa.notifyOwner(t) };
-const linkedFlow = createInboxFlow({ wa: linkedWa, erp, ai, getProductNames, channel: "linked" });
+const linkedFlow = createInboxFlow({ wa: linkedWa, erp, ai, getProductNames, channel: "linked", silent: () => linked.receiveOnly() });
 linked.init((msg) => handleMessage(msg, linkedFlow, linkedWa), (messages) => erp.archive(messages));
 
 async function handleMessage(msg, flowIn, waIn) {

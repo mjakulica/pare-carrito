@@ -19,7 +19,10 @@ const NO = /^\s*(no|nop|negativo|para nada)(?=$|[\s,.!¡?¿])/i;
 
 // channel: por donde llego ("cloud" = API oficial, "linked" = WhatsApp vinculado por QR); la bandeja
 // lo guarda para contestar por el mismo lado.
-function createInboxFlow({ wa, erp, ai, getProductNames, channel }) {
+// silent(): modo "solo recibir": no se le contesta nada a nadie; lo que parece pedido va igual a la
+// bandeja (de numeros nuevos, sin vincular, para que el personal elija el cliente).
+function createInboxFlow({ wa, erp, ai, getProductNames, channel, silent }) {
+  const callado = () => !!(silent && silent());
   async function classify(text) {
     const names = getProductNames ? await getProductNames() : [];
     return ai.classifyMessage(text, names);
@@ -38,6 +41,15 @@ function createInboxFlow({ wa, erp, ai, getProductNames, channel }) {
   async function handleKnown({ from, text, profileName, client }) {
     const parsed = await classify(text);
     const nombre = client.name || profileName || "cliente";
+    if (callado()) {
+      if (!ORDER_INTENTS.has(parsed.intent)) return "ignorado_solo_recibir";
+      let orderId = "";
+      if (parsed.intent !== "pedido_nuevo") {
+        try { const r = await erp.getTodayOrder(client.id); orderId = r && r.order ? r.order.id : ""; } catch (e) { /* sin pedido */ }
+      }
+      await toInbox({ phone: from, profileName, clientId: client.id, kind: KIND[parsed.intent], text, items: parsed.items || [], orderId });
+      return KIND[parsed.intent];
+    }
     if (parsed.intent === "saludo") {
       await wa.sendText(from, `Hola ${nombre}! Pasame tu pedido cuando quieras.`);
       return "saludo";
@@ -63,6 +75,12 @@ function createInboxFlow({ wa, erp, ai, getProductNames, channel }) {
   }
 
   async function handleUnknown({ from, text, profileName }) {
+    if (callado()) {
+      const parsed = await classify(text);
+      if (!ORDER_INTENTS.has(parsed.intent)) return "ignorado";
+      await toInbox({ phone: from, profileName, kind: KIND[parsed.intent], text, items: parsed.items || [] });
+      return "guardado_sin_preguntar";
+    }
     const st = (await erp.getIdentify(from).catch(() => null)) || {};
     const stage = st.stage || "";
 

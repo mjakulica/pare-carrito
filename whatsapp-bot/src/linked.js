@@ -11,6 +11,21 @@ const path = require("path");
 const DIR = process.env.WA_LINKED_DIR || path.join(__dirname, "..", "data", "wa-linked");
 const JIDS_FILE = path.join(path.dirname(DIR), "wa-linked-jids.json");
 const ENABLED_FILE = path.join(path.dirname(DIR), "wa-linked-enabled");
+// "Solo recibir": el sistema no manda NINGUN mensaje por este WhatsApp (menor riesgo de bloqueo). Los
+// pedidos igual entran a la bandeja y todo se archiva. Prendido salvo que el gerente lo apague.
+const SENDING_FILE = path.join(path.dirname(DIR), "wa-linked-send-enabled");
+
+function receiveOnly() {
+  return !fs.existsSync(SENDING_FILE);
+}
+
+function setReceiveOnly(value) {
+  fs.mkdirSync(path.dirname(DIR), { recursive: true });
+  if (value) { try { fs.unlinkSync(SENDING_FILE); } catch (e) { /* ya estaba */ } }
+  else fs.writeFileSync(SENDING_FILE, new Date().toISOString());
+  console.log("WhatsApp vinculado: solo recibir " + (value ? "PRENDIDO" : "apagado (puede contestar)") + ".");
+  return status();
+}
 
 const info = { status: "apagado", qr: "", qrAt: 0, me: "", connectedAt: "", lastError: "" };
 let sock = null;
@@ -240,7 +255,7 @@ async function stop() {
 }
 
 function status() {
-  return { status: info.status, qr: info.status === "esperando_qr" ? info.qr : "", me: info.me, connectedAt: info.connectedAt, lastError: info.lastError };
+  return { status: info.status, qr: info.status === "esperando_qr" ? info.qr : "", me: info.me, connectedAt: info.connectedAt, lastError: info.lastError, receiveOnly: receiveOnly() };
 }
 
 function isConnected() {
@@ -249,6 +264,7 @@ function isConnected() {
 
 // Respuesta con una pausa corta (2 a 5 s), como una persona: baja el riesgo de bloqueo.
 async function sendText(phone, text) {
+  if (receiveOnly()) { console.log("WhatsApp vinculado (solo recibir): no se envio a ..." + String(phone).slice(-4)); return false; }
   if (!isConnected()) { console.warn("WhatsApp vinculado: no conectado, no se envio a ..." + String(phone).slice(-4)); return false; }
   const jid = jids[String(phone)] || String(phone).replace(/\D/g, "") + "@s.whatsapp.net";
   await sleep(2000 + Math.floor(Math.random() * 3000));
@@ -261,4 +277,4 @@ async function sendText(phone, text) {
   }
 }
 
-module.exports = { init, startLinking, stop, status, isConnected, sendText, addContacts, listContacts, archiveMessage, flushArchive };
+module.exports = { init, startLinking, stop, status, isConnected, sendText, addContacts, listContacts, archiveMessage, flushArchive, receiveOnly, setReceiveOnly };

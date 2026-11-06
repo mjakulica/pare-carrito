@@ -3709,9 +3709,10 @@ app.get("/whatsapp/linked", authenticate, requireRole("manager", "admin"), async
   res.status(r.ok ? 200 : 502).json(r);
 });
 app.post("/whatsapp/linked/:action", authenticate, requireRole("manager", "admin"), async (req, res) => {
-  if (!["start", "stop"].includes(req.params.action)) return res.status(404).json({ error: "Ruta no encontrada." });
-  const r = await botRequest("/linked/" + req.params.action, {});
-  console.log("WhatsApp vinculado: " + (req.params.action === "start" ? "vincular" : "desvincular") + " por " + req.user.username + ".");
+  if (!["start", "stop", "mode"].includes(req.params.action)) return res.status(404).json({ error: "Ruta no encontrada." });
+  const body = req.params.action === "mode" ? { receiveOnly: !!(req.body && req.body.receiveOnly) } : {};
+  const r = await botRequest("/linked/" + req.params.action, body);
+  console.log("WhatsApp vinculado: " + (req.params.action === "start" ? "vincular" : req.params.action === "stop" ? "desvincular" : "solo recibir " + (body.receiveOnly ? "prendido" : "apagado")) + " por " + req.user.username + ".");
   res.status(r.ok ? 200 : 502).json(r);
 });
 

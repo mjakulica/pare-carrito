@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v89";
+  const APP_VERSION = "v90";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -14764,8 +14764,12 @@
       : "Apagado.";
     const on = st && ["conectado", "esperando_qr", "conectando", "reconectando"].includes(st.status);
     return `<h2 class="page-title" style="font-size:18px">WhatsApp vinculado por QR (mientras Meta aprueba)</h2>
-      <p class="muted" style="margin-top:0">Conecta un WhatsApp común, como WhatsApp Web: los pedidos que le escriban entran solos a la bandeja de Nuevo Pedido y el bot le pregunta de qué negocio es a un número nuevo. Se sigue usando normal en el celular. <strong>No es oficial:</strong> WhatsApp puede bloquear el número si detecta un bot; por eso solo contesta a quien manda un pedido, con una pausa, y nunca a contactos personales.</p>
+      <p class="muted" style="margin-top:0">Conecta un WhatsApp común, como WhatsApp Web: los pedidos que le escriban entran solos a la bandeja de Nuevo Pedido y todos los chats se guardan en Mensajes WhatsApp. Se sigue usando normal en el celular. <strong>No es oficial:</strong> WhatsApp puede bloquear el número si detecta un bot; con "Solo recibir" el sistema no manda ningún mensaje. Si lo apagás, solo contesta a quien manda un pedido, con una pausa, y nunca a contactos personales.</p>
       <p style="margin:6px 0">Estado: ${estado}</p>
+      ${st && !st.error ? `<div class="wa-receive-only ${st.receiveOnly === false ? "off" : ""}">
+        <label style="display:flex;gap:8px;align-items:flex-start"><input type="checkbox" id="wa-receive-only" ${st.receiveOnly === false ? "" : "checked"} style="width:auto;min-height:auto;margin-top:3px" />
+        <span><strong>Solo recibir (recomendado)</strong><br><span class="muted" style="font-size:13px">El sistema no manda ningún mensaje por este WhatsApp: no contesta "recibimos tu pedido", no le pregunta de qué negocio es a un número nuevo y no avisa "quedó cargado". Los pedidos entran igual a la bandeja de Nuevo Pedido y todo se guarda en Mensajes WhatsApp. Ustedes responden desde el celular. Es lo que menos riesgo de bloqueo tiene.</span></span></label>
+      </div>` : ""}
       ${st && st.qr ? `<img src="${escapeAttr(st.qr)}" alt="Código QR para vincular WhatsApp" style="width:260px;height:260px;border:1px solid var(--line, #d9e0e8);border-radius:8px;background:#fff" />` : ""}
       <div class="page-actions" style="margin-top:8px">
         ${on ? `<button class="btn danger" type="button" id="wa-linked-stop">Desvincular</button>` : `<button class="btn primary" type="button" id="wa-linked-start">Vincular un WhatsApp</button>`}
@@ -14791,6 +14795,19 @@
     if (a) a.addEventListener("click", () => go("/whatsapp/linked/start", "Vas a vincular un WhatsApp común con este sistema. Recordá: no es oficial y WhatsApp puede bloquear el número si detecta un bot. ¿Seguir?"));
     const b = document.getElementById("wa-linked-stop");
     if (b) b.addEventListener("click", () => go("/whatsapp/linked/stop", "¿Desvincular este WhatsApp? Los pedidos dejan de entrar solos a la bandeja."));
+    const ro = document.getElementById("wa-receive-only");
+    if (ro) ro.addEventListener("change", async () => {
+      const valor = ro.checked;
+      if (!valor && !confirm("Si apagás 'Solo recibir', el sistema va a contestar solo por este WhatsApp (recibimos tu pedido, preguntas a números nuevos, avisos de pedido cargado). Sube el riesgo de que WhatsApp bloquee el número. ¿Apagarlo igual?")) { ro.checked = true; return; }
+      ro.disabled = true;
+      try {
+        const r = await cloudRequest(getCloudSyncConfig(), "/whatsapp/linked/mode", { method: "POST", body: JSON.stringify({ receiveOnly: valor }) });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(j.error || "HTTP " + r.status);
+        ui.waLinked = j;
+      } catch (e) { alert("No se pudo cambiar: " + e.message); ro.checked = !valor; }
+      paintWaLinked();
+    });
     const c = document.getElementById("wa-linked-refresh");
     if (c) c.addEventListener("click", () => go("/whatsapp/linked"));
   }

@@ -119,3 +119,33 @@ test("archivo: guarda chats individuales y grupos, recibidos y enviados, con fot
   ]);
   assert.equal(lotes[2].senderPhone, "5493879999999");
 });
+
+test("solo recibir: no se le contesta a nadie; los pedidos van igual a la bandeja (los de números nuevos sin preguntar)", async () => {
+  const sent = [], inbox = [], identify = [];
+  const { createInboxFlow } = require("../src/inboxFlow");
+  const intents = { "2 kg papa": "pedido_nuevo", "hola": "saludo", "a que hora llegan?": "consulta" };
+  const flow = createInboxFlow({
+    wa: { sendText: async (to, t) => { sent.push([to, t]); return true; }, notifyTeam: async () => {}, notifyOwner: async () => {} },
+    erp: { inbox: async (e) => { inbox.push(e); return { ok: true }; }, getTodayOrder: async () => ({}), getIdentify: async () => { identify.push("get"); return {}; }, setIdentify: async () => identify.push("set") },
+    ai: { classifyMessage: async (t) => ({ intent: intents[t], items: [] }) },
+    channel: "linked", silent: () => true
+  });
+  await flow.handleKnown({ from: "549111", text: "hola", client: { id: "010" } });
+  await flow.handleKnown({ from: "549111", text: "a que hora llegan?", client: { id: "010" } });
+  await flow.handleKnown({ from: "549111", text: "2 kg papa", client: { id: "010" } });
+  assert.equal(await flow.handleUnknown({ from: "549222", text: "2 kg papa" }), "guardado_sin_preguntar");
+  assert.equal(await flow.handleUnknown({ from: "549333", text: "hola" }), "ignorado");
+  assert.equal(sent.length, 0);
+  assert.deepEqual(identify, []);
+  assert.deepEqual(inbox.map((e) => [e.phone, e.clientId || null, e.kind]), [["549111", "010", "pedido"], ["549222", null, "pedido"]]);
+});
+
+test("solo recibir: linked.sendText no manda nada (prendido de entrada)", async () => {
+  process.env.WA_LINKED_DIR = require("path").join(require("os").tmpdir(), "wa-ro-test-" + Date.now(), "auth");
+  delete require.cache[require.resolve("../src/linked")];
+  const linked = require("../src/linked");
+  assert.equal(linked.receiveOnly(), true);
+  assert.equal(await linked.sendText("549111", "hola"), false);
+  assert.equal(linked.setReceiveOnly(false).receiveOnly, false);
+  assert.equal(linked.setReceiveOnly(true).receiveOnly, true);
+});
