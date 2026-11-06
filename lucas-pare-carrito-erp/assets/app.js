@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v101";
+  const APP_VERSION = "v102";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -22925,8 +22925,26 @@
     return out.length ? out : [line];
   }
 
+  // Fechas y horas no son cantidades: "para hoy jueves 08/09:", "Apertura: 07:30", "llego 7hs".
+  // Se distingue la fecha de una fraccion: 1/2, 3/4, 1/4, 2/3 son fracciones; 08/09 o 12/11 son fechas.
+  function stripDatesAndTimes(line) {
+    return String(line || "")
+      .replace(/(^|[^\d/])(\d{1,2})([\/-])(\d{1,2})(?:[\/-](\d{2,4}))?(?![\d/])/g, (m, pre, a, sep, b, y) => {
+        const n = Number(a), d = Number(b);
+        // "5-6 kg" es un rango, no una fecha: con guion solo si es "08-09" o lleva año.
+        if (sep === "-" && !y && (a.length < 2 || b.length < 2)) return m;
+        const fraccion = !y && [2, 3, 4, 8].includes(d) && n < d && !/^0/.test(a);
+        return fraccion || n < 1 || n > 31 || d < 1 || d > 12 ? m : pre + " ";
+      })
+      .replace(/(^|[^\d])\d{1,2}:\d{2}(\s*(hs|h|horas?))?(?!\d)/gi, "$1 ")
+      .replace(/(^|[^\d])\d{1,2}\s*(hs|horas)(?![a-z])/gi, "$1 ")
+      // (sin juntar los espacios dobles: separan productos en un mismo renglon)
+      .replace(/^[\s:,-]+|[\s:,-]+$/g, "")
+      .trim();
+  }
+
   function expandWhatsappOrderLines(text) {
-    const rawLines = String(text || "").split(/\r?\n/).flatMap(splitRunOnOrderLine)
+    const rawLines = String(text || "").split(/\r?\n/).map(stripDatesAndTimes).flatMap(splitRunOnOrderLine)
       .map((line) => articleQuantityToNumber(String(line || ""))
         .replace(UNIT_ABBREVIATIONS, "$1$2")
         // La unidad puede venir pegada al numero ("1k y medio"): sin contemplarla, el "y medio"
