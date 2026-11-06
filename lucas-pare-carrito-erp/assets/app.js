@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v96";
+  const APP_VERSION = "v97";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -6162,7 +6162,9 @@
       const product = entry.product;
       const qty = Number(entry.quantity || 0);
       const unit = normalizeText(entry.unitType || product.unitType || "");
-      if (qty <= CANTIDAD_SOSPECHOSA || ["kg", "kgs", "kilo", "unidad", "unidades", "u", "docena"].includes(unit)) return;
+      if (qty <= CANTIDAD_SOSPECHOSA || ["kg", "kgs", "kilo", "unidad", "unidades", "u"].includes(unit)) return;
+      // Por docena: solo si el cliente tiene historial y siempre pide mucho menos (6 docenas de huevos es normal).
+      if (["docena", "docenas"].includes(unit) && !hist.get(product.id)) return;
       const h = hist.get(product.id);
       if (h && h.max * 2 >= qty) return; // ya pidio cantidades parecidas
       // Lo que suele pedir de ese mismo producto en otra presentacion (Limon Unidad en vez de Limon Jaula).
@@ -21309,10 +21311,11 @@
       const k = f.order.clientId + "|" + normalizeText(x.alias);
       const g = porClave.get(k) || { clientId: f.order.clientId, alias: x.alias, votos: new Map(), ejemplo: x.from, seguro: true, porEdicion: false, nota: "" };
       g.votos.set(x.productId, (g.votos.get(x.productId) || 0) + 1);
-      if (x.seguro === false) g.seguro = false;
+      g.seguros = (g.seguros || 0) + (x.seguro === false ? 0 : 1);
+      g.dudosos = (g.dudosos || 0) + (x.seguro === false ? 1 : 0);
       if (x.seguro === undefined) g.porEdicion = true; // salio de la correccion del texto
       if (x.nota) g.nota = x.nota;
-      if (x.seguro === false && x.cantidadMensaje !== undefined) g.cantidades = "escribió " + formatAmountInput(x.cantidadMensaje) + ", en el pedido " + formatAmountInput(x.cantidadPedido);
+      if (x.seguro === false && x.cantidadMensaje !== undefined) g.cantidades = "escribió " + Number(x.cantidadMensaje).toLocaleString("es-AR", { maximumFractionDigits: 3 }) + ", en el pedido " + Number(x.cantidadPedido).toLocaleString("es-AR", { maximumFractionDigits: 3 });
       porClave.set(k, g);
     }));
     porClave.forEach((g) => {
@@ -21320,7 +21323,8 @@
       const total = Array.from(g.votos.values()).reduce((a, b) => a + b, 0);
       const p = getProduct(productId);
       n += 1;
-      sugerencias.push({ clientId: g.clientId, alias: g.alias, productId, productName: p ? p.name : productId, from: g.ejemplo, pedidos: votos, dudoso: votos < total || !g.seguro, motivo: votos < total ? "en otros pedidos dio otro producto" : !g.seguro ? "la cantidad no coincide (" + (g.cantidades || "") + ")" : "", nota: g.nota });
+      const cantidadDudosa = (g.dudosos || 0) > (g.seguros || 0);
+      sugerencias.push({ clientId: g.clientId, alias: g.alias, productId, productName: p ? p.name : productId, from: g.ejemplo, pedidos: votos, dudoso: votos < total || cantidadDudosa, motivo: votos < total ? "en otros pedidos dio otro producto" : cantidadDudosa ? "la cantidad no coincide (" + (g.cantidades || "") + ")" : "", nota: g.nota });
     });
     sugerencias.sort((a, b) => String(a.clientId).localeCompare(String(b.clientId)) || a.alias.localeCompare(b.alias));
     const sinArreglo = res.alias.filter((f) => !f.sugerencias.length).length;
@@ -22398,7 +22402,7 @@
     ["papa", 0.2], ["batata", 0.3], ["cebolla", 0.15], ["zanahoria", 0.1], ["remolacha", 0.2],
     ["pepino", 0.3], ["berenjena", 0.3], ["zapallito", 0.2], ["zukini", 0.3], ["zucchini", 0.3],
     ["choclo", 0.3], ["anana", 1.5], ["melon", 1.5], ["sandia", 6], ["zapallo", 2.5],
-    ["repollo", 1.2], ["coliflor", 1], ["brocoli", 0.5], ["lechuga", 0.35], ["ajo", 0.05], ["jengibre", 0.1]
+    ["repollo", 1.2], ["coliflor", 1], ["brocoli", 0.5], ["lechuga", 0.35], ["ajo", 0.05], ["jengibre", 0.2]
   ];
 
   function defaultPieceWeightKg(product) {
@@ -22415,7 +22419,8 @@
 
   // "4 unidades kiwi", "4 u de kiwi", "kiwi 4 unid": el cliente dijo piezas, no kilos.
   // "un"/"u" sueltos solo cuentan pegados a un numero ("un kilo de papa" es un articulo).
-  const EXPLICIT_UNITS_RE = /(\d\s*(unidades|unidad|unids?|uni|un|u)(?![a-z\u00e0-\u017f]))|(^|[^a-z\u00e0-\u017f])(unidades|unidad)(?![a-z\u00e0-\u017f])/i;
+  // Tambien piezas que se cuentan: "1 raiz de jengibre", "2 piezas de zapallo".
+  const EXPLICIT_UNITS_RE = /(\d\s*(unidades|unidad|unids?|uni|un|u|raiz|raices|piezas?)(?![a-z\u00e0-\u017f]))|(^|[^a-z\u00e0-\u017f])(unidades|unidad|raiz|raices|piezas?)(?![a-z\u00e0-\u017f])/i;
   const EXPLICIT_WEIGHT_RE = /(\d\s*(kgs?|kilos?|k|grs?|gramos)(?![a-z\u00e0-\u017f]))|(^|[^a-z\u00e0-\u017f])(kilos?|kilo|kg|kgs|gramos)(?![a-z\u00e0-\u017f])/i;
 
   // Si la linea pide unidades de un producto que se vende por kg, se pasa a kg con el peso por
@@ -22427,8 +22432,10 @@
     const unidades = Number(quantity || 0);
     if (!(unidades > 0)) return null;
     const peso = pieceWeightKg(product);
-    const etiqueta = formatNumber(unidades).replace(/,0$/, "") + (unidades === 1 ? " unidad" : " unidades");
-    const nuevaNota = [etiqueta, note].filter(Boolean).join(" - ");
+    const pieza = /(^|[^a-z])(raiz|raices)([^a-z]|$)/.test(plano) ? ["raíz", "raíces"] : /(^|[^a-z])piezas?([^a-z]|$)/.test(plano) ? ["pieza", "piezas"] : ["unidad", "unidades"];
+    const etiqueta = formatNumber(unidades).replace(/,0$/, "") + " " + (unidades === 1 ? pieza[0] : pieza[1]);
+    const notaLimpia = String(note || "").replace(/(^|\s)(ra[ií]z|ra[ií]ces|piezas?)(?=\s|$)/gi, " ").replace(/\s+/g, " ").trim();
+    const nuevaNota = [etiqueta, notaLimpia].filter(Boolean).join(" - ");
     if (!(peso > 0)) return { quantity: unidades, unitType: "kg", note: nuevaNota, warning: product.name + ": pidieron " + etiqueta + " y se vende por kg. Cargale el peso por unidad en Productos o corregi la cantidad." };
     const kg = Math.max(0.05, Math.round(unidades * peso * 20) / 20);
     return { quantity: kg, unitType: "kg", note: nuevaNota, warning: product.name + ": " + etiqueta + " = " + formatNumber(kg) + " kg aprox. (" + formatNumber(peso) + " kg c/u" + (Number(product.pieceWeightKg) > 0 ? "" : ", estimado") + ")." };
@@ -22568,7 +22575,7 @@
       if (!cands.length) return;
       if (cands.length > 1 && cands[0].sim === cands[1].sim) {
         // Varios parecidos ("limon" con Limon Jaula y Limon Docena en el pedido): decide la cantidad.
-        const igual = cands.filter((c) => c.sim === cands[0].sim && (Math.abs(c.q - r.qty) < 0.001 || Math.abs(c.q - r.qtyLinea) < 0.001));
+        const igual = cands.filter((c) => c.sim === cands[0].sim && (Math.abs(c.q - r.qty) <= Math.max(0.011, c.q * 0.02) || Math.abs(c.q - r.qtyLinea) <= Math.max(0.011, c.q * 0.02)));
         if (igual.length !== 1) return;
         cands.unshift(igual[0]);
       }
@@ -22577,7 +22584,9 @@
       // este: fue un cambio o un reemplazo en el pedido.
       const raizDestino = productRoot(producto.name);
       if (aliasWords(r.alias).some((w) => raices.has(w) && !wordsLookAlike(w, raizDestino) && !aliasWords(producto.name).some((v) => wordsLookAlike(w, v)))) return;
-      const mismaCantidad = Math.abs(q - r.qty) < 0.001 || Math.abs(q - r.qtyLinea) < 0.001;
+      // Con tolerancia: "5 unidades" de algo por docena da 0,4166... y en el pedido puede haber quedado 0,42.
+      const casi = (a, b) => Math.abs(a - b) <= Math.max(0.011, Math.abs(b) * 0.02);
+      const mismaCantidad = casi(r.qty, q) || casi(r.qtyLinea, q);
       // Sacar las palabras que quedaron como nota del producto en el pedido.
       const notaWords = new Set(normalizeText(notas.get(producto.id) || "").split(" ").filter(Boolean));
       const alias = String(r.alias).split(/\s+/).filter((w) => !notaWords.has(normalizeText(w))).join(" ").trim();
