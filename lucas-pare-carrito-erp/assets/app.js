@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v92";
+  const APP_VERSION = "v93";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -21136,14 +21136,23 @@
     // Grupos vinculados a un cliente: lo que se escribe ahi es de ese cliente.
     const porGrupo = new Map();
     (state.clients || []).forEach((c) => (Array.isArray(c.waGroups) ? c.waGroups : []).forEach((g) => porGrupo.set(String(g), c.id)));
+    // Sin telefono vinculado: el numero de cliente con que esta agendado el contacto ("15) Hotel ...").
+    const porAgenda = new Map();
+    const nombreChat = new Map();
+    (j.messages || []).forEach((m) => { if (m.chat_name && !nombreChat.has(m.chat_id)) nombreChat.set(m.chat_id, String(m.chat_name)); });
+    nombreChat.forEach((name, chat) => {
+      const k = name.match(/^\s*(\d{1,4})\s*[)\-.:]/);
+      const c = k ? (state.clients || []).find((x) => x && x.isActive !== false && /^\d+$/.test(String(x.id)) && Number(x.id) === Number(k[1])) : null;
+      if (c) porAgenda.set(chat, c.id);
+    });
     const msgsPorCliente = new Map();
     (j.messages || []).forEach((m) => {
-      const cid = m.is_group || String(m.chat_id).endsWith("@g.us") ? porGrupo.get(String(m.chat_id)) : porTel.get(String(m.chat_id).replace(/\D/g, "").slice(-8));
+      const cid = m.is_group || String(m.chat_id).endsWith("@g.us") ? porGrupo.get(String(m.chat_id)) || porAgenda.get(m.chat_id) : porTel.get(String(m.chat_id).replace(/\D/g, "").slice(-8)) || porAgenda.get(m.chat_id);
       if (!cid) return;
       if (!msgsPorCliente.has(cid)) msgsPorCliente.set(cid, []);
       msgsPorCliente.get(cid).push({ text: String(m.text || ""), t: new Date(m.ts).getTime() });
     });
-    const clientesConTel = new Set([...porTel.values(), ...porGrupo.values()]);
+    const clientesConTel = new Set([...porTel.values(), ...porGrupo.values(), ...porAgenda.values()]);
     const pedidos = (state.orders || []).filter((o) => o && String(o.date || "") >= desde && !["cancelado", "anulado"].includes(o.status) && !o.exampleOnly && !o.deletedAt)
       .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.clientId).localeCompare(String(b.clientId)));
     const res = { desde, archivo: j.archivo || {}, total: pedidos.length, ok: [], alias: [], editado: [], sinMensaje: [], sinTelefono: [], sinProductos: [] };
@@ -21176,6 +21185,13 @@
         }
         if (!mejor || score > mejor.score + 1e-9) mejor = { ...c, score };
       });
+      // Muy corregido (casi no se parece al texto guardado): el mensaje con cantidades que el cliente
+      // mando justo antes de cargar el pedido (hasta 12 h antes). Si mando varios seguidos, todos juntos.
+      if ((!mejor || mejor.score < 0.3) && T) {
+        const previos = cands.filter((c) => /\d/.test(c.text) && c.t <= creado + 30 * 60000 && c.t >= creado - 12 * 3600000);
+        previos.sort((a, b) => b.t - a.t || b.text.length - a.text.length);
+        if (previos[0]) mejor = { ...previos[0], score: 0.3, porHora: true };
+      }
       if (!mejor || mejor.score < 0.3) { res.sinMensaje.push(o); return; }
       const W = mejor.text;
       const pw = parseWhatsappOrder(W, o.clientId);

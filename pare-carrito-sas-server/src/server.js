@@ -3895,7 +3895,7 @@ app.get("/whatsapp/archive/range", authenticate, requireRole("manager", "admin")
   const to = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.to || "")) ? String(req.query.to) : new Date(Date.now() + 86400000).toISOString().slice(0, 10);
   await remapLidsFromBot();
   const { rows } = await pool.query(
-    `SELECT chat_id, is_group, text, ts FROM whatsapp_archive WHERE NOT from_me AND msg_type = 'texto'
+    `SELECT chat_id, is_group, chat_name, text, ts FROM whatsapp_archive WHERE NOT from_me AND msg_type = 'texto'
      AND ts >= ($1::date - interval '2 days') AND ts < ($2::date + interval '1 day') ORDER BY chat_id, ts LIMIT 50000`, [from, to]);
   const total = await pool.query("SELECT count(*)::int AS n, min(ts) AS desde FROM whatsapp_archive");
   res.json({ ok: true, messages: rows, archivo: total.rows[0] });
