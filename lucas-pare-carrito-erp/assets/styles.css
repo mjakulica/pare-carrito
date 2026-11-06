@@ -4401,3 +4401,6 @@ tr:last-child td {
 .wa-arch-reply textarea { flex: 1; min-height: 44px; resize: vertical; }
 .qty-checks { background: #fff4e5; border: 1px solid #f2c48d; border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; color: #6b3d06; }
 .qty-checks .btn { margin-top: 4px; }
+.alias-fix-box { background: #eaf5ee; border: 1px solid #b9dcc6; border-radius: 8px; padding: 10px 12px; margin: 10px 0; }
+.alias-fix-list { max-height: 45vh; overflow-y: auto; }
+.alias-fix-list .alias-check-sug { display: flex; gap: 8px; align-items: flex-start; margin: 4px 0; }
