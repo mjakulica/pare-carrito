@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v87";
+  const APP_VERSION = "v88";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -5808,10 +5808,15 @@
     const parseButton = document.getElementById("parse-whatsapp-order");
     if (parseButton) parseButton.addEventListener("click", () => {
       ui.pendingWhatsappText = String(pasteInput.value || "").trim();
+      // Si se corrigio el texto despues de cargarlo, se aprende de la correccion (alias del cliente).
+      const aprendidos = learnFromParseEdit(ui.lastParsedText, pasteInput.value, ui.lastParsedClient, clientSelect.value);
+      ui.lastParsedText = pasteInput.value;
+      ui.lastParsedClient = clientSelect.value;
       // El cliente NO se cambia por el texto pegado: manda el que esta elegido en la pantalla.
       // Antes se detectaba por la primera linea y pisaba la seleccion.
       const parsed = parseWhatsappOrder(pasteInput.value, clientSelect.value);
       applyParsedOrderToRows(parsed, searchInput, warningBox);
+      if (aprendidos.length) showLearnedAliases(aprendidos, warningBox);
       if (parsed.unmatched.length && ["manager", "admin"].includes(currentUser.role)) {
         openUnmatchedAliasModal(parsed.unmatched, clientSelect.value, () => {
           alert("Alias guardados. Vuelva a cargar el texto pegado para aplicar las nuevas equivalencias.");
@@ -5980,6 +5985,7 @@
       ui.orderProductFilter = "";
       ui.orderWhatsappDraft = "";
       ui.orderDraft = {};
+      ui.lastParsedText = "";
       ui.orderRenderedLimit = getOrderProductBatchLimit();
       ui.selectedDate = defaultNewOrderDate();
       render();
@@ -6094,6 +6100,7 @@
       ui.selectedClientId = c ? c.id : "";
       ui.orderDraft = {};
       ui.orderWhatsappDraft = x.text;
+      ui.lastParsedText = "";
       ui.inboxAutoParse = true;
       render();
       const paste = document.getElementById("order-whatsapp-paste");
@@ -21902,6 +21909,84 @@
       if (t === antes) break;
     }
     return t;
+  }
+
+  // ---- Aprender de las correcciones ----
+  // Se carga el texto, no encuentra un producto (o elige otro), se corrige el renglon y se vuelve a
+  // cargar: lo que escribio el cliente queda como alias de ese producto para ese cliente. La proxima
+  // vez se reconoce solo. Se comparan los renglones con LCS para emparejar los que cambiaron.
+  function orderTextLines(text) {
+    return expandWhatsappOrderLines(text).map(stripOrderCourtesy).filter((l) => l && !shouldIgnoreOrderTextLine(l));
+  }
+
+  function changedLinePairs(before, after) {
+    const A = orderTextLines(before);
+    const B = orderTextLines(after);
+    const n = A.length, m = B.length;
+    const key = (x) => normalizeText(x);
+    const L = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+    for (let i = n - 1; i >= 0; i -= 1) for (let j = m - 1; j >= 0; j -= 1) L[i][j] = key(A[i]) === key(B[j]) ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+    const pares = [];
+    let i = 0, j = 0, ga = [], gb = [];
+    const cerrar = () => { if (ga.length && ga.length === gb.length) ga.forEach((a, k) => pares.push([a, gb[k]])); ga = []; gb = []; };
+    while (i < n && j < m) {
+      if (key(A[i]) === key(B[j])) { cerrar(); i += 1; j += 1; }
+      else if (L[i + 1][j] >= L[i][j + 1]) { ga.push(A[i]); i += 1; }
+      else { gb.push(B[j]); j += 1; }
+    }
+    while (i < n) ga.push(A[i++]);
+    while (j < m) gb.push(B[j++]);
+    cerrar();
+    return pares;
+  }
+
+  function learnFromParseEdit(beforeText, afterText, beforeClient, clientId) {
+    if (!beforeText || !clientId || beforeClient !== clientId || normalizeText(beforeText) === normalizeText(afterText)) return [];
+    if (!currentUser || !["manager", "admin", "employee"].includes(currentUser.role)) return [];
+    const out = [];
+    changedLinePairs(beforeText, afterText).forEach(([a, b]) => {
+      const pa = parseOrderLine(a, clientId);
+      const alias = pa && String(pa.name || "").trim();
+      if (!alias || normalizeText(alias).length < 3) return;
+      const ra = parseWhatsappOrder(a, clientId);
+      const rb = parseWhatsappOrder(b, clientId);
+      if (rb.items.length !== 1 || ra.items.length > 1) return;
+      const producto = rb.items[0].product;
+      if (!producto || (ra.items[0] && ra.items[0].product && ra.items[0].product.id === producto.id)) return;
+      // Si en el texto nuevo el producto se escribio igual que antes, no hay nada que aprender.
+      const pb = parseOrderLine(b, clientId);
+      if (pb && normalizeText(pb.name) === normalizeText(alias)) return;
+      // Una correccion deja la misma cantidad y cambia el producto; si cambio la cantidad es otro renglon.
+      if (!pb || Math.abs(Number(pa.quantity || 0) - Number(pb.quantity || 0)) > 0.0001) return;
+      state.clientProductAliases = state.clientProductAliases || [];
+      const ya = state.clientProductAliases.find((x) => x.clientId === clientId && normalizeText(x.alias) === normalizeText(alias));
+      if (ya && ya.productId === producto.id) return;
+      // El mismo texto apuntaba a otro producto para este cliente: se reemplaza por la correccion.
+      if (ya) state.clientProductAliases = state.clientProductAliases.filter((x) => x !== ya);
+      const nuevo = { clientId, productId: producto.id, alias, learnedAt: new Date().toISOString(), learnedBy: currentUser.name || "" };
+      state.clientProductAliases.push(nuevo);
+      out.push({ alias: nuevo, replaced: ya || null, productName: producto.name });
+    });
+    if (out.length) saveState();
+    return out;
+  }
+
+  function showLearnedAliases(aprendidos, warningBox) {
+    if (!warningBox) return;
+    const c = getClient(aprendidos[0].alias.clientId);
+    const box = document.createElement("div");
+    box.className = "learned-aliases";
+    box.innerHTML = `<strong>&#129504; Aprendí de tu corrección${c ? " (para " + escapeHtml(c.name) + ")" : ""}:</strong><ul class="order-parse-list">${aprendidos.map((x) => `<li>"${escapeHtml(x.alias.alias)}" → ${escapeHtml(x.productName)}</li>`).join("")}</ul><button class="btn small ghost" type="button">Deshacer</button>`;
+    box.querySelector("button").addEventListener("click", () => {
+      aprendidos.forEach((x) => {
+        state.clientProductAliases = (state.clientProductAliases || []).filter((y) => y !== x.alias);
+        if (x.replaced) state.clientProductAliases.push(x.replaced);
+      });
+      saveState();
+      box.innerHTML = "Listo, no se guardó.";
+    });
+    warningBox.style.display = "block";
+    warningBox.prepend(box);
   }
 
   function parseWhatsappOrder(text, clientId) {

@@ -4382,3 +4382,4 @@ tr:last-child td {
   .wa-arch:not(.con-chat) .wa-arch-conv { display: none; }
   .wa-arch-back { display: inline-flex; }
 }
+.learned-aliases { background: #eaf5ee; border: 1px solid #b9dcc6; border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; color: #17412d; }
