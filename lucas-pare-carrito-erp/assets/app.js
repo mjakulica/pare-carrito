@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v84";
+  const APP_VERSION = "v85";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -14525,27 +14525,41 @@
   }
 
   // Recuadro del Inicio del gerente/admin: lo que Control marca para revisar, de ayer y de hoy.
+  // Entregas sin pago ni foto de los ultimos dias (lo que hay que rendir).
+  function controlUnsettledDeliveries(dias) {
+    const desde = addDaysISO(todayISO(), -(dias || 7));
+    return (state.orders || []).filter((o) => String(o.date || "") >= desde && o.status === "entregado" && !o.exampleOnly && !orderIsSettled(o) && !(o.deliveryPayment && ["transferencia", "cuenta"].includes(o.deliveryPayment.method) && o.deliveryRemitoPhoto))
+      .sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(a.clientId).localeCompare(String(b.clientId)));
+  }
+
   function controlDashboardHtml() {
     const hoy = todayISO();
     const ayer = addDaysISO(hoy, -1);
+    // Cada punto lleva a donde se ve: el dia que corresponde en Control, o la pagina que lo resuelve.
     const puntos = [];
-    const entregadosSinRendir = (state.orders || []).filter((o) => (o.date === hoy || o.date === ayer) && o.status === "entregado" && !orderIsSettled(o) && !(o.deliveryPayment && ["transferencia", "cuenta"].includes(o.deliveryPayment.method) && o.deliveryRemitoPhoto));
-    if (entregadosSinRendir.length) puntos.push(entregadosSinRendir.length + " entrega(s) sin pago ni foto");
+    const entregadosSinRendir = controlUnsettledDeliveries(1);
+    if (entregadosSinRendir.length) puntos.push({ text: entregadosSinRendir.length + " entrega(s) sin pago ni foto (hoy y ayer)", go: "control", date: hoy });
     const sinEntregarAyer = (state.orders || []).filter((o) => o.date === ayer && !["cancelado", "anulado", "entregado"].includes(o.status) && o.routeDate === ayer);
-    if (sinEntregarAyer.length) puntos.push(sinEntregarAyer.length + " pedido(s) de ayer sin entregar");
+    if (sinEntregarAyer.length) puntos.push({ text: sinEntregarAyer.length + " pedido(s) de ayer sin entregar", go: "control", date: ayer });
     const porComprobar = deliveryTransferPendingCount();
-    if (porComprobar) puntos.push(porComprobar + " transferencia(s) por comprobar");
+    if (porComprobar) puntos.push({ text: porComprobar + " transferencia(s) por comprobar", go: "comprobar-transferencias" });
     const empleados = (state.users || []).filter((u) => u && u.role === "employee" && u.isActive !== false);
     const sinCierre = empleados.filter((u) => (state.attendance || []).some((a) => a.userId === u.id && a.date === ayer && a.present) && !getCashClosingForDate(u.id, ayer));
-    if (sinCierre.length) puntos.push("sin cierre de caja ayer: " + sinCierre.map((u) => u.name).join(", "));
+    if (sinCierre.length) puntos.push({ text: "sin cierre de caja ayer: " + sinCierre.map((u) => u.name).join(", "), go: "control", date: ayer });
     const conDif = getCashClosings().filter((c) => c.date === ayer && Math.abs(Number(c.cashDiff || 0)) >= 1);
-    if (conDif.length) puntos.push("diferencia de caja ayer: " + conDif.map((c) => (c.userName || "") + " " + formatMoney(c.cashDiff)).join(", "));
+    if (conDif.length) puntos.push({ text: "diferencia de caja ayer: " + conDif.map((c) => (c.userName || "") + " " + formatMoney(c.cashDiff)).join(", "), go: "control", date: ayer });
+    afterRender.push(() => document.querySelectorAll("[data-control-point]").forEach((b) => b.addEventListener("click", () => {
+      const p = puntos[Number(b.dataset.controlPoint)];
+      if (!p) return;
+      if (p.date) ui.controlDate = p.date;
+      navigate(p.go);
+    })));
     return `<div class="panel ${puntos.length ? "highlight-panel" : ""}" style="margin-bottom:14px">
       <div class="page-actions" style="justify-content:space-between;align-items:center">
         <strong style="font-size:15px">${puntos.length ? "&#9888; Control: " + puntos.length + " punto(s) para revisar" : "&#10003; Control: nada para revisar"}</strong>
         <button class="btn small ${puntos.length ? "yellow" : "ghost"}" type="button" data-route="control">Ir a Control</button>
       </div>
-      ${puntos.length ? `<ul style="margin:6px 0 0 18px">${puntos.map((p) => `<li>${escapeHtml(p)}</li>`).join("")}</ul>` : ""}
+      ${puntos.length ? `<ul class="control-points">${puntos.map((p, i) => `<li><span>${escapeHtml(p.text)}</span> <button class="btn small ghost" type="button" data-control-point="${i}">Ver</button></li>`).join("")}</ul>` : ""}
     </div>`;
   }
 
@@ -15038,6 +15052,15 @@
         ${metricCard("Transferencias por comprobar", String(porComprobar), noLlegaron.length ? noLlegaron.length + " no llegaron" : "Remitos del reparto")}
         ${metricCard("Clientes con deuda inusual", deudasInfo.loading ? "..." : String(deudas.length), "Contra su promedio de 8 semanas")}
       </div>
+      ${(() => {
+        const pend = controlUnsettledDeliveries(7);
+        if (!pend.length) return "";
+        return `<div class="panel highlight-panel" style="margin-top:14px">
+          <h2 class="page-title" style="font-size:18px">Entregas sin rendir de los últimos 7 días (${pend.length})</h2>
+          <p class="muted" style="margin-top:0">Entregadas sin pago registrado ni foto del remito, de cualquier día (no solo el elegido arriba).</p>
+          <ul style="margin:6px 0 0 18px">${pend.map((o) => { const c = getClient(o.clientId); return `<li style="margin:4px 0">${formatDate(o.date)} · ${escapeHtml(o.clientId)} - ${escapeHtml(c ? c.name : o.clientId)} <span class="muted">${escapeHtml(o.id)} · ${formatMoney(o.totalAmount)}${o.deliveredBy ? " · entregó " + escapeHtml(o.deliveredBy) : ""}</span> <button class="btn small yellow" type="button" data-settle-order="${escapeAttr(o.id)}">Rendir</button></li>`; }).join("")}</ul>
+        </div>`;
+      })()}
       ${controlRepairsHtml()}
       <div class="panel control-montos" style="margin-top:14px">
         <div class="page-actions" style="justify-content:space-between">

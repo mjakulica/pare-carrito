@@ -4360,3 +4360,6 @@ tr:last-child td {
 .wa-inbox-actions { flex-wrap: wrap; gap: 6px; }
 .wa-inbox-link { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .wa-inbox-link input { min-width: 220px; }
+.control-points { list-style: none; margin: 8px 0 0; padding: 0; }
+.control-points li { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 5px 0; border-top: 1px solid rgba(0, 0, 0, .06); }
+.control-points li:first-child { border-top: 0; }
