@@ -225,3 +225,4 @@ CREATE TABLE IF NOT EXISTS whatsapp_identify (
   candidate_id TEXT,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE whatsapp_inbox ADD COLUMN IF NOT EXISTS channel TEXT NOT NULL DEFAULT 'cloud';

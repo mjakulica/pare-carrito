@@ -8,6 +8,7 @@ const erp = require("./erp");
 const flow = require("./orderFlow");
 const { createTemplateService, createTemplateRouter } = require("./templates");
 const { createInboxFlow } = require("./inboxFlow");
+const linked = require("./linked");
 
 const app = express();
 app.use(express.json({
@@ -73,11 +74,21 @@ app.post("/broadcast", async (req, res) => {
 app.post("/send", async (req, res) => {
   const broadcastKey = process.env.BROADCAST_KEY || "";
   if (!broadcastKey || req.get("x-broadcast-key") !== broadcastKey) return res.sendStatus(401);
-  const { to, text } = req.body || {};
+  const { to, text, channel } = req.body || {};
   if (!to || !text) return res.status(400).json({ error: "Se espera { to, text }." });
-  const ok = await wa.sendText(String(to), String(text).slice(0, 1000));
+  const ok = channel === "linked" ? await linked.sendText(String(to), String(text).slice(0, 1000)) : await wa.sendText(String(to), String(text).slice(0, 1000));
   res.status(ok ? 200 : 502).json(ok ? { ok: true } : { error: "WhatsApp no acepto el mensaje." });
 });
+
+// WhatsApp vinculado por QR: estado (con el QR para escanear), vincular y desvincular.
+const linkedAuth = (req, res, next) => {
+  const k = process.env.BROADCAST_KEY || "";
+  if (!k || req.get("x-broadcast-key") !== k) return res.sendStatus(401);
+  next();
+};
+app.get("/linked/status", linkedAuth, (req, res) => res.json({ ok: true, ...linked.status() }));
+app.post("/linked/start", linkedAuth, async (req, res) => res.json({ ok: true, ...(await linked.startLinking()) }));
+app.post("/linked/stop", linkedAuth, async (req, res) => res.json({ ok: true, ...(await linked.stop()) }));
 
 // Verificacion del webhook (Meta).
 app.get("/webhook", (req, res) => {
@@ -102,9 +113,15 @@ app.post("/webhook", async (req, res) => {
   }
 });
 
-const inboxFlow = createInboxFlow({ wa, erp, ai, getProductNames });
+const inboxFlow = createInboxFlow({ wa, erp, ai, getProductNames, channel: "cloud" });
+// Mismo flujo para el WhatsApp vinculado por QR, contestando por ese mismo WhatsApp.
+const linkedWa = { sendText: (to, t) => linked.sendText(to, t), notifyTeam: (t) => wa.notifyTeam(t), notifyOwner: (t) => wa.notifyOwner(t) };
+const linkedFlow = createInboxFlow({ wa: linkedWa, erp, ai, getProductNames, channel: "linked" });
+linked.init((msg) => handleMessage(msg, linkedFlow, linkedWa));
 
-async function handleMessage(msg) {
+async function handleMessage(msg, flowIn, waIn) {
+  const inbox = flowIn || inboxFlow;
+  const out = waIn || wa;
   const from = String(msg.from || "").replace(/[^\d]/g, "");
   const text = String(msg.text || "").trim();
   if (!from || !text) return;
@@ -125,13 +142,13 @@ async function handleMessage(msg) {
   } catch (e) {
     // Sin respuesta del sistema no se sabe si es cliente: no se le pregunta "de que negocio sos".
     console.warn("findClientByPhone:", e.message);
-    await wa.notifyTeam(`El sistema no respondio al buscar el numero ${from}. Mensaje: "${text}"`);
+    await out.notifyTeam(`El sistema no respondio al buscar el numero ${from}. Mensaje: "${text}"`);
     return;
   }
 
   // 3) Todo va a la bandeja de WhatsApp del sistema (ver inboxFlow.js).
-  if (client) await inboxFlow.handleKnown({ from, text, profileName: msg.name || "", client });
-  else await inboxFlow.handleUnknown({ from, text, profileName: msg.name || "" });
+  if (client) await inbox.handleKnown({ from, text, profileName: msg.name || "", client });
+  else await inbox.handleUnknown({ from, text, profileName: msg.name || "" });
 }
 
 app.listen(config.port, () => {

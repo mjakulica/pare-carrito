@@ -1,0 +1,159 @@
+"use strict";
+
+// WhatsApp vinculado como dispositivo (como WhatsApp Web, con codigo QR), para recibir pedidos en un
+// numero comun mientras Meta no aprueba la API oficial. NO es oficial: WhatsApp puede bloquear el
+// numero si detecta un bot, por eso solo se contesta a quien manda un pedido (ver inboxFlow.js) y
+// con una pausa antes de cada respuesta.
+
+const fs = require("fs");
+const path = require("path");
+
+const DIR = process.env.WA_LINKED_DIR || path.join(__dirname, "..", "data", "wa-linked");
+const JIDS_FILE = path.join(path.dirname(DIR), "wa-linked-jids.json");
+const ENABLED_FILE = path.join(path.dirname(DIR), "wa-linked-enabled");
+
+const info = { status: "apagado", qr: "", qrAt: 0, me: "", connectedAt: "", lastError: "" };
+let sock = null;
+let connecting = false;
+let onMessage = null;
+let jids = {};
+try { jids = JSON.parse(fs.readFileSync(JIDS_FILE, "utf8")) || {}; } catch (e) { jids = {}; }
+
+const digits = (jid) => String(jid || "").split("@")[0].split(":")[0].replace(/\D/g, "");
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function rememberJid(phone, jid) {
+  if (!phone || !jid || jids[phone] === jid) return;
+  jids[phone] = jid;
+  try { fs.writeFileSync(JIDS_FILE, JSON.stringify(jids)); } catch (e) { /* se recalcula */ }
+}
+
+function messageText(m) {
+  const msg = m && m.message ? m.message : {};
+  const inner = msg.ephemeralMessage ? msg.ephemeralMessage.message || {} : msg;
+  return String(inner.conversation || (inner.extendedTextMessage && inner.extendedTextMessage.text) || (inner.imageMessage && inner.imageMessage.caption) || "").trim();
+}
+
+async function connect() {
+  if (sock || connecting) return;
+  connecting = true;
+  try {
+    const B = await import("@whiskeysockets/baileys");
+    const makeWASocket = B.default;
+    const { useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = B;
+    const QRCode = require("qrcode");
+    fs.mkdirSync(DIR, { recursive: true });
+    const { state, saveCreds } = await useMultiFileAuthState(DIR);
+    let version;
+    try { version = (await fetchLatestBaileysVersion()).version; } catch (e) { /* la que trae la libreria */ }
+    const logger = (await import("pino")).default({ level: "silent" });
+    info.status = "conectando";
+    sock = makeWASocket({ auth: state, version, logger, browser: ["Pare Carrito", "Chrome", "1.0"], markOnlineOnConnect: false, syncFullHistory: false });
+    sock.ev.on("creds.update", saveCreds);
+    sock.ev.on("connection.update", async (u) => {
+      if (u.qr) {
+        info.qr = await QRCode.toDataURL(u.qr, { margin: 1, width: 280 });
+        info.qrAt = Date.now();
+        info.status = "esperando_qr";
+      }
+      if (u.connection === "open") {
+        info.status = "conectado";
+        info.qr = "";
+        info.me = digits(sock.user && sock.user.id);
+        info.connectedAt = new Date().toISOString();
+        info.lastError = "";
+        console.log("WhatsApp vinculado: conectado como ..." + info.me.slice(-4));
+      }
+      if (u.connection === "close") {
+        const code = u.lastDisconnect && u.lastDisconnect.error && u.lastDisconnect.error.output ? u.lastDisconnect.error.output.statusCode : 0;
+        sock = null;
+        if (code === DisconnectReason.loggedOut) {
+          // Lo desvincularon desde el celular: se borra la sesion y queda apagado.
+          info.status = "desvinculado";
+          info.qr = "";
+          fs.rmSync(DIR, { recursive: true, force: true });
+          try { fs.unlinkSync(ENABLED_FILE); } catch (e) { /* ya no estaba */ }
+          console.warn("WhatsApp vinculado: se desvinculo desde el celular.");
+        } else if (fs.existsSync(ENABLED_FILE)) {
+          info.status = "reconectando";
+          info.lastError = String(code || (u.lastDisconnect && u.lastDisconnect.error && u.lastDisconnect.error.message) || "");
+          setTimeout(() => connect().catch(() => {}), 5000);
+        } else info.status = "apagado";
+      }
+    });
+    sock.ev.on("messages.upsert", async ({ messages, type }) => {
+      if (type !== "notify") return;
+      for (const m of messages || []) {
+        try {
+          const key = m.key || {};
+          const jid = String(key.remoteJid || "");
+          // Solo chats con personas: ni grupos, ni estados, ni canales, ni lo que manda el propio celular.
+          if (key.fromMe || !jid || /@(g\.us|broadcast|newsletter)$/.test(jid) || jid === "status@broadcast") continue;
+          const text = messageText(m);
+          if (!text) continue;
+          // Contactos con identificador oculto (@lid): se usa el numero si WhatsApp lo manda.
+          const phoneJid = jid.endsWith("@lid") ? key.senderPn || key.remoteJidAlt || jid : jid;
+          const phone = digits(phoneJid);
+          rememberJid(phone, jid);
+          if (onMessage) await onMessage({ from: phone, name: m.pushName || "", text, id: key.id });
+        } catch (e) {
+          console.error("WhatsApp vinculado, mensaje:", e.message);
+        }
+      }
+    });
+  } catch (e) {
+    sock = null;
+    info.status = "error";
+    info.lastError = e.message;
+    console.error("WhatsApp vinculado: no se pudo iniciar:", e.message);
+  } finally {
+    connecting = false;
+  }
+}
+
+// Arranca solo si ya estaba vinculado (se reinicia el bot y sigue conectado).
+function init(handler) {
+  onMessage = handler;
+  if (fs.existsSync(ENABLED_FILE)) connect().catch(() => {});
+}
+
+async function startLinking() {
+  fs.mkdirSync(path.dirname(DIR), { recursive: true });
+  fs.writeFileSync(ENABLED_FILE, new Date().toISOString());
+  await connect();
+  return status();
+}
+
+async function stop() {
+  try { fs.unlinkSync(ENABLED_FILE); } catch (e) { /* ya no estaba */ }
+  const s = sock;
+  sock = null;
+  if (s) { try { await s.logout(); } catch (e) { try { s.end(); } catch (e2) { /* cerrado */ } } }
+  fs.rmSync(DIR, { recursive: true, force: true });
+  Object.assign(info, { status: "apagado", qr: "", me: "", connectedAt: "" });
+  return status();
+}
+
+function status() {
+  return { status: info.status, qr: info.status === "esperando_qr" ? info.qr : "", me: info.me, connectedAt: info.connectedAt, lastError: info.lastError };
+}
+
+function isConnected() {
+  return !!sock && info.status === "conectado";
+}
+
+// Respuesta con una pausa corta (2 a 5 s), como una persona: baja el riesgo de bloqueo.
+async function sendText(phone, text) {
+  if (!isConnected()) { console.warn("WhatsApp vinculado: no conectado, no se envio a ..." + String(phone).slice(-4)); return false; }
+  const jid = jids[String(phone)] || String(phone).replace(/\D/g, "") + "@s.whatsapp.net";
+  await sleep(2000 + Math.floor(Math.random() * 3000));
+  try {
+    await sock.sendMessage(jid, { text: String(text) });
+    return true;
+  } catch (e) {
+    console.error("WhatsApp vinculado, envio:", e.message);
+    return false;
+  }
+}
+
+module.exports = { init, startLinking, stop, status, isConnected, sendText };

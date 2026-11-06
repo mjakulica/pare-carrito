@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v82";
+  const APP_VERSION = "v83";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -600,7 +600,56 @@
     if (listo !== ui.lastServerReadyShown) { ui.lastServerReadyShown = listo; scheduleServerGateRender(); }
   }, 10000);
 
+  // ---- Compartir desde WhatsApp ----
+  // En Android, con la app instalada: mantener apretado el mensaje -> Compartir -> Pare Carrito. El
+  // texto llega en la direccion (share_text) y entra a la bandeja de Nuevo Pedido. Se guarda en el
+  // equipo hasta que haya una sesion de gerente, admin o empleado con conexion.
+  const SHARED_KEY = "lpc_shared_whatsapp_v1";
+  function captureSharedText() {
+    try {
+      const q = new URLSearchParams(location.search);
+      const text = [q.get("share_text"), q.get("share_url")].filter(Boolean).join("\n").trim();
+      if (!text && !q.get("share_title")) return;
+      if (text) {
+        const lista = JSON.parse(storeGet(SHARED_KEY) || "[]");
+        lista.push({ text, title: String(q.get("share_title") || ""), at: new Date().toISOString() });
+        storeSet(SHARED_KEY, JSON.stringify(lista.slice(-20)));
+      }
+      history.replaceState(null, "", location.pathname + "#/nuevo-pedido");
+    } catch (e) { console.warn("Compartir:", e.message); }
+  }
+
+  let sharedSending = false;
+  async function sendSharedTexts() {
+    if (sharedSending || !currentUser || !["manager", "admin", "employee"].includes(currentUser.role)) return;
+    let lista = [];
+    try { lista = JSON.parse(storeGet(SHARED_KEY) || "[]"); } catch (e) { lista = []; }
+    if (!lista.length) return;
+    const config = getCloudSyncConfig();
+    if (!cloudSyncReady(config)) return;
+    sharedSending = true;
+    let enviados = 0;
+    try {
+      while (lista.length) {
+        const x = lista[0];
+        const r = await cloudRequest(config, "/inbox/manual", { method: "POST", body: JSON.stringify({ text: x.text, sender: x.title }) });
+        if (!r.ok) break;
+        lista.shift();
+        storeSet(SHARED_KEY, JSON.stringify(lista));
+        enviados += 1;
+      }
+    } catch (e) { console.warn("Compartir: se reintenta", e.message); }
+    sharedSending = false;
+    if (enviados) {
+      ui.waInbox = null;
+      if (getRoute().base !== "nuevo-pedido") navigate("nuevo-pedido");
+      else refreshWhatsappInbox(true);
+      setTimeout(() => alert(enviados === 1 ? "Mensaje de WhatsApp agregado a la bandeja de Nuevo Pedido." : enviados + " mensajes de WhatsApp agregados a la bandeja de Nuevo Pedido."), 300);
+    }
+  }
+
   window.addEventListener("DOMContentLoaded", async () => {
+    captureSharedText();
     captureSessionBootIds();
     await migrateLegacyBackendUrl();
     // La pantalla se dibuja PRIMERO, con los datos que ya tiene el dispositivo, y la descarga va
@@ -5988,14 +6037,17 @@
     const clienteBox = (x) => `<span class="wa-inbox-link"><input list="wa-inbox-clients" data-wa-client-input="${x.id}" placeholder="Buscar cliente por nombre o número" autocomplete="off" /><button class="btn small primary" type="button" data-wa-link="${x.id}">Vincular</button></span>`;
     const fila = (x) => {
       const c = x.client_id ? getClient(x.client_id) : null;
-      const quien = c ? `<strong>${escapeHtml(c.id)} - ${escapeHtml(c.name)}</strong>` : `<strong>Sin vincular: ${escapeHtml(formatWaPhone(x.phone))}</strong>${x.profile_name ? ` <span class="muted">(${escapeHtml(x.profile_name)})</span>` : ""}`;
+      const compartido = !x.phone;
+      const quien = c ? `<strong>${escapeHtml(c.id)} - ${escapeHtml(c.name)}</strong>` : compartido ? `<strong>Compartido desde WhatsApp</strong>${x.profile_name ? ` <span class="muted">(${escapeHtml(x.profile_name)})</span>` : ""}` : `<strong>Sin vincular: ${escapeHtml(formatWaPhone(x.phone))}</strong>${x.profile_name ? ` <span class="muted">(${escapeHtml(x.profile_name)})</span>` : ""}`;
+      const canal = x.channel === "linked" ? ` <span class="pill gray" title="Llegó al WhatsApp vinculado por QR">QR</span>` : "";
       const candidatos = (Array.isArray(x.candidates) ? x.candidates : []).filter((k) => getClient(k.id));
       let acciones = "";
       if (x.kind === "pedido" && x.client_id) acciones = `<button class="btn small primary" type="button" data-wa-load="${x.id}">Cargar en Nuevo Pedido</button>`;
       else if (x.kind === "agregar" || x.kind === "cancelar") acciones = (x.client_id && x.order_id && getOrder(x.order_id) ? `<button class="btn small primary" type="button" data-wa-open-order="${escapeAttr(x.order_id)}">Abrir su pedido de hoy</button>` : x.client_id ? `<button class="btn small primary" type="button" data-wa-load="${x.id}">Cargar como pedido nuevo</button>` : "") + `<button class="btn small ghost" type="button" data-wa-done="${x.id}">Hecho</button>`;
-      if (!x.client_id) acciones = (candidatos.length ? candidatos.map((k) => `<button class="btn small blue" type="button" data-wa-link="${x.id}" data-wa-client="${escapeAttr(k.id)}">Es ${escapeHtml(k.name)}${k.address ? " (" + escapeHtml(k.address) + ")" : ""}</button>`).join("") : "") + clienteBox(x);
+      if (!x.client_id && compartido) acciones = `<button class="btn small primary" type="button" data-wa-load="${x.id}">Cargar en Nuevo Pedido</button><span class="muted" style="font-size:12px">(el cliente se elige en el pedido)</span>`;
+      else if (!x.client_id) acciones = (candidatos.length ? candidatos.map((k) => `<button class="btn small blue" type="button" data-wa-link="${x.id}" data-wa-client="${escapeAttr(k.id)}">Es ${escapeHtml(k.name)}${k.address ? " (" + escapeHtml(k.address) + ")" : ""}</button>`).join("") : "") + clienteBox(x);
       return `<div class="wa-inbox-item ${ui.inboxLoading && ui.inboxLoading.id === x.id ? "active" : ""}">
-        <div class="wa-inbox-head">${quien} <span class="pill ${x.kind === "identificar" || !x.client_id ? "amber" : x.kind === "pedido" ? "green" : "blue"}">${escapeHtml(WA_INBOX_KIND[x.kind] || x.kind)}</span> <span class="muted">${escapeHtml(hace(x.created_at))}</span></div>
+        <div class="wa-inbox-head">${quien}${canal} <span class="pill ${x.kind === "identificar" || !x.client_id ? "amber" : x.kind === "pedido" ? "green" : "blue"}">${escapeHtml(WA_INBOX_KIND[x.kind] || x.kind)}</span> <span class="muted">${escapeHtml(hace(x.created_at))}</span></div>
         <div class="wa-inbox-text">${escapeHtml(x.text)}</div>
         <div class="page-actions wa-inbox-actions">${acciones}<button class="btn small ghost" type="button" data-wa-discard="${x.id}">Descartar</button></div>
       </div>`;
@@ -6031,11 +6083,13 @@
     document.querySelectorAll("[data-wa-cancel-load]").forEach((b) => b.addEventListener("click", () => { ui.inboxLoading = null; paintWhatsappInbox(); }));
     document.querySelectorAll("[data-wa-load]").forEach((b) => b.addEventListener("click", () => {
       const x = item(b.dataset.waLoad);
-      const c = x && getClient(x.client_id);
-      if (!c) return alert("Ese cliente no está cargado en este equipo.");
-      if (hasUnsavedWork() && Object.keys(ui.orderDraft || {}).length && !confirm("Hay productos cargados en el pedido de la pantalla. ¿Reemplazarlos por el pedido de WhatsApp de " + c.name + "?")) return;
-      ui.inboxLoading = { id: x.id, name: c.name };
-      ui.selectedClientId = c.id;
+      if (!x) return;
+      const c = x.client_id ? getClient(x.client_id) : null;
+      if (x.client_id && !c) return alert("Ese cliente no está cargado en este equipo.");
+      const nombre = c ? c.name : "WhatsApp compartido";
+      if (hasUnsavedWork() && Object.keys(ui.orderDraft || {}).length && !confirm("Hay productos cargados en el pedido de la pantalla. ¿Reemplazarlos por el pedido de WhatsApp de " + nombre + "?")) return;
+      ui.inboxLoading = { id: x.id, name: c ? c.name : "un mensaje compartido (elegí el cliente)" };
+      ui.selectedClientId = c ? c.id : "";
       ui.orderDraft = {};
       ui.orderWhatsappDraft = x.text;
       ui.inboxAutoParse = true;
@@ -14672,11 +14726,72 @@
         <div class="field span-2"><label>Plantilla de Meta (con una variable {{1}})</label><input id="wa-control-template" value="${escapeAttr(a.controlWhatsappTemplate || "")}" placeholder="ej: resumen_control" /></div>
         <div class="field span-2"><label>Números (vacío = teléfono del gerente)</label><input id="wa-control-to" value="${escapeAttr(a.controlWhatsappTo || "")}" placeholder="5493871234567, 5493877654321" /></div>
       </div>
-    </div>${["manager", "admin"].includes(currentUser.role) ? metaReviewerPanelHtml() : ""}${window.WhatsAppTemplates ? window.WhatsAppTemplates.html() : ""}`;
+    </div>${["manager", "admin"].includes(currentUser.role) ? `<div id="wa-linked-panel" class="panel" style="margin-top:14px">${waLinkedPanelInner()}</div>` : ""}${["manager", "admin"].includes(currentUser.role) ? metaReviewerPanelHtml() : ""}${window.WhatsAppTemplates ? window.WhatsAppTemplates.html() : ""}`;
+  }
+
+  // ---- WhatsApp vinculado por QR (mientras Meta no aprueba) ----
+  function waLinkedPanelInner() {
+    const st = ui.waLinked;
+    const estado = !st ? "Consultando..." : st.error ? "No se pudo consultar el bot: " + escapeHtml(st.error)
+      : st.status === "conectado" ? `<strong style="color:var(--green)">&#9989; Conectado</strong>${st.me ? " como +" + escapeHtml(st.me) : ""}${st.connectedAt ? " desde " + formatTimestampShort(st.connectedAt) : ""}`
+      : st.status === "esperando_qr" ? "<strong>Escaneá el código</strong> desde el celular de ese WhatsApp: Configuración → Dispositivos vinculados → Vincular un dispositivo."
+      : st.status === "conectando" || st.status === "reconectando" ? "Conectando..." + (st.lastError ? ` <span class="muted">(${escapeHtml(st.lastError)})</span>` : "")
+      : st.status === "desvinculado" ? "Se desvinculó desde el celular. Volvé a vincularlo si hace falta."
+      : st.status === "error" ? "Error: " + escapeHtml(st.lastError || "")
+      : "Apagado.";
+    const on = st && ["conectado", "esperando_qr", "conectando", "reconectando"].includes(st.status);
+    return `<h2 class="page-title" style="font-size:18px">WhatsApp vinculado por QR (mientras Meta aprueba)</h2>
+      <p class="muted" style="margin-top:0">Conecta un WhatsApp común, como WhatsApp Web: los pedidos que le escriban entran solos a la bandeja de Nuevo Pedido y el bot le pregunta de qué negocio es a un número nuevo. Se sigue usando normal en el celular. <strong>No es oficial:</strong> WhatsApp puede bloquear el número si detecta un bot; por eso solo contesta a quien manda un pedido, con una pausa, y nunca a contactos personales.</p>
+      <p style="margin:6px 0">Estado: ${estado}</p>
+      ${st && st.qr ? `<img src="${escapeAttr(st.qr)}" alt="Código QR para vincular WhatsApp" style="width:260px;height:260px;border:1px solid var(--line, #d9e0e8);border-radius:8px;background:#fff" />` : ""}
+      <div class="page-actions" style="margin-top:8px">
+        ${on ? `<button class="btn danger" type="button" id="wa-linked-stop">Desvincular</button>` : `<button class="btn primary" type="button" id="wa-linked-start">Vincular un WhatsApp</button>`}
+        <button class="btn ghost" type="button" id="wa-linked-refresh">Actualizar</button>
+      </div>`;
+  }
+
+  function paintWaLinked() {
+    const box = document.getElementById("wa-linked-panel");
+    if (!box) return;
+    box.innerHTML = waLinkedPanelInner();
+    const go = async (path, confirmMsg) => {
+      if (confirmMsg && !confirm(confirmMsg)) return;
+      try {
+        const r = await cloudRequest(getCloudSyncConfig(), path, { method: path.endsWith("/linked") ? "GET" : "POST", ...(path.endsWith("/linked") ? {} : { body: "{}" }) });
+        const j = await r.json().catch(() => ({}));
+        ui.waLinked = r.ok ? j : { error: j.error || "HTTP " + r.status };
+      } catch (e) { ui.waLinked = { error: e.message }; }
+      paintWaLinked();
+      scheduleWaLinkedPoll();
+    };
+    const a = document.getElementById("wa-linked-start");
+    if (a) a.addEventListener("click", () => go("/whatsapp/linked/start", "Vas a vincular un WhatsApp común con este sistema. Recordá: no es oficial y WhatsApp puede bloquear el número si detecta un bot. ¿Seguir?"));
+    const b = document.getElementById("wa-linked-stop");
+    if (b) b.addEventListener("click", () => go("/whatsapp/linked/stop", "¿Desvincular este WhatsApp? Los pedidos dejan de entrar solos a la bandeja."));
+    const c = document.getElementById("wa-linked-refresh");
+    if (c) c.addEventListener("click", () => go("/whatsapp/linked"));
+  }
+
+  // Mientras se espera el QR o la conexion, se consulta cada 3 s (el QR cambia cada ~20 s).
+  function scheduleWaLinkedPoll() {
+    clearTimeout(ui.waLinkedTimer);
+    const st = ui.waLinked;
+    if (!document.getElementById("wa-linked-panel")) return;
+    if (st && !["esperando_qr", "conectando", "reconectando"].includes(st.status)) return;
+    ui.waLinkedTimer = setTimeout(async () => {
+      try {
+        const r = await cloudRequest(getCloudSyncConfig(), "/whatsapp/linked", { method: "GET" });
+        const j = await r.json().catch(() => ({}));
+        ui.waLinked = r.ok ? j : { error: j.error || "HTTP " + r.status };
+      } catch (e) { ui.waLinked = { error: e.message }; }
+      paintWaLinked();
+      scheduleWaLinkedPoll();
+    }, ui.waLinked ? 3000 : 50);
   }
 
   function bindWhatsappBotPanel() {
     bindMetaReviewerPanel();
+    if (document.getElementById("wa-linked-panel")) { paintWaLinked(); scheduleWaLinkedPoll(); }
     if (window.WhatsAppTemplates) window.WhatsAppTemplates.mount({ request: (path, options) => cloudRequest(getCloudSyncConfig(), path, options) });
     const check = document.getElementById("wa-status-check");
     const cargar = async () => {
@@ -20726,6 +20841,7 @@
 
   function bindCommon() {
     bindRecorridoGuide();
+    sendSharedTexts();
     document.querySelectorAll("[data-billing-dismiss]").forEach((button) => button.addEventListener("click", () => {
       const kind = button.dataset.billingDismiss.split("|")[0];
       dismissBillingWarning(kind, button.dataset.billingDismiss, button.dataset.dismissHasta, button.dataset.dismissLabel);

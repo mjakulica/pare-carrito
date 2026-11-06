@@ -17,7 +17,9 @@ const KIND = { pedido_nuevo: "pedido", agregar: "agregar", cancelar: "cancelar" 
 const SI = /^\s*(s[ií]+|ok|dale|correcto|exacto|as[ií] es|claro|sip|confirmo)(?=$|[\s,.!¡?¿])/i;
 const NO = /^\s*(no|nop|negativo|para nada)(?=$|[\s,.!¡?¿])/i;
 
-function createInboxFlow({ wa, erp, ai, getProductNames }) {
+// channel: por donde llego ("cloud" = API oficial, "linked" = WhatsApp vinculado por QR); la bandeja
+// lo guarda para contestar por el mismo lado.
+function createInboxFlow({ wa, erp, ai, getProductNames, channel }) {
   async function classify(text) {
     const names = getProductNames ? await getProductNames() : [];
     return ai.classifyMessage(text, names);
@@ -25,7 +27,7 @@ function createInboxFlow({ wa, erp, ai, getProductNames }) {
 
   async function toInbox(entry) {
     try {
-      return await erp.inbox(entry);
+      return await erp.inbox({ ...entry, channel: channel || "cloud" });
     } catch (e) {
       // Si la bandeja falla, que no se pierda: aviso al equipo con el texto.
       await wa.notifyTeam(`No se pudo guardar en la bandeja un mensaje de ${entry.profileName || entry.phone}: ${e.message}\n"${entry.text}"`);

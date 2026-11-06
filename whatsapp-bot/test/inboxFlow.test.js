@@ -69,3 +69,16 @@ test("sin candidato claro (o dice que no): va al personal, que lo vincula desde 
   assert.equal(await g.flow.handleUnknown({ from: "549555", text: "no" }), "al_personal");
   assert.equal(g.links.length, 0);
 });
+
+test("WhatsApp vinculado por QR: la bandeja guarda el canal para contestar por el mismo lado", async () => {
+  const inbox = [];
+  const { createInboxFlow } = require("../src/inboxFlow");
+  const flow = createInboxFlow({
+    wa: { sendText: async () => true, notifyTeam: async () => {}, notifyOwner: async () => {} },
+    erp: { inbox: async (e) => { inbox.push(e); return { ok: true }; }, getTodayOrder: async () => ({}) },
+    ai: { classifyMessage: async () => ({ intent: "pedido_nuevo", items: [] }) },
+    channel: "linked"
+  });
+  await flow.handleKnown({ from: "549111", text: "2 kg papa", client: { id: "010" } });
+  assert.equal(inbox[0].channel, "linked");
+});

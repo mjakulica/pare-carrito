@@ -3578,8 +3578,8 @@ app.post("/external/inbox", externalAuth, async (req, res) => {
   const kind = String(b.kind || "");
   if (!phone || !INBOX_KINDS.has(kind) || !String(b.text || "").trim()) return res.status(400).json({ error: "Se espera { phone, kind, text }." });
   const { rows } = await pool.query(
-    "INSERT INTO whatsapp_inbox (phone, profile_name, client_id, kind, text, items, order_id, candidates) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id",
-    [phone, String(b.profileName || "").slice(0, 120), b.clientId ? String(b.clientId) : null, kind, String(b.text).slice(0, 4000), JSON.stringify(Array.isArray(b.items) ? b.items : []), b.orderId ? String(b.orderId) : null, JSON.stringify(Array.isArray(b.candidates) ? b.candidates : [])]
+    "INSERT INTO whatsapp_inbox (phone, profile_name, client_id, kind, text, items, order_id, candidates, channel) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id",
+    [phone, String(b.profileName || "").slice(0, 120), b.clientId ? String(b.clientId) : null, kind, String(b.text).slice(0, 4000), JSON.stringify(Array.isArray(b.items) ? b.items : []), b.orderId ? String(b.orderId) : null, JSON.stringify(Array.isArray(b.candidates) ? b.candidates : []), b.channel === "linked" ? "linked" : "cloud"]
   );
   res.json({ ok: true, id: rows[0].id });
 });
@@ -3632,8 +3632,9 @@ app.post("/external/clients/:id/link-phone", externalAuth, async (req, res) => {
 });
 
 // Mensaje de texto al cliente por el bot (dentro de las 24 h de su ultimo mensaje).
-async function inboxNotify(phone, text) {
-  const r = await botRequest("/send", { to: phone, text });
+async function inboxNotify(phone, text, channel) {
+  if (!phone) return false; // compartido a mano desde el celular: no hay a quien avisar
+  const r = await botRequest("/send", { to: phone, text, channel: channel || "cloud" });
   if (!r.ok) console.warn("WhatsApp: no se pudo avisar al cliente ..." + String(phone).slice(-4) + ": " + r.error);
   return r.ok;
 }
@@ -3642,7 +3643,7 @@ async function inboxNotify(phone, text) {
 const INBOX_ROLES = ["manager", "admin", "employee"];
 app.get("/inbox", authenticate, requireRole(...INBOX_ROLES), async (req, res) => {
   const { rows } = await pool.query(
-    `SELECT id, created_at, phone, profile_name, client_id, kind, text, items, order_id, candidates, status, handled_by, handled_at, result_order_id
+    `SELECT id, created_at, phone, profile_name, client_id, kind, text, items, order_id, candidates, status, handled_by, handled_at, result_order_id, channel
      FROM whatsapp_inbox WHERE (status = 'pendiente' AND created_at > now() - interval '7 days') OR handled_at > now() - interval '12 hours'
      ORDER BY created_at ASC LIMIT 200`
   );
@@ -3651,11 +3652,11 @@ app.get("/inbox", authenticate, requireRole(...INBOX_ROLES), async (req, res) =>
 
 app.post("/inbox/:id/done", authenticate, requireRole(...INBOX_ROLES), async (req, res) => {
   const orderId = String((req.body && req.body.orderId) || "");
-  const { rows } = await pool.query("UPDATE whatsapp_inbox SET status = 'cargado', handled_by = $1, handled_at = now(), result_order_id = $2 WHERE id = $3 AND status = 'pendiente' RETURNING phone, kind", [req.user.name || req.user.username, orderId || null, req.params.id]);
+  const { rows } = await pool.query("UPDATE whatsapp_inbox SET status = 'cargado', handled_by = $1, handled_at = now(), result_order_id = $2 WHERE id = $3 AND status = 'pendiente' RETURNING phone, kind, channel", [req.user.name || req.user.username, orderId || null, req.params.id]);
   if (!rows.length) return res.status(409).json({ error: "Ese mensaje ya lo resolvio otra persona." });
   if (req.body && req.body.notify !== false) {
     const texto = rows[0].kind === "pedido" ? "¡Listo! Tu pedido quedó cargado. Gracias." : "¡Listo! Ya hicimos el cambio en tu pedido. Gracias.";
-    await inboxNotify(rows[0].phone, texto);
+    await inboxNotify(rows[0].phone, texto, rows[0].channel);
   }
   res.json({ ok: true });
 });
@@ -3668,12 +3669,42 @@ app.post("/inbox/:id/discard", authenticate, requireRole(...INBOX_ROLES), async 
 
 app.post("/inbox/:id/link", authenticate, requireRole(...INBOX_ROLES), async (req, res) => {
   const clientId = String((req.body && req.body.clientId) || "");
-  const { rows } = await pool.query("SELECT phone FROM whatsapp_inbox WHERE id = $1", [req.params.id]);
+  const { rows } = await pool.query("SELECT phone, channel FROM whatsapp_inbox WHERE id = $1", [req.params.id]);
   if (!rows.length || !clientId) return res.status(400).json({ error: "Falta el cliente." });
+  // Compartido a mano (sin numero): solo se le asigna el cliente a ese mensaje.
+  if (!rows[0].phone) {
+    await pool.query("UPDATE whatsapp_inbox SET client_id = $1 WHERE id = $2", [clientId, req.params.id]);
+    return res.json({ ok: true, clientId, phone: "" });
+  }
   const out = await linkPhoneToClient(rows[0].phone, clientId, req.user.name || req.user.username);
   if (out.error) return res.status(out.status || 500).json({ error: out.error });
-  await inboxNotify(rows[0].phone, "¡Gracias! Ya registramos este número para " + out.name + ".");
+  await inboxNotify(rows[0].phone, "¡Gracias! Ya registramos este número para " + out.name + ".", rows[0].channel);
   res.json({ ok: true, clientId: out.clientId, name: out.name, phone: rows[0].phone });
+});
+
+// Mensaje compartido desde WhatsApp en el celular ("Compartir" -> Pare Carrito): entra a la bandeja.
+app.post("/inbox/manual", authenticate, requireRole(...INBOX_ROLES), async (req, res) => {
+  const text = String((req.body && req.body.text) || "").trim();
+  if (!text) return res.status(400).json({ error: "No llegó ningún texto." });
+  const clientId = req.body && req.body.clientId ? String(req.body.clientId) : null;
+  const { rows } = await pool.query(
+    "INSERT INTO whatsapp_inbox (phone, profile_name, client_id, kind, text, channel) VALUES ('', $1, $2, 'pedido', $3, 'compartido') RETURNING id",
+    [String((req.body && req.body.sender) || "Compartido por " + (req.user.name || req.user.username)).slice(0, 120), clientId, text.slice(0, 4000)]
+  );
+  res.json({ ok: true, id: rows[0].id });
+});
+
+// WhatsApp vinculado por QR (gerente/admin): estado con el QR, vincular y desvincular.
+app.get("/whatsapp/linked", authenticate, requireRole("manager", "admin"), async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  const r = await botRequest("/linked/status");
+  res.status(r.ok ? 200 : 502).json(r);
+});
+app.post("/whatsapp/linked/:action", authenticate, requireRole("manager", "admin"), async (req, res) => {
+  if (!["start", "stop"].includes(req.params.action)) return res.status(404).json({ error: "Ruta no encontrada." });
+  const r = await botRequest("/linked/" + req.params.action, {});
+  console.log("WhatsApp vinculado: " + (req.params.action === "start" ? "vincular" : "desvincular") + " por " + req.user.username + ".");
+  res.status(r.ok ? 200 : 502).json(r);
 });
 
 app.post("/external/orders", externalAuth, async (req, res) => {
