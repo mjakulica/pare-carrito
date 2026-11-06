@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v93";
+  const APP_VERSION = "v94";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -5816,6 +5816,7 @@
       // Antes se detectaba por la primera linea y pisaba la seleccion.
       const parsed = parseWhatsappOrder(pasteInput.value, clientSelect.value);
       applyParsedOrderToRows(parsed, searchInput, warningBox);
+      showQuantityChecks(parsed, clientSelect.value, warningBox, recalc);
       if (aprendidos.length) showLearnedAliases(aprendidos, warningBox);
       if (parsed.unmatched.length && ["manager", "admin"].includes(currentUser.role)) {
         openUnmatchedAliasModal(parsed.unmatched, clientSelect.value, () => {
@@ -6137,6 +6138,64 @@
         if (c && x) { const d = String(x.phone); if (!(c.phones || []).includes(d)) c.phones = (c.phones || []).concat([d]); }
       } catch (e) { alert("No se pudo vincular: " + e.message); }
       refreshWhatsappInbox(true);
+    }));
+  }
+
+  // Cantidades raras al cargar un texto: mas de 4 de algo que se vende por bulto (jaula, cajon,
+  // bolsa...) que el cliente nunca pide asi, o mucho mas de lo que suele pedir. Ej.: "Limones 15"
+  // tomado como 15 jaulas cuando el cliente siempre pide limon por unidad.
+  const CANTIDAD_SOSPECHOSA = 4;
+  function quantityChecks(parsed, clientId) {
+    const out = [];
+    if (!parsed || !clientId) return out;
+    const desde = addDaysISO(todayISO(), -120);
+    const pedidos = (state.orders || []).filter((o) => o && o.clientId === clientId && !o.exampleOnly && !["cancelado", "anulado"].includes(o.status) && String(o.date || "") >= desde);
+    const hist = new Map();
+    pedidos.forEach((o) => (o.items || []).forEach((it) => {
+      const h = hist.get(it.productId) || { veces: 0, max: 0 };
+      h.veces += 1;
+      h.max = Math.max(h.max, Number(it.quantity || 0));
+      hist.set(it.productId, h);
+    }));
+    const raiz = (name) => normalizeText(name).split(" ").filter(Boolean)[0] || "";
+    (parsed.items || []).forEach((entry) => {
+      const product = entry.product;
+      const qty = Number(entry.quantity || 0);
+      const unit = normalizeText(entry.unitType || product.unitType || "");
+      if (qty <= CANTIDAD_SOSPECHOSA || ["kg", "kgs", "kilo", "unidad", "unidades", "u", "docena"].includes(unit)) return;
+      const h = hist.get(product.id);
+      if (h && h.max * 2 >= qty) return; // ya pidio cantidades parecidas
+      // Lo que suele pedir de ese mismo producto en otra presentacion (Limon Unidad en vez de Limon Jaula).
+      const r = raiz(product.name);
+      const otros = r ? activeProducts().filter((p) => p.id !== product.id && raiz(p.name) === r && hist.has(p.id)).sort((a, b) => hist.get(b.id).veces - hist.get(a.id).veces) : [];
+      const alt = otros[0] || null;
+      const motivo = h ? "suele pedir hasta " + formatNumber(h.max) : pedidos.length ? "nunca lo pidió por " + (product.unitType || "bulto") : "es mucho para " + (product.unitType || "bulto");
+      out.push({ product, qty, unit: product.unitType || "", motivo, alt, altVeces: alt ? hist.get(alt.id).veces : 0 });
+    });
+    return out;
+  }
+
+  function showQuantityChecks(parsed, clientId, warningBox, onFix) {
+    const checks = quantityChecks(parsed, clientId);
+    if (!checks.length || !warningBox) return;
+    const html = `<div class="qty-checks"><strong>Revisá estas cantidades</strong><ul class="order-parse-list">${checks.map((c, i) => `<li>
+      <strong>${escapeHtml(formatAmountInput(c.qty) + " " + c.product.name)}</strong>: ${escapeHtml(c.motivo)}.${c.alt ? ` Este cliente suele pedir <strong>${escapeHtml(c.alt.name)}</strong> (${c.altVeces === 1 ? "1 vez" : c.altVeces + " veces"}). <button class="btn small primary" type="button" data-qty-fix="${i}">Cambiar a ${escapeHtml(formatAmountInput(c.qty) + " " + c.alt.name)}</button>` : ""}
+    </li>`).join("")}</ul></div>`;
+    warningBox.style.display = "block";
+    warningBox.insertAdjacentHTML("afterbegin", html);
+    warningBox.querySelectorAll("[data-qty-fix]").forEach((b) => b.addEventListener("click", () => {
+      const c = checks[Number(b.dataset.qtyFix)];
+      if (!c || !c.alt) return;
+      const client = getClient(ui.selectedClientId || clientId);
+      const prev = (ui.orderDraft || {})[c.product.id] || {};
+      delete ui.orderDraft[c.product.id];
+      ui.orderDraft[c.alt.id] = { productId: c.alt.id, quantity: c.qty, note: prev.note || "", price: getAdjustedProductPrice(c.alt, client), unitType: c.alt.unitType };
+      const viejo = document.querySelector(`[data-product-row="${cssEscape(c.product.id)}"]`);
+      if (viejo) viejo.querySelector("[data-qty]").value = "";
+      const nuevo = document.querySelector(`[data-product-row="${cssEscape(c.alt.id)}"]`);
+      if (nuevo) { nuevo.querySelector("[data-qty]").value = formatAmountInput(c.qty); const u = nuevo.querySelector("[data-unit]"); if (u) u.value = c.alt.unitType; }
+      b.closest("li").innerHTML = `&#9989; Cambiado a ${escapeHtml(formatAmountInput(c.qty) + " " + c.alt.name)}.`;
+      if (onFix) onFix();
     }));
   }
 

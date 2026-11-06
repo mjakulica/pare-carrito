@@ -4399,3 +4399,5 @@ tr:last-child td {
 
 .wa-arch-reply { display: flex; gap: 8px; align-items: flex-end; margin-top: 8px; }
 .wa-arch-reply textarea { flex: 1; min-height: 44px; resize: vertical; }
+.qty-checks { background: #fff4e5; border: 1px solid #f2c48d; border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; color: #6b3d06; }
+.qty-checks .btn { margin-top: 4px; }
