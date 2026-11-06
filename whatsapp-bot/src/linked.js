@@ -59,6 +59,66 @@ function rememberJid(phone, jid) {
   try { fs.writeFileSync(JIDS_FILE, JSON.stringify(jids)); } catch (e) { /* se recalcula */ }
 }
 
+// ---- Archivo de todos los mensajes (respaldo) ----
+// Se guardan chats individuales y grupos, recibidos y enviados desde el celular. No se envia nada
+// por WhatsApp: solo se copian al servidor propio, en tandas.
+let archiveSink = null;
+let archiveQueue = [];
+let archiveTimer = null;
+const groupNames = {};
+
+function messageKind(m) {
+  const msg = m && m.message ? m.message : {};
+  const inner = msg.ephemeralMessage ? msg.ephemeralMessage.message || {} : msg.viewOnceMessage ? msg.viewOnceMessage.message || {} : msg;
+  const tipos = { imageMessage: "imagen", videoMessage: "video", audioMessage: "audio", documentMessage: "documento", stickerMessage: "sticker", locationMessage: "ubicacion", contactMessage: "contacto", pollCreationMessage: "encuesta", reactionMessage: "reaccion" };
+  for (const k of Object.keys(tipos)) if (inner[k]) {
+    const caption = (inner[k].caption || inner[k].fileName || (k === "reactionMessage" ? inner[k].text : "") || "").trim();
+    return { type: tipos[k], text: "[" + tipos[k] + "]" + (caption ? " " + caption : "") };
+  }
+  const text = String(inner.conversation || (inner.extendedTextMessage && inner.extendedTextMessage.text) || "").trim();
+  return text ? { type: "texto", text } : null;
+}
+
+async function groupName(jid) {
+  if (groupNames[jid] !== undefined) return groupNames[jid];
+  groupNames[jid] = "";
+  try { const md = sock ? await sock.groupMetadata(jid) : null; groupNames[jid] = (md && md.subject) || ""; } catch (e) { /* sin nombre */ }
+  return groupNames[jid];
+}
+
+async function archiveMessage(m) {
+  if (!archiveSink) return;
+  const key = m && m.key || {};
+  const jid = String(key.remoteJid || "");
+  if (!jid || jid === "status@broadcast" || /@(broadcast|newsletter)$/.test(jid)) return;
+  const kind = messageKind(m);
+  if (!kind) return;
+  const isGroup = jid.endsWith("@g.us");
+  const senderJid = isGroup ? key.participant || "" : key.fromMe ? "" : jid;
+  const chatPhone = isGroup ? jid : digits(jid.endsWith("@lid") ? key.senderPn || key.remoteJidAlt || jid : jid);
+  const contacto = !isGroup ? contacts[chatPhone] : null;
+  const ts = Number(m.messageTimestamp && m.messageTimestamp.low != null ? m.messageTimestamp.low : m.messageTimestamp || 0) * 1000 || Date.now();
+  archiveQueue.push({
+    waId: key.id || String(ts), chatId: chatPhone, isGroup, fromMe: !!key.fromMe, type: kind.type, text: kind.text, ts,
+    chatName: isGroup ? await groupName(jid) : (contacto && (contacto.name || contacto.notify)) || (!key.fromMe ? m.pushName || "" : ""),
+    senderPhone: digits(senderJid), senderName: key.fromMe ? "" : m.pushName || ""
+  });
+  if (archiveQueue.length >= 200) flushArchive();
+  else if (!archiveTimer) archiveTimer = setTimeout(flushArchive, 5000);
+}
+
+async function flushArchive() {
+  clearTimeout(archiveTimer);
+  archiveTimer = null;
+  if (!archiveQueue.length || !archiveSink) return;
+  const lote = archiveQueue.splice(0, 500);
+  try { await archiveSink(lote); } catch (e) {
+    // Si el servidor no responde se reintenta (hasta 5000 pendientes, para no llenar la memoria).
+    archiveQueue = lote.concat(archiveQueue).slice(0, 5000);
+    archiveTimer = setTimeout(flushArchive, 30000);
+  }
+}
+
 function messageText(m) {
   const msg = m && m.message ? m.message : {};
   const inner = msg.ephemeralMessage ? msg.ephemeralMessage.message || {} : msg;
@@ -114,8 +174,13 @@ async function connect() {
     });
     sock.ev.on("contacts.upsert", (list) => addContacts(list));
     sock.ev.on("contacts.update", (list) => addContacts(list));
-    sock.ev.on("messaging-history.set", (h) => addContacts(h && h.contacts));
+    sock.ev.on("messaging-history.set", (h) => {
+      addContacts(h && h.contacts);
+      // Historial que manda WhatsApp al vincular: tambien al archivo (lo de mas de 90 dias se descarta).
+      (h && h.messages || []).forEach((m) => archiveMessage(m).catch(() => {}));
+    });
     sock.ev.on("messages.upsert", async ({ messages, type }) => {
+      for (const m of messages || []) archiveMessage(m).catch(() => {});
       if (type !== "notify") return;
       for (const m of messages || []) {
         try {
@@ -146,8 +211,9 @@ async function connect() {
 }
 
 // Arranca solo si ya estaba vinculado (se reinicia el bot y sigue conectado).
-function init(handler) {
+function init(handler, archiver) {
   onMessage = handler;
+  archiveSink = archiver || null;
   if (fs.existsSync(ENABLED_FILE)) connect().catch(() => {});
 }
 
@@ -193,4 +259,4 @@ async function sendText(phone, text) {
   }
 }
 
-module.exports = { init, startLinking, stop, status, isConnected, sendText, addContacts, listContacts };
+module.exports = { init, startLinking, stop, status, isConnected, sendText, addContacts, listContacts, archiveMessage, flushArchive };

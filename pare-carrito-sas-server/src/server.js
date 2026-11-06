@@ -13,6 +13,7 @@ const { billingConfig, nowArt, computeDueInvoices, runBilling, regeneratePdf, em
 const { controlDailySummary, controlPaymentChecks, parseBankText, parseBankJson } = require("./control");
 const { repairAccounting, repairSummary, isOpeningRow, alignChangedOrderSaldos } = require("./dataRepair");
 const { matchClients, phoneSuggestions, normalizeArPhone } = require("./whatsappInbox");
+const { dailySalesSummary, dailySalesHtml, dailySalesLine, archiveEmailHtml } = require("./dailyReport");
 const { syncSheetsFromStateDiff, pushPrecio } = require("./sheetsSync");
 
 const PORT = Number(process.env.PORT || 3000);
@@ -1921,9 +1922,16 @@ async function sendControlDailyEmail(date, opciones = {}) {
   const summary = controlDailySummary(data, date, controlClientDebts(data, today));
   const fecha = date.split("-").reverse().join("/");
   const subject = (summary.problemas ? "⚠ Control " + fecha + ": " + summary.problemas + " punto(s) para revisar" : "✔ Control " + fecha + ": todo en orden");
-  const sent = await sendMail(to.join(","), subject, summary.html);
+  // Resumen del dia (pedidos, kilos, ventas, cobros, saldo de clientes) y los mensajes de WhatsApp.
+  const ventas = dailySalesSummary(data, date);
+  let mensajes = [];
+  try {
+    mensajes = (await pool.query("SELECT chat_id, chat_name, is_group, sender_phone, sender_name, from_me, text, ts FROM whatsapp_archive WHERE (ts AT TIME ZONE 'America/Argentina/Buenos_Aires')::date = $1::date ORDER BY chat_id, ts", [date])).rows;
+  } catch (e) { console.warn("Correo diario: no se pudieron leer los mensajes de WhatsApp:", e.message); }
+  const html = summary.html.replace(/<\/div>\s*$/, "") + dailySalesHtml(ventas) + archiveEmailHtml(mensajes, clientNameByPhone(data)) + "</div>";
+  const sent = await sendMail(to.join(","), subject, html);
   const whatsapp = await sendControlWhatsapp(data, summary.linea);
-  return { sent, to, problemas: summary.problemas, counts: summary.counts, whatsapp };
+  return { sent, to, problemas: summary.problemas, counts: summary.counts, whatsapp, ventas: dailySalesLine(ventas), mensajes: mensajes.length };
 }
 
 // Resumen de Control por WhatsApp (plantilla de Meta con una variable) a los numeros elegidos o al
@@ -3744,6 +3752,59 @@ app.post("/clients/link-phones", authenticate, requireRole("manager", "admin"), 
   for (const l of links) await pool.query("UPDATE whatsapp_inbox SET client_id = $1 WHERE client_id IS NULL AND status = 'pendiente' AND right(phone, 8) = right($2, 8) AND phone <> ''", [l.clientId, l.phone]);
   console.log("Telefonos vinculados a clientes desde la agenda: " + out.linked + " (" + req.user.username + ").");
   res.json(out);
+});
+
+// ---------- Archivo de mensajes del WhatsApp vinculado ----------
+const ARCHIVE_DAYS = 90;
+let archiveLastCleanup = 0;
+app.post("/external/wa-archive", externalAuth, async (req, res) => {
+  const list = Array.isArray(req.body && req.body.messages) ? req.body.messages.slice(0, 2000) : [];
+  let n = 0;
+  const limite = Date.now() - ARCHIVE_DAYS * 86400000;
+  for (const m of list) {
+    const ts = new Date(Number(m.ts) || m.ts);
+    if (!m || !m.waId || !m.chatId || isNaN(ts) || ts.getTime() < limite) continue;
+    const r = await pool.query(
+      `INSERT INTO whatsapp_archive (wa_id, chat_id, chat_name, is_group, sender_phone, sender_name, from_me, msg_type, text, ts)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (chat_id, wa_id) DO NOTHING`,
+      [String(m.waId).slice(0, 120), String(m.chatId).slice(0, 120), String(m.chatName || "").slice(0, 200), !!m.isGroup, phoneDigits(m.senderPhone).slice(0, 20), String(m.senderName || "").slice(0, 120), !!m.fromMe, String(m.type || "texto").slice(0, 30), String(m.text || "").slice(0, 4000), ts]
+    );
+    n += r.rowCount;
+  }
+  // Una vez por hora se borra lo de mas de 90 dias.
+  if (Date.now() - archiveLastCleanup > 3600000) {
+    archiveLastCleanup = Date.now();
+    pool.query("DELETE FROM whatsapp_archive WHERE ts < now() - ($1 || ' days')::interval", [String(ARCHIVE_DAYS)]).catch((e) => console.warn("archivo WhatsApp, limpieza:", e.message));
+  }
+  res.json({ ok: true, saved: n });
+});
+
+// Nombre del cliente por los ultimos 8 digitos del telefono (los numeros vienen en formatos distintos).
+function clientNameByPhone(data) {
+  const map = new Map();
+  (data.clients || []).forEach((c) => [c && c.phone].concat(c && Array.isArray(c.phones) ? c.phones : []).forEach((ph) => { const t = phoneDigits(ph).slice(-8); if (t.length === 8 && !map.has(t)) map.set(t, c.id + " - " + (c.name || "")); }));
+  return (phone) => map.get(phoneDigits(phone).slice(-8)) || "";
+}
+
+app.get("/whatsapp/archive/chats", authenticate, requireRole("manager", "admin"), async (req, res) => {
+  const q = String(req.query.q || "").trim();
+  const params = [];
+  let where = "";
+  if (q) { params.push("%" + q + "%"); where = "WHERE chat_id IN (SELECT chat_id FROM whatsapp_archive WHERE text ILIKE $1 OR chat_name ILIKE $1 OR sender_name ILIKE $1 OR chat_id ILIKE $1)"; }
+  const { rows } = await pool.query(
+    `SELECT chat_id, max(chat_name) FILTER (WHERE chat_name <> '') AS chat_name, bool_or(is_group) AS is_group, count(*)::int AS total, max(ts) AS last_ts,
+       (array_agg(text ORDER BY ts DESC))[1] AS last_text, (array_agg(from_me ORDER BY ts DESC))[1] AS last_from_me
+     FROM whatsapp_archive ${where} GROUP BY chat_id ORDER BY max(ts) DESC LIMIT 300`, params);
+  const stored = await loadStateData();
+  const cliente = clientNameByPhone(stored ? stored.data : {});
+  res.json({ ok: true, chats: rows.map((r) => ({ ...r, client: r.is_group ? "" : cliente(r.chat_id) })) });
+});
+
+app.get("/whatsapp/archive/messages", authenticate, requireRole("manager", "admin"), async (req, res) => {
+  const chat = String(req.query.chat || "");
+  if (!chat) return res.status(400).json({ error: "Falta el chat." });
+  const { rows } = await pool.query("SELECT wa_id, chat_name, is_group, sender_phone, sender_name, from_me, msg_type, text, ts FROM whatsapp_archive WHERE chat_id = $1 ORDER BY ts DESC LIMIT 1000", [chat]);
+  res.json({ ok: true, messages: rows.reverse() });
 });
 
 app.post("/external/orders", externalAuth, async (req, res) => {

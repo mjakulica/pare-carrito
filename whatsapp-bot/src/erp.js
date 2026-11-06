@@ -79,4 +79,9 @@ function linkPhone(clientId, phone) {
   return erpRequest("POST", "/external/clients/" + encodeURIComponent(clientId) + "/link-phone", { phone });
 }
 
-module.exports = { erpRequest, findClientByPhone, getTodayOrder, createOrder, addItems, cancelItems, listProductNames, inbox, getIdentify, setIdentify, matchClients, linkPhone };
+// Archivo de mensajes del WhatsApp vinculado (respaldo de 90 dias en el servidor).
+function archive(messages) {
+  return erpRequest("POST", "/external/wa-archive", { messages });
+}
+
+module.exports = { archive, erpRequest, findClientByPhone, getTodayOrder, createOrder, addItems, cancelItems, listProductNames, inbox, getIdentify, setIdentify, matchClients, linkPhone };

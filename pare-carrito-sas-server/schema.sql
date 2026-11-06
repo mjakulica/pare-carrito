@@ -226,3 +226,22 @@ CREATE TABLE IF NOT EXISTS whatsapp_identify (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ALTER TABLE whatsapp_inbox ADD COLUMN IF NOT EXISTS channel TEXT NOT NULL DEFAULT 'cloud';
+
+-- Archivo de mensajes del WhatsApp vinculado (chats individuales y grupos, recibidos y enviados).
+-- Respaldo por si bloquean el numero; se borra solo a los 90 dias.
+CREATE TABLE IF NOT EXISTS whatsapp_archive (
+  id BIGSERIAL PRIMARY KEY,
+  wa_id TEXT NOT NULL,
+  chat_id TEXT NOT NULL,
+  chat_name TEXT,
+  is_group BOOLEAN NOT NULL DEFAULT FALSE,
+  sender_phone TEXT,
+  sender_name TEXT,
+  from_me BOOLEAN NOT NULL DEFAULT FALSE,
+  msg_type TEXT,
+  text TEXT,
+  ts TIMESTAMPTZ NOT NULL,
+  UNIQUE (chat_id, wa_id)
+);
+CREATE INDEX IF NOT EXISTS whatsapp_archive_ts ON whatsapp_archive (ts);
+CREATE INDEX IF NOT EXISTS whatsapp_archive_chat ON whatsapp_archive (chat_id, ts);

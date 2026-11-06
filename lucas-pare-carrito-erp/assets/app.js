@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v85";
+  const APP_VERSION = "v86";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -330,6 +330,7 @@
     { id: "dashboard", label: "Inicio", icon: "IN", roles: ["manager", "admin", "employee", "customer", "contador", "example", "proveedor"] },
     { id: "mi-recorrido", label: "Mi recorrido", icon: "MR", roles: ["manager", "admin", "employee"] },
     { id: "control", label: "Control", icon: "CK", roles: ["manager", "admin"] },
+    { id: "whatsapp-mensajes", label: "Mensajes WhatsApp", icon: "WA", roles: ["manager", "admin"] },
     { id: "nuevo-pedido", label: "Nuevo Pedido", icon: "NP", roles: ["manager", "admin", "employee", "customer", "example"] },
     { id: "pedidos", label: "Pedidos", icon: "PE", roles: ["manager", "admin", "employee", "customer", "example", "proveedor"] },
     { id: "clientes", label: "Clientes", icon: "CL", roles: ["manager", "admin"] },
@@ -3515,6 +3516,7 @@
       dashboard: renderDashboard,
       "mi-recorrido": () => renderMiRecorrido(route.id),
       control: renderControl,
+      "whatsapp-mensajes": renderWhatsappArchive,
       "nuevo-pedido": renderNewOrder,
       pedidos: renderOrders,
       clientes: renderClients,
@@ -20860,6 +20862,76 @@
         </div>
       </div>
     `;
+  }
+
+  // ---- Mensajes de WhatsApp (archivo del WhatsApp vinculado, 90 dias) ----
+  // Respaldo por si bloquean el numero: todos los chats (individuales y grupos), recibidos y enviados.
+  function waArchiveFetch(path) {
+    return cloudRequest(getCloudSyncConfig(), path, { method: "GET" }).then((r) => r.json().then((j) => (r.ok ? j : Promise.reject(new Error(j.error || "HTTP " + r.status)))));
+  }
+
+  function loadWaArchiveChats() {
+    ui.waArchiveLoading = true;
+    waArchiveFetch("/whatsapp/archive/chats" + (ui.waArchiveQ ? "?q=" + encodeURIComponent(ui.waArchiveQ) : ""))
+      .then((j) => { ui.waArchiveChats = j.chats || []; ui.waArchiveError = ""; })
+      .catch((e) => { ui.waArchiveError = e.message; ui.waArchiveChats = ui.waArchiveChats || []; })
+      .finally(() => { ui.waArchiveLoading = false; if (getRoute().base === "whatsapp-mensajes") render(); });
+  }
+
+  function loadWaArchiveChat(chatId) {
+    ui.waArchiveChat = chatId;
+    ui.waArchiveMsgs = null;
+    render();
+    waArchiveFetch("/whatsapp/archive/messages?chat=" + encodeURIComponent(chatId))
+      .then((j) => { if (ui.waArchiveChat === chatId) ui.waArchiveMsgs = j.messages || []; })
+      .catch((e) => { ui.waArchiveMsgs = []; ui.waArchiveError = e.message; })
+      .finally(() => { if (getRoute().base === "whatsapp-mensajes") render(); });
+  }
+
+  function renderWhatsappArchive() {
+    if (!ui.waArchiveChats && !ui.waArchiveLoading) loadWaArchiveChats();
+    const chats = ui.waArchiveChats || [];
+    const titulo = (c) => c.is_group ? "&#128101; " + escapeHtml(c.chat_name || "Grupo") : escapeHtml(c.client || c.chat_name || "") + (c.client && c.chat_name ? ` <span class="muted">(${escapeHtml(c.chat_name)})</span>` : "") + ` <span class="muted">${escapeHtml(formatWaPhone(c.chat_id))}</span>`;
+    const actual = chats.find((c) => c.chat_id === ui.waArchiveChat);
+    const q = String(ui.waArchiveQ || "").toLowerCase();
+    afterRender.push(() => {
+      const form = document.getElementById("wa-arch-search");
+      if (form) form.addEventListener("submit", (e) => { e.preventDefault(); ui.waArchiveQ = document.getElementById("wa-arch-q").value.trim(); ui.waArchiveChat = ""; loadWaArchiveChats(); render(); });
+      document.querySelectorAll("[data-wa-chat]").forEach((b) => b.addEventListener("click", () => loadWaArchiveChat(b.dataset.waChat)));
+      const all = document.getElementById("wa-arch-all");
+      if (all) all.addEventListener("click", () => { ui.waArchiveQ = ""; ui.waArchiveChat = ""; loadWaArchiveChats(); render(); });
+      const back = document.getElementById("wa-arch-back");
+      if (back) back.addEventListener("click", () => { ui.waArchiveChat = ""; render(); });
+      const box = document.getElementById("wa-arch-msgs");
+      if (box) box.scrollTop = box.scrollHeight;
+    });
+    const msgs = ui.waArchiveMsgs;
+    const hora = (ts) => new Date(ts).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+    return pageShell(
+      "Mensajes de WhatsApp",
+      "Copia de todos los chats del WhatsApp vinculado por QR (individuales y grupos, recibidos y enviados). Se guardan 90 días: si bloquean el número, acá queda todo.",
+      `<button class="btn ghost" type="button" data-route="configuracion">Vinculación</button>`,
+      `${ui.waArchiveError ? `<div class="alert warn">${escapeHtml(ui.waArchiveError)}</div>` : ""}
+      <form id="wa-arch-search" class="page-actions" style="margin-bottom:12px"><input id="wa-arch-q" placeholder="Buscar por cliente, nombre, número o texto" value="${escapeAttr(ui.waArchiveQ || "")}" style="flex:1;min-width:220px" /><button class="btn primary" type="submit">Buscar</button>${ui.waArchiveQ ? `<button class="btn ghost" type="button" id="wa-arch-all">Ver todos</button>` : ""}</form>
+      <div class="wa-arch ${ui.waArchiveChat ? "con-chat" : ""}">
+        <div class="panel wa-arch-list">
+          ${ui.waArchiveLoading && !chats.length ? `<p class="muted">Cargando...</p>` : chats.length ? chats.map((c) => `<button type="button" class="wa-arch-chat ${c.chat_id === ui.waArchiveChat ? "active" : ""}" data-wa-chat="${escapeAttr(c.chat_id)}">
+            <span class="wa-arch-title">${titulo(c)}</span>
+            <span class="muted wa-arch-last">${c.last_from_me ? "Nosotros: " : ""}${escapeHtml(String(c.last_text || "").slice(0, 80))}</span>
+            <span class="muted wa-arch-meta">${hora(c.last_ts)} · ${c.total} mensaje(s)</span>
+          </button>`).join("") : `<p class="muted">${ui.waArchiveQ ? "Nada coincide con la búsqueda." : "Todavía no hay mensajes. Se guardan desde que el WhatsApp se vincula por QR (Configuración)."}</p>`}
+        </div>
+        <div class="panel wa-arch-conv">
+          ${!ui.waArchiveChat ? `<p class="muted">Elegí un chat para ver la conversación.</p>` : `
+            <div class="page-actions" style="justify-content:space-between;margin-bottom:8px"><strong>${actual ? titulo(actual) : escapeHtml(ui.waArchiveChat)}</strong><button class="btn small ghost wa-arch-back" type="button" id="wa-arch-back">&larr; Chats</button></div>
+            <div class="wa-arch-msgs" id="wa-arch-msgs">${msgs === null ? `<p class="muted">Cargando...</p>` : msgs.map((m) => `<div class="wa-arch-msg ${m.from_me ? "mine" : ""} ${q && String(m.text || "").toLowerCase().includes(q) ? "hit" : ""}">
+              ${!m.from_me && m.is_group ? `<div class="wa-arch-sender">${escapeHtml(m.sender_name || formatWaPhone(m.sender_phone))}</div>` : ""}
+              <div>${escapeHtml(m.text || "")}</div><div class="wa-arch-time">${hora(m.ts)}</div>
+            </div>`).join("")}</div>`}
+        </div>
+      </div>`,
+      "whatsapp-mensajes"
+    );
   }
 
   // ---- Vincular telefonos de clientes desde la agenda ----

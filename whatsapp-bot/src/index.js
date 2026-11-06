@@ -118,7 +118,7 @@ const inboxFlow = createInboxFlow({ wa, erp, ai, getProductNames, channel: "clou
 // Mismo flujo para el WhatsApp vinculado por QR, contestando por ese mismo WhatsApp.
 const linkedWa = { sendText: (to, t) => linked.sendText(to, t), notifyTeam: (t) => wa.notifyTeam(t), notifyOwner: (t) => wa.notifyOwner(t) };
 const linkedFlow = createInboxFlow({ wa: linkedWa, erp, ai, getProductNames, channel: "linked" });
-linked.init((msg) => handleMessage(msg, linkedFlow, linkedWa));
+linked.init((msg) => handleMessage(msg, linkedFlow, linkedWa), (messages) => erp.archive(messages));
 
 async function handleMessage(msg, flowIn, waIn) {
   const inbox = flowIn || inboxFlow;

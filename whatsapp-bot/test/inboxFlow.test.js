@@ -96,3 +96,26 @@ test("contactos del WhatsApp vinculado: guarda nombre de agenda por número, ign
   linked.addContacts([{ id: "5493871234567@s.whatsapp.net", notify: "Juancito" }]);
   assert.deepEqual(linked.listContacts(), [{ phone: "5493871234567", name: "Vivré Juan", notify: "Juancito" }]);
 });
+
+test("archivo: guarda chats individuales y grupos, recibidos y enviados, con fotos y audios; ignora estados", async () => {
+  process.env.WA_LINKED_DIR = require("path").join(require("os").tmpdir(), "wa-arch-test-" + Date.now(), "auth");
+  delete require.cache[require.resolve("../src/linked")];
+  const linked = require("../src/linked");
+  const lotes = [];
+  linked.init(() => {}, async (l) => { lotes.push(...l); });
+  linked.addContacts([{ id: "5493871234567@s.whatsapp.net", name: "Vivré Juan" }]);
+  const ts = Math.floor(Date.now() / 1000);
+  await linked.archiveMessage({ key: { id: "A1", remoteJid: "5493871234567@s.whatsapp.net" }, pushName: "Juan", messageTimestamp: ts, message: { conversation: "2 kg de papa" } });
+  await linked.archiveMessage({ key: { id: "A2", remoteJid: "5493871234567@s.whatsapp.net", fromMe: true }, messageTimestamp: ts, message: { extendedTextMessage: { text: "Dale, anotado" } } });
+  await linked.archiveMessage({ key: { id: "A3", remoteJid: "120363@g.us", participant: "5493879999999@s.whatsapp.net" }, pushName: "Pedro", messageTimestamp: ts, message: { imageMessage: { caption: "lista de hoy" } } });
+  await linked.archiveMessage({ key: { id: "A4", remoteJid: "status@broadcast" }, messageTimestamp: ts, message: { conversation: "estado" } });
+  await linked.archiveMessage({ key: { id: "A5", remoteJid: "5493871234567@s.whatsapp.net" }, messageTimestamp: ts, message: { audioMessage: {} } });
+  await linked.flushArchive();
+  assert.deepEqual(lotes.map((m) => [m.waId, m.chatId, m.isGroup, m.fromMe, m.type, m.text, m.chatName, m.senderName]), [
+    ["A1", "5493871234567", false, false, "texto", "2 kg de papa", "Vivré Juan", "Juan"],
+    ["A2", "5493871234567", false, true, "texto", "Dale, anotado", "Vivré Juan", ""],
+    ["A3", "120363@g.us", true, false, "imagen", "[imagen] lista de hoy", "", "Pedro"],
+    ["A5", "5493871234567", false, false, "audio", "[audio]", "Vivré Juan", ""]
+  ]);
+  assert.equal(lotes[2].senderPhone, "5493879999999");
+});
