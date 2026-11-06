@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v99";
+  const APP_VERSION = "v100";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -21326,7 +21326,7 @@
       <div><div class="muted">Texto guardado en el pedido</div><pre>${escapeHtml(f.T || "(el pedido no se cargó con texto)")}</pre></div></div>
       ${f.unmatched.length ? `<p><strong>Renglones del mensaje que no se reconocen:</strong> ${f.unmatched.map((u) => `"${escapeHtml(u)}"`).join(", ")}</p>` : ""}
       ${f.difAlias.length && f.explica ? `<p style="margin-bottom:4px"><strong>Renglón por renglón, cómo lo lee hoy el sistema:</strong></p>
-        <table class="alias-check-table"><thead><tr><th>Escribió</th><th>El sistema entiende</th><th></th></tr></thead><tbody>${f.explica.filas.map((x) => `<tr class="ac-${x.estado}"><td>${escapeHtml(x.line)}</td><td>${x.entiende ? escapeHtml(x.entiende) : "<em>—</em>"}</td><td>${x.estado === "ok" ? "&#9989;" : (x.estado === "cant" ? "&#9888;&#65039; " : "&#10060; ") + escapeHtml(x.detalle) + (tipo === "alias" ? `<div class="ac-fix"><select data-ac-line="${escapeAttr(f.order.id)}" data-ac-text="${escapeAttr(x.line)}"><option value="">Este renglón es...</option>${(f.order.items || []).map((it) => { const p = getProduct(it.productId); return `<option value="${escapeAttr(it.productId)}">${escapeHtml(p ? p.name : it.productName || it.productId)}${it.note ? " (" + escapeHtml(it.note) + ")" : ""}</option>`; }).join("")}</select></div>` : "")}</td></tr>`).join("")}</tbody></table>
+        <table class="alias-check-table"><thead><tr><th>Escribió</th><th>El sistema entiende</th><th></th></tr></thead><tbody>${f.explica.filas.map((x) => `<tr class="ac-${x.estado}"><td>${escapeHtml(x.line)}</td><td>${x.entiende ? escapeHtml(x.entiende) : "<em>—</em>"}</td><td>${x.estado === "ok" ? "&#9989;" : (x.estado === "cant" ? "&#9888;&#65039; " : "&#10060; ") + escapeHtml(x.detalle) + (tipo === "alias" ? `<div class="ac-fix"><select data-ac-line="${escapeAttr(f.order.id)}" data-ac-text="${escapeAttr(x.line)}"><option value="">Este renglón es...</option><option value="__nota">Una aclaración (nota del producto anterior)</option><option value="__ignorar">Ignorar este renglón (no es un producto)</option>${(f.order.items || []).map((it) => { const p = getProduct(it.productId); return `<option value="${escapeAttr(it.productId)}">${escapeHtml(p ? p.name : it.productName || it.productId)}${it.note ? " (" + escapeHtml(it.note) + ")" : ""}</option>`; }).join("")}</select></div>` : "")}</td></tr>`).join("")}</tbody></table>
         ${f.explica.faltan.length ? `<p style="margin:4px 0"><strong>En el pedido, pero no sale del mensaje:</strong> ${f.explica.faltan.map(escapeHtml).join(", ")}</p>` : ""}` : ""}
       ${f.difEditado.length ? `<p style="margin-bottom:4px"><strong>Qué cambió entre el texto cargado y el pedido de hoy:</strong></p><ul class="order-parse-list">${describeOrderChanges(f.difEditado).map((x) => `<li>${x}</li>`).join("")}</ul>
         <p class="muted" style="font-size:12px;margin:2px 0 0">El mensaje del cliente da lo mismo que el texto cargado, así que los alias están bien. Revisá que el cambio haya sido a propósito (no había, se reemplazó, el cliente pidió otra cosa después).</p>` : ""}
@@ -21402,6 +21402,17 @@
       if (again) again.addEventListener("click", () => openAliasCheck());
       document.querySelectorAll("[data-ac-line]").forEach((sel) => sel.addEventListener("change", () => {
         if (!sel.value) return;
+        if (sel.value === "__nota" || sel.value === "__ignorar") {
+          const clean = normalizeText(stripOrderCourtesy(sel.dataset.acText));
+          if (!clean || /\d/.test(clean)) { alert("Ese renglón tiene una cantidad: no se puede marcar como aclaración ni ignorarlo. Elegí el producto o usá \"No es error de alias\"."); sel.value = ""; return; }
+          const key = sel.value === "__nota" ? "orderNoteLines" : "orderIgnoreLines";
+          if (!confirm((sel.value === "__nota" ? "De ahora en adelante, \"" + sel.dataset.acText + "\" se carga como nota del producto anterior" : "De ahora en adelante se ignora el renglón \"" + sel.dataset.acText + "\"") + " (para todos los clientes). ¿Seguro?")) { sel.value = ""; return; }
+          state.appSettings = state.appSettings || {};
+          state.appSettings[key] = Array.from(new Set([...(state.appSettings[key] || []), clean]));
+          saveState();
+          sel.closest("td").innerHTML = "&#9989; " + (sel.value === "__nota" ? "Se carga como nota" : "Se ignora");
+          return;
+        }
         const o = getOrder(sel.dataset.acLine);
         const pa = o ? parseOrderLine(sel.dataset.acText, o.clientId) : null;
         const alias = pa ? String(pa.name || "").split(/\s+/).filter((w) => !ALIAS_NOTE_WORDS.has(normalizeText(w))).join(" ").trim() : "";
@@ -22485,6 +22496,16 @@
   const COURTESY_START = /^[\s,.;:!¡¿?~*-]*(hola+|holis|buen[oa]s+(?:\s+(?:d[ií]as?|tardes?|noches?))?|buen\s+d[ií]a|qu[eé]\s+tal(?:\s+c[oó]mo\s+(?:est[aá]s|andas|va))?|c[oó]mo\s+(?:est[aá]s|andas|va|andan|est[aá]n)|todo\s+bien|espero\s+(?:que\s+)?(?:est[eé]s|anden|est[eé]n)\s+bien|te\s+(?:paso|mando|dejo|env[ií]o)(?:\s+(?:el|mi|los))?(?:\s+pedidos?)?|(?:ac[aá]\s+(?:va|est[aá])\s+)?(?:el\s+|mi\s+)?pedidos?(?:\s+(?:de\s+hoy|para\s+(?:ma[ñn]ana|hoy|el\s+\w+)))?|para\s+ma[ñn]ana|por\s+favor|porfa|xfa)(?=$|[\s,.;:!¡¿?~*-])[\s,.;:!¡¿?~*-]*/i;
   const COURTESY_END = /[\s,.;:!¡¿?~*-]*(?:(?:muchas|mil)\s+)?(gracias+|graciass*|saludos|slds|abrazos?|besos?|bendiciones|por\s+favor|porfa|xfa|x\s+favor|eso\s+es\s+todo|es\s+todo|nada\s+m[aá]s|nada\s+mas|buen\s+d[ií]a|buenas\s+(?:noches|tardes)|que\s+tengas?\s+(?:buen|lindo)\s+(?:d[ií]a|finde|fin\s+de\s+semana|noche|descanso)|hasta\s+ma[ñn]ana|hasta\s+luego|chau)[\s,.;:!¡¿?~*-]*$/i;
 
+  // Aclaraciones del producto anterior ("en lo posible que no esten secos", "que sean maduras"): van a la
+  // nota de ese producto, no son un producto. Tambien las que alguien marco "Es una aclaración".
+  const NOTE_LINE_RE = /(^|\s)(en lo posible|que no (esten|este|sean|sea|vengan|venga)|que (esten|este|sean|sea|vengan|venga)|no muy|no tan|bien (maduro|madura|maduros|maduras|verde|verdes|firme|firmes)|los mas|las mas|de los (buenos|grandes|chicos)|de las (buenas|grandes|chicas)|sin (golpes|manchas|semillas)|por favor que|si (se puede|puede|hay))(\s|$)/;
+  function isOrderNoteLine(line) {
+    const clean = normalizeText(line);
+    if (!clean || /\d/.test(clean)) return false;
+    const notas = (state.appSettings && state.appSettings.orderNoteLines) || [];
+    return notas.includes(clean) || NOTE_LINE_RE.test(clean);
+  }
+
   function stripOrderCourtesy(line) {
     let t = String(line || "").replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}]/gu, " ").replace(/\s+/g, " ").trim();
     for (let i = 0; i < 6; i += 1) {
@@ -22590,6 +22611,7 @@
     });
     const renglones = [];
     orderTextLines(text).forEach((line) => {
+      if (isOrderNoteLine(line)) return;
       const pa = parseOrderLine(line, clientId);
       const r = parseWhatsappOrder(line, clientId);
       const it = r.items[0];
@@ -22642,6 +22664,7 @@
     const pendientes = new Map();
     (order.items || []).forEach((it) => pendientes.set(it.productId, (pendientes.get(it.productId) || 0) + Number(it.quantity || 0)));
     const filas = orderTextLines(text).map((line) => {
+      if (isOrderNoteLine(line)) return { line, entiende: "aclaración (nota del producto anterior)", estado: "ok", detalle: "" };
       const r = parseWhatsappOrder(line, clientId);
       if (!r.items.length) return { line, entiende: "", estado: "no", detalle: "no lo reconoce" };
       const partes = r.items.map((it) => {
@@ -22711,6 +22734,10 @@
       if (!line) return;
       if (shouldIgnoreOrderTextLine(line)) return;
       if (shouldIgnoreDetectedClientLine(line, clientId)) return;
+      if (isOrderNoteLine(line)) {
+        if (items.length) items[items.length - 1].note = [items[items.length - 1].note, line.trim()].filter(Boolean).join(" - ");
+        return;
+      }
       const parsed = parseOrderLine(line, clientId);
       if (!parsed) {
         unmatched.push(line);
@@ -22805,8 +22832,61 @@
       .replace(/^(\s*[-*\u2022]?\s*)(un|una)\s+(?!poco\b|poquito\b|par\b)(?=[a-zA-Z\u00c0-\u017f])/i, "$11 ");
   }
 
+  // Varios productos en un mismo renglon ("Pedido cocina   Papas 4 bolsas Tomates 5kg  C. Verdeo  2 atados
+  // Apio  Perejil"): se corta en los espacios dobles y donde, despues de un producto con su cantidad,
+  // empieza otro con mayuscula. Solo si el renglon arranca por el nombre ("Papas 4 bolsas"), para no
+  // romper "2 kg Tomate Perita".
+  const RUN_UNIT_TOKEN = /^(kgs?|kilos?|k|grs?|gramos|bolsas?|atados?|cajon(es)?|cajas?|jaulas?|unidades?|unid|uni|u|docenas?|doc|maples?|bandejas?|plantas?|raiz|raices|piezas?)$/i;
+  function splitRunOnOrderLine(line) {
+    const crudos = String(line || "").split(/\s{2,}|\t+/).map((x) => x.trim()).filter(Boolean);
+    // "C. Verdeo  2 atados Apio": la cantidad que quedo sola despues de un espacio doble es del
+    // producto de antes ("C. Verdeo 2 atados"); lo que sigue es otro producto ("Apio").
+    const trozos = [];
+    crudos.forEach((t) => {
+      const prev = trozos[trozos.length - 1];
+      const m = t.match(/^(\d+(?:[.,]\d+)?(?:\/\d+)?\s*(?:[a-záéíóúñ.]+)?)(?:\s+(.*))?$/i);
+      if (prev !== undefined && !/\d/.test(prev) && m) {
+        const [cant, resto] = [m[1], m[2] || ""];
+        const unidadOk = !/[a-z]/i.test(cant.replace(/^[\d.,/\s]+/, "")) || RUN_UNIT_TOKEN.test(cant.replace(/^[\d.,/\s]+/, "").replace(/\.$/, ""));
+        if (unidadOk) {
+          trozos[trozos.length - 1] = prev + " " + cant.trim();
+          if (resto.trim()) trozos.push(resto.trim());
+          return;
+        }
+      }
+      trozos.push(t);
+    });
+    const out = [];
+    trozos.forEach((trozo) => {
+      const tokens = trozo.split(/\s+/);
+      if (tokens.length < 4 || !/[a-záéíóúñ]/i.test(tokens[0]) || /^\d/.test(tokens[0])) { out.push(trozo); return; }
+      let actual = [];
+      let tieneNombre = false;
+      let cerroCantidad = false; // termino en "cantidad + unidad" ("4 bolsas", "5kg")
+      let previoNumero = false;
+      tokens.forEach((t) => {
+        const limpio = t.replace(/[.,]$/, "");
+        const fusionado = /^\d+([.,]\d+)?(kgs?|k|grs?|gr)$/i.test(limpio);
+        const esNumero = /^\d/.test(t);
+        const esUnidad = RUN_UNIT_TOKEN.test(limpio);
+        const empiezaOtro = /^[A-ZÁÉÍÓÚÑ]([a-záéíóúñ]|\.)/.test(t) && !esUnidad;
+        if (empiezaOtro && tieneNombre && cerroCantidad) {
+          out.push(actual.join(" "));
+          actual = [];
+          tieneNombre = false;
+        }
+        actual.push(t);
+        cerroCantidad = fusionado || (esUnidad && previoNumero);
+        previoNumero = esNumero && !fusionado;
+        if (!esNumero && !esUnidad) tieneNombre = true;
+      });
+      if (actual.length) out.push(actual.join(" "));
+    });
+    return out.length ? out : [line];
+  }
+
   function expandWhatsappOrderLines(text) {
-    const rawLines = String(text || "").split(/\r?\n/)
+    const rawLines = String(text || "").split(/\r?\n/).flatMap(splitRunOnOrderLine)
       .map((line) => articleQuantityToNumber(String(line || ""))
         .replace(UNIT_ABBREVIATIONS, "$1$2")
         // La unidad puede venir pegada al numero ("1k y medio"): sin contemplarla, el "y medio"
@@ -22819,7 +22899,8 @@
       const protectedLine = line
         .replace(/(\d)\s*,\s*(\d)/g, "$1\u0001$2")
         .replace(/(\d)\s*\.\s*(\d)/g, "$1\u0002$2")
-        .replace(/\.\s+(?!\()/g, ", ");
+        // ". " separa productos, salvo una inicial abreviada ("C. Verdeo").
+        .replace(/(\S*)\.\s+(?!\()/g, (m, w) => (/^[a-záéíóúñ]$/i.test(w) ? w + ". " : w + ", "));
       const commaParts = protectedLine
         .replace(/[;]+/g, ",")
         .split(/\s*,+\s*/)
@@ -23557,6 +23638,12 @@
   function shouldIgnoreOrderTextLine(line) {
     const clean = normalizeText(line);
     if (!clean) return true;
+    // Titulos de seccion: "Pedido barra", "Pedido cocina", "Barra:", "Cocina".
+    if (/^(pedidos?\s+(de\s+|para\s+)?(la\s+|el\s+)?)?(barra|cocina|salon|local|bar|resto|restaurante|cafeteria|kiosco|deposito|sucursal(\s+\d+)?)$/.test(clean)) return true;
+    if (/^pedidos?\s+[a-z]+$/.test(clean) && !/\d/.test(clean)) return true;
+    // Renglones que alguien marco "Ignorar este renglón" en Comprobar alias.
+    const ignorar = (state.appSettings && state.appSettings.orderIgnoreLines) || [];
+    if (ignorar.includes(clean)) return true;
     // Saludo o presentacion sin ninguna cantidad ("hola buenas para mañna pedimos", "te paso el
     // pedido de hoy"): no es un producto, aunque tenga errores de tipeo que el limpiador no conoce.
     if (!/\d/.test(clean) && !/(^|\s)(un|una|medio|media|par|cuarto)(\s|$)/.test(clean) && /(^|\s)(hola+|buen[oa]s+|buen|dias?|tardes?|noches?|pedimos|pedido|pedidos|pido|pedir|hacerte|haceme|ma[nñ]+a?n?a|manana|hoy|gracias|porfa|favor|lunes|martes|miercoles|jueves|viernes|sabado|domingo|semana|entrega|entregar)(\s|$)/.test(clean)) return true;
