@@ -28,8 +28,8 @@ async function erpRequest(method, path, body) {
 }
 
 // Busca el cliente del ERP por telefono de WhatsApp.
-function findClientByPhone(phone) {
-  return erpRequest("GET", "/external/clients/by-phone/" + encodeURIComponent(phone));
+function findClientByPhone(phone, group) {
+  return erpRequest("GET", "/external/clients/by-phone/" + encodeURIComponent(phone) + (group ? "?group=" + encodeURIComponent(group) : ""));
 }
 
 // Pedido de hoy del cliente (si existe).

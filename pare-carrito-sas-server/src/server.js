@@ -12,7 +12,7 @@ const jwt = require("jsonwebtoken");
 const { billingConfig, nowArt, computeDueInvoices, runBilling, regeneratePdf, emitCreditNote, creditNoteTypeFor } = require("./billing");
 const { controlDailySummary, controlPaymentChecks, parseBankText, parseBankJson } = require("./control");
 const { repairAccounting, repairSummary, isOpeningRow, alignChangedOrderSaldos } = require("./dataRepair");
-const { matchClients, phoneSuggestions, normalizeArPhone } = require("./whatsappInbox");
+const { matchClients, phoneSuggestions, groupSuggestions, normalizeArPhone } = require("./whatsappInbox");
 const { dailySalesSummary, dailySalesHtml, dailySalesLine, archiveEmailHtml } = require("./dailyReport");
 const { syncSheetsFromStateDiff, pushPrecio } = require("./sheetsSync");
 
@@ -3530,7 +3530,9 @@ app.get("/external/clients/by-phone/:phone", externalAuth, async (req, res) => {
   if (!stored) return res.status(404).json({ error: "Sin datos." });
   const digits = String(req.params.phone || "").replace(/\D/g, "");
   const tail = digits.slice(-8);
-  const client = (stored.data.clients || []).find((c) => {
+  // Grupo de WhatsApp vinculado a un cliente (el grupo "Factory" es del cliente Factory).
+  const group = String(req.query.group || "");
+  const client = group ? (stored.data.clients || []).find((c) => c && Array.isArray(c.waGroups) && c.waGroups.includes(group)) : (stored.data.clients || []).find((c) => {
     const candidates = [c.phone].concat(Array.isArray(c.phones) ? c.phones : []);
     return candidates.some((ph) => {
       const cd = String(ph || "").replace(/\D/g, "");
@@ -3718,9 +3720,33 @@ app.post("/whatsapp/linked/:action", authenticate, requireRole("manager", "admin
 
 // Vincular telefonos a clientes desde la agenda (del WhatsApp vinculado o de un archivo .vcf). El
 // gerente revisa las sugerencias antes de guardar; los contactos que no son clientes no se guardan.
+// Chats guardados con el identificador oculto de WhatsApp (@lid): cuando el bot ya sabe el numero real,
+// se pasan a ese numero para que se puedan vincular con el cliente.
+async function remapArchiveLids(lids) {
+  const pares = (Array.isArray(lids) ? lids : []).map((x) => [String(x.lid || "").replace(/\D/g, ""), String(x.phone || "").replace(/\D/g, "")]).filter(([l, ph]) => l && ph && l !== ph);
+  let n = 0;
+  for (const [lid, phone] of pares) {
+    // El mismo mensaje puede estar guardado con los dos (historial + en vivo): se deja uno solo.
+    await pool.query("DELETE FROM whatsapp_archive a WHERE a.chat_id = $1 AND EXISTS (SELECT 1 FROM whatsapp_archive b WHERE b.chat_id = $2 AND b.wa_id = a.wa_id)", [lid, phone]);
+    const a = await pool.query("UPDATE whatsapp_archive SET chat_id = $2 WHERE chat_id = $1 AND NOT is_group", [lid, phone]);
+    const b = await pool.query("UPDATE whatsapp_archive SET sender_phone = $2 WHERE sender_phone = $1", [lid, phone]);
+    n += a.rowCount + b.rowCount;
+  }
+  return n;
+}
+
+async function remapLidsFromBot() {
+  try {
+    const r = await botRequest("/linked/contacts");
+    if (r && r.ok && Array.isArray(r.lids) && r.lids.length) return await remapArchiveLids(r.lids);
+  } catch (e) { /* el bot puede no estar */ }
+  return 0;
+}
+
 app.get("/whatsapp/linked/contacts", authenticate, requireRole("manager", "admin"), async (req, res) => {
   const r = await botRequest("/linked/contacts");
   if (!r.ok) return res.status(502).json({ error: r.error || "El bot no respondió." });
+  await remapArchiveLids(r.lids).catch((e) => console.error("No se pudieron traducir los chats ocultos:", e.message));
   const stored = await loadStateData();
   res.json({ ok: true, connected: !!r.connected, total: (r.contacts || []).length, ...phoneSuggestions(stored ? stored.data.clients || [] : [], r.contacts || []) });
 });
@@ -3784,7 +3810,9 @@ app.post("/external/wa-archive", externalAuth, async (req, res) => {
 function clientNameByPhone(data) {
   const map = new Map();
   (data.clients || []).forEach((c) => [c && c.phone].concat(c && Array.isArray(c.phones) ? c.phones : []).forEach((ph) => { const t = phoneDigits(ph).slice(-8); if (t.length === 8 && !map.has(t)) map.set(t, c.id + " - " + (c.name || "")); }));
-  return (phone) => map.get(phoneDigits(phone).slice(-8)) || "";
+  const grupos = new Map();
+  (data.clients || []).forEach((c) => (c && Array.isArray(c.waGroups) ? c.waGroups : []).forEach((g) => grupos.set(String(g), c.id + " - " + (c.name || ""))));
+  return (phone) => grupos.get(String(phone)) || (String(phone).endsWith("@g.us") ? "" : map.get(phoneDigits(phone).slice(-8)) || "");
 }
 
 // Quien ve Mensajes de WhatsApp: gerente y admin siempre; empleados y contador segun la lista de
@@ -3801,6 +3829,36 @@ async function canSeeWaArchive(req, res, next) {
   res.status(403).json({ error: "No tenés acceso a los mensajes de WhatsApp. Lo habilita el gerente en Configuración." });
 }
 
+// Grupos de WhatsApp (del archivo) y a que cliente pertenecen.
+app.get("/whatsapp/groups", authenticate, requireRole("manager", "admin"), async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT chat_id, max(chat_name) FILTER (WHERE chat_name <> '') AS chat_name, count(*)::int AS total
+     FROM whatsapp_archive WHERE is_group GROUP BY chat_id ORDER BY max(ts) DESC LIMIT 500`);
+  const stored = await loadStateData();
+  res.json({ ok: true, total: rows.length, ...groupSuggestions(stored ? stored.data.clients || [] : [], rows.map((r) => ({ chatId: r.chat_id, name: r.chat_name || "", total: r.total }))) });
+});
+
+// links: [{ chatId, clientId }]; clientId vacio desvincula el grupo.
+app.post("/clients/link-groups", authenticate, requireRole("manager", "admin"), async (req, res) => {
+  const links = (Array.isArray(req.body && req.body.links) ? req.body.links : []).map((l) => ({ chatId: String(l.chatId || ""), clientId: String(l.clientId || "") })).filter((l) => /@g\.us$/.test(l.chatId));
+  if (!links.length) return res.status(400).json({ error: "No hay grupos para vincular." });
+  const out = await withStateExt((data) => {
+    let n = 0;
+    const stamp = new Date().toISOString();
+    for (const l of links) {
+      (data.clients || []).forEach((c) => {
+        if (c && Array.isArray(c.waGroups) && c.waGroups.includes(l.chatId) && c.id !== l.clientId) { c.waGroups = c.waGroups.filter((g) => g !== l.chatId); c.updatedAt = stamp; n += 1; }
+      });
+      const client = l.clientId ? (data.clients || []).find((c) => c && c.id === l.clientId) : null;
+      if (client && !(client.waGroups || []).includes(l.chatId)) { client.waGroups = (client.waGroups || []).concat([l.chatId]); client.updatedAt = stamp; n += 1; }
+    }
+    return { ok: true, changed: n };
+  });
+  if (out.error) return res.status(out.status || 500).json({ error: out.error });
+  console.log("Grupos de WhatsApp vinculados a clientes: " + links.length + " por " + req.user.username + ".");
+  res.json(out);
+});
+
 app.get("/whatsapp/archive/chats", authenticate, requireRole("manager", "admin", "employee", "contador"), canSeeWaArchive, async (req, res) => {
   const q = String(req.query.q || "").trim();
   const params = [];
@@ -3812,18 +3870,48 @@ app.get("/whatsapp/archive/chats", authenticate, requireRole("manager", "admin",
      FROM whatsapp_archive ${where} GROUP BY chat_id ORDER BY max(ts) DESC LIMIT 300`, params);
   const stored = await loadStateData();
   const cliente = clientNameByPhone(stored ? stored.data : {});
-  res.json({ ok: true, chats: rows.map((r) => ({ ...r, client: r.is_group ? "" : cliente(r.chat_id) })) });
+  res.json({ ok: true, chats: rows.map((r) => ({ ...r, client: cliente(r.chat_id) })) });
 });
 
 // Mensajes recibidos de chats individuales entre dos fechas (para comprobar los alias contra los pedidos).
 app.get("/whatsapp/archive/range", authenticate, requireRole("manager", "admin"), async (req, res) => {
   const from = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.from || "")) ? String(req.query.from) : new Date(Date.now() - 31 * 86400000).toISOString().slice(0, 10);
   const to = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.to || "")) ? String(req.query.to) : new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+  await remapLidsFromBot();
   const { rows } = await pool.query(
-    `SELECT chat_id, text, ts FROM whatsapp_archive WHERE NOT is_group AND NOT from_me AND msg_type = 'texto'
+    `SELECT chat_id, is_group, text, ts FROM whatsapp_archive WHERE NOT from_me AND msg_type = 'texto'
      AND ts >= ($1::date - interval '2 days') AND ts < ($2::date + interval '1 day') ORDER BY chat_id, ts LIMIT 50000`, [from, to]);
   const total = await pool.query("SELECT count(*)::int AS n, min(ts) AS desde FROM whatsapp_archive");
   res.json({ ok: true, messages: rows, archivo: total.rows[0] });
+});
+
+// Responder desde Mensajes de WhatsApp: lo escribe una persona y sale por el WhatsApp vinculado (aunque
+// el bot este en "solo recibir", que apaga solo las respuestas automaticas). Queda en el archivo con el
+// nombre de quien lo escribio.
+const waReplyTimes = new Map();
+app.post("/whatsapp/archive/reply", authenticate, requireRole("manager", "admin", "employee"), canSeeWaArchive, async (req, res) => {
+  const chat = String((req.body && req.body.chat) || "").trim();
+  const text = String((req.body && req.body.text) || "").trim();
+  if (!chat || !text) return res.status(400).json({ error: "Falta el chat o el texto." });
+  if (text.length > 4000) return res.status(400).json({ error: "El mensaje es muy largo." });
+  if (!/^\d{6,20}$/.test(chat) && !/^[\d-]+@g\.us$/.test(chat)) return res.status(400).json({ error: "Ese chat no se puede responder desde acá." });
+  const { rows } = await pool.query("SELECT chat_name, is_group FROM whatsapp_archive WHERE chat_id = $1 ORDER BY ts DESC LIMIT 1", [chat]);
+  if (!rows.length) return res.status(404).json({ error: "Chat no encontrado." });
+  // Freno contra envios en masa (cuidar el numero): hasta 20 por minuto por usuario.
+  const ahora = Date.now();
+  const recientes = (waReplyTimes.get(req.user.id) || []).filter((t) => t > ahora - 60000);
+  if (recientes.length >= 20) return res.status(429).json({ error: "Demasiados mensajes seguidos. Esperá un minuto." });
+  recientes.push(ahora);
+  waReplyTimes.set(req.user.id, recientes);
+  const r = await botRequest("/send", { to: chat, text, channel: "linked", manual: true });
+  if (!r.ok) return res.status(r.status === 409 ? 409 : 502).json({ error: r.error || "No se pudo enviar." });
+  const quien = String(req.user.name || req.user.username || "").slice(0, 80) + " (sistema)";
+  await pool.query(
+    `INSERT INTO whatsapp_archive (wa_id, chat_id, chat_name, is_group, sender_phone, sender_name, from_me, msg_type, text, ts)
+     VALUES ($1,$2,$3,$4,'',$5,TRUE,'texto',$6,now()) ON CONFLICT (chat_id, wa_id) DO NOTHING`,
+    [String(r.id || "SIS-" + ahora), chat, rows[0].chat_name || "", !!rows[0].is_group, quien, text]);
+  console.log("WhatsApp: respuesta manual de " + req.user.username + " a " + (rows[0].is_group ? "un grupo" : "..." + chat.slice(-4)) + ".");
+  res.json({ ok: true });
 });
 
 app.get("/whatsapp/archive/messages", authenticate, requireRole("manager", "admin", "employee", "contador"), canSeeWaArchive, async (req, res) => {
@@ -4020,6 +4108,25 @@ app.post("/external/compra-hoy", externalAuth, async (req, res) => {
   res.json(out);
 });
 
+// Avisos a clientes por el WhatsApp vinculado por QR (mientras Meta no aprueba el bot oficial). Se
+// elige en Configuracion cuales salen por ahi; si el vinculado no esta conectado, va por el bot oficial.
+const LINKED_NOTICE_DEFAULTS = { cambioPedido: true, feriado: true, subaPrecio: true, mora: false };
+function linkedNoticeOn(settings, kind) {
+  const m = (settings && settings.waLinkedNotices) || {};
+  return m[kind] === undefined ? !!LINKED_NOTICE_DEFAULTS[kind] : !!m[kind];
+}
+async function linkedNoticeReady(settings, kind) {
+  if (!linkedNoticeOn(settings, kind)) return false;
+  const r = await botRequest("/linked/status");
+  return !!(r.ok && r.status === "conectado");
+}
+async function sendLinkedNotice(phone, text) {
+  const r = await botRequest("/send", { to: String(phone).replace(/\D/g, ""), text, channel: "linked", notice: true });
+  if (!r.ok) console.warn("Aviso por WhatsApp vinculado a ..." + String(phone).slice(-4) + ": " + r.error);
+  return !!r.ok;
+}
+const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
+
 // Aviso de feriado: junta los telefonos de clientes activos y los manda por el bot (plantilla).
 app.post("/clients/holiday-broadcast", authenticate, requireRole("manager", "admin"), async (req, res) => {
   const botUrl = process.env.BOT_BROADCAST_URL || "";
@@ -4030,8 +4137,9 @@ app.post("/clients/holiday-broadcast", authenticate, requireRole("manager", "adm
   const d = stored.data || {};
   const settings = d.appSettings || {};
   if (whatsappOff(settings)) return res.json({ ok: true, skipped: "whatsapp desactivado" });
+  const porVinculado = await linkedNoticeReady(settings, "feriado");
   const templateName = settings.holidayTemplateName || "";
-  if (!templateName) return res.status(400).json({ error: "Configura el nombre de la plantilla de Meta en Configuracion." });
+  if (!templateName && !porVinculado) return res.status(400).json({ error: "Configura el nombre de la plantilla de Meta en Configuracion (o vinculá el WhatsApp por QR)." });
   const lang = settings.holidayTemplateLang || "es";
   const date = String((req.body || {}).date || "");
   const name = String((req.body || {}).name || "");
@@ -4046,6 +4154,24 @@ app.post("/clients/holiday-broadcast", authenticate, requireRole("manager", "adm
   });
   const unique = Array.from(new Set(numbers));
   if (!unique.length) return res.json({ ok: true, sent: 0, failed: 0, note: "No hay numeros cargados." });
+  if (porVinculado) {
+    // Por el WhatsApp comun: solo a los clientes que escribieron en los ultimos 60 dias (no a toda la
+    // agenda) y de a uno, con pausas largas, para no parecer un envio masivo.
+    const { rows } = await pool.query("SELECT DISTINCT right(chat_id, 8) AS t FROM whatsapp_archive WHERE NOT is_group AND NOT from_me AND ts > now() - interval '60 days'");
+    const activos = new Set(rows.map((r) => r.t));
+    const vistos = new Set();
+    const destino = unique.filter((n) => { const t = n.slice(-8); if (!activos.has(t) || vistos.has(t)) return false; vistos.add(t); return true; });
+    res.json({ ok: true, via: "linked", total: destino.length, omitidos: unique.length - destino.length });
+    (async () => {
+      let ok = 0;
+      for (let i = 0; i < destino.length; i += 1) {
+        if (i) await sleepMs(20000 + Math.floor(Math.random() * 25000));
+        if (await sendLinkedNotice(destino[i], msg)) ok += 1;
+      }
+      console.log("Aviso de feriado por WhatsApp vinculado: " + ok + " de " + destino.length + ".");
+    })().catch((e) => console.error("Aviso de feriado:", e.message));
+    return;
+  }
   try {
     const r = await fetch(botUrl, {
       method: "POST",
@@ -4071,8 +4197,9 @@ app.post("/clients/order-change-notify", authenticate, async (req, res) => {
   const settings = d.appSettings || {};
   if (whatsappOff(settings)) return res.json({ ok: true, skipped: "whatsapp desactivado" });
   if (!settings.orderChangeNotifyEnabled) return res.json({ ok: true, skipped: "deshabilitado" });
+  const porVinculado = await linkedNoticeReady(settings, "cambioPedido");
   const templateName = settings.orderChangeTemplateName || "";
-  if (!templateName) return res.status(400).json({ error: "Configura la plantilla de aviso de cambios en Configuracion." });
+  if (!templateName && !porVinculado) return res.status(400).json({ error: "Configura la plantilla de aviso de cambios en Configuracion." });
   const lang = settings.orderChangeTemplateLang || "es";
   const clientId = String((req.body || {}).clientId || "");
   const detail = String((req.body || {}).detail || "");
@@ -4082,6 +4209,14 @@ app.post("/clients/order-change-notify", authenticate, async (req, res) => {
   if (!phone) return res.json({ ok: true, sent: 0, note: "El cliente no tiene celular principal." });
   let msg = settings.orderChangeMessage || "Hola {cliente}, actualizamos tu pedido de hoy: {detalle}. Cualquier cosa avisanos.";
   msg = msg.replace(/{cliente}/g, client.name || "").replace(/{detalle}/g, detail);
+  if (porVinculado) {
+    // Al numero desde el que el cliente escribe (el ultimo con mensajes), si no al principal.
+    const tels = [client.phone].concat(Array.isArray(client.phones) ? client.phones : []).map((ph) => String(ph || "").replace(/\D/g, "")).filter(Boolean);
+    const { rows } = tels.length ? await pool.query("SELECT chat_id FROM whatsapp_archive WHERE NOT is_group AND NOT from_me AND right(chat_id, 8) = ANY($1) ORDER BY ts DESC LIMIT 1", [tels.map((t) => t.slice(-8))]) : { rows: [] };
+    const to = rows[0] ? rows[0].chat_id : phone;
+    const ok = await sendLinkedNotice(to, msg);
+    return res.json({ ok: true, via: "linked", sent: ok ? 1 : 0, failed: ok ? 0 : 1 });
+  }
   try {
     const r = await fetch(botUrl, {
       method: "POST",
@@ -4107,8 +4242,9 @@ app.post("/clients/price-increase-notify", authenticate, async (req, res) => {
   const d = stored.data || {};
   const settings = d.appSettings || {};
   if (whatsappOff(settings)) return res.json({ ok: true, skipped: "whatsapp desactivado" });
+  const porVinculado = await linkedNoticeReady(settings, "subaPrecio");
   const templateName = settings.priceIncreaseTemplateName || "";
-  if (!templateName) return res.status(400).json({ error: "Configura la plantilla de aviso de suba en Configuracion." });
+  if (!templateName && !porVinculado) return res.status(400).json({ error: "Configura la plantilla de aviso de suba en Configuracion." });
   const lang = settings.priceIncreaseTemplateLang || "es";
   const tpl = settings.priceIncreaseMessage || "El producto {producto} tuvo una suba de un {porcentaje}%, paso de valer {precioAnterior} a valer {precioNuevo}, si se desea cancelar la compra avisar, de caso contrario no hace falta contestar, gracias";
   const money = (v) => "$" + Number(v || 0).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -4126,6 +4262,11 @@ app.post("/clients/price-increase-notify", authenticate, async (req, res) => {
       .replace(/{porcentaje}/g, String(n.pct != null ? n.pct : ""))
       .replace(/{precioAnterior}/g, money(n.oldPrice))
       .replace(/{precioNuevo}/g, money(n.newPrice));
+    if (porVinculado) {
+      if (sent + failed) await sleepMs(8000 + Math.floor(Math.random() * 12000));
+      if (await sendLinkedNotice(phone, msg)) sent += 1; else failed += 1;
+      continue;
+    }
     try {
       const r = await fetch(botUrl, { method: "POST", headers: { "content-type": "application/json", "x-broadcast-key": botKey }, body: JSON.stringify({ numbers: [phone], templateName, lang, params: [msg] }) });
       if (r.ok) sent += 1; else failed += 1;
@@ -4252,6 +4393,11 @@ async function runDunning({ pool, now = new Date() }) {
   const templateName = settings.dunningWhatsappTemplate || "";
   const lang = settings.dunningWhatsappLang || "es";
   const dunningState = await loadDunningState();
+  const moraVinculado = !whatsappOff(settings) && await linkedNoticeReady(settings, "mora").catch(() => false);
+  const enviarMora = async (phone, msg) => {
+    if (moraVinculado) { await sleepMs(10000 + Math.floor(Math.random() * 20000)); if (!(await sendLinkedNotice(phone, msg))) throw new Error("no salio por el vinculado"); return; }
+    await fetch(botUrl, { method: "POST", headers: { "content-type": "application/json", "x-broadcast-key": botKey }, body: JSON.stringify({ numbers: [phone], templateName, lang, params: [msg] }) });
+  };
   let waSent = 0;
   let mailsSent = 0;
   for (const c of clients) {
@@ -4272,10 +4418,10 @@ async function runDunning({ pool, now = new Date() }) {
       }
       const phone = String(c.phone || (Array.isArray(c.phones) ? c.phones[0] : "") || "").replace(/\D/g, "");
       // WhatsApp: una vez por dia.
-      if (botUrl && templateName && phone && st.lastWhatsappDate !== today && !whatsappOff(settings)) {
+      if (botUrl && (templateName || moraVinculado) && phone && st.lastWhatsappDate !== today && !whatsappOff(settings)) {
         const msg = waTpl.replace(/{cliente}/g, c.name || "").replace(/{saldo}/g, money(bal));
         try {
-          await fetch(botUrl, { method: "POST", headers: { "content-type": "application/json", "x-broadcast-key": botKey }, body: JSON.stringify({ numbers: [phone], templateName, lang, params: [msg] }) });
+          await enviarMora(phone, msg);
           st.lastWhatsappDate = today; waSent += 1;
         } catch (e) { console.error("dunning whatsapp:", e.message); }
       }
@@ -4306,9 +4452,9 @@ async function runDunning({ pool, now = new Date() }) {
         const msg = unusualTpl.replace(/{cliente}/g, c.name || "").replace(/{saldo}/g, money(x.actual));
         let enviado = false;
         const phone = String(c.phone || (Array.isArray(c.phones) ? c.phones[0] : "") || "").replace(/\D/g, "");
-        if (botUrl && templateName && phone && !whatsappOff(settings)) {
+        if (botUrl && (templateName || moraVinculado) && phone && !whatsappOff(settings)) {
           try {
-            await fetch(botUrl, { method: "POST", headers: { "content-type": "application/json", "x-broadcast-key": botKey }, body: JSON.stringify({ numbers: [phone], templateName, lang, params: [msg] }) });
+            await enviarMora(phone, msg);
             waSent += 1; enviado = true;
           } catch (e) { console.error("dunning inusual whatsapp:", e.message); }
         }

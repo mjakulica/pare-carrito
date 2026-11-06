@@ -74,8 +74,19 @@ app.post("/broadcast", async (req, res) => {
 app.post("/send", async (req, res) => {
   const broadcastKey = process.env.BROADCAST_KEY || "";
   if (!broadcastKey || req.get("x-broadcast-key") !== broadcastKey) return res.sendStatus(401);
-  const { to, text, channel } = req.body || {};
+  const { to, text, channel, manual, notice } = req.body || {};
   if (!to || !text) return res.status(400).json({ error: "Se espera { to, text }." });
+  // Respuesta escrita por una persona desde el sistema: por el WhatsApp vinculado, aunque este en solo recibir.
+  if (manual) {
+    if (!linked.isConnected()) return res.status(409).json({ error: "El WhatsApp vinculado no está conectado." });
+    const r = await linked.sendText(String(to), String(text).slice(0, 4000), { manual: true });
+    return r ? res.json({ ok: true, id: r.id || "" }) : res.status(502).json({ error: "WhatsApp no aceptó el mensaje." });
+  }
+  if (notice) {
+    if (!linked.isConnected()) return res.status(409).json({ error: "El WhatsApp vinculado no está conectado." });
+    const ok = await linked.sendText(String(to), String(text).slice(0, 1500), { notice: true });
+    return res.status(ok ? 200 : 502).json(ok ? { ok: true } : { error: "WhatsApp no aceptó el mensaje." });
+  }
   if (channel === "linked" && linked.receiveOnly()) return res.json({ ok: true, skipped: "solo recibir" });
   const ok = channel === "linked" ? await linked.sendText(String(to), String(text).slice(0, 1000)) : await wa.sendText(String(to), String(text).slice(0, 1000));
   res.status(ok ? 200 : 502).json(ok ? { ok: true } : { error: "WhatsApp no acepto el mensaje." });
@@ -89,7 +100,7 @@ const linkedAuth = (req, res, next) => {
 };
 app.get("/linked/status", linkedAuth, (req, res) => res.json({ ok: true, ...linked.status() }));
 app.post("/linked/start", linkedAuth, async (req, res) => res.json({ ok: true, ...(await linked.startLinking()) }));
-app.get("/linked/contacts", linkedAuth, (req, res) => res.json({ ok: true, connected: linked.isConnected(), contacts: linked.listContacts() }));
+app.get("/linked/contacts", linkedAuth, (req, res) => res.json({ ok: true, connected: linked.isConnected(), contacts: linked.listContacts(), lids: linked.listLids() }));
 app.post("/linked/mode", linkedAuth, (req, res) => res.json({ ok: true, ...linked.setReceiveOnly(!!(req.body && req.body.receiveOnly)) }));
 app.post("/linked/stop", linkedAuth, async (req, res) => res.json({ ok: true, ...(await linked.stop()) }));
 
@@ -127,7 +138,19 @@ async function handleMessage(msg, flowIn, waIn) {
   const out = waIn || wa;
   const from = String(msg.from || "").replace(/[^\d]/g, "");
   const text = String(msg.text || "").trim();
-  if (!from || !text) return;
+  if (!text) return;
+
+  // 0) Grupo de WhatsApp: solo cuenta si esta vinculado a un cliente; nunca se contesta en el grupo.
+  if (msg.group) {
+    let client = null;
+    try {
+      const r = await erp.findClientByPhone(from || "0", msg.group);
+      client = r && r.client ? r.client : null;
+    } catch (e) { console.warn("findClientByPhone (grupo):", e.message); return; }
+    if (client && inbox.handleGroup) await inbox.handleGroup({ from, group: msg.group, groupName: msg.groupName || "", text, profileName: msg.name || "", client });
+    return;
+  }
+  if (!from) return;
 
   // 1) Respuestas del equipo (confirmaciones "ok P37").
   if (config.notifyNumbers.includes(from) || from === config.ownerNumber) {

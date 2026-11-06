@@ -126,7 +126,21 @@ function createInboxFlow({ wa, erp, ai, getProductNames, channel, silent }) {
     return "pregunta_negocio";
   }
 
-  return { handleKnown, handleUnknown };
+  // Grupo vinculado a un cliente ("Factory" -> cliente 7): lo que parece pedido va a la bandeja como de
+  // ese cliente, lo escriba quien lo escriba. En los grupos el bot nunca contesta.
+  async function handleGroup({ from, group, groupName, text, profileName, client }) {
+    const parsed = await classify(text);
+    if (!ORDER_INTENTS.has(parsed.intent)) return "ignorado_grupo";
+    let orderId = "";
+    if (parsed.intent !== "pedido_nuevo") {
+      try { const r = await erp.getTodayOrder(client.id); orderId = r && r.order ? r.order.id : ""; } catch (e) { /* sin pedido */ }
+    }
+    const quien = [profileName, groupName ? "grupo " + groupName : "grupo"].filter(Boolean).join(" · ");
+    await toInbox({ phone: from || "", profileName: quien, clientId: client.id, kind: KIND[parsed.intent], text, items: parsed.items || [], orderId, group });
+    return KIND[parsed.intent];
+  }
+
+  return { handleKnown, handleUnknown, handleGroup };
 }
 
 module.exports = { createInboxFlow };

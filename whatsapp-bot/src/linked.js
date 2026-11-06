@@ -41,13 +41,39 @@ const CONTACTS_FILE = path.join(path.dirname(DIR), "wa-linked-contacts.json");
 let contacts = {};
 try { contacts = JSON.parse(fs.readFileSync(CONTACTS_FILE, "utf8")) || {}; } catch (e) { contacts = {}; }
 let contactsTimer = null;
+// WhatsApp a veces oculta el numero de un contacto detras de un identificador (@lid). Cuando el contacto
+// o un mensaje traen las dos cosas, se guarda la equivalencia para usar el numero real.
+const LIDS_FILE = path.join(path.dirname(DIR), "wa-linked-lids.json");
+let lids = {};
+try { lids = JSON.parse(fs.readFileSync(LIDS_FILE, "utf8")) || {}; } catch (e) { lids = {}; }
+let lidsTimer = null;
+function rememberLid(lidJid, phoneJid) {
+  const l = digits(lidJid), ph = digits(phoneJid);
+  if (!l || !ph || !String(phoneJid).endsWith("@s.whatsapp.net") || lids[l] === ph) return;
+  lids[l] = ph;
+  clearTimeout(lidsTimer);
+  lidsTimer = setTimeout(() => { try { fs.writeFileSync(LIDS_FILE, JSON.stringify(lids)); } catch (e) { /* se recalcula */ } }, 2000);
+}
+
+// Numero real de un chat: si es un @lid, el que manda el mensaje o el de la tabla de equivalencias.
+function phoneOf(jid, key) {
+  const j = String(jid || "");
+  if (!j.endsWith("@lid")) return digits(j);
+  const alt = key && (key.senderPn || key.remoteJidAlt || key.participantPn || key.participantAlt);
+  if (alt && String(alt).endsWith("@s.whatsapp.net")) { rememberLid(j, alt); return digits(alt); }
+  return lids[digits(j)] || digits(j);
+}
+
 function addContacts(list) {
   let cambio = false;
   for (const c of list || []) {
     if (!c || !c.id) continue;
-    const jid = String(c.id);
-    if (!jid.endsWith("@s.whatsapp.net")) continue; // grupos, canales y contactos sin numero visible
-    const phone = digits(jid);
+    const id = String(c.id);
+    const phoneJid = id.endsWith("@s.whatsapp.net") ? id : c.jid && String(c.jid).endsWith("@s.whatsapp.net") ? String(c.jid) : "";
+    const lidJid = id.endsWith("@lid") ? id : c.lid ? String(c.lid) : "";
+    if (phoneJid && lidJid) rememberLid(lidJid, phoneJid);
+    if (!phoneJid) continue; // grupos, canales y contactos sin numero visible
+    const phone = digits(phoneJid);
     const name = String(c.name || c.verifiedName || "").trim();
     const notify = String(c.notify || "").trim();
     const prev = contacts[phone] || {};
@@ -59,6 +85,10 @@ function addContacts(list) {
     clearTimeout(contactsTimer);
     contactsTimer = setTimeout(() => { try { fs.writeFileSync(CONTACTS_FILE, JSON.stringify(contacts)); } catch (e) { /* se recalcula */ } }, 2000);
   }
+}
+
+function listLids() {
+  return Object.keys(lids).map((lid) => ({ lid, phone: lids[lid] }));
 }
 
 function listContacts() {
@@ -110,13 +140,13 @@ async function archiveMessage(m) {
   if (!kind) return;
   const isGroup = jid.endsWith("@g.us");
   const senderJid = isGroup ? key.participant || "" : key.fromMe ? "" : jid;
-  const chatPhone = isGroup ? jid : digits(jid.endsWith("@lid") ? key.senderPn || key.remoteJidAlt || jid : jid);
+  const chatPhone = isGroup ? jid : phoneOf(jid, key);
   const contacto = !isGroup ? contacts[chatPhone] : null;
   const ts = Number(m.messageTimestamp && m.messageTimestamp.low != null ? m.messageTimestamp.low : m.messageTimestamp || 0) * 1000 || Date.now();
   archiveQueue.push({
     waId: key.id || String(ts), chatId: chatPhone, isGroup, fromMe: !!key.fromMe, type: kind.type, text: kind.text, ts,
     chatName: isGroup ? await groupName(jid) : (contacto && (contacto.name || contacto.notify)) || (!key.fromMe ? m.pushName || "" : ""),
-    senderPhone: digits(senderJid), senderName: key.fromMe ? "" : m.pushName || ""
+    senderPhone: phoneOf(senderJid, { senderPn: key.participantPn || key.participantAlt }), senderName: key.fromMe ? "" : m.pushName || ""
   });
   if (archiveQueue.length >= 200) flushArchive();
   else if (!archiveTimer) archiveTimer = setTimeout(flushArchive, 5000);
@@ -204,13 +234,18 @@ async function connect() {
         try {
           const key = m.key || {};
           const jid = String(key.remoteJid || "");
-          // Solo chats con personas: ni grupos, ni estados, ni canales, ni lo que manda el propio celular.
-          if (key.fromMe || !jid || /@(g\.us|broadcast|newsletter)$/.test(jid) || jid === "status@broadcast") continue;
+          // Chats con personas y grupos: ni estados, ni canales, ni lo que manda el propio celular.
+          if (key.fromMe || !jid || /@(broadcast|newsletter)$/.test(jid) || jid === "status@broadcast") continue;
           const text = messageText(m);
           if (!text) continue;
+          if (jid.endsWith("@g.us")) {
+            // Grupo: si esta vinculado a un cliente, lo que se escribe es de ese cliente.
+            const sender = phoneOf(key.participant || "", { senderPn: key.participantPn || key.participantAlt });
+            if (onMessage) await onMessage({ from: sender, group: jid, groupName: await groupName(jid), name: m.pushName || "", text, id: key.id });
+            continue;
+          }
           // Contactos con identificador oculto (@lid): se usa el numero si WhatsApp lo manda.
-          const phoneJid = jid.endsWith("@lid") ? key.senderPn || key.remoteJidAlt || jid : jid;
-          const phone = digits(phoneJid);
+          const phone = phoneOf(jid, key);
           rememberJid(phone, jid);
           if (onMessage) await onMessage({ from: phone, name: m.pushName || "", text, id: key.id });
         } catch (e) {
@@ -250,7 +285,9 @@ async function stop() {
   fs.rmSync(DIR, { recursive: true, force: true });
   // Al desvincular se borran tambien los contactos del celular.
   contacts = {};
+  lids = {};
   try { fs.unlinkSync(CONTACTS_FILE); } catch (e) { /* no habia */ }
+  try { fs.unlinkSync(LIDS_FILE); } catch (e) { /* no habia */ }
   Object.assign(info, { status: "apagado", qr: "", me: "", connectedAt: "" });
   return status();
 }
@@ -264,18 +301,25 @@ function isConnected() {
 }
 
 // Respuesta con una pausa corta (2 a 5 s), como una persona: baja el riesgo de bloqueo.
-async function sendText(phone, text) {
-  if (receiveOnly()) { console.log("WhatsApp vinculado (solo recibir): no se envio a ..." + String(phone).slice(-4)); return false; }
+// opts.manual: lo escribe una persona desde el sistema (Mensajes de WhatsApp); se manda aunque el bot
+// este en "solo recibir", que apaga solo las respuestas automaticas. Devuelve el id del mensaje.
+// phone puede ser un grupo ("...@g.us").
+async function sendText(phone, text, opts) {
+  const manual = !!(opts && opts.manual);
+  // opts.notice: aviso del sistema que el gerente eligio mandar por aca (cambio de pedido, feriado...):
+  // sale aunque este en "solo recibir", con la pausa de siempre.
+  const notice = !!(opts && opts.notice);
+  if (!manual && !notice && receiveOnly()) { console.log("WhatsApp vinculado (solo recibir): no se envio a ..." + String(phone).slice(-4)); return false; }
   if (!isConnected()) { console.warn("WhatsApp vinculado: no conectado, no se envio a ..." + String(phone).slice(-4)); return false; }
-  const jid = jids[String(phone)] || String(phone).replace(/\D/g, "") + "@s.whatsapp.net";
-  await sleep(2000 + Math.floor(Math.random() * 3000));
+  const jid = String(phone).endsWith("@g.us") ? String(phone) : jids[String(phone)] || String(phone).replace(/\D/g, "") + "@s.whatsapp.net";
+  if (!manual) await sleep(2000 + Math.floor(Math.random() * 3000));
   try {
-    await sock.sendMessage(jid, { text: String(text) });
-    return true;
+    const sent = await sock.sendMessage(jid, { text: String(text) });
+    return manual ? { id: (sent && sent.key && sent.key.id) || "" } : true;
   } catch (e) {
     console.error("WhatsApp vinculado, envio:", e.message);
     return false;
   }
 }
 
-module.exports = { init, startLinking, stop, status, isConnected, sendText, addContacts, listContacts, archiveMessage, flushArchive, receiveOnly, setReceiveOnly };
+module.exports = { listLids, phoneOf, init, startLinking, stop, status, isConnected, sendText, addContacts, listContacts, archiveMessage, flushArchive, receiveOnly, setReceiveOnly };

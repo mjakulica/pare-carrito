@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v90";
+  const APP_VERSION = "v91";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -7132,7 +7132,7 @@
     return pageShell(
       "Clientes",
       "Alta, edición, saldos y vehículo asignado.",
-      `<button class="btn primary" data-add-client>Agregar cliente</button>${["manager", "admin"].includes(currentUser.role) ? `<button class="btn ghost" type="button" data-link-phones>Vincular teléfonos desde contactos</button>` : ""}`,
+      `<button class="btn primary" data-add-client>Agregar cliente</button>${["manager", "admin"].includes(currentUser.role) ? `<button class="btn ghost" type="button" data-link-phones>Vincular teléfonos y grupos</button>` : ""}`,
       `
       ${renderTabs()}
       ${renderDuplicateClientIdsWarning()}
@@ -13385,6 +13385,8 @@
         recalcOrderTotals(order);
         updateOrderAccounting(order);
         saveState();
+        // Aviso al cliente (si esta prendido "Avisar al cliente al agregar/quitar productos").
+        if (!order.exampleOnly) notifyOrderProductChange(order, "sacamos " + formatAmountInput(item.quantity) + " " + item.productName + " porque no tenemos");
         render();
       });
     });
@@ -14770,11 +14772,33 @@
         <label style="display:flex;gap:8px;align-items:flex-start"><input type="checkbox" id="wa-receive-only" ${st.receiveOnly === false ? "" : "checked"} style="width:auto;min-height:auto;margin-top:3px" />
         <span><strong>Solo recibir (recomendado)</strong><br><span class="muted" style="font-size:13px">El sistema no manda ningún mensaje por este WhatsApp: no contesta "recibimos tu pedido", no le pregunta de qué negocio es a un número nuevo y no avisa "quedó cargado". Los pedidos entran igual a la bandeja de Nuevo Pedido y todo se guarda en Mensajes WhatsApp. Ustedes responden desde el celular. Es lo que menos riesgo de bloqueo tiene.</span></span></label>
       </div>` : ""}
+      ${st && !st.error ? waLinkedNoticesHtml() : ""}
       ${st && st.qr ? `<img src="${escapeAttr(st.qr)}" alt="Código QR para vincular WhatsApp" style="width:260px;height:260px;border:1px solid var(--line, #d9e0e8);border-radius:8px;background:#fff" />` : ""}
       <div class="page-actions" style="margin-top:8px">
         ${on ? `<button class="btn danger" type="button" id="wa-linked-stop">Desvincular</button>` : `<button class="btn primary" type="button" id="wa-linked-start">Vincular un WhatsApp</button>`}
         <button class="btn ghost" type="button" id="wa-linked-refresh">Actualizar</button>
       </div>`;
+  }
+
+  // Avisos a clientes que salen por este WhatsApp (en vez del bot oficial) mientras Meta no aprueba.
+  const WA_LINKED_NOTICES = [
+    { key: "cambioPedido", label: "Cambio en el pedido", help: "al quitar un producto que falta (la X de Unidades) o al agregar/quitar al editar el pedido. Solo a ese cliente.", def: true },
+    { key: "feriado", label: "Aviso de feriado", help: "solo a los clientes que escribieron en los últimos 60 días, de a uno con pausas.", def: true },
+    { key: "subaPrecio", label: "Suba de precio", help: "a los clientes que compran ese producto.", def: true },
+    { key: "mora", label: "Recordatorio de saldo (mora)", help: "automático todos los días: es el que más riesgo de bloqueo tiene.", def: false }
+  ];
+  function waLinkedNoticeOn(key) {
+    const m = (state.appSettings && state.appSettings.waLinkedNotices) || {};
+    const d = WA_LINKED_NOTICES.find((x) => x.key === key);
+    return m[key] === undefined ? !!(d && d.def) : !!m[key];
+  }
+  function waLinkedNoticesHtml() {
+    const cambioOff = !(state.appSettings && state.appSettings.orderChangeNotifyEnabled);
+    return `<div class="wa-receive-only" style="margin-top:8px">
+      <strong>Avisos que salen por este WhatsApp</strong>
+      <p class="muted" style="font-size:13px;margin:2px 0 6px">Mientras Meta no aprueba el bot oficial. Salen aunque esté en "Solo recibir" (eso apaga solo las respuestas automáticas a los pedidos). Si este WhatsApp no está conectado, van por el bot oficial.</p>
+      ${WA_LINKED_NOTICES.map((n) => `<label style="display:flex;gap:8px;align-items:flex-start;margin:4px 0"><input type="checkbox" data-wa-notice="${n.key}" ${waLinkedNoticeOn(n.key) ? "checked" : ""} style="width:auto;min-height:auto;margin-top:3px" /><span><strong>${escapeHtml(n.label)}</strong> <span class="muted" style="font-size:13px">— ${escapeHtml(n.help)}</span>${n.key === "cambioPedido" && cambioOff ? `<br><span style="font-size:13px;color:var(--red, #b42318)">Está apagado "Avisar al cliente por WhatsApp al agregar/quitar productos" (más abajo, en Configuración): prendelo para que salga.</span>` : ""}</span></label>`).join("")}
+    </div>`;
   }
 
   function paintWaLinked() {
@@ -14808,6 +14832,12 @@
       } catch (e) { alert("No se pudo cambiar: " + e.message); ro.checked = !valor; }
       paintWaLinked();
     });
+    box.querySelectorAll("[data-wa-notice]").forEach((chk) => chk.addEventListener("change", () => {
+      if (chk.checked && chk.dataset.waNotice === "mora" && !confirm("El recordatorio de saldo sale solo, todos los días, a cada cliente en mora. Por un WhatsApp común es lo que más riesgo de bloqueo tiene. ¿Mandarlo por acá igual?")) { chk.checked = false; return; }
+      state.appSettings = state.appSettings || {};
+      state.appSettings.waLinkedNotices = { ...(state.appSettings.waLinkedNotices || {}), [chk.dataset.waNotice]: chk.checked };
+      saveState();
+    }));
     const c = document.getElementById("wa-linked-refresh");
     if (c) c.addEventListener("click", () => go("/whatsapp/linked"));
   }
@@ -19746,7 +19776,9 @@
       if (!response.ok) return alert(payload.error || "No se pudo enviar el aviso.");
       h.notified = true;
       saveState();
-      alert("Aviso enviado a " + (payload.sent || 0) + " de " + (payload.total || 0) + " numero(s)." + (payload.failed ? " Fallaron: " + payload.failed + "." : ""));
+      alert(payload.via === "linked"
+        ? "El aviso sale por el WhatsApp vinculado a " + (payload.total || 0) + " cliente(s) que escribieron en los últimos 60 días, de a uno y con pausas (puede tardar " + Math.max(1, Math.round((payload.total || 0) * 32 / 60)) + " min)." + (payload.omitidos ? " " + payload.omitidos + " número(s) sin mensajes recientes no lo reciben, para cuidar el número." : "")
+        : "Aviso enviado a " + (payload.sent || 0) + " de " + (payload.total || 0) + " numero(s)." + (payload.failed ? " Fallaron: " + payload.failed + "." : ""));
       openHolidaysModal();
     } catch (error) {
       alert("Error al enviar: " + error.message);
@@ -20933,7 +20965,7 @@
   function renderWhatsappArchive() {
     if (!ui.waArchiveChats && !ui.waArchiveLoading) loadWaArchiveChats();
     const chats = ui.waArchiveChats || [];
-    const titulo = (c) => c.is_group ? "&#128101; " + escapeHtml(c.chat_name || "Grupo") : escapeHtml(c.client || c.chat_name || "") + (c.client && c.chat_name ? ` <span class="muted">(${escapeHtml(c.chat_name)})</span>` : "") + ` <span class="muted">${escapeHtml(formatWaPhone(c.chat_id))}</span>`;
+    const titulo = (c) => c.is_group ? "&#128101; " + escapeHtml(c.chat_name || "Grupo") + (c.client ? ` <span class="muted">(${escapeHtml(c.client)})</span>` : "") : escapeHtml(c.client || c.chat_name || "") + (c.client && c.chat_name ? ` <span class="muted">(${escapeHtml(c.chat_name)})</span>` : "") + ` <span class="muted">${escapeHtml(formatWaPhone(c.chat_id))}</span>`;
     const actual = chats.find((c) => c.chat_id === ui.waArchiveChat);
     const q = String(ui.waArchiveQ || "").toLowerCase();
     afterRender.push(() => {
@@ -20948,6 +20980,33 @@
       if (back) back.addEventListener("click", () => { ui.waArchiveChat = ""; render(); });
       const box = document.getElementById("wa-arch-msgs");
       if (box) box.scrollTop = box.scrollHeight;
+      const reply = document.getElementById("wa-arch-reply");
+      if (reply) reply.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const ta = document.getElementById("wa-arch-reply-text");
+        const btn = reply.querySelector("button[type=submit]");
+        const text = ta.value.trim();
+        if (!text) return;
+        const chat = ui.waArchiveChat;
+        btn.disabled = true;
+        ui.waArchiveDraft = text;
+        try {
+          const r = await cloudRequest(getCloudSyncConfig(), "/whatsapp/archive/reply", { method: "POST", body: JSON.stringify({ chat, text }) });
+          const j = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(j.error || "HTTP " + r.status);
+          ui.waArchiveDraft = "";
+          ui.waArchiveError = "";
+          loadWaArchiveChat(chat);
+        } catch (err) {
+          btn.disabled = false;
+          alert("No se pudo enviar: " + err.message);
+        }
+      });
+      const ta = document.getElementById("wa-arch-reply-text");
+      if (ta) {
+        ta.addEventListener("input", () => { ui.waArchiveDraft = ta.value; });
+        ta.addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); reply.requestSubmit(); } });
+      }
     });
     const msgs = ui.waArchiveMsgs;
     const hora = (ts) => new Date(ts).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
@@ -20970,8 +21029,12 @@
             <div class="page-actions" style="justify-content:space-between;margin-bottom:8px"><strong>${actual ? titulo(actual) : escapeHtml(ui.waArchiveChat)}</strong><button class="btn small ghost wa-arch-back" type="button" id="wa-arch-back">&larr; Chats</button></div>
             <div class="wa-arch-msgs" id="wa-arch-msgs">${msgs === null ? `<p class="muted">Cargando...</p>` : msgs.map((m) => `<div class="wa-arch-msg ${m.from_me ? "mine" : ""} ${q && String(m.text || "").toLowerCase().includes(q) ? "hit" : ""}">
               ${!m.from_me && m.is_group ? `<div class="wa-arch-sender">${escapeHtml(m.sender_name || formatWaPhone(m.sender_phone))}</div>` : ""}
-              <div>${escapeHtml(m.text || "")}</div><div class="wa-arch-time">${hora(m.ts)}</div>
-            </div>`).join("")}</div>`}
+              <div>${escapeHtml(m.text || "")}</div><div class="wa-arch-time">${m.from_me && /\(sistema\)$/.test(m.sender_name || "") ? escapeHtml(String(m.sender_name).replace(/ \(sistema\)$/, "")) + " · " : ""}${hora(m.ts)}</div>
+            </div>`).join("")}</div>
+            <form id="wa-arch-reply" class="wa-arch-reply">
+              <textarea id="wa-arch-reply-text" rows="2" placeholder="Escribir una respuesta (sale por el WhatsApp vinculado)">${escapeHtml(ui.waArchiveDraft || "")}</textarea>
+              <button class="btn primary" type="submit">Enviar</button>
+            </form>`}
         </div>
       </div>`,
       "whatsapp-mensajes"
@@ -21024,14 +21087,17 @@
     // Telefono (ultimos 8 digitos) -> cliente
     const porTel = new Map();
     (state.clients || []).forEach((c) => [c.phone].concat(c.phones || []).forEach((ph) => { const t = String(ph || "").replace(/\D/g, "").slice(-8); if (t.length === 8) porTel.set(t, c.id); }));
+    // Grupos vinculados a un cliente: lo que se escribe ahi es de ese cliente.
+    const porGrupo = new Map();
+    (state.clients || []).forEach((c) => (Array.isArray(c.waGroups) ? c.waGroups : []).forEach((g) => porGrupo.set(String(g), c.id)));
     const msgsPorCliente = new Map();
     (j.messages || []).forEach((m) => {
-      const cid = porTel.get(String(m.chat_id).replace(/\D/g, "").slice(-8));
+      const cid = m.is_group || String(m.chat_id).endsWith("@g.us") ? porGrupo.get(String(m.chat_id)) : porTel.get(String(m.chat_id).replace(/\D/g, "").slice(-8));
       if (!cid) return;
       if (!msgsPorCliente.has(cid)) msgsPorCliente.set(cid, []);
       msgsPorCliente.get(cid).push({ text: String(m.text || ""), t: new Date(m.ts).getTime() });
     });
-    const clientesConTel = new Set(porTel.values());
+    const clientesConTel = new Set([...porTel.values(), ...porGrupo.values()]);
     const pedidos = (state.orders || []).filter((o) => o && String(o.date || "") >= desde && !["cancelado", "anulado"].includes(o.status) && !o.exampleOnly && !o.deletedAt)
       .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.clientId).localeCompare(String(b.clientId)));
     const res = { desde, archivo: j.archivo || {}, total: pedidos.length, ok: [], alias: [], editado: [], sinMensaje: [], sinTelefono: [], sinProductos: [] };
@@ -21109,9 +21175,9 @@
         ${metricCard("Alias a revisar", String(res.alias.length), "El mensaje original todavía no da el pedido")}
         ${metricCard("Modificados después", String(res.editado.length), "Alias bien; el pedido se cambió en el sistema")}
       </div>
-      <p class="muted" style="margin-top:0">${res.total} pedido(s) desde el ${formatDate(res.desde)}. Sin mensaje de WhatsApp encontrado: ${res.sinMensaje.length} · clientes sin teléfono vinculado: ${res.sinTelefono.length}${res.sinProductos.length ? " · sin detalle de productos: " + res.sinProductos.length : ""}. Archivo de WhatsApp: ${Number(arch.n || 0)} mensajes${arch.desde ? " desde el " + formatDate(String(arch.desde).slice(0, 10)) : ""}.</p>
+      <p class="muted" style="margin-top:0">${res.total} pedido(s) desde el ${formatDate(res.desde)}. Sin mensaje de WhatsApp encontrado: ${res.sinMensaje.length} · clientes sin teléfono ni grupo vinculado: ${res.sinTelefono.length}${res.sinProductos.length ? " · sin detalle de productos: " + res.sinProductos.length : ""}. Archivo de WhatsApp: ${Number(arch.n || 0)} mensajes${arch.desde ? " desde el " + formatDate(String(arch.desde).slice(0, 10)) : ""}.</p>
       ${!Number(arch.n || 0) ? `<div class="alert warn">Todavía no hay mensajes guardados. Vinculá el WhatsApp por QR en Configuración (si ya estaba vinculado, desvinculalo y volvé a escanear para que mande el historial).</div>` : ""}
-      ${res.sinTelefono.length ? `<p class="muted" style="font-size:12px">Para comparar más pedidos, cargá los teléfonos de los clientes: Clientes → Vincular teléfonos desde contactos.</p>` : ""}
+      ${res.sinTelefono.length ? `<p class="muted" style="font-size:12px">Para comparar más pedidos, cargá los teléfonos de los clientes y sus grupos: Clientes → Vincular teléfonos y grupos.</p>` : ""}
       ${res.alias.length ? `<h3 style="font-size:16px">Alias a revisar (${res.alias.length})</h3>${res.alias.map((f) => bloque(f, "alias")).join("")}` : ""}
       ${res.editado.length ? `<h3 style="font-size:16px">Modificados después de cargarlos (${res.editado.length})</h3>${res.editado.map((f) => bloque(f, "editado")).join("")}` : ""}
       ${res.sinMensaje.length ? `<details style="margin-top:10px"><summary>Pedidos sin mensaje de WhatsApp encontrado (${res.sinMensaje.length})</summary><ul>${res.sinMensaje.map((o) => `<li>${formatDate(o.date)} · ${nombre(o)} <span class="muted">${escapeHtml(o.id)}</span></li>`).join("")}</ul></details>` : ""}
@@ -21158,18 +21224,53 @@
       if (!box) return;
       if (!datos) { box.innerHTML = ""; return; }
       if (datos.error) { box.innerHTML = `<div class="alert warn">${escapeHtml(datos.error)}</div>`; return; }
+      if (datos.groups) {
+        const gs = datos.groups;
+        const vinc = datos.vinculados || [];
+        box.innerHTML = `<p class="muted" style="margin:8px 0">${datos.total || 0} grupo(s) en el archivo · ${vinc.length} ya vinculados a un cliente. Los mensajes de un grupo vinculado cuentan como pedidos de ese cliente, aunque los escriba otra persona.</p>
+          <datalist id="lp-clients">${activeClients().map((c) => `<option value="${escapeAttr(c.id + " - " + c.name)}"></option>`).join("")}</datalist>
+          ${gs.length ? `<div class="table-wrap"><table><thead><tr><th></th><th>Grupo</th><th>Cliente</th></tr></thead><tbody>
+          ${gs.map((x, i) => `<tr>
+            <td><input type="checkbox" data-lp-check="${i}" ${x.suggested ? "checked" : ""} style="width:auto;min-height:auto" /></td>
+            <td><strong>${escapeHtml(x.name || "(sin nombre)")}</strong><br><span class="muted" style="font-size:12px">${x.total || 0} mensaje(s)${x.byNumber ? " · por el número de cliente del nombre" : ""}</span></td>
+            <td><select data-lp-client="${i}">${x.candidates.map((k) => `<option value="${escapeAttr(k.id)}" ${k.id === x.suggested ? "selected" : ""}>${escapeHtml(k.id + " - " + k.name)}</option>`).join("")}<option value="" ${x.candidates.length ? "" : "selected"}>Otro cliente...</option></select>
+              <input list="lp-clients" data-lp-other="${i}" placeholder="Buscar cliente" style="${x.candidates.length ? "display:none;" : ""}margin-top:4px" /></td>
+          </tr>`).join("")}</tbody></table></div>
+          <p class="muted" style="font-size:12px">Tildá los grupos que son de un cliente (por ejemplo, el grupo "Factory" → 7 - Factory) y elegí el cliente. Los grupos que no son de clientes dejalos sin tildar.</p>` : `<p>No hay grupos nuevos para vincular.</p>`}
+          ${vinc.length ? `<details style="margin-top:8px"><summary>Ya vinculados (${vinc.length})</summary><ul style="margin:6px 0">${vinc.map((v) => `<li>${escapeHtml(v.name || v.chatId)} → ${escapeHtml(v.clientId + " - " + v.clientName)} <button class="btn ghost" type="button" data-lp-unlink="${escapeAttr(v.chatId)}" style="min-height:auto;padding:2px 8px">Desvincular</button></li>`).join("")}</ul></details>` : ""}`;
+        box.querySelectorAll("[data-lp-unlink]").forEach((b) => b.addEventListener("click", async () => {
+          b.disabled = true;
+          try {
+            const r = await cloudRequest(getCloudSyncConfig(), "/clients/link-groups", { method: "POST", body: JSON.stringify({ links: [{ chatId: b.dataset.lpUnlink, clientId: "" }] }) });
+            if (!r.ok) throw new Error("HTTP " + r.status);
+            (state.clients || []).forEach((c) => { if (Array.isArray(c.waGroups)) c.waGroups = c.waGroups.filter((g) => g !== b.dataset.lpUnlink); });
+            pedir("/whatsapp/groups", null, null);
+          } catch (e) { b.disabled = false; alert("No se pudo desvincular: " + e.message); }
+        }));
+        box.querySelectorAll("[data-lp-client]").forEach((sel) => sel.addEventListener("change", () => {
+          const other = box.querySelector(`[data-lp-other="${sel.dataset.lpClient}"]`);
+          if (other) other.style.display = sel.value ? "none" : "";
+          const chk = box.querySelector(`[data-lp-check="${sel.dataset.lpClient}"]`);
+          if (chk) chk.checked = true;
+        }));
+        box.querySelectorAll("[data-lp-other]").forEach((inp) => inp.addEventListener("change", () => {
+          const chk = box.querySelector(`[data-lp-check="${inp.dataset.lpOther}"]`);
+          if (chk && inp.value) chk.checked = true;
+        }));
+        return;
+      }
       const sug = datos.suggestions || [];
       box.innerHTML = `<p class="muted" style="margin:8px 0">${datos.total || 0} teléfono(s) leídos · ${sug.length} parecen clientes · ${datos.yaVinculados || 0} ya estaban vinculados · ${datos.sinParecido || 0} no se parecen a ningún cliente (no se guardan).</p>
         ${sug.length ? `<datalist id="lp-clients">${activeClients().map((c) => `<option value="${escapeAttr(c.id + " - " + c.name)}"></option>`).join("")}</datalist>
         <div class="table-wrap"><table><thead><tr><th></th><th>Contacto en el celular</th><th>Cliente</th></tr></thead><tbody>
         ${sug.map((x, i) => `<tr>
           <td><input type="checkbox" data-lp-check="${i}" ${x.suggested ? "checked" : ""} style="width:auto;min-height:auto" /></td>
-          <td><strong>${escapeHtml(x.name || x.notify || "")}</strong>${x.name && x.notify && x.notify !== x.name ? ` <span class="muted">(${escapeHtml(x.notify)})</span>` : ""}<br><span class="muted">${escapeHtml(formatWaPhone(x.phone))}</span></td>
+          <td><strong>${escapeHtml(x.name || x.notify || "")}</strong>${x.name && x.notify && x.notify !== x.name ? ` <span class="muted">(${escapeHtml(x.notify)})</span>` : ""}<br><span class="muted">${escapeHtml(formatWaPhone(x.phone))}</span>${x.byNumber ? `<br><span class="muted" style="font-size:12px">Por el número de cliente agendado</span>` : ""}</td>
           <td><select data-lp-client="${i}">${x.candidates.map((k) => `<option value="${escapeAttr(k.id)}" ${k.id === x.suggested ? "selected" : ""}>${escapeHtml(k.id + " - " + k.name)}${k.address ? " (" + escapeHtml(k.address) + ")" : ""}</option>`).join("")}<option value="">Otro cliente...</option></select>
             <input list="lp-clients" data-lp-other="${i}" placeholder="Buscar otro cliente" style="display:none;margin-top:4px" /></td>
         </tr>`).join("")}
         </tbody></table></div>
-        <p class="muted" style="font-size:12px">Tildados: los que coinciden claro. Revisá los demás, elegí el cliente y tildalos si corresponde.</p>` : `<p>No hay contactos nuevos para vincular.</p>`}`;
+        <p class="muted" style="font-size:12px">Tildados: los que coinciden claro (o agendados con el número de cliente adelante, como "12) ..."). Revisá los demás, elegí el cliente y tildalos si corresponde.</p>` : `<p>No hay contactos nuevos para vincular.</p>`}`;
       box.querySelectorAll("[data-lp-client]").forEach((sel) => sel.addEventListener("change", () => {
         const other = box.querySelector(`[data-lp-other="${sel.dataset.lpClient}"]`);
         if (other) other.style.display = sel.value ? "none" : "";
@@ -21185,22 +21286,25 @@
         const r = await cloudRequest(getCloudSyncConfig(), path, body ? { method: "POST", body: JSON.stringify(body) } : { method: "GET" });
         const j = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(j.error || "HTTP " + r.status);
-        if (j.connected === false && !j.total) throw new Error("El WhatsApp vinculado no está conectado. Vinculalo en Configuración o usá un archivo de contactos.");
+        if (j.connected === false && !j.total && !j.groups) throw new Error("El WhatsApp vinculado no está conectado. Vinculalo en Configuración o usá un archivo de contactos.");
         datos = j;
       } catch (e) { datos = { error: e.message }; }
       if (boton) boton.disabled = false;
       pintar();
     };
-    showModal("Vincular teléfonos desde contactos", `
+    showModal("Vincular teléfonos y grupos de WhatsApp", `
       <p class="muted" style="margin-top:0">Se comparan los nombres de tu agenda con los clientes para cargarles el teléfono de WhatsApp. Así el bot los reconoce cuando escriben. Revisás la lista antes de guardar; los contactos personales no se guardan.</p>
       <div class="page-actions">
         <button class="btn primary" type="button" id="lp-from-wa">Traer del WhatsApp vinculado</button>
+        <button class="btn ghost" type="button" id="lp-groups">Grupos de WhatsApp</button>
         <label class="btn ghost" style="cursor:pointer">Subir archivo de contactos (.vcf)<input type="file" id="lp-file" accept=".vcf,text/vcard,text/x-vcard" hidden /></label>
       </div>
       <p class="muted" style="font-size:12px;margin:6px 0 0">Archivo .vcf: en Android, app Contactos → menú → Exportar (o Administrar contactos → Exportar a archivo); en iPhone, desde iCloud.com → Contactos → Exportar vCard.</p>
       <div id="lp-result" style="margin-top:10px"></div>`, () => {
       const wa = document.getElementById("lp-from-wa");
       if (wa) wa.addEventListener("click", () => pedir("/whatsapp/linked/contacts", null, wa));
+      const grp = document.getElementById("lp-groups");
+      if (grp) grp.addEventListener("click", () => pedir("/whatsapp/groups", null, grp));
       const file = document.getElementById("lp-file");
       if (file) file.addEventListener("change", async () => {
         const f = file.files && file.files[0];
@@ -21211,6 +21315,32 @@
       });
       const save = document.getElementById("modal-save");
       if (save) save.addEventListener("click", async () => {
+        if (datos && datos.groups) {
+          const links = [];
+          document.querySelectorAll("[data-lp-check]").forEach((chk) => {
+            if (!chk.checked) return;
+            const i = Number(chk.dataset.lpCheck);
+            const sel = document.querySelector(`[data-lp-client="${i}"]`);
+            let clientId = sel ? sel.value : "";
+            if (!clientId) { const o = document.querySelector(`[data-lp-other="${i}"]`); const found = o ? findClientByInput(o.value) : null; clientId = found ? found.id : ""; }
+            if (clientId && datos.groups[i]) links.push({ clientId, chatId: datos.groups[i].chatId });
+          });
+          if (!links.length) return alert("No hay ningún grupo tildado con cliente elegido.");
+          save.disabled = true;
+          try {
+            const r = await cloudRequest(getCloudSyncConfig(), "/clients/link-groups", { method: "POST", body: JSON.stringify({ links }) });
+            const j = await r.json().catch(() => ({}));
+            if (!r.ok) throw new Error(j.error || "HTTP " + r.status);
+            links.forEach((l) => {
+              (state.clients || []).forEach((c) => { if (Array.isArray(c.waGroups) && c.id !== l.clientId) c.waGroups = c.waGroups.filter((g) => g !== l.chatId); });
+              const c = getClient(l.clientId);
+              if (c && !(c.waGroups || []).includes(l.chatId)) c.waGroups = (c.waGroups || []).concat([l.chatId]);
+            });
+            alert("Listo: " + links.length + " grupo(s) vinculados a sus clientes.");
+            closeModal();
+          } catch (e) { save.disabled = false; alert("No se pudo guardar: " + e.message); }
+          return;
+        }
         const sug = (datos && datos.suggestions) || [];
         const links = [];
         document.querySelectorAll("[data-lp-check]").forEach((chk) => {

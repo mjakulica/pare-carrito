@@ -115,14 +115,56 @@ function phoneSuggestions(clients, contacts) {
     if (!phone || vistos.has(phone)) continue;
     vistos.add(phone);
     if (ya.has(tail(phone))) { yaVinculados += 1; continue; }
-    const texto = [k.name, k.notify].filter(Boolean).join(" ");
-    const candidates = matchClients(clients, texto, 3, true);
-    if (!candidates.length || candidates[0].score < 0.5) { sinParecido += 1; continue; }
-    const claro = clearCandidate(candidates);
-    out.push({ phone, name: String(k.name || ""), notify: String(k.notify || ""), candidates, suggested: claro ? claro.id : "" });
+    // Agendados con el numero de cliente adelante: "12) Belgrano 2", "21 - Estacion Belgrano".
+    const pref = String(k.name || "").match(/^\s*(\d{1,4})\s*[)\-.:]\s*(.*)$/);
+    const nombre = pref ? pref[2] : String(k.name || "");
+    const texto = [nombre, k.notify].filter(Boolean).join(" ");
+    let candidates = matchClients(clients, texto, 3, true);
+    let suggested = "";
+    const porNumero = pref ? (clients || []).find((c) => c && c.isActive !== false && /^\d+$/.test(String(c.id)) && Number(c.id) === Number(pref[1])) : null;
+    if (porNumero) {
+      // El numero adelante del nombre es siempre el numero de cliente: se toma ese, sin mirar el nombre.
+      candidates = [{ id: porNumero.id, name: porNumero.name || "", address: porNumero.address || "", score: 2, byNumber: true }]
+        .concat(candidates.filter((c) => c.id !== porNumero.id)).slice(0, 3);
+      suggested = porNumero.id;
+    } else {
+      if (!candidates.length || candidates[0].score < 0.5) { sinParecido += 1; continue; }
+      const claro = clearCandidate(candidates);
+      suggested = claro ? claro.id : "";
+    }
+    out.push({ phone, name: String(k.name || ""), notify: String(k.notify || ""), candidates, suggested, byNumber: !!porNumero });
   }
   out.sort((a, b) => (b.suggested ? 1 : 0) - (a.suggested ? 1 : 0) || b.candidates[0].score - a.candidates[0].score);
   return { suggestions: out, yaVinculados, sinParecido };
 }
 
-module.exports = { matchClients, clearCandidate, scoreClient, norm, normalizeArPhone, phoneSuggestions };
+// Grupos de WhatsApp que parecen ser de un cliente ("Factory" -> cliente 7 Factory, o "7) Factory").
+// groups: [{ chatId, name }]. Los que ya estan vinculados a un cliente (client.waGroups) se cuentan aparte.
+function groupSuggestions(clients, groups) {
+  const ya = new Map();
+  (clients || []).forEach((c) => (c && Array.isArray(c.waGroups) ? c.waGroups : []).forEach((g) => ya.set(String(g), c)));
+  const out = [];
+  const vinculados = [];
+  let sinParecido = 0;
+  for (const g of groups || []) {
+    if (!g || !g.chatId) continue;
+    const name = String(g.name || "");
+    if (ya.has(String(g.chatId))) { const c = ya.get(String(g.chatId)); vinculados.push({ chatId: g.chatId, name, clientId: c.id, clientName: c.name || "" }); continue; }
+    const pref = name.match(/^\s*(\d{1,4})\s*[)\-.:]\s*(.*)$/);
+    const porNumero = pref ? (clients || []).find((c) => c && c.isActive !== false && /^\d+$/.test(String(c.id)) && Number(c.id) === Number(pref[1])) : null;
+    let candidates = matchClients(clients, pref ? pref[2] : name, 3, true);
+    let suggested = "";
+    if (porNumero) {
+      candidates = [{ id: porNumero.id, name: porNumero.name || "", address: porNumero.address || "", score: 2, byNumber: true }].concat(candidates.filter((c) => c.id !== porNumero.id)).slice(0, 3);
+      suggested = porNumero.id;
+    } else if (candidates.length && candidates[0].score >= 0.5) {
+      const claro = clearCandidate(candidates);
+      suggested = claro ? claro.id : "";
+    } else { candidates = []; sinParecido += 1; }
+    out.push({ chatId: g.chatId, name, total: g.total || 0, candidates, suggested, byNumber: !!porNumero });
+  }
+  out.sort((a, b) => (b.suggested ? 1 : 0) - (a.suggested ? 1 : 0) || (b.candidates.length ? 1 : 0) - (a.candidates.length ? 1 : 0) || (b.total || 0) - (a.total || 0));
+  return { groups: out, vinculados, sinParecido };
+}
+
+module.exports = { groupSuggestions, matchClients, clearCandidate, scoreClient, norm, normalizeArPhone, phoneSuggestions };

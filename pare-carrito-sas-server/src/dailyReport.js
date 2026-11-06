@@ -85,8 +85,8 @@ function archiveEmailHtml(rows, clientName, limit) {
   const hora = (ts) => new Date(ts).toLocaleTimeString("es-AR", { timeZone: "America/Argentina/Buenos_Aires", hour: "2-digit", minute: "2-digit" });
   const bloques = Array.from(chats.values()).map((msgs) => {
     const m0 = msgs[0];
-    const cliente = !m0.is_group && clientName ? clientName(m0.chat_id) : "";
-    const titulo = m0.is_group ? "Grupo: " + (m0.chat_name || m0.chat_id) : (cliente ? cliente + " · " : "") + (m0.chat_name || "") + " (+" + String(m0.chat_id).replace(/\D/g, "") + ")";
+    const cliente = clientName ? clientName(m0.chat_id) : "";
+    const titulo = m0.is_group ? (cliente ? cliente + " · " : "") + "Grupo: " + (m0.chat_name || m0.chat_id) : (cliente ? cliente + " · " : "") + (m0.chat_name || "") + " (+" + String(m0.chat_id).replace(/\D/g, "") + ")";
     return `<div style="margin:10px 0 0;padding:8px 10px;border:1px solid #e3e8ef;border-radius:8px">
       <div style="font-weight:bold;margin-bottom:4px">${esc(titulo)} <span style="color:#5d6b7e;font-weight:normal">· ${msgs.length} mensaje(s)</span></div>
       ${msgs.map((m) => `<div style="font-size:13px;margin:2px 0"><span style="color:#5d6b7e">${hora(m.ts)}</span> <b>${esc(m.from_me ? "Nosotros" : m.sender_name || (m.is_group ? "+" + m.sender_phone : "Cliente"))}:</b> ${esc(String(m.text || "").slice(0, 400))}</div>`).join("")}

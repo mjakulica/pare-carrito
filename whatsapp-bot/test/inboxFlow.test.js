@@ -149,3 +149,37 @@ test("solo recibir: linked.sendText no manda nada (prendido de entrada)", async 
   assert.equal(linked.setReceiveOnly(false).receiveOnly, false);
   assert.equal(linked.setReceiveOnly(true).receiveOnly, true);
 });
+
+test("números ocultos (@lid): se traducen al número real con los contactos o el mensaje", async () => {
+  process.env.WA_LINKED_DIR = require("path").join(require("os").tmpdir(), "wa-lid-test-" + Date.now(), "auth");
+  delete require.cache[require.resolve("../src/linked")];
+  const linked = require("../src/linked");
+  const lotes = [];
+  linked.init(() => {}, async (l) => { lotes.push(...l); });
+  linked.addContacts([{ id: "246033141514406@lid", jid: "5493871234567@s.whatsapp.net", name: "21) Estacion Belgrano" }]);
+  assert.equal(linked.phoneOf("246033141514406@lid"), "5493871234567");
+  assert.equal(linked.phoneOf("111@lid", { senderPn: "5493870000001@s.whatsapp.net" }), "5493870000001");
+  assert.equal(linked.phoneOf("111@lid"), "5493870000001");
+  await linked.archiveMessage({ key: { id: "L1", remoteJid: "246033141514406@lid" }, messageTimestamp: Math.floor(Date.now() / 1000), message: { conversation: "pedido" } });
+  await linked.flushArchive();
+  assert.equal(lotes[0].chatId, "5493871234567");
+  assert.deepEqual(linked.listContacts().map((c) => c.phone), ["5493871234567"]);
+  assert.ok(linked.listLids().some((x) => x.lid === "246033141514406" && x.phone === "5493871234567"));
+});
+
+test("grupo vinculado a un cliente: el pedido va a la bandeja como de ese cliente, sin contestar", async () => {
+  const sent = [];
+  const inbox = [];
+  const flowG = createInboxFlow({
+    wa: { sendText: async (to, t) => sent.push(t), notifyTeam: async () => {}, notifyOwner: async () => {} },
+    erp: { inbox: async (e) => { inbox.push(e); return { ok: true }; }, getTodayOrder: async () => ({ order: null }) },
+    ai: { classifyMessage: async (t) => /tomate/.test(t) ? { intent: "pedido_nuevo", items: [{ producto: "tomate", cantidad: 2 }] } : { intent: "otro", items: [] } },
+    channel: "linked"
+  });
+  assert.equal(await flowG.handleGroup({ from: "5493875555555", group: "120363@g.us", groupName: "Factory", text: "2 cajones de tomate", profileName: "Juan", client: { id: "7", name: "Factory" } }), "pedido");
+  assert.equal(await flowG.handleGroup({ from: "5493875555555", group: "120363@g.us", groupName: "Factory", text: "jaja buenísimo", profileName: "Juan", client: { id: "7", name: "Factory" } }), "ignorado_grupo");
+  assert.equal(inbox.length, 1);
+  assert.equal(inbox[0].clientId, "7");
+  assert.match(inbox[0].profileName, /Factory/);
+  assert.equal(sent.length, 0);
+});

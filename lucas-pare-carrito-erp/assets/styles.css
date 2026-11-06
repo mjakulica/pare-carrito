@@ -4396,3 +4396,6 @@ tr:last-child td {
 @media (max-width: 760px) { .alias-check-texts { grid-template-columns: 1fr; } }
 .wa-receive-only { background: #eaf5ee; border: 1px solid #b9dcc6; border-radius: 8px; padding: 8px 10px; margin: 8px 0; }
 .wa-receive-only.off { background: #fff6e5; border-color: #f2c94c; }
+
+.wa-arch-reply { display: flex; gap: 8px; align-items: flex-end; margin-top: 8px; }
+.wa-arch-reply textarea { flex: 1; min-height: 44px; resize: vertical; }
