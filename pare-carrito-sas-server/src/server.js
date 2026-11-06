@@ -3732,6 +3732,22 @@ async function remapArchiveLids(lids) {
     const b = await pool.query("UPDATE whatsapp_archive SET sender_phone = $2 WHERE sender_phone = $1", [lid, phone]);
     n += a.rowCount + b.rowCount;
   }
+  // Clientes vinculados a mano con el identificador oculto: pasan a tener el numero real.
+  if (pares.length) {
+    const mapa = new Map(pares);
+    const stored = await loadStateData();
+    const hay = stored && (stored.data.clients || []).some((c) => c && Array.isArray(c.phones) && c.phones.some((ph) => mapa.has(phoneDigits(ph))));
+    if (hay) {
+      await withStateExt((data) => {
+        (data.clients || []).forEach((c) => {
+          if (!c || !Array.isArray(c.phones) || !c.phones.some((ph) => mapa.has(phoneDigits(ph)))) return;
+          c.phones = Array.from(new Set(c.phones.map((ph) => mapa.get(phoneDigits(ph)) || ph)));
+          c.updatedAt = new Date().toISOString();
+        });
+        return { ok: true };
+      });
+    }
+  }
   return n;
 }
 
@@ -3912,6 +3928,41 @@ app.post("/whatsapp/archive/reply", authenticate, requireRole("manager", "admin"
     [String(r.id || "SIS-" + ahora), chat, rows[0].chat_name || "", !!rows[0].is_group, quien, text]);
   console.log("WhatsApp: respuesta manual de " + req.user.username + " a " + (rows[0].is_group ? "un grupo" : "..." + chat.slice(-4)) + ".");
   res.json({ ok: true });
+});
+
+// Vincular a mano un chat del archivo con un cliente: un numero (o un identificador oculto de WhatsApp,
+// que queda guardado tal cual como telefono del cliente) o un grupo. Si estaba en otro cliente, se mueve.
+app.post("/whatsapp/archive/link", authenticate, requireRole("manager", "admin"), async (req, res) => {
+  const chat = String((req.body && req.body.chat) || "").trim();
+  const clientId = String((req.body && req.body.clientId) || "").trim();
+  if (!chat || !clientId) return res.status(400).json({ error: "Falta el chat o el cliente." });
+  const esGrupo = /^[\d-]+@g\.us$/.test(chat);
+  const phone = esGrupo ? "" : normalizeArPhone(chat) || (/^\d{10,20}$/.test(chat) ? chat : "");
+  if (!esGrupo && !phone) return res.status(400).json({ error: "Ese chat no se puede vincular." });
+  const out = await withStateExt((data) => {
+    const client = (data.clients || []).find((c) => c && c.id === clientId);
+    if (!client) return { error: "Cliente no encontrado.", status: 404 };
+    const stamp = new Date().toISOString();
+    (data.clients || []).forEach((c) => {
+      if (!c || c.id === clientId) return;
+      if (esGrupo && Array.isArray(c.waGroups) && c.waGroups.includes(chat)) { c.waGroups = c.waGroups.filter((g) => g !== chat); c.updatedAt = stamp; }
+      if (!esGrupo && Array.isArray(c.phones) && c.phones.some((ph) => phoneDigits(ph).slice(-8) === phone.slice(-8))) { c.phones = c.phones.filter((ph) => phoneDigits(ph).slice(-8) !== phone.slice(-8)); c.updatedAt = stamp; }
+    });
+    if (esGrupo) {
+      if (!(client.waGroups || []).includes(chat)) { client.waGroups = (client.waGroups || []).concat([chat]); client.updatedAt = stamp; }
+    } else {
+      const tiene = [client.phone].concat(Array.isArray(client.phones) ? client.phones : []).some((ph) => phoneDigits(ph).slice(-8) === phone.slice(-8));
+      if (!tiene) { client.phones = (Array.isArray(client.phones) ? client.phones : []).concat([phone]); client.updatedAt = stamp; }
+    }
+    return { ok: true, clientId: client.id, name: client.name || "", phone, group: esGrupo ? chat : "" };
+  });
+  if (out.error) return res.status(out.status || 500).json({ error: out.error });
+  if (!esGrupo) {
+    await pool.query("UPDATE whatsapp_inbox SET client_id = $1 WHERE right(phone, 8) = right($2, 8) AND client_id IS NULL AND status = 'pendiente' AND phone <> ''", [clientId, phone]);
+    await pool.query("DELETE FROM whatsapp_identify WHERE phone = $1", [phone]);
+  }
+  console.log("WhatsApp: chat " + (esGrupo ? "de grupo" : "..." + phone.slice(-4)) + " vinculado a mano al cliente " + clientId + " por " + req.user.username + ".");
+  res.json(out);
 });
 
 app.get("/whatsapp/archive/messages", authenticate, requireRole("manager", "admin", "employee", "contador"), canSeeWaArchive, async (req, res) => {

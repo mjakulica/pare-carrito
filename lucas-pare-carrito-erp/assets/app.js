@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v91";
+  const APP_VERSION = "v92";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -20954,12 +20954,23 @@
 
   function loadWaArchiveChat(chatId) {
     ui.waArchiveChat = chatId;
+    ui.waArchiveLinking = false;
     ui.waArchiveMsgs = null;
     render();
     waArchiveFetch("/whatsapp/archive/messages?chat=" + encodeURIComponent(chatId))
       .then((j) => { if (ui.waArchiveChat === chatId) ui.waArchiveMsgs = j.messages || []; })
       .catch((e) => { ui.waArchiveMsgs = []; ui.waArchiveError = e.message; })
       .finally(() => { if (getRoute().base === "whatsapp-mensajes") render(); });
+  }
+
+  // Cliente probable de un chat: el numero adelante del nombre de agenda ("10) Parada") o el nombre.
+  function waArchiveGuessClient(chat) {
+    if (!chat) return "";
+    if (chat.client) return chat.client;
+    const name = String(chat.chat_name || "");
+    const m = name.match(/^\s*(\d{1,4})\s*[)\-.:]/);
+    const c = m ? activeClients().find((x) => /^\d+$/.test(String(x.id)) && Number(x.id) === Number(m[1])) : null;
+    return c ? c.id + " - " + c.name : "";
   }
 
   function renderWhatsappArchive() {
@@ -20980,6 +20991,36 @@
       if (back) back.addEventListener("click", () => { ui.waArchiveChat = ""; render(); });
       const box = document.getElementById("wa-arch-msgs");
       if (box) box.scrollTop = box.scrollHeight;
+      const lk = document.getElementById("wa-arch-link");
+      if (lk) lk.addEventListener("click", () => { ui.waArchiveLinking = !ui.waArchiveLinking; render(); setTimeout(() => { const i = document.getElementById("wa-arch-link-client"); if (i) i.focus(); }, 50); });
+      const lkc = document.getElementById("wa-arch-link-cancel");
+      if (lkc) lkc.addEventListener("click", () => { ui.waArchiveLinking = false; render(); });
+      const lkf = document.getElementById("wa-arch-link-form");
+      if (lkf) lkf.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const found = findClientByInput(document.getElementById("wa-arch-link-client").value);
+        if (!found) return alert("Elegí un cliente de la lista.");
+        const chat = ui.waArchiveChat;
+        const btn = lkf.querySelector("button[type=submit]");
+        btn.disabled = true;
+        try {
+          const r = await cloudRequest(getCloudSyncConfig(), "/whatsapp/archive/link", { method: "POST", body: JSON.stringify({ chat, clientId: found.id }) });
+          const j = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(j.error || "HTTP " + r.status);
+          // Tambien en este equipo, sin esperar la proxima descarga.
+          (state.clients || []).forEach((c) => {
+            if (c.id === found.id) return;
+            if (j.group && Array.isArray(c.waGroups)) c.waGroups = c.waGroups.filter((g) => g !== j.group);
+            if (j.phone && Array.isArray(c.phones)) c.phones = c.phones.filter((ph) => String(ph).replace(/\D/g, "").slice(-8) !== j.phone.slice(-8));
+          });
+          const c = getClient(found.id);
+          if (c && j.group && !(c.waGroups || []).includes(j.group)) c.waGroups = (c.waGroups || []).concat([j.group]);
+          if (c && j.phone && !(c.phones || []).some((ph) => String(ph).replace(/\D/g, "").slice(-8) === j.phone.slice(-8))) c.phones = (c.phones || []).concat([j.phone]);
+          ui.waArchiveLinking = false;
+          (ui.waArchiveChats || []).forEach((x) => { if (x.chat_id === chat) x.client = found.id + " - " + (found.name || ""); });
+          render();
+        } catch (err) { btn.disabled = false; alert("No se pudo vincular: " + err.message); }
+      });
       const reply = document.getElementById("wa-arch-reply");
       if (reply) reply.addEventListener("submit", async (e) => {
         e.preventDefault();
@@ -21026,7 +21067,12 @@
         </div>
         <div class="panel wa-arch-conv">
           ${!ui.waArchiveChat ? `<p class="muted">Elegí un chat para ver la conversación.</p>` : `
-            <div class="page-actions" style="justify-content:space-between;margin-bottom:8px"><strong>${actual ? titulo(actual) : escapeHtml(ui.waArchiveChat)}</strong><button class="btn small ghost wa-arch-back" type="button" id="wa-arch-back">&larr; Chats</button></div>
+            <div class="page-actions" style="justify-content:space-between;margin-bottom:8px"><strong>${actual ? titulo(actual) : escapeHtml(ui.waArchiveChat)}</strong><span style="display:flex;gap:6px">${["manager", "admin"].includes(currentUser.role) ? `<button class="btn small ${actual && actual.client ? "ghost" : "primary"}" type="button" id="wa-arch-link">${actual && actual.client ? "Cambiar cliente" : "Vincular a cliente"}</button>` : ""}<button class="btn small ghost wa-arch-back" type="button" id="wa-arch-back">&larr; Chats</button></span></div>
+            ${ui.waArchiveLinking ? `<form id="wa-arch-link-form" class="wa-arch-reply" style="margin:0 0 8px">
+              <datalist id="wa-arch-clients">${activeClients().map((c) => `<option value="${escapeAttr(c.id + " - " + c.name)}"></option>`).join("")}</datalist>
+              <input id="wa-arch-link-client" list="wa-arch-clients" placeholder="Buscar cliente por número o nombre" value="${escapeAttr(waArchiveGuessClient(actual))}" style="flex:1" autocomplete="off" />
+              <button class="btn primary" type="submit">Vincular</button><button class="btn ghost" type="button" id="wa-arch-link-cancel">Cancelar</button>
+            </form>` : ""}
             <div class="wa-arch-msgs" id="wa-arch-msgs">${msgs === null ? `<p class="muted">Cargando...</p>` : msgs.map((m) => `<div class="wa-arch-msg ${m.from_me ? "mine" : ""} ${q && String(m.text || "").toLowerCase().includes(q) ? "hit" : ""}">
               ${!m.from_me && m.is_group ? `<div class="wa-arch-sender">${escapeHtml(m.sender_name || formatWaPhone(m.sender_phone))}</div>` : ""}
               <div>${escapeHtml(m.text || "")}</div><div class="wa-arch-time">${m.from_me && /\(sistema\)$/.test(m.sender_name || "") ? escapeHtml(String(m.sender_name).replace(/ \(sistema\)$/, "")) + " · " : ""}${hora(m.ts)}</div>
