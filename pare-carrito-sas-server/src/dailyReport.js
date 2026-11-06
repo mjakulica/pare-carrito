@@ -18,18 +18,32 @@ function esc(text) {
   return String(text == null ? "" : text).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
-// Kilos de un renglon: en kg tal cual, en gramos dividido 1000; otras unidades no suman kilos.
-function itemKg(item) {
-  const u = String(item && item.unitType || "").toLowerCase().replace(/\./g, "").trim();
-  const q = Number(item && item.quantity || 0);
-  if (["kg", "kgs", "kilo", "kilos", "kilogramo", "kilogramos"].includes(u)) return q;
-  if (["g", "gr", "grs", "gramo", "gramos"].includes(u)) return q / 1000;
-  return 0;
+// Kilos: la misma cuenta que el grafico de kg del Inicio (getKgFactor de la app): cantidad por los kg
+// por unidad del producto, o el peso configurado para su unidad (cajon, bolsa...), o 1.
+const DEFAULT_UNIT_TYPES = [{ name: "kg", weight: 1 }, { name: "docena", weight: 1 }, { name: "jaula", weight: 1 }, { name: "cajon", weight: 1 }, { name: "bolsa", weight: 1 }, { name: "unidad", weight: 1 }];
+
+function kgFactorFn(data) {
+  const configured = data.appSettings && Array.isArray(data.appSettings.unitTypes) && data.appSettings.unitTypes.length ? data.appSettings.unitTypes : DEFAULT_UNIT_TYPES;
+  const pesos = new Map();
+  configured.forEach((u) => {
+    const unit = typeof u === "string" ? { name: u, weight: 1 } : u || {};
+    const name = String(unit.name || "").trim().toLowerCase();
+    if (name && !pesos.has(name)) pesos.set(name, Number(unit.weight) > 0 ? Number(unit.weight) : 1);
+  });
+  const productos = new Map((data.products || []).filter(Boolean).map((p) => [String(p.id), p]));
+  return (productId) => {
+    const product = productos.get(String(productId));
+    if (!product) return 1;
+    if (Number(product.kgPerUnit) > 0) return Number(product.kgPerUnit);
+    const w = pesos.get(String(product.unitType || "").toLowerCase());
+    return w > 0 ? w : 1;
+  };
 }
 
 function dailySalesSummary(data, date) {
   const orders = (data.orders || []).filter((o) => o && o.date === date && !CANCELADO.includes(o.status) && !o.exampleOnly);
-  const kg = orders.reduce((s, o) => s + (o.items || []).reduce((t, it) => t + itemKg(it), 0), 0);
+  const factor = kgFactorFn(data);
+  const kg = orders.reduce((s, o) => s + (o.items || []).reduce((t, it) => t + Number(it.quantity || 0) * factor(it.productId), 0), 0);
   const ventas = orders.reduce((s, o) => s + Number(o.totalAmount || 0), 0);
   const pagos = (data.payments || []).filter((p) => p && p.date === date && p.status !== "anulado");
   const porMedio = (m) => pagos.filter((p) => p.method === m).reduce((s, p) => s + Number(p.amount || 0), 0);
@@ -45,7 +59,7 @@ function dailySalesHtml(r) {
   return `<h3 style="margin:18px 0 6px">Resumen del día</h3>
     <table cellpadding="0" style="border-collapse:collapse;font-size:14px">
       ${fila("Pedidos", num(r.pedidos, 0))}
-      ${fila("Kilos totales (productos por kg)", num(r.kg) + " kg")}
+      ${fila("Kilos totales (como en el Inicio)", num(r.kg) + " kg")}
       ${fila("Ventas (total de los pedidos)", money(r.ventas), true)}
       ${fila("Cobrado en efectivo", money(r.efectivo))}
       ${fila("Cobrado por transferencia", money(r.transferencia))}
@@ -81,4 +95,4 @@ function archiveEmailHtml(rows, clientName, limit) {
   return `<h3 style="margin:18px 0 6px">Mensajes de WhatsApp del día (${rows.length})</h3>${bloques}${rows.length > max ? `<p style="color:#5d6b7e">Se muestran los primeros ${max}. El resto está en el sistema: Mensajes de WhatsApp.</p>` : ""}`;
 }
 
-module.exports = { dailySalesSummary, dailySalesHtml, dailySalesLine, archiveEmailHtml, itemKg };
+module.exports = { dailySalesSummary, dailySalesHtml, dailySalesLine, archiveEmailHtml, kgFactorFn };

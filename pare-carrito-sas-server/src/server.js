@@ -3786,7 +3786,21 @@ function clientNameByPhone(data) {
   return (phone) => map.get(phoneDigits(phone).slice(-8)) || "";
 }
 
-app.get("/whatsapp/archive/chats", authenticate, requireRole("manager", "admin"), async (req, res) => {
+// Quien ve Mensajes de WhatsApp: gerente y admin siempre; empleados y contador segun la lista de
+// Configuracion (appSettings.waArchiveAccess.userIds). Sin lista: todos los empleados.
+async function canSeeWaArchive(req, res, next) {
+  if (["manager", "admin"].includes(req.user.role)) return next();
+  try {
+    const { rows } = await pool.query("SELECT data->'appSettings'->'waArchiveAccess' AS a FROM app_state WHERE id = 'main'");
+    const acceso = rows[0] && rows[0].a;
+    const ids = acceso && Array.isArray(acceso.userIds) ? acceso.userIds.map(String) : null;
+    const ok = ids ? ids.includes(String(req.user.sub)) : req.user.role === "employee";
+    if (ok) return next();
+  } catch (e) { /* sin acceso */ }
+  res.status(403).json({ error: "No tenés acceso a los mensajes de WhatsApp. Lo habilita el gerente en Configuración." });
+}
+
+app.get("/whatsapp/archive/chats", authenticate, requireRole("manager", "admin", "employee", "contador"), canSeeWaArchive, async (req, res) => {
   const q = String(req.query.q || "").trim();
   const params = [];
   let where = "";
@@ -3800,7 +3814,18 @@ app.get("/whatsapp/archive/chats", authenticate, requireRole("manager", "admin")
   res.json({ ok: true, chats: rows.map((r) => ({ ...r, client: r.is_group ? "" : cliente(r.chat_id) })) });
 });
 
-app.get("/whatsapp/archive/messages", authenticate, requireRole("manager", "admin"), async (req, res) => {
+// Mensajes recibidos de chats individuales entre dos fechas (para comprobar los alias contra los pedidos).
+app.get("/whatsapp/archive/range", authenticate, requireRole("manager", "admin"), async (req, res) => {
+  const from = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.from || "")) ? String(req.query.from) : new Date(Date.now() - 31 * 86400000).toISOString().slice(0, 10);
+  const to = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.to || "")) ? String(req.query.to) : new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+  const { rows } = await pool.query(
+    `SELECT chat_id, text, ts FROM whatsapp_archive WHERE NOT is_group AND NOT from_me AND msg_type = 'texto'
+     AND ts >= ($1::date - interval '2 days') AND ts < ($2::date + interval '1 day') ORDER BY chat_id, ts LIMIT 50000`, [from, to]);
+  const total = await pool.query("SELECT count(*)::int AS n, min(ts) AS desde FROM whatsapp_archive");
+  res.json({ ok: true, messages: rows, archivo: total.rows[0] });
+});
+
+app.get("/whatsapp/archive/messages", authenticate, requireRole("manager", "admin", "employee", "contador"), canSeeWaArchive, async (req, res) => {
   const chat = String(req.query.chat || "");
   if (!chat) return res.status(400).json({ error: "Falta el chat." });
   const { rows } = await pool.query("SELECT wa_id, chat_name, is_group, sender_phone, sender_name, from_me, msg_type, text, ts FROM whatsapp_archive WHERE chat_id = $1 ORDER BY ts DESC LIMIT 1000", [chat]);

@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v88";
+  const APP_VERSION = "v89";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -330,7 +330,7 @@
     { id: "dashboard", label: "Inicio", icon: "IN", roles: ["manager", "admin", "employee", "customer", "contador", "example", "proveedor"] },
     { id: "mi-recorrido", label: "Mi recorrido", icon: "MR", roles: ["manager", "admin", "employee"] },
     { id: "control", label: "Control", icon: "CK", roles: ["manager", "admin"] },
-    { id: "whatsapp-mensajes", label: "Mensajes WhatsApp", icon: "WA", roles: ["manager", "admin"] },
+    { id: "whatsapp-mensajes", label: "Mensajes WhatsApp", icon: "WA", roles: ["manager", "admin", "employee", "contador"] },
     { id: "nuevo-pedido", label: "Nuevo Pedido", icon: "NP", roles: ["manager", "admin", "employee", "customer", "example"] },
     { id: "pedidos", label: "Pedidos", icon: "PE", roles: ["manager", "admin", "employee", "customer", "example", "proveedor"] },
     { id: "clientes", label: "Clientes", icon: "CL", roles: ["manager", "admin"] },
@@ -14749,7 +14749,7 @@
         <div class="field span-2"><label>Plantilla de Meta (con una variable {{1}})</label><input id="wa-control-template" value="${escapeAttr(a.controlWhatsappTemplate || "")}" placeholder="ej: resumen_control" /></div>
         <div class="field span-2"><label>Números (vacío = teléfono del gerente)</label><input id="wa-control-to" value="${escapeAttr(a.controlWhatsappTo || "")}" placeholder="5493871234567, 5493877654321" /></div>
       </div>
-    </div>${["manager", "admin"].includes(currentUser.role) ? `<div id="wa-linked-panel" class="panel" style="margin-top:14px">${waLinkedPanelInner()}</div>` : ""}${["manager", "admin"].includes(currentUser.role) ? metaReviewerPanelHtml() : ""}${window.WhatsAppTemplates ? window.WhatsAppTemplates.html() : ""}`;
+    </div>${["manager", "admin"].includes(currentUser.role) ? `<div id="wa-linked-panel" class="panel" style="margin-top:14px">${waLinkedPanelInner()}</div>${waArchiveAccessHtml()}` : ""}${["manager", "admin"].includes(currentUser.role) ? metaReviewerPanelHtml() : ""}${window.WhatsAppTemplates ? window.WhatsAppTemplates.html() : ""}`;
   }
 
   // ---- WhatsApp vinculado por QR (mientras Meta no aprueba) ----
@@ -14812,8 +14812,26 @@
     }, ui.waLinked ? 3000 : 50);
   }
 
+  function waArchiveAccessHtml() {
+    const acceso = state.appSettings && state.appSettings.waArchiveAccess;
+    const usuarios = (state.users || []).filter((u) => u && u.isActive !== false && ["employee", "contador"].includes(u.role));
+    return `<div class="panel" style="margin-top:14px" id="wa-access-panel">
+      <h2 class="page-title" style="font-size:18px">Quién puede ver Mensajes de WhatsApp</h2>
+      <p class="muted" style="margin-top:0">El gerente y el admin siempre. Tildá los demás usuarios que pueden ver los chats guardados.</p>
+      ${usuarios.length ? usuarios.map((u) => `<label style="display:flex;gap:8px;align-items:center;padding:3px 0"><input type="checkbox" data-wa-access="${escapeAttr(u.id)}" ${canSeeWaArchive(u) ? "checked" : ""} style="width:auto;min-height:auto" /> ${escapeHtml(u.name || u.username)} <span class="muted">(${escapeHtml(roleLabel(u.role))})</span></label>`).join("") : `<p class="muted">No hay empleados cargados.</p>`}
+      <div class="page-actions" style="margin-top:8px"><button class="btn primary" type="button" id="wa-access-save">Guardar acceso</button>${acceso ? "" : `<span class="muted" style="font-size:12px">Hoy: todos los empleados (sin configurar).</span>`}</div>
+    </div>`;
+  }
+
   function bindWhatsappBotPanel() {
     bindMetaReviewerPanel();
+    const accesoBtn = document.getElementById("wa-access-save");
+    if (accesoBtn) accesoBtn.addEventListener("click", () => {
+      const userIds = Array.from(document.querySelectorAll("[data-wa-access]")).filter((c) => c.checked).map((c) => c.dataset.waAccess);
+      state.appSettings.waArchiveAccess = { userIds, updatedAt: new Date().toISOString(), by: currentUser.name || "" };
+      saveState();
+      alert("Acceso guardado: " + (userIds.length ? userIds.length + " usuario(s) además del gerente y el admin." : "solo el gerente y el admin."));
+    });
     if (document.getElementById("wa-linked-panel")) { paintWaLinked(); scheduleWaLinkedPoll(); }
     if (window.WhatsAppTemplates) window.WhatsAppTemplates.mount({ request: (path, options) => cloudRequest(getCloudSyncConfig(), path, options) });
     const check = document.getElementById("wa-status-check");
@@ -20905,6 +20923,8 @@
       const form = document.getElementById("wa-arch-search");
       if (form) form.addEventListener("submit", (e) => { e.preventDefault(); ui.waArchiveQ = document.getElementById("wa-arch-q").value.trim(); ui.waArchiveChat = ""; loadWaArchiveChats(); render(); });
       document.querySelectorAll("[data-wa-chat]").forEach((b) => b.addEventListener("click", () => loadWaArchiveChat(b.dataset.waChat)));
+      const chk = document.getElementById("wa-alias-check");
+      if (chk) chk.addEventListener("click", () => openAliasCheck());
       const all = document.getElementById("wa-arch-all");
       if (all) all.addEventListener("click", () => { ui.waArchiveQ = ""; ui.waArchiveChat = ""; loadWaArchiveChats(); render(); });
       const back = document.getElementById("wa-arch-back");
@@ -20917,7 +20937,7 @@
     return pageShell(
       "Mensajes de WhatsApp",
       "Copia de todos los chats del WhatsApp vinculado por QR (individuales y grupos, recibidos y enviados). Se guardan 90 días: si bloquean el número, acá queda todo.",
-      `<button class="btn ghost" type="button" data-route="configuracion">Vinculación</button>`,
+      `${["manager", "admin"].includes(currentUser.role) ? `<button class="btn primary" type="button" id="wa-alias-check">Comprobar alias (30 días)</button><button class="btn ghost" type="button" data-route="configuracion">Vinculación</button>` : ""}`,
       `${ui.waArchiveError ? `<div class="alert warn">${escapeHtml(ui.waArchiveError)}</div>` : ""}
       <form id="wa-arch-search" class="page-actions" style="margin-bottom:12px"><input id="wa-arch-q" placeholder="Buscar por cliente, nombre, número o texto" value="${escapeAttr(ui.waArchiveQ || "")}" style="flex:1;min-width:220px" /><button class="btn primary" type="submit">Buscar</button>${ui.waArchiveQ ? `<button class="btn ghost" type="button" id="wa-arch-all">Ver todos</button>` : ""}</form>
       <div class="wa-arch ${ui.waArchiveChat ? "con-chat" : ""}">
@@ -20939,6 +20959,161 @@
       </div>`,
       "whatsapp-mensajes"
     );
+  }
+
+  // ---- Comprobar alias contra los pedidos de los ultimos 30 dias ----
+  // Por cada pedido: W = mensaje original del WhatsApp (archivo), T = texto guardado en el pedido (ya
+  // corregido) y P = el pedido como esta hoy. Se leen W y T con los alias de HOY:
+  //  - W distinto de T: problema de alias (el mensaje original todavia no sale solo). De la diferencia
+  //    W -> T salen los alias que faltan.
+  //  - T distinto de P: el pedido se modifico despues de cargarlo (o un alias nuevo cambio la lectura);
+  //    se muestra aparte, no cuenta como error de alias.
+  function aggregateItems(items) {
+    const m = new Map();
+    (items || []).forEach((it) => {
+      const id = it.product ? it.product.id : it.productId;
+      if (!id) return;
+      m.set(id, (m.get(id) || 0) + Number(it.quantity || 0));
+    });
+    return m;
+  }
+
+  function compareItemMaps(a, b) {
+    const ids = new Set([...a.keys(), ...b.keys()]);
+    const out = [];
+    ids.forEach((id) => {
+      const qa = a.get(id) || 0, qb = b.get(id) || 0;
+      if (Math.abs(qa - qb) > 0.01) out.push({ productId: id, a: qa, b: qb });
+    });
+    return out;
+  }
+
+  function wordSet(text) {
+    return new Set(orderTextLines(text).join(" ").split(/\s+/).map((w) => normalizeText(w)).filter((w) => w && w.length > 1));
+  }
+
+  function jaccard(a, b) {
+    if (!a.size || !b.size) return 0;
+    let inter = 0;
+    a.forEach((w) => { if (b.has(w)) inter += 1; });
+    return inter / (a.size + b.size - inter);
+  }
+
+  async function runAliasCheck(dias) {
+    const desde = addDaysISO(todayISO(), -(dias || 30));
+    const r = await cloudRequest(getCloudSyncConfig(), "/whatsapp/archive/range?from=" + desde + "&to=" + todayISO(), { method: "GET" });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || "HTTP " + r.status);
+    // Telefono (ultimos 8 digitos) -> cliente
+    const porTel = new Map();
+    (state.clients || []).forEach((c) => [c.phone].concat(c.phones || []).forEach((ph) => { const t = String(ph || "").replace(/\D/g, "").slice(-8); if (t.length === 8) porTel.set(t, c.id); }));
+    const msgsPorCliente = new Map();
+    (j.messages || []).forEach((m) => {
+      const cid = porTel.get(String(m.chat_id).replace(/\D/g, "").slice(-8));
+      if (!cid) return;
+      if (!msgsPorCliente.has(cid)) msgsPorCliente.set(cid, []);
+      msgsPorCliente.get(cid).push({ text: String(m.text || ""), t: new Date(m.ts).getTime() });
+    });
+    const clientesConTel = new Set(porTel.values());
+    const pedidos = (state.orders || []).filter((o) => o && String(o.date || "") >= desde && !["cancelado", "anulado"].includes(o.status) && !o.exampleOnly && !o.deletedAt)
+      .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.clientId).localeCompare(String(b.clientId)));
+    const res = { desde, archivo: j.archivo || {}, total: pedidos.length, ok: [], alias: [], editado: [], sinMensaje: [], sinTelefono: [], sinProductos: [] };
+    pedidos.forEach((o) => {
+      if (!clientesConTel.has(o.clientId)) { res.sinTelefono.push(o); return; }
+      if (!(o.items || []).length) { res.sinProductos.push(o); return; }
+      const T = o.whatsappText && o.whatsappText.text ? String(o.whatsappText.text) : "";
+      const P = aggregateItems(o.items);
+      const creado = new Date(o.createdAt || (o.date + "T05:00:00")).getTime();
+      const msgs = (msgsPorCliente.get(o.clientId) || []).filter((m) => m.t >= creado - 36 * 3600000 && m.t <= creado + 2 * 3600000);
+      // Candidatos: cada mensaje y los grupos de mensajes seguidos (el pedido en varios mensajes).
+      const cands = [];
+      for (let i = 0; i < msgs.length; i += 1) {
+        let texto = "";
+        for (let k = i; k < Math.min(msgs.length, i + 8); k += 1) {
+          if (k > i && msgs[k].t - msgs[k - 1].t > 30 * 60000) break;
+          texto += (texto ? "\n" : "") + msgs[k].text;
+          cands.push({ text: texto, t: msgs[i].t });
+        }
+      }
+      const tw = T ? wordSet(T) : null;
+      let mejor = null;
+      cands.forEach((c) => {
+        let score;
+        if (tw) score = jaccard(wordSet(c.text), tw);
+        else {
+          const pc = aggregateItems(parseWhatsappOrder(c.text, o.clientId).items);
+          const hits = [...P.keys()].filter((id) => pc.has(id)).length;
+          score = P.size ? hits / Math.max(P.size, pc.size || 1) : 0;
+        }
+        if (!mejor || score > mejor.score + 1e-9) mejor = { ...c, score };
+      });
+      if (!mejor || mejor.score < 0.3) { res.sinMensaje.push(o); return; }
+      const W = mejor.text;
+      const pw = parseWhatsappOrder(W, o.clientId);
+      const PW = aggregateItems(pw.items);
+      const PT = T ? aggregateItems(parseWhatsappOrder(T, o.clientId).items) : null;
+      const difAlias = compareItemMaps(PW, PT || P);
+      const difEditado = PT ? compareItemMaps(PT, P) : [];
+      const fila = { order: o, W, T, wAt: mejor.t, difAlias, difEditado, unmatched: pw.unmatched, sugerencias: T ? suggestAliasesFromEdit(W, T, o.clientId) : [] };
+      if (difAlias.length || pw.unmatched.length) res.alias.push(fila);
+      else if (difEditado.length) res.editado.push(fila);
+      else res.ok.push(fila);
+    });
+    return res;
+  }
+
+  async function openAliasCheck() {
+    if (historyMode() === "rapida") {
+      if (!confirm("Para comprobar los últimos 30 días hace falta bajar el historial de pedidos con sus productos (100 días). ¿Bajarlo ahora?")) return;
+      await loadHistory("parcial");
+      if (historyMode() === "rapida") return;
+    }
+    showModal("Comprobar alias (últimos 30 días)", `<p class="muted">Leyendo los mensajes de WhatsApp y comparando con los pedidos...</p>`, null, { hideSave: true, cancelLabel: "Cerrar", className: "modal-wide" });
+    let res;
+    try { res = await runAliasCheck(30); } catch (e) { if (ui.modal) { ui.modal.body = `<div class="alert warn">No se pudo comprobar: ${escapeHtml(e.message)}</div>`; render(); } return; }
+    if (!ui.modal) return; // se cerro la ventana mientras comparaba
+    const nombre = (o) => { const c = getClient(o.clientId); return escapeHtml(o.clientId) + " - " + escapeHtml(c ? c.name : o.clientId); };
+    const prod = (id) => { const p = getProduct(id); return escapeHtml(p ? p.name : id); };
+    const tabla = (difs, colA, colB) => `<table class="alias-check-table"><thead><tr><th>Producto</th><th>${colA}</th><th>${colB}</th></tr></thead><tbody>${difs.map((d) => `<tr><td>${prod(d.productId)}</td><td class="num">${d.a ? formatNumber(d.a) : "—"}</td><td class="num">${d.b ? formatNumber(d.b) : "—"}</td></tr>`).join("")}</tbody></table>`;
+    let n = 0;
+    const sugerencias = [];
+    const bloque = (f, tipo) => `<details class="alias-check-item ${tipo}"><summary><strong>${formatDate(f.order.date)} · ${nombre(f.order)}</strong> <span class="muted">${escapeHtml(f.order.id)}</span></summary>
+      <div class="alias-check-texts"><div><div class="muted">Mensaje original de WhatsApp (${new Date(f.wAt).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })})</div><pre>${escapeHtml(f.W)}</pre></div>
+      <div><div class="muted">Texto guardado en el pedido</div><pre>${escapeHtml(f.T || "(el pedido no se cargó con texto)")}</pre></div></div>
+      ${f.unmatched.length ? `<p><strong>Renglones del mensaje que no se reconocen:</strong> ${f.unmatched.map((u) => `"${escapeHtml(u)}"`).join(", ")}</p>` : ""}
+      ${f.difAlias.length ? `<p style="margin-bottom:4px"><strong>Lo que da el mensaje original con los alias de hoy, contra ${f.T ? "el texto guardado" : "el pedido"}:</strong></p>${tabla(f.difAlias, "Mensaje", f.T ? "Texto guardado" : "Pedido")}` : ""}
+      ${f.difEditado.length ? `<p style="margin-bottom:4px"><strong>Modificado en el sistema después de cargarlo</strong> <span class="muted">(o un alias nuevo cambió la lectura del texto guardado)</span>:</p>${tabla(f.difEditado, "Texto guardado", "Pedido hoy")}` : ""}
+      ${f.sugerencias.length ? `<p style="margin-bottom:4px"><strong>Alias sugeridos para este cliente:</strong></p>${f.sugerencias.map((x) => { const i = n++; sugerencias.push({ clientId: f.order.clientId, ...x }); return `<label class="alias-check-sug"><input type="checkbox" data-alias-sug="${i}" checked style="width:auto;min-height:auto" /> "${escapeHtml(x.alias)}" → ${escapeHtml(x.productName)} <span class="muted">(escribió "${escapeHtml(x.from)}", se corrigió a "${escapeHtml(x.to)}")</span></label>`; }).join("")}` : ""}
+    </details>`;
+    const arch = res.archivo || {};
+    ui.modal.body = `
+      <div class="grid three" style="margin-bottom:10px">
+        ${metricCard("Correctos", String(res.ok.length), "El mensaje original da exactamente el pedido")}
+        ${metricCard("Alias a revisar", String(res.alias.length), "El mensaje original todavía no da el pedido")}
+        ${metricCard("Modificados después", String(res.editado.length), "Alias bien; el pedido se cambió en el sistema")}
+      </div>
+      <p class="muted" style="margin-top:0">${res.total} pedido(s) desde el ${formatDate(res.desde)}. Sin mensaje de WhatsApp encontrado: ${res.sinMensaje.length} · clientes sin teléfono vinculado: ${res.sinTelefono.length}${res.sinProductos.length ? " · sin detalle de productos: " + res.sinProductos.length : ""}. Archivo de WhatsApp: ${Number(arch.n || 0)} mensajes${arch.desde ? " desde el " + formatDate(String(arch.desde).slice(0, 10)) : ""}.</p>
+      ${!Number(arch.n || 0) ? `<div class="alert warn">Todavía no hay mensajes guardados. Vinculá el WhatsApp por QR en Configuración (si ya estaba vinculado, desvinculalo y volvé a escanear para que mande el historial).</div>` : ""}
+      ${res.sinTelefono.length ? `<p class="muted" style="font-size:12px">Para comparar más pedidos, cargá los teléfonos de los clientes: Clientes → Vincular teléfonos desde contactos.</p>` : ""}
+      ${res.alias.length ? `<h3 style="font-size:16px">Alias a revisar (${res.alias.length})</h3>${res.alias.map((f) => bloque(f, "alias")).join("")}` : ""}
+      ${res.editado.length ? `<h3 style="font-size:16px">Modificados después de cargarlos (${res.editado.length})</h3>${res.editado.map((f) => bloque(f, "editado")).join("")}` : ""}
+      ${res.sinMensaje.length ? `<details style="margin-top:10px"><summary>Pedidos sin mensaje de WhatsApp encontrado (${res.sinMensaje.length})</summary><ul>${res.sinMensaje.map((o) => `<li>${formatDate(o.date)} · ${nombre(o)} <span class="muted">${escapeHtml(o.id)}</span></li>`).join("")}</ul></details>` : ""}
+      ${sugerencias.length ? `<div class="page-actions" style="margin-top:12px"><button class="btn primary" type="button" id="alias-check-save">Guardar los alias tildados (${sugerencias.length})</button></div>` : ""}`;
+    ui.modal.bind = () => {
+      const b = document.getElementById("alias-check-save");
+      if (b) b.addEventListener("click", () => {
+        let guardados = 0;
+        document.querySelectorAll("[data-alias-sug]").forEach((c) => {
+          if (!c.checked) return;
+          const x = sugerencias[Number(c.dataset.aliasSug)];
+          if (x && saveClientAlias(x.clientId, x.productId, x.alias)) guardados += 1;
+        });
+        if (guardados) saveState();
+        alert(guardados ? guardados + " alias guardados. La próxima vez esos mensajes se leen solos." : "No había alias nuevos para guardar.");
+        b.disabled = true;
+      });
+    };
+    render();
   }
 
   // ---- Vincular telefonos de clientes desde la agenda ----
@@ -21204,7 +21379,18 @@
     return (state.appSettings && state.appSettings.rolePermissions && state.appSettings.rolePermissions[role]) || null;
   }
 
+  // Mensajes de WhatsApp: gerente y admin siempre; los demas segun la lista de Configuracion (sin
+  // lista, todos los empleados). El servidor aplica la misma regla.
+  function canSeeWaArchive(user) {
+    if (!user) return false;
+    if (["manager", "admin"].includes(user.role)) return true;
+    const acceso = state.appSettings && state.appSettings.waArchiveAccess;
+    if (acceso && Array.isArray(acceso.userIds)) return acceso.userIds.map(String).includes(String(user.id));
+    return user.role === "employee";
+  }
+
   function pageVisibleForRole(item, role) {
+    if (item.id === "whatsapp-mensajes") return role === currentUser.role ? canSeeWaArchive(currentUser) : ["manager", "admin", "employee"].includes(role);
     // Mi recorrido convive con el sistema de siempre: el empleado lo ve solo si se lo activan en Usuarios.
     if (item.id === "mi-recorrido") return role === "manager" || role === "admin" || (role === "employee" && !!currentUser && recorridoEnabledFor(currentUser.id));
     if (item.id === "mi-facturacion") {
@@ -21940,9 +22126,9 @@
     return pares;
   }
 
-  function learnFromParseEdit(beforeText, afterText, beforeClient, clientId) {
-    if (!beforeText || !clientId || beforeClient !== clientId || normalizeText(beforeText) === normalizeText(afterText)) return [];
-    if (!currentUser || !["manager", "admin", "employee"].includes(currentUser.role)) return [];
+  // Alias que salen de comparar un texto con su version corregida: renglones emparejados, misma
+  // cantidad, y el original no daba el producto que da el corregido.
+  function suggestAliasesFromEdit(beforeText, afterText, clientId) {
     const out = [];
     changedLinePairs(beforeText, afterText).forEach(([a, b]) => {
       const pa = parseOrderLine(a, clientId);
@@ -21958,14 +22144,30 @@
       if (pb && normalizeText(pb.name) === normalizeText(alias)) return;
       // Una correccion deja la misma cantidad y cambia el producto; si cambio la cantidad es otro renglon.
       if (!pb || Math.abs(Number(pa.quantity || 0) - Number(pb.quantity || 0)) > 0.0001) return;
-      state.clientProductAliases = state.clientProductAliases || [];
-      const ya = state.clientProductAliases.find((x) => x.clientId === clientId && normalizeText(x.alias) === normalizeText(alias));
-      if (ya && ya.productId === producto.id) return;
-      // El mismo texto apuntaba a otro producto para este cliente: se reemplaza por la correccion.
-      if (ya) state.clientProductAliases = state.clientProductAliases.filter((x) => x !== ya);
-      const nuevo = { clientId, productId: producto.id, alias, learnedAt: new Date().toISOString(), learnedBy: currentUser.name || "" };
-      state.clientProductAliases.push(nuevo);
-      out.push({ alias: nuevo, replaced: ya || null, productName: producto.name });
+      if (out.some((x) => normalizeText(x.alias) === normalizeText(alias))) return;
+      out.push({ alias, productId: producto.id, productName: producto.name, from: a, to: b });
+    });
+    return out;
+  }
+
+  function saveClientAlias(clientId, productId, alias) {
+    state.clientProductAliases = state.clientProductAliases || [];
+    const ya = state.clientProductAliases.find((x) => x.clientId === clientId && normalizeText(x.alias) === normalizeText(alias));
+    if (ya && ya.productId === productId) return null;
+    // El mismo texto apuntaba a otro producto para este cliente: se reemplaza por la correccion.
+    if (ya) state.clientProductAliases = state.clientProductAliases.filter((x) => x !== ya);
+    const nuevo = { clientId, productId, alias, learnedAt: new Date().toISOString(), learnedBy: currentUser ? currentUser.name || "" : "" };
+    state.clientProductAliases.push(nuevo);
+    return { alias: nuevo, replaced: ya || null };
+  }
+
+  function learnFromParseEdit(beforeText, afterText, beforeClient, clientId) {
+    if (!beforeText || !clientId || beforeClient !== clientId || normalizeText(beforeText) === normalizeText(afterText)) return [];
+    if (!currentUser || !["manager", "admin", "employee"].includes(currentUser.role)) return [];
+    const out = [];
+    suggestAliasesFromEdit(beforeText, afterText, clientId).forEach((sug) => {
+      const r = saveClientAlias(clientId, sug.productId, sug.alias);
+      if (r) out.push({ ...r, productName: sug.productName });
     });
     if (out.length) saveState();
     return out;

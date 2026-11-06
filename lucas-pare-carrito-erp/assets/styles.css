@@ -4383,3 +4383,14 @@ tr:last-child td {
   .wa-arch-back { display: inline-flex; }
 }
 .learned-aliases { background: #eaf5ee; border: 1px solid #b9dcc6; border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; color: #17412d; }
+.modal.modal-wide { max-width: min(1100px, 96vw); width: 96vw; }
+.alias-check-item { border: 1px solid var(--line, #e3e8ef); border-radius: 8px; padding: 8px 10px; margin: 6px 0; }
+.alias-check-item.alias { border-left: 4px solid #d97706; }
+.alias-check-item.editado { border-left: 4px solid #2457a6; }
+.alias-check-item summary { cursor: pointer; }
+.alias-check-texts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 8px 0; }
+.alias-check-texts pre { white-space: pre-wrap; background: #f4f6f8; border-radius: 6px; padding: 8px; margin: 4px 0 0; font-size: 13px; max-height: 260px; overflow: auto; }
+.alias-check-table { border-collapse: collapse; font-size: 13px; margin-bottom: 6px; }
+.alias-check-table th, .alias-check-table td { padding: 3px 10px 3px 0; text-align: left; }
+.alias-check-sug { display: block; padding: 3px 0; font-size: 13px; }
+@media (max-width: 760px) { .alias-check-texts { grid-template-columns: 1fr; } }
