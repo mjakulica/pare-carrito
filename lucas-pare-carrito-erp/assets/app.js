@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v103";
+  const APP_VERSION = "v104";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -21245,7 +21245,18 @@
     const pedidos = (state.orders || []).filter((o) => o && String(o.date || "") >= desde && !["cancelado", "anulado"].includes(o.status) && !o.exampleOnly && !o.deletedAt)
       .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.clientId).localeCompare(String(b.clientId)));
     const res = { desde, archivo: j.archivo || {}, total: pedidos.length, ok: [], alias: [], cantidad: [], editado: [], revisados: [], sinMensaje: [], sinTelefono: [], sinProductos: [] };
-    pedidos.forEach((o) => {
+    // Lo mismo se lee muchas veces (cada mensaje en varios grupos de mensajes): se recuerda.
+    parseMemo = new Map();
+    try {
+    for (let idx = 0; idx < pedidos.length; idx += 1) {
+      const o = pedidos[idx];
+      // Cada tanto se deja respirar a la pantalla y se muestra el avance.
+      if (idx % 15 === 0) {
+        const box = document.getElementById("alias-check-progress");
+        if (box) box.textContent = "Comparando pedido " + (idx + 1) + " de " + pedidos.length + "...";
+        await new Promise((r) => setTimeout(r, 0));
+      }
+      (() => {
       if (!clientesConTel.has(o.clientId)) { res.sinTelefono.push(o); return; }
       if (!(o.items || []).length) { res.sinProductos.push(o); return; }
       const T = o.whatsappText && o.whatsappText.text ? String(o.whatsappText.text) : "";
@@ -21304,7 +21315,9 @@
       else if (difAlias.length || (pw.unmatched.length && difPedido.length)) res.alias.push(fila);
       else if (difEditado.length) res.editado.push(fila);
       else res.ok.push(fila);
-    });
+      })();
+    }
+    } finally { parseMemo = null; }
     return res;
   }
 
@@ -21314,7 +21327,7 @@
       await loadHistory("parcial");
       if (historyMode() === "rapida") return;
     }
-    showModal("Comprobar alias (últimos 30 días)", `<p class="muted">Leyendo los mensajes de WhatsApp y comparando con los pedidos...</p>`, null, { hideSave: true, cancelLabel: "Cerrar", className: "modal-wide" });
+    showModal("Comprobar alias (últimos 30 días)", `<p class="muted">Leyendo los mensajes de WhatsApp y comparando con los pedidos...</p><p class="muted" id="alias-check-progress"></p>`, null, { hideSave: true, cancelLabel: "Cerrar", className: "modal-wide" });
     let res;
     try { res = await runAliasCheck(30); } catch (e) { if (ui.modal) { ui.modal.body = `<div class="alert warn">No se pudo comprobar: ${escapeHtml(e.message)}</div>`; render(); } return; }
     if (!ui.modal) return; // se cerro la ventana mientras comparaba
@@ -22754,7 +22767,19 @@
     warningBox.prepend(box);
   }
 
+  let parseMemo = null;
   function parseWhatsappOrder(text, clientId) {
+    if (parseMemo) {
+      const k = (clientId || "") + "\u0000" + text;
+      if (parseMemo.has(k)) return parseMemo.get(k);
+      const r = parseWhatsappOrderRaw(text, clientId);
+      parseMemo.set(k, r);
+      return r;
+    }
+    return parseWhatsappOrderRaw(text, clientId);
+  }
+
+  function parseWhatsappOrderRaw(text, clientId) {
     const items = [];
     const unmatched = [];
     const warnings = [];
@@ -22867,14 +22892,23 @@
   // romper "2 kg Tomate Perita".
   const RUN_UNIT_TOKEN = /^(kgs?|kilos?|k|grs?|gramos|bolsas?|atados?|cajon(es)?|cajas?|jaulas?|unidad(es)?|unid|uni|u|docenas?|doc|maples?|bandejas?|plantas?|raiz|raices|piezas?)$/i;
   let runOnRootsCache = null;
-  function runOnProductRoots() {
+  function runOnCatalog() {
     const lista = state.products || [];
-    if (runOnRootsCache && runOnRootsCache.n === lista.length) return runOnRootsCache.set;
+    if (runOnRootsCache && runOnRootsCache.lista === lista && runOnRootsCache.n === lista.length) return runOnRootsCache;
     const set = new Set();
-    lista.forEach((p) => { if (p && p.isActive !== false) { const w = normalizeText(p.name).split(" ")[0]; if (w && w.length >= 3) set.add(w.replace(/(es|s)$/, "")).add(w); } });
-    runOnRootsCache = { n: lista.length, set };
-    return set;
+    const pares = new Set(); // primeras dos palabras de cada producto ("tomate cherry")
+    lista.forEach((p) => {
+      if (!p) return;
+      const palabras = normalizeText(p.name).split(" ").filter(Boolean);
+      if (palabras.length > 1) pares.add(palabras[0] + " " + palabras[1]);
+      if (p.isActive === false) return;
+      const w = palabras[0];
+      if (w && w.length >= 3) set.add(w.replace(/(es|s)$/, "")).add(w);
+    });
+    runOnRootsCache = { lista, n: lista.length, set, pares };
+    return runOnRootsCache;
   }
+  function runOnProductRoots() { return runOnCatalog().set; }
 
   function splitRunOnOrderLine(line) {
     const crudos = String(line || "").split(/\s{2,}|\t+/).map((x) => x.trim()).filter(Boolean);
@@ -22913,9 +22947,8 @@
         const esNumero = /^\d/.test(t);
         const esUnidad = RUN_UNIT_TOKEN.test(limpio);
         const empiezaOtro = /^[A-ZÁÉÍÓÚÑ]([a-záéíóúñ]|\.)/.test(t) && !esUnidad;
-        const juntos = actual.length === 1 ? normalizeText(actual[0] + " " + t) : "";
-        const esUnSoloProducto = juntos && (state.products || []).some((p) => p && normalizeText(p.name).startsWith(juntos));
-        const otroProducto = empiezaOtro && nombreEsProducto && esRaiz(t) && actual.length === 1 && !esUnSoloProducto;
+        const otroProducto = empiezaOtro && nombreEsProducto && actual.length === 1 && esRaiz(t)
+          && !runOnCatalog().pares.has(normalizeText(actual[0] + " " + t)); // juntos son un producto ("Tomate Cherry")
         if (empiezaOtro && tieneNombre && (cerroCantidad || otroProducto)) {
           out.push(actual.join(" "));
           actual = [];
@@ -23038,6 +23071,16 @@
   }
 
   function parseOrderLine(line, clientId) {
+    if (parseMemo) {
+      const k = "\u0001pl\u0001" + (clientId || "") + "\u0000" + line;
+      if (parseMemo.has(k)) return parseMemo.get(k);
+      const r = parseOrderLineRaw(line, clientId);
+      parseMemo.set(k, r);
+      return r;
+    }
+    return parseOrderLineRaw(line, clientId);
+  }
+  function parseOrderLineRaw(line, clientId) {
     const aliased = applyQuantityAliases(normalizeWhatsappOrderSyntax(line), clientId);
     const rawTokens = String(aliased || "").split(/\s+/).map(cleanRawOrderToken).filter(Boolean);
     const tokens = rawTokens.map(normalizeOrderTokenText);
@@ -23394,6 +23437,16 @@
   }
 
   function findProductForParsedLine(name, unitType, clientId, requestedUnit) {
+    if (parseMemo) {
+      const k = "\u0001fp\u0001" + [name, unitType, clientId, requestedUnit].join("\u0000");
+      if (parseMemo.has(k)) return parseMemo.get(k);
+      const r = findProductForParsedLineRaw(name, unitType, clientId, requestedUnit);
+      parseMemo.set(k, r);
+      return r;
+    }
+    return findProductForParsedLineRaw(name, unitType, clientId, requestedUnit);
+  }
+  function findProductForParsedLineRaw(name, unitType, clientId, requestedUnit) {
     const match = matchProductForParsedLine(name, unitType, clientId, requestedUnit);
     return match ? match.product : null;
   }
