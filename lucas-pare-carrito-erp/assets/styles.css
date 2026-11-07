@@ -4436,3 +4436,4 @@ tr:last-child td {
 @media (max-width: 640px) { .sec-row { grid-template-columns: 1fr; } }
 .unmatched-alias-kind { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 6px; }
 .unmatched-alias-kind .btn { min-height: auto; padding: 4px 10px; font-size: 13px; }
+.wa-inbox-auto { font-size: 13px; color: #8a5300; background: #fff4e5; border-radius: 6px; padding: 4px 8px; margin: 4px 0; }

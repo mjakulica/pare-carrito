@@ -3653,16 +3653,31 @@ async function inboxNotify(phone, text, channel) {
 const INBOX_ROLES = ["manager", "admin", "employee"];
 app.get("/inbox", authenticate, requireRole(...INBOX_ROLES), async (req, res) => {
   const { rows } = await pool.query(
-    `SELECT id, created_at, phone, profile_name, client_id, kind, text, items, order_id, candidates, status, handled_by, handled_at, result_order_id, channel
+    `SELECT id, created_at, phone, profile_name, client_id, kind, text, items, order_id, candidates, status, handled_by, handled_at, result_order_id, channel, auto_note
      FROM whatsapp_inbox WHERE (status = 'pendiente' AND created_at > now() - interval '7 days') OR handled_at > now() - interval '12 hours'
      ORDER BY created_at ASC LIMIT 200`
   );
+  // Un equipo que tomo un mensaje para cargarlo solo y no termino (se cerro, sin internet): vuelve a la bandeja.
+  pool.query("UPDATE whatsapp_inbox SET status = 'pendiente', auto_note = 'El equipo automático no terminó de cargarlo.' WHERE status = 'procesando' AND claimed_at < now() - interval '10 minutes'").catch(() => {});
   res.json({ ok: true, items: rows });
+});
+
+// Carga automatica: un solo equipo toma cada mensaje (si dos equipos lo intentan, gana uno).
+app.post("/inbox/:id/claim", authenticate, requireRole(...INBOX_ROLES), async (req, res) => {
+  const { rows } = await pool.query("UPDATE whatsapp_inbox SET status = 'procesando', claimed_at = now() WHERE id = $1 AND status = 'pendiente' RETURNING id", [req.params.id]);
+  if (!rows.length) return res.status(409).json({ error: "Ya lo tomó otro equipo o una persona." });
+  res.json({ ok: true });
+});
+// No se pudo cargar solo: vuelve a la bandeja con el motivo, para que lo cargue una persona.
+app.post("/inbox/:id/release", authenticate, requireRole(...INBOX_ROLES), async (req, res) => {
+  const note = String((req.body && req.body.reason) || "").slice(0, 500);
+  await pool.query("UPDATE whatsapp_inbox SET status = 'pendiente', auto_note = $2, claimed_at = NULL WHERE id = $1 AND status = 'procesando'", [req.params.id, note || null]);
+  res.json({ ok: true });
 });
 
 app.post("/inbox/:id/done", authenticate, requireRole(...INBOX_ROLES), async (req, res) => {
   const orderId = String((req.body && req.body.orderId) || "");
-  const { rows } = await pool.query("UPDATE whatsapp_inbox SET status = 'cargado', handled_by = $1, handled_at = now(), result_order_id = $2 WHERE id = $3 AND status = 'pendiente' RETURNING phone, kind, channel", [req.user.name || req.user.username, orderId || null, req.params.id]);
+  const { rows } = await pool.query("UPDATE whatsapp_inbox SET status = 'cargado', handled_by = $1, handled_at = now(), result_order_id = $2 WHERE id = $3 AND status IN ('pendiente', 'procesando') RETURNING phone, kind, channel", [(req.body && req.body.auto ? "Carga automática (" : "") + (req.user.name || req.user.username) + (req.body && req.body.auto ? ")" : ""), orderId || null, req.params.id]);
   if (!rows.length) return res.status(409).json({ error: "Ese mensaje ya lo resolvio otra persona." });
   if (req.body && req.body.notify !== false) {
     const texto = rows[0].kind === "pedido" ? "¡Listo! Tu pedido quedó cargado. Gracias." : "¡Listo! Ya hicimos el cambio en tu pedido. Gracias.";

@@ -226,6 +226,8 @@ CREATE TABLE IF NOT EXISTS whatsapp_identify (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ALTER TABLE whatsapp_inbox ADD COLUMN IF NOT EXISTS channel TEXT NOT NULL DEFAULT 'cloud';
+ALTER TABLE whatsapp_inbox ADD COLUMN IF NOT EXISTS auto_note TEXT;
+ALTER TABLE whatsapp_inbox ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ;
 
 -- Archivo de mensajes del WhatsApp vinculado (chats individuales y grupos, recibidos y enviados).
 -- Respaldo por si bloquean el numero; se borra solo a los 90 dias.

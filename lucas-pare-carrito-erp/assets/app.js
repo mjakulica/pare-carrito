@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v112";
+  const APP_VERSION = "v113";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -593,6 +593,167 @@
     console.warn("Backend migrado de " + anterior + " a /api");
     return true;
   }
+
+  // ---- Carga automatica de la bandeja de WhatsApp ----
+  // Se prende en Configuracion (para todos) y se elige UN equipo que la hace (queda abierto). Ese equipo
+  // revisa la bandeja cada minuto y carga solo los pedidos que salen 100% limpios: cliente conocido,
+  // todos los renglones reconocidos, sin avisos ni cantidades sospechosas, sin partes para otros
+  // clientes y sin otro pedido del cliente para ese dia. Lo demas queda en la bandeja con el motivo.
+  const AUTO_INBOX_DEVICE_KEY = "lpc_auto_inbox_device";
+  function autoInboxOn() {
+    return !!(state.appSettings && state.appSettings.autoInbox && state.appSettings.autoInbox.enabled);
+  }
+  function autoInboxThisDevice() {
+    try { return localStorage.getItem(AUTO_INBOX_DEVICE_KEY) === "1"; } catch (e) { return false; }
+  }
+  function autoInboxLog(texto) {
+    ui.autoInboxLog = [{ at: new Date().toISOString(), texto }].concat(ui.autoInboxLog || []).slice(0, 15);
+    const box = document.getElementById("auto-inbox-log");
+    if (box) box.innerHTML = autoInboxLogHtml();
+  }
+  function autoInboxLogHtml() {
+    const l = ui.autoInboxLog || [];
+    return l.length ? `<ul class="order-parse-list">${l.map((x) => `<li><span class="muted">${escapeHtml(formatTimestampShort(x.at))}</span> ${escapeHtml(x.texto)}</li>`).join("")}</ul>` : `<p class="muted" style="margin:4px 0">Todavía no cargó nada en esta sesión.</p>`;
+  }
+
+  // Revisa si el pedido de un mensaje se puede cargar solo. Devuelve { ok, motivo, parsed, date }.
+  function autoInboxEvaluate(x) {
+    const client = x.client_id ? getClient(x.client_id) : null;
+    if (!client || client.isActive === false) return { ok: false, motivo: "el número no está vinculado a un cliente" };
+    const secciones = splitOrderSections(x.text);
+    if (secciones.length >= 2 && secciones.some((y) => y.label)) return { ok: false, motivo: "trae partes para varios clientes" };
+    const parsed = parseWhatsappOrder(x.text, client.id);
+    if (!parsed.items.length) return { ok: false, motivo: "no se encontró ningún producto" };
+    if (parsed.unmatched.length) return { ok: false, motivo: "no se reconocen: " + parsed.unmatched.slice(0, 3).join(", ") };
+    if ((parsed.warnings || []).length) return { ok: false, motivo: "hay que revisar: " + parsed.warnings[0] };
+    const qc = quantityChecks(parsed, client.id);
+    if (qc.length) return { ok: false, motivo: "cantidad sospechosa: " + formatAmountInput(qc[0].qty) + " " + qc[0].product.name };
+    const sinPrecio = parsed.items.find((it) => !(getAdjustedProductPrice(it.product, client) > 0));
+    if (sinPrecio) return { ok: false, motivo: sinPrecio.product.name + " no tiene precio" };
+    const date = defaultNewOrderDate();
+    if (isSundayISO(date)) return { ok: false, motivo: "el día de entrega es domingo" };
+    const ya = (state.orders || []).find((o) => o && o.clientId === client.id && o.date === date && !["cancelado", "anulado"].includes(o.status) && !o.deletedAt);
+    if (ya) return { ok: false, motivo: "ya tiene un pedido para el " + formatDate(date) + " (" + ya.id + "): revisá si es un agregado" };
+    return { ok: true, parsed, date, client };
+  }
+
+  function autoInboxCreateOrder(ev, x) {
+    const { parsed, date, client } = ev;
+    const prev = ui.orderDraft;
+    ui.orderDraft = {};
+    parsed.items.forEach((entry) => {
+      const actual = ui.orderDraft[entry.product.id];
+      ui.orderDraft[entry.product.id] = {
+        productId: entry.product.id,
+        quantity: (actual ? Number(actual.quantity || 0) : 0) + Number(entry.quantity || 0),
+        note: [actual && actual.note, entry.note].filter(Boolean).join(" - "),
+        price: getAdjustedProductPrice(entry.product, client),
+        unitType: entry.unitType
+      };
+    });
+    let items;
+    try { items = collectOrderDraftItems(client, true); } finally { ui.orderDraft = prev; }
+    if (!items.length) return null;
+    const subtotalAmount = items.reduce((sum, item) => sum + item.subtotal, 0);
+    const ivaAmount = items.reduce((sum, item) => sum + item.ivaAmount, 0);
+    const envio = Math.max(0, Number(client.shippingFee || 0) || 0);
+    const ivaEnvio = shouldApplyInvoiceVat(client) ? 10.5 : 0;
+    const order = {
+      id: nextDatedId("ORD", (state.orders || []).concat(state.deletedOrders || [])),
+      userId: currentUser.id,
+      date,
+      clientId: client.id,
+      deliveryVehicleId: client.vehicleId,
+      status: "pendiente",
+      items,
+      subtotalAmount,
+      ivaAmount: ivaAmount + envio * ivaEnvio / 100,
+      shippingFee: envio,
+      shippingIvaRate: ivaEnvio,
+      totalAmount: subtotalAmount + ivaAmount + envio + envio * ivaEnvio / 100,
+      priceTier: client.priceTier,
+      priceAdjustmentPct: Number(client.priceAdjustmentPct || 0),
+      paymentReceived: 0,
+      paymentStatus: "pending",
+      remitoPrinted: false,
+      notes: "",
+      autoLoaded: true,
+      whatsappText: { name: fileDate(date) + " Pedido " + client.name, text: x.text },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    order.whatsappText.name += " " + order.id;
+    state.orders.push(order);
+    attachProximoReplacements(order);
+    addSaldoEntry({ clientId: client.id, type: "pedido", description: "Pedido " + order.id, amount: order.totalAmount, relatedEntityId: order.id, relatedEntityType: "order", notes: "Deuda generada por pedido (carga automática de WhatsApp)." });
+    addCajaEntry({ type: "order_created", concept: "Pedido creado - " + client.name + " - " + order.id, relatedEntityId: order.id, relatedEntityType: "order", expectedAmount: order.totalAmount, amountIngreso: 0, amountEgreso: 0, paymentStatus: "pending", notes: "Registro de accountability. No suma caja hasta cobrar." });
+    saveState();
+    return order;
+  }
+
+  async function runAutoInbox() {
+    if (ui.autoInboxRunning || !currentUser || !WA_INBOX_ROLES.includes(currentUser.role) || !autoInboxOn() || !autoInboxThisDevice() || !navigator.onLine) return;
+    if (typeof serverDataReady === "function" && !serverDataReady()) return;
+    ui.autoInboxRunning = true;
+    try {
+      const r = await cloudRequest(getCloudSyncConfig(), "/inbox", { method: "GET" });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) return;
+      const limite = Date.now() - 36 * 3600 * 1000;
+      const candidatos = (j.items || []).filter((x) => x.status === "pendiente" && x.kind === "pedido" && x.client_id && !x.auto_note && new Date(x.created_at).getTime() >= limite);
+      for (const x of candidatos) {
+        const c = getClient(x.client_id);
+        const nombre = c ? c.id + " - " + c.name : x.client_id;
+        try {
+          const claim = await cloudRequest(getCloudSyncConfig(), "/inbox/" + x.id + "/claim", { method: "POST", body: "{}" });
+          if (!claim.ok) continue;
+          const ev = autoInboxEvaluate(x);
+          if (!ev.ok) {
+            await cloudRequest(getCloudSyncConfig(), "/inbox/" + x.id + "/release", { method: "POST", body: JSON.stringify({ reason: ev.motivo }) });
+            autoInboxLog("No cargado (" + nombre + "): " + ev.motivo);
+            continue;
+          }
+          const order = autoInboxCreateOrder(ev, x);
+          if (!order) { await cloudRequest(getCloudSyncConfig(), "/inbox/" + x.id + "/release", { method: "POST", body: JSON.stringify({ reason: "no se pudo armar el pedido" }) }); continue; }
+          const resultado = await confirmChangesReachedServer();
+          if (resultado === "rechazado" || !getOrder(order.id)) {
+            await cloudRequest(getCloudSyncConfig(), "/inbox/" + x.id + "/release", { method: "POST", body: JSON.stringify({ reason: "el servidor no confirmó el pedido; cargalo a mano" }) });
+            autoInboxLog("ERROR (" + nombre + "): el servidor no confirmó el pedido");
+            continue;
+          }
+          await cloudRequest(getCloudSyncConfig(), "/inbox/" + x.id + "/done", { method: "POST", body: JSON.stringify({ orderId: order.id, auto: true }) });
+          autoInboxLog("Cargado " + order.id + " de " + nombre + " para el " + formatDate(order.date) + " (" + order.items.length + " productos)");
+        } catch (e) {
+          autoInboxLog("Error con un mensaje de " + nombre + ": " + e.message);
+          try { await cloudRequest(getCloudSyncConfig(), "/inbox/" + x.id + "/release", { method: "POST", body: JSON.stringify({ reason: "error: " + e.message }) }); } catch (e2) { /* vuelve solo a los 10 min */ }
+        }
+      }
+      if (candidatos.length && typeof refreshWhatsappInbox === "function") refreshWhatsappInbox(true);
+    } catch (e) {
+      /* sin conexion: se reintenta en el proximo ciclo */
+    } finally {
+      ui.autoInboxRunning = false;
+    }
+  }
+  setInterval(() => { runAutoInbox(); }, 60 * 1000);
+  setTimeout(() => { runAutoInbox(); }, 8000);
+  document.addEventListener("change", (e) => {
+    const t = e.target;
+    if (!t || !t.id) return;
+    if (t.id === "auto-inbox-on") {
+      if (t.checked && !confirm("Activar la carga automática: los pedidos de WhatsApp que salgan 100% limpios se cargan y quedan guardados sin que nadie los revise. ¿Activarla?")) { t.checked = false; return; }
+      state.appSettings = state.appSettings || {};
+      state.appSettings.autoInbox = { ...(state.appSettings.autoInbox || {}), enabled: t.checked, changedBy: currentUser ? currentUser.name || currentUser.username : "", changedAt: new Date().toISOString() };
+      saveState();
+      autoInboxLog(t.checked ? "Carga automática activada" : "Carga automática desactivada");
+      if (t.checked) runAutoInbox();
+    }
+    if (t.id === "auto-inbox-device") {
+      try { if (t.checked) localStorage.setItem(AUTO_INBOX_DEVICE_KEY, "1"); else localStorage.removeItem(AUTO_INBOX_DEVICE_KEY); } catch (err) { alert("Este navegador no deja guardar la opción."); t.checked = false; return; }
+      autoInboxLog(t.checked ? "Este equipo hace la carga automática" : "Este equipo dejó de hacer la carga automática");
+      if (t.checked) runAutoInbox();
+    }
+  });
 
   window.addEventListener("online", () => { scheduleServerGateRender(); cloudPull(false, true).catch(() => {}); });
   window.addEventListener("offline", () => { scheduleServerGateRender(); });
@@ -6100,6 +6261,7 @@
       return `<div class="wa-inbox-item ${ui.inboxLoading && ui.inboxLoading.id === x.id ? "active" : ""}">
         <div class="wa-inbox-head">${quien}${canal} <span class="pill ${x.kind === "identificar" || !x.client_id ? "amber" : x.kind === "pedido" ? "green" : "blue"}">${escapeHtml(WA_INBOX_KIND[x.kind] || x.kind)}</span> <span class="muted">${escapeHtml(hace(x.created_at))}</span></div>
         <div class="wa-inbox-text">${escapeHtml(x.text)}</div>
+        ${x.auto_note ? `<div class="wa-inbox-auto">&#9881;&#65039; No se cargó solo: ${escapeHtml(x.auto_note)}</div>` : ""}
         <div class="page-actions wa-inbox-actions">${acciones}<button class="btn small ghost" type="button" data-wa-discard="${x.id}">Descartar</button></div>
       </div>`;
     };
@@ -14854,7 +15016,14 @@
         <div class="field span-2"><label>Plantilla de Meta (con una variable {{1}})</label><input id="wa-control-template" value="${escapeAttr(a.controlWhatsappTemplate || "")}" placeholder="ej: resumen_control" /></div>
         <div class="field span-2"><label>Números (vacío = teléfono del gerente)</label><input id="wa-control-to" value="${escapeAttr(a.controlWhatsappTo || "")}" placeholder="5493871234567, 5493877654321" /></div>
       </div>
-    </div>${["manager", "admin"].includes(currentUser.role) ? `<div id="wa-linked-panel" class="panel" style="margin-top:14px">${waLinkedPanelInner()}</div>${waArchiveAccessHtml()}` : ""}${["manager", "admin"].includes(currentUser.role) ? metaReviewerPanelHtml() : ""}${window.WhatsAppTemplates ? window.WhatsAppTemplates.html() : ""}`;
+    </div>${["manager", "admin"].includes(currentUser.role) ? `<div class="panel auto-inbox-panel" style="margin-top:14px">
+      <h2 class="page-title" style="font-size:18px">Carga automática de pedidos de WhatsApp</h2>
+      <p class="muted" style="margin-top:0">Los pedidos de la bandeja se cargan solos, sin que nadie toque nada, <strong>solo si salen 100% limpios</strong>: cliente vinculado, todos los renglones reconocidos, sin avisos ni cantidades sospechosas, sin partes para otros clientes y sin otro pedido del cliente para ese día. El resto queda en la bandeja con el motivo, para cargarlo a mano. La fecha es la del próximo reparto (después de las 10 h, mañana).</p>
+      <label style="display:flex;gap:8px;align-items:flex-start;margin:6px 0"><input type="checkbox" id="auto-inbox-on" ${autoInboxOn() ? "checked" : ""} style="width:auto;min-height:auto;margin-top:3px" /><span><strong>Activar la carga automática</strong></span></label>
+      <label style="display:flex;gap:8px;align-items:flex-start;margin:6px 0"><input type="checkbox" id="auto-inbox-device" ${autoInboxThisDevice() ? "checked" : ""} style="width:auto;min-height:auto;margin-top:3px" /><span><strong>Este equipo hace la carga</strong><br><span class="muted" style="font-size:13px">Elegí un equipo que quede prendido con el sistema abierto (una PC de la oficina). Revisa la bandeja cada minuto. Si hay más de uno marcado no se duplica: cada mensaje lo toma uno solo.</span></span></label>
+      ${autoInboxOn() && !autoInboxThisDevice() ? `<p class="muted" style="font-size:13px">Está activada, pero este equipo no la hace: la hace el equipo que esté marcado.</p>` : ""}
+      <div><strong style="font-size:14px">Últimos movimientos en este equipo</strong><div id="auto-inbox-log">${autoInboxLogHtml()}</div></div>
+    </div><div id="wa-linked-panel" class="panel" style="margin-top:14px">${waLinkedPanelInner()}</div>${waArchiveAccessHtml()}` : ""}${["manager", "admin"].includes(currentUser.role) ? metaReviewerPanelHtml() : ""}${window.WhatsAppTemplates ? window.WhatsAppTemplates.html() : ""}`;
   }
 
   // ---- WhatsApp vinculado por QR (mientras Meta no aprueba) ----
