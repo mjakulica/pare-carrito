@@ -100,6 +100,23 @@ services:
     volumes:
       - wabot_data:/app/data
 
+  # Equipo de carga automatica: navegador sin pantalla con el sistema abierto (ver autocarga-robot).
+  # Se activa/pausa desde Configuracion; sin la carga automatica prendida no hace nada.
+  autocarga:
+    build: ../autocarga-robot
+    restart: unless-stopped
+    depends_on:
+      - api
+      - caddy
+    environment:
+      SITE_DOMAIN: ${SITE_DOMAIN}
+      SITE_URL: ${AUTOCARGA_SITE_URL:-}
+      ERP_BASE_URL: http://api:3000
+      ERP_API_KEY: ${EXTERNAL_API_KEY:-}
+      TZ: ${TZ:-America/Argentina/Salta}
+    shm_size: "256m"
+    mem_limit: 700m
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped

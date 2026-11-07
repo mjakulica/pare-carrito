@@ -95,6 +95,7 @@ jobs:
         run: |
           docker build -q -t prueba-api pare-carrito-sas-server
           docker build -q -t prueba-bot whatsapp-bot
+          docker build -q -t prueba-autocarga autocarga-robot
 
   deploy:
     name: Deploy al VPS

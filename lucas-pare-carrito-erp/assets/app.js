@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v113";
+  const APP_VERSION = "v114";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -691,8 +691,22 @@
     return order;
   }
 
+  function autoInboxIsRobot() {
+    try { return localStorage.getItem("lpc_robot") === "1"; } catch (e) { return false; }
+  }
+  function autoInboxRobotAllowed() {
+    return !(state.appSettings && state.appSettings.autoInbox && state.appSettings.autoInbox.serverRobot === false);
+  }
+  function autoInboxDeviceName() {
+    if (autoInboxIsRobot()) return "Servidor (equipo automático)";
+    try { return (typeof deviceLabel === "function" ? deviceLabel() : "") || navigator.userAgent.slice(0, 60); } catch (e) { return "equipo"; }
+  }
   async function runAutoInbox() {
-    if (ui.autoInboxRunning || !currentUser || !WA_INBOX_ROLES.includes(currentUser.role) || !autoInboxOn() || !autoInboxThisDevice() || !navigator.onLine) return;
+    if (ui.autoInboxRunning || !currentUser || !WA_INBOX_ROLES.includes(currentUser.role) || !autoInboxThisDevice() || !navigator.onLine) return;
+    // Latido: que se vea en Configuracion que este equipo esta andando (y si esta en pausa).
+    const pausa = !autoInboxOn() ? "desactivada" : autoInboxIsRobot() && !autoInboxRobotAllowed() ? "en pausa (equipo del servidor apagado)" : "activa";
+    cloudRequest(getCloudSyncConfig(), "/inbox/auto-heartbeat", { method: "POST", body: JSON.stringify({ device: autoInboxDeviceName(), robot: autoInboxIsRobot(), estado: pausa }) }).catch(() => {});
+    if (pausa !== "activa") return;
     if (typeof serverDataReady === "function" && !serverDataReady()) return;
     ui.autoInboxRunning = true;
     try {
@@ -735,6 +749,19 @@
       ui.autoInboxRunning = false;
     }
   }
+  async function paintAutoInboxStatus() {
+    const box = document.getElementById("auto-inbox-status");
+    if (!box || !currentUser || !["manager", "admin"].includes(currentUser.role)) return;
+    try {
+      const r = await cloudRequest(getCloudSyncConfig(), "/inbox/auto-status", { method: "GET" });
+      const j = await r.json().catch(() => ({}));
+      const eq = j.equipos || [];
+      const hace = (iso) => { const m = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000)); return m < 1 ? "recién" : m < 60 ? "hace " + m + " min" : "hace " + Math.round(m / 60) + " h"; };
+      const tarde = (iso) => Date.now() - new Date(iso).getTime() > 5 * 60000;
+      box.innerHTML = eq.length ? `<ul class="order-parse-list">${eq.map((x) => `<li>${x.robot ? "&#128421;&#65039; " : "&#128187; "}<strong>${escapeHtml(x.device)}</strong> — ${tarde(x.at) ? `<span style="color:var(--red, #b42318)">sin señal (${escapeHtml(hace(x.at))})</span>` : escapeHtml(x.estado || "activa") + " · " + escapeHtml(hace(x.at))}</li>`).join("")}</ul>` : `<p class="muted" style="margin:4px 0">Ningún equipo está haciendo la carga ahora.${autoInboxRobotAllowed() ? " El del servidor aparece acá cuando arranca (después de publicar la versión)." : ""}</p>`;
+    } catch (e) { box.innerHTML = `<p class="muted" style="margin:4px 0">No se pudo consultar.</p>`; }
+  }
+  setInterval(() => { paintAutoInboxStatus(); }, 30 * 1000);
   setInterval(() => { runAutoInbox(); }, 60 * 1000);
   setTimeout(() => { runAutoInbox(); }, 8000);
   document.addEventListener("change", (e) => {
@@ -747,6 +774,12 @@
       saveState();
       autoInboxLog(t.checked ? "Carga automática activada" : "Carga automática desactivada");
       if (t.checked) runAutoInbox();
+    }
+    if (t.id === "auto-inbox-robot") {
+      state.appSettings = state.appSettings || {};
+      state.appSettings.autoInbox = { ...(state.appSettings.autoInbox || {}), serverRobot: t.checked };
+      saveState();
+      autoInboxLog(t.checked ? "Equipo del servidor activado" : "Equipo del servidor en pausa");
     }
     if (t.id === "auto-inbox-device") {
       try { if (t.checked) localStorage.setItem(AUTO_INBOX_DEVICE_KEY, "1"); else localStorage.removeItem(AUTO_INBOX_DEVICE_KEY); } catch (err) { alert("Este navegador no deja guardar la opción."); t.checked = false; return; }
@@ -15021,7 +15054,9 @@
       <p class="muted" style="margin-top:0">Los pedidos de la bandeja se cargan solos, sin que nadie toque nada, <strong>solo si salen 100% limpios</strong>: cliente vinculado, todos los renglones reconocidos, sin avisos ni cantidades sospechosas, sin partes para otros clientes y sin otro pedido del cliente para ese día. El resto queda en la bandeja con el motivo, para cargarlo a mano. La fecha es la del próximo reparto (después de las 10 h, mañana).</p>
       <label style="display:flex;gap:8px;align-items:flex-start;margin:6px 0"><input type="checkbox" id="auto-inbox-on" ${autoInboxOn() ? "checked" : ""} style="width:auto;min-height:auto;margin-top:3px" /><span><strong>Activar la carga automática</strong></span></label>
       <label style="display:flex;gap:8px;align-items:flex-start;margin:6px 0"><input type="checkbox" id="auto-inbox-device" ${autoInboxThisDevice() ? "checked" : ""} style="width:auto;min-height:auto;margin-top:3px" /><span><strong>Este equipo hace la carga</strong><br><span class="muted" style="font-size:13px">Elegí un equipo que quede prendido con el sistema abierto (una PC de la oficina). Revisa la bandeja cada minuto. Si hay más de uno marcado no se duplica: cada mensaje lo toma uno solo.</span></span></label>
-      ${autoInboxOn() && !autoInboxThisDevice() ? `<p class="muted" style="font-size:13px">Está activada, pero este equipo no la hace: la hace el equipo que esté marcado.</p>` : ""}
+      <label style="display:flex;gap:8px;align-items:flex-start;margin:6px 0"><input type="checkbox" id="auto-inbox-robot" ${autoInboxRobotAllowed() ? "checked" : ""} style="width:auto;min-height:auto;margin-top:3px" /><span><strong>Usar el equipo del servidor</strong><br><span class="muted" style="font-size:13px">Un navegador que corre en el servidor y hace la carga solo, sin dejar ninguna PC ni celular prendido. Destildalo para pausarlo (si hay otro equipo marcado, sigue ese).</span></span></label>
+      ${autoInboxOn() && !autoInboxThisDevice() ? `<p class="muted" style="font-size:13px">Está activada; la hacen el equipo del servidor y los equipos marcados.</p>` : ""}
+      <div style="margin:6px 0"><strong style="font-size:14px">Equipos que hacen la carga</strong><div id="auto-inbox-status"><p class="muted" style="margin:4px 0">Consultando...</p></div></div>
       <div><strong style="font-size:14px">Últimos movimientos en este equipo</strong><div id="auto-inbox-log">${autoInboxLogHtml()}</div></div>
     </div><div id="wa-linked-panel" class="panel" style="margin-top:14px">${waLinkedPanelInner()}</div>${waArchiveAccessHtml()}` : ""}${["manager", "admin"].includes(currentUser.role) ? metaReviewerPanelHtml() : ""}${window.WhatsAppTemplates ? window.WhatsAppTemplates.html() : ""}`;
   }
@@ -15156,6 +15191,7 @@
       alert("Acceso guardado: " + (userIds.length ? userIds.length + " usuario(s) además del gerente y el admin." : "solo el gerente y el admin."));
     });
     if (document.getElementById("wa-linked-panel")) { paintWaLinked(); scheduleWaLinkedPoll(); }
+    if (document.getElementById("auto-inbox-status")) paintAutoInboxStatus();
     if (window.WhatsAppTemplates) window.WhatsAppTemplates.mount({ request: (path, options) => cloudRequest(getCloudSyncConfig(), path, options) });
     const check = document.getElementById("wa-status-check");
     const cargar = async () => {
@@ -21486,6 +21522,13 @@
     let filtro = "sugeridos";
     let buscar = "";
     const elegidos = new Map(); // chatId -> { clientId, check }
+    const verAbiertos = new Set();
+    const verMensajes = new Map();
+    const lcConvHtml = (msgs) => {
+      if (!msgs.length) return `<p class="muted">Sin mensajes.</p>`;
+      const hora = (ts) => new Date(ts).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+      return msgs.slice(-25).map((m) => `<div class="wa-arch-msg ${m.from_me ? "mine" : ""}">${!m.from_me && m.is_group ? `<div class="wa-arch-sender">${escapeHtml(m.sender_name || formatWaPhone(m.sender_phone))}</div>` : ""}<div>${escapeHtml(m.text || "")}</div><div class="wa-arch-time">${hora(m.ts)}</div></div>`).join("");
+    };
     const etiqueta = (id) => { const c = getClient(id); return c ? c.id + " - " + c.name : ""; };
     const pintar = () => {
       const box = document.getElementById("lc-body");
@@ -21516,7 +21559,9 @@
           return `<div class="lc-row ${e.check ? "on" : ""}" data-lc-row="${escapeAttr(x.chatId)}">
             <input type="checkbox" data-lc-check="${escapeAttr(x.chatId)}" ${e.check ? "checked" : ""} style="width:auto;min-height:auto" />
             <div class="lc-chat"><strong>${x.isGroup ? "&#128101; " : ""}${escapeHtml(x.name || "(sin nombre)")}</strong> <span class="muted">${x.isGroup ? "grupo" : escapeHtml(formatWaPhone(x.chatId))}</span>
-              <div class="muted lc-meta">${x.recibidos} mensaje(s) · ${escapeHtml(formatTimestampShort(x.lastTs))}${x.lastText ? " · “" + escapeHtml(x.lastText.slice(0, 70)) + "”" : ""}</div></div>
+              <div class="muted lc-meta">${x.recibidos} mensaje(s) · ${escapeHtml(formatTimestampShort(x.lastTs))}${x.lastText ? " · “" + escapeHtml(x.lastText.slice(0, 70)) + "”" : ""}</div>
+              <button class="btn small ghost lc-ver" type="button" data-lc-ver="${escapeAttr(x.chatId)}">${verAbiertos.has(x.chatId) ? "Ocultar conversación" : "Ver conversación"}</button>
+              ${verAbiertos.has(x.chatId) ? `<div class="lc-conv" data-lc-conv="${escapeAttr(x.chatId)}">${verMensajes.has(x.chatId) ? lcConvHtml(verMensajes.get(x.chatId)) : `<p class="muted">Cargando...</p>`}</div>` : ""}</div>
             <div class="lc-client"><input list="lc-clients" data-lc-client="${escapeAttr(x.chatId)}" value="${escapeAttr(etiqueta(e.clientId))}" placeholder="Elegir cliente" autocomplete="off" />
               ${x.suggested && e.clientId === x.suggested ? `<span class="muted lc-why">${x.motivo === "numero" ? "por el número de agenda" : "por el nombre"}</span>` : ""}
               ${otros.length ? `<span class="lc-alts">${otros.map((k) => `<button class="btn small ghost" type="button" data-lc-alt="${escapeAttr(x.chatId)}|${escapeAttr(k.id)}">${escapeHtml(k.id + " - " + k.name)}</button>`).join("")}</span>` : ""}</div>
@@ -21525,6 +21570,23 @@
       const save = document.getElementById("modal-save");
       if (save) save.textContent = "Vincular tildados (" + marcados + ")";
       box.querySelectorAll("[data-lc-f]").forEach((b) => b.addEventListener("click", () => { filtro = b.dataset.lcF; pintar(); }));
+      box.querySelectorAll("[data-lc-ver]").forEach((b) => b.addEventListener("click", async () => {
+        const chat = b.dataset.lcVer;
+        const pos = box.querySelector(".lc-list") ? box.querySelector(".lc-list").scrollTop : 0;
+        if (verAbiertos.has(chat)) { verAbiertos.delete(chat); pintar(); const l = document.querySelector(".lc-list"); if (l) l.scrollTop = pos; return; }
+        verAbiertos.add(chat);
+        pintar();
+        let l = document.querySelector(".lc-list"); if (l) l.scrollTop = pos;
+        if (!verMensajes.has(chat)) {
+          try {
+            const r = await cloudRequest(getCloudSyncConfig(), "/whatsapp/archive/messages?chat=" + encodeURIComponent(chat), { method: "GET" });
+            const j = await r.json().catch(() => ({}));
+            verMensajes.set(chat, r.ok ? j.messages || [] : []);
+          } catch (e) { verMensajes.set(chat, []); }
+          const cont = document.querySelector(`[data-lc-conv="${cssEscape(chat)}"]`);
+          if (cont) { cont.innerHTML = lcConvHtml(verMensajes.get(chat)); cont.scrollTop = cont.scrollHeight; }
+        }
+      }));
       const qi = document.getElementById("lc-q");
       if (qi) qi.addEventListener("change", () => { buscar = qi.value; pintar(); });
       const marcar = (val) => { box.querySelectorAll("[data-lc-check]").forEach((c) => { const e = elegidos.get(c.dataset.lcCheck); if (e && (!val || e.clientId)) e.check = val; }); pintar(); };

@@ -3662,6 +3662,39 @@ app.get("/inbox", authenticate, requireRole(...INBOX_ROLES), async (req, res) =>
   res.json({ ok: true, items: rows });
 });
 
+// ---- Equipo de carga automatica en el servidor (robot) ----
+// El robot (contenedor "autocarga": un navegador sin pantalla) entra al sistema como el usuario
+// "carga-automatica" (empleado). Pide su acceso por la red interna con la clave del bot; la
+// contraseña se genera al azar en cada pedido y nunca la ve nadie.
+const ROBOT_USER_ID = "USR-CARGA-AUTOMATICA";
+const ROBOT_USERNAME = "carga-automatica";
+app.post("/external/robot-login", externalAuth, async (req, res) => {
+  const taken = await pool.query("SELECT 1 FROM users WHERE lower(username) = lower($1) AND id <> $2", [ROBOT_USERNAME, ROBOT_USER_ID]);
+  if (taken.rows.length) return res.status(409).json({ error: "Ya existe otro usuario llamado " + ROBOT_USERNAME + "." });
+  const password = crypto.randomBytes(24).toString("base64url");
+  const hash = await bcrypt.hash(password, 10);
+  await pool.query(
+    `INSERT INTO users (id, username, name, email, role, password_hash, password_fingerprint, is_active, updated_at)
+     VALUES ($1, $2, 'Carga automática', '', 'employee', $3, '', true, now())
+     ON CONFLICT (id) DO UPDATE SET role = 'employee', is_active = true, password_hash = EXCLUDED.password_hash, updated_at = now()`,
+    [ROBOT_USER_ID, ROBOT_USERNAME, hash]
+  );
+  res.json({ ok: true, username: ROBOT_USERNAME, password });
+});
+
+// Latido de los equipos que hacen la carga automatica (para ver en Configuracion si andan).
+const autoInboxBeats = new Map();
+app.post("/inbox/auto-heartbeat", authenticate, requireRole(...INBOX_ROLES), (req, res) => {
+  const b = req.body || {};
+  const key = String(b.device || req.user.username).slice(0, 80);
+  autoInboxBeats.set(key, { device: key, robot: !!b.robot, user: req.user.name || req.user.username, estado: String(b.estado || "").slice(0, 120), at: new Date().toISOString() });
+  res.json({ ok: true });
+});
+app.get("/inbox/auto-status", authenticate, requireRole("manager", "admin"), (req, res) => {
+  const lim = Date.now() - 24 * 3600 * 1000;
+  res.json({ ok: true, equipos: Array.from(autoInboxBeats.values()).filter((x) => new Date(x.at).getTime() > lim).sort((a, b) => String(b.at).localeCompare(String(a.at))) });
+});
+
 // Carga automatica: un solo equipo toma cada mensaje (si dos equipos lo intentan, gana uno).
 app.post("/inbox/:id/claim", authenticate, requireRole(...INBOX_ROLES), async (req, res) => {
   const { rows } = await pool.query("UPDATE whatsapp_inbox SET status = 'procesando', claimed_at = now() WHERE id = $1 AND status = 'pendiente' RETURNING id", [req.params.id]);
