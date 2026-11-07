@@ -4412,3 +4412,4 @@ tr:last-child td {
 .ac-fix select { margin-top: 4px; min-height: 32px; font-size: 13px; }
 .ac-card-link { text-decoration: none; color: inherit; display: block; }
 .ac-card-link .card { cursor: pointer; border-color: #9fc7b0; }
+.alias-check-qty { border: 1px solid #e3e8ef; border-left: 4px solid #e8a33d; border-radius: 8px; padding: 8px 10px; margin: 6px 0; }

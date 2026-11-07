@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v102";
+  const APP_VERSION = "v103";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -21244,7 +21244,7 @@
     const clientesConTel = new Set([...porTel.values(), ...porGrupo.values(), ...porAgenda.values()]);
     const pedidos = (state.orders || []).filter((o) => o && String(o.date || "") >= desde && !["cancelado", "anulado"].includes(o.status) && !o.exampleOnly && !o.deletedAt)
       .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.clientId).localeCompare(String(b.clientId)));
-    const res = { desde, archivo: j.archivo || {}, total: pedidos.length, ok: [], alias: [], editado: [], revisados: [], sinMensaje: [], sinTelefono: [], sinProductos: [] };
+    const res = { desde, archivo: j.archivo || {}, total: pedidos.length, ok: [], alias: [], cantidad: [], editado: [], revisados: [], sinMensaje: [], sinTelefono: [], sinProductos: [] };
     pedidos.forEach((o) => {
       if (!clientesConTel.has(o.clientId)) { res.sinTelefono.push(o); return; }
       if (!(o.items || []).length) { res.sinProductos.push(o); return; }
@@ -21299,6 +21299,8 @@
       const fila = { order: o, W, T, wAt: mejor.t, difAlias, difEditado, unmatched: pw.unmatched, sugerencias, explica: explainMessageVsOrder(W, o) };
       // Revisado a mano ("fue un cambio en el pedido"), con el mismo mensaje: ya no cuenta como error.
       if ((difAlias.length || (pw.unmatched.length && difPedido.length)) && o.aliasCheckOk && o.aliasCheckOk.w === normalizeText(W).slice(0, 400)) res.revisados.push(fila);
+      // Mismos productos, solo otra cantidad (y nada sin reconocer): no es un problema de alias.
+      else if (difAlias.length && !pw.unmatched.length && difAlias.every((d) => d.a > 0 && d.b > 0)) res.cantidad.push(fila);
       else if (difAlias.length || (pw.unmatched.length && difPedido.length)) res.alias.push(fila);
       else if (difEditado.length) res.editado.push(fila);
       else res.ok.push(fila);
@@ -21371,7 +21373,7 @@
       <div class="grid three" style="margin-bottom:10px">
         ${metricCard("Correctos", String(res.ok.length), "El mensaje original da exactamente el pedido")}
         <a href="#" data-ac-go="alias" class="ac-card-link">${metricCard("Alias a revisar", String(res.alias.length), "Tocá para ver la lista")}</a>
-        <a href="#" data-ac-go="editado" class="ac-card-link">${metricCard("Modificados después", String(res.editado.length), "Tocá para ver qué cambió en cada uno")}</a>
+        <a href="#" data-ac-go="${res.cantidad.length ? "cantidad" : "editado"}" class="ac-card-link">${metricCard("Modificados después", String(res.editado.length + res.cantidad.length), (res.cantidad.length ? res.cantidad.length + " solo cambió la cantidad. " : "") + "Tocá para ver qué cambió")}</a>
       </div>
       <p class="muted" style="margin-top:0">${res.total} pedido(s) desde el ${formatDate(res.desde)}. Sin mensaje de WhatsApp encontrado: ${res.sinMensaje.length} · clientes sin teléfono ni grupo vinculado: ${res.sinTelefono.length}${res.sinProductos.length ? " · sin detalle de productos: " + res.sinProductos.length : ""}. Archivo de WhatsApp: ${Number(arch.n || 0)} mensajes${arch.desde ? " desde el " + formatDate(String(arch.desde).slice(0, 10)) : ""}.</p>
       ${!Number(arch.n || 0) ? `<div class="alert warn">Todavía no hay mensajes guardados. Vinculá el WhatsApp por QR en Configuración (si ya estaba vinculado, desvinculalo y volvé a escanear para que mande el historial).</div>` : ""}
@@ -21386,6 +21388,9 @@
       ${recientes.length ? `<details class="alias-recent" style="margin:10px 0"><summary><strong>Alias guardados en los últimos 7 días (${recientes.length})</strong> <span class="muted">— borrá los que estén mal</span></summary>
         <ul class="order-parse-list">${recientes.map((x) => { const c = getClient(x.clientId); const p = getProduct(x.productId); return `<li>${escapeHtml(x.clientId)} - ${escapeHtml(c ? c.name : "")}: "${escapeHtml(x.alias)}" → ${escapeHtml(p ? p.name : x.productId)} <span class="muted">(${escapeHtml(formatTimestampShort(x.learnedAt))}${x.learnedBy ? ", " + escapeHtml(x.learnedBy) : ""}${x.source === "comprobar" ? ", desde Comprobar alias" : ""})</span> <button class="btn small danger" type="button" data-alias-del="${escapeAttr(x.clientId + "|" + x.alias)}">Borrar</button></li>`; }).join("")}</ul></details>` : ""}
       ${res.alias.length ? `<h3 style="font-size:16px" id="ac-sec-alias">Alias a revisar (${res.alias.length})</h3>${res.alias.map((f) => bloque(f, "alias")).join("")}` : ""}
+      ${res.cantidad.length ? `<h3 style="font-size:16px" id="ac-sec-cantidad">Solo cambió la cantidad (${res.cantidad.length})</h3>
+        <p class="muted" style="margin-top:0">El mensaje da los mismos productos que el pedido, con otra cantidad. No es un problema de alias: revisá que la cantidad del pedido sea la correcta (el cliente pidió de más o de menos después, no había suficiente, se corrigió el peso...).</p>
+        ${res.cantidad.map((f) => `<div class="alias-check-qty"><strong>${formatDate(f.order.date)} · ${nombre(f.order)}</strong> <span class="muted">${escapeHtml(f.order.id)}</span><ul class="order-parse-list">${f.difAlias.map((d) => { const p = getProduct(d.productId); return `<li>${escapeHtml(p ? p.name : d.productId)}: el mensaje dice <strong>${escapeHtml(formatAmountInput(d.a))}</strong>, en el pedido quedó <strong>${escapeHtml(formatAmountInput(d.b))}</strong></li>`; }).join("")}</ul></div>`).join("")}` : ""}
       ${res.editado.length ? (() => {
         const tipos = res.editado.map((f) => ({ f, c: classifyOrderChanges(f.difEditado) }));
         const n = (k) => tipos.filter((t) => t.c[k].length).length;
@@ -22637,7 +22642,7 @@
       if (it && r.items.length === 1 && pendientes.has(it.product.id) && Math.abs(pendientes.get(it.product.id) - it.quantity) < 0.001) { pendientes.delete(it.product.id); return; }
       if (it && r.items.length === 1 && pendientes.has(it.product.id) && pendientes.get(it.product.id) > it.quantity) { pendientes.set(it.product.id, pendientes.get(it.product.id) - it.quantity); return; }
       if (!pa || !pa.name) return;
-      renglones.push({ line, alias: String(pa.name).trim(), qty: it ? Number(it.quantity) : Number(pa.quantity || 0), qtyLinea: Number(pa.quantity || 0) });
+      renglones.push({ line, alias: String(pa.name).trim(), qty: it ? Number(it.quantity) : Number(pa.quantity || 0), qtyLinea: Number(pa.quantity || 0), leido: it && r.items.length === 1 ? it.product : null });
     });
     const raices = new Set(activeProducts().map((p) => productRoot(p.name)).filter((w) => w.length >= 3));
     renglones.forEach((r) => {
@@ -22658,6 +22663,11 @@
         cands.unshift(igual[0]);
       }
       const { p: producto, q } = cands[0];
+      // Ya se lee ese producto (solo cambio la cantidad): no hace falta alias.
+      if (r.leido && r.leido.id === producto.id) return;
+      // Lo escrito nombra mejor al producto que ya lee ("tomate cherry" -> Tomate Cherry, no Perita):
+      // en el pedido se reemplazo por otro, no es un alias.
+      if (r.leido && aliasSimilarity(r.alias, r.leido.name) > aliasSimilarity(r.alias, producto.name)) return;
       // Si lo escrito nombra a otro producto del catalogo ("banana", "frutilla"), no es un alias de
       // este: fue un cambio o un reemplazo en el pedido.
       const raizDestino = productRoot(producto.name);
