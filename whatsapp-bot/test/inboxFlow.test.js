@@ -183,3 +183,19 @@ test("grupo vinculado a un cliente: el pedido va a la bandeja como de ese client
   assert.match(inbox[0].profileName, /Factory/);
   assert.equal(sent.length, 0);
 });
+
+test("sin IA: un mensaje con cantidades y productos entra igual a la bandeja (solo recibir)", async () => {
+  const inbox = [];
+  const flowS = createInboxFlow({
+    wa: { sendText: async () => { throw new Error("no debe mandar"); }, notifyTeam: async () => {}, notifyOwner: async () => {} },
+    erp: { inbox: async (e) => { inbox.push(e); return { ok: true }; }, getTodayOrder: async () => ({ order: null }), getIdentify: async () => ({}) },
+    ai: { classifyMessage: async () => ({ intent: "consulta", items: [] }) }, // la IA no ayuda (sin clave)
+    getProductNames: async () => ["Tomate Perita Kg", "Papa Bolsa", "Lechuga Crespa Unidad"],
+    channel: "linked",
+    silent: () => true
+  });
+  assert.equal(await flowS.handleKnown({ from: "5493871", text: "Hola buenas para mañana\n2 lechugas\n3 kg tomate", profileName: "", client: { id: "001", name: "X" } }), "pedido");
+  assert.equal(await flowS.handleKnown({ from: "5493871", text: "Hola! cómo estás?", profileName: "", client: { id: "001", name: "X" } }), "ignorado_solo_recibir");
+  assert.equal(await flowS.handleUnknown({ from: "5493872", text: "Papas 4 bolsas", profileName: "" }), "guardado_sin_preguntar");
+  assert.equal(inbox.length, 2);
+});

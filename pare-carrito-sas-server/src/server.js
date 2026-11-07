@@ -3708,6 +3708,14 @@ app.post("/inbox/manual", authenticate, requireRole(...INBOX_ROLES), async (req,
 app.get("/whatsapp/linked", authenticate, requireRole("manager", "admin"), async (req, res) => {
   res.set("Cache-Control", "no-store");
   const r = await botRequest("/linked/status");
+  if (r.ok) {
+    // Lo de hoy: mensajes de chats individuales que llegaron y cuantos entraron a la bandeja.
+    try {
+      const a = await pool.query("SELECT count(*)::int AS n FROM whatsapp_archive WHERE NOT is_group AND NOT from_me AND ts >= date_trunc('day', now() AT TIME ZONE 'America/Argentina/Buenos_Aires') AT TIME ZONE 'America/Argentina/Buenos_Aires'");
+      const b = await pool.query("SELECT count(*)::int AS n, count(*) FILTER (WHERE status = 'pendiente')::int AS pend FROM whatsapp_inbox WHERE channel = 'linked' AND created_at >= date_trunc('day', now() AT TIME ZONE 'America/Argentina/Buenos_Aires') AT TIME ZONE 'America/Argentina/Buenos_Aires'");
+      r.hoy = { mensajes: a.rows[0].n, bandeja: b.rows[0].n, pendientes: b.rows[0].pend };
+    } catch (e) { /* sin datos */ }
+  }
   res.status(r.ok ? 200 : 502).json(r);
 });
 app.post("/whatsapp/linked/:action", authenticate, requireRole("manager", "admin"), async (req, res) => {

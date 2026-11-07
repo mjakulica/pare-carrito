@@ -4413,3 +4413,4 @@ tr:last-child td {
 .ac-card-link { text-decoration: none; color: inherit; display: block; }
 .ac-card-link .card { cursor: pointer; border-color: #9fc7b0; }
 .alias-check-qty { border: 1px solid #e3e8ef; border-left: 4px solid #e8a33d; border-radius: 8px; padding: 8px 10px; margin: 6px 0; }
+.wa-linked-today { background: #f3f7fb; border: 1px solid #d9e0e8; border-radius: 8px; padding: 8px 10px; margin: 6px 0; }

@@ -98,7 +98,7 @@ const linkedAuth = (req, res, next) => {
   if (!k || req.get("x-broadcast-key") !== k) return res.sendStatus(401);
   next();
 };
-app.get("/linked/status", linkedAuth, (req, res) => res.json({ ok: true, ...linked.status() }));
+app.get("/linked/status", linkedAuth, (req, res) => res.json({ ok: true, ...linked.status(), stats: linkedStats, ia: !!config.openrouter.apiKey }));
 app.post("/linked/start", linkedAuth, async (req, res) => res.json({ ok: true, ...(await linked.startLinking()) }));
 app.get("/linked/contacts", linkedAuth, (req, res) => res.json({ ok: true, connected: linked.isConnected(), contacts: linked.listContacts(), lids: linked.listLids() }));
 app.post("/linked/mode", linkedAuth, (req, res) => res.json({ ok: true, ...linked.setReceiveOnly(!!(req.body && req.body.receiveOnly)) }));
@@ -131,7 +131,22 @@ const inboxFlow = createInboxFlow({ wa, erp, ai, getProductNames, channel: "clou
 // Mismo flujo para el WhatsApp vinculado por QR, contestando por ese mismo WhatsApp.
 const linkedWa = { sendText: (to, t) => linked.sendText(to, t), notifyTeam: (t) => wa.notifyTeam(t), notifyOwner: (t) => wa.notifyOwner(t) };
 const linkedFlow = createInboxFlow({ wa: linkedWa, erp, ai, getProductNames, channel: "linked", silent: () => linked.receiveOnly() });
-linked.init((msg) => handleMessage(msg, linkedFlow, linkedWa), (messages) => erp.archive(messages));
+// Contadores del dia del WhatsApp vinculado (se ven en Configuracion): cuantos mensajes llegaron y si
+// hubo errores al pasarlos a la bandeja.
+const linkedStats = { dia: "", recibidos: 0, errores: 0, ultimoError: "", ultimoErrorAt: "" };
+linked.init(async (msg) => {
+  const hoy = new Date(Date.now() - 3 * 3600 * 1000).toISOString().slice(0, 10);
+  if (linkedStats.dia !== hoy) Object.assign(linkedStats, { dia: hoy, recibidos: 0, errores: 0 });
+  linkedStats.recibidos += 1;
+  try {
+    await handleMessage(msg, linkedFlow, linkedWa);
+  } catch (e) {
+    linkedStats.errores += 1;
+    linkedStats.ultimoError = e.message;
+    linkedStats.ultimoErrorAt = new Date().toISOString();
+    console.error("WhatsApp vinculado, al procesar un mensaje:", e.message);
+  }
+}, (messages) => erp.archive(messages));
 
 async function handleMessage(msg, flowIn, waIn) {
   const inbox = flowIn || inboxFlow;

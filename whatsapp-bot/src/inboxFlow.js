@@ -17,6 +17,29 @@ const KIND = { pedido_nuevo: "pedido", agregar: "agregar", cancelar: "cancelar" 
 const SI = /^\s*(s[ií]+|ok|dale|correcto|exacto|as[ií] es|claro|sip|confirmo)(?=$|[\s,.!¡?¿])/i;
 const NO = /^\s*(no|nop|negativo|para nada)(?=$|[\s,.!¡?¿])/i;
 
+// Sin IA (o si la IA falla o no lo ve): un mensaje parece pedido si tiene renglones con cantidad y
+// producto ("2 kg tomate", "Papas 4 bolsas", "1/2 cajon de tomates") o nombra productos del catalogo
+// con cantidades. Mejor que entre a la bandeja algo de mas (una persona lo descarta) que perder un pedido.
+function norm(t) {
+  return String(t || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9/.,\s]/g, " ").replace(/\s+/g, " ").trim();
+}
+const UNIDADES = /(^|\s)(\d+([.,/]\d+)?\s*)(kgs?|kilos?|k|grs?|gramos|bolsas?|cajon(es)?|cajas?|jaulas?|atados?|docenas?|doc|maples?|bandejas?|unidades?|unidad|u|uni|paquetes?|planta|plantas|cabezas?)(\s|$|[.,])/;
+function looksLikeOrder(text, productNames) {
+  const lineas = String(text || "").split(/\r?\n|,|;/).map(norm).filter(Boolean);
+  if (!lineas.length) return false;
+  const raices = new Set((productNames || []).map((n) => norm(n).split(" ")[0]).filter((w) => w && w.length >= 4).map((w) => w.replace(/(es|s)$/, "")));
+  const nombraProducto = (l) => l.split(" ").some((w) => w.length >= 4 && raices.has(w.replace(/(es|s)$/, "")));
+  let conUnidad = 0;
+  let conProducto = 0;
+  for (const l of lineas) {
+    if (/\$\s*\d|\d{1,2}:\d{2}|transferencia|alias|cbu|pague|pago|deposit/.test(l) || /\?\s*$/.test(l)) continue; // plata, horarios o preguntas
+    const tieneNumero = /(^|\s)\d+([.,/]\d+)?(\s|$|[a-z])/.test(l) || /(^|\s)(un|una|medio|media)\s/.test(l);
+    if (UNIDADES.test(l)) conUnidad += 1;
+    if (tieneNumero && nombraProducto(l)) conProducto += 1;
+  }
+  return conUnidad >= 1 || conProducto >= 1;
+}
+
 // channel: por donde llego ("cloud" = API oficial, "linked" = WhatsApp vinculado por QR); la bandeja
 // lo guarda para contestar por el mismo lado.
 // silent(): modo "solo recibir": no se le contesta nada a nadie; lo que parece pedido va igual a la
@@ -25,7 +48,13 @@ function createInboxFlow({ wa, erp, ai, getProductNames, channel, silent }) {
   const callado = () => !!(silent && silent());
   async function classify(text) {
     const names = getProductNames ? await getProductNames() : [];
-    return ai.classifyMessage(text, names);
+    let r = { intent: "consulta", items: [], note: "" };
+    try { r = (await ai.classifyMessage(text, names)) || r; } catch (e) { /* sin IA: decide la regla */ }
+    if (!ORDER_INTENTS.has(r.intent) && r.intent !== "saludo" && looksLikeOrder(text, names)) {
+      return { intent: "pedido_nuevo", items: r.items || [], note: r.note || "", porRegla: true };
+    }
+    if (r.intent === "saludo" && looksLikeOrder(text, names)) return { intent: "pedido_nuevo", items: r.items || [], note: "", porRegla: true };
+    return r;
   }
 
   async function toInbox(entry) {
@@ -143,4 +172,4 @@ function createInboxFlow({ wa, erp, ai, getProductNames, channel, silent }) {
   return { handleKnown, handleUnknown, handleGroup };
 }
 
-module.exports = { createInboxFlow };
+module.exports = { createInboxFlow, looksLikeOrder };
