@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v107";
+  const APP_VERSION = "v108";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -5328,6 +5328,8 @@
           </div>
           <div class="panel order-whatsapp-panel" id="order-whatsapp-panel">
             <div class="field order-whatsapp-field">
+              ${ui.pendingSections && ui.pendingSections.items.length ? `<div class="pending-sections"><strong>Falta cargar ${ui.pendingSections.items.length} parte(s) del mismo mensaje:</strong> ${ui.pendingSections.items.map((x) => escapeHtml((x.label ? "Para " + x.label : "otra parte") + (x.clientId && getClient(x.clientId) ? " → " + x.clientId + " - " + getClient(x.clientId).name : ""))).join(" · ")}
+                <div class="page-actions" style="margin-top:6px"><button class="btn small primary" type="button" id="pending-section-load">Cargar la siguiente</button><button class="btn small ghost" type="button" id="pending-section-drop">Olvidar</button></div></div>` : ""}
               <label>Pegar pedido como texto</label>
               <textarea id="order-whatsapp-paste" placeholder="Banana 1/2 doc&#10;Cebolla morada 1kg&#10;Uva 500gr">${escapeHtml(ui.orderWhatsappDraft || "")}</textarea>
               <div class="order-whatsapp-actions ${isCustomerOrder ? "solo-cargar" : ""}">
@@ -5807,6 +5809,25 @@
     if (pasteInput) pasteInput.addEventListener("input", () => { ui.orderWhatsappDraft = pasteInput.value; });
     const parseButton = document.getElementById("parse-whatsapp-order");
     if (parseButton) parseButton.addEventListener("click", () => {
+      // Un mensaje con partes para varios clientes ("Para la confi ... Para heladeria ..."): se elige
+      // el cliente de cada parte y se carga de a una.
+      if (!ui.skipSections) {
+        const secciones = splitOrderSections(pasteInput.value);
+        if (secciones.length >= 2 && secciones.filter((x) => x.label).length >= 1) {
+          openOrderSectionsModal(clientSelect.value || ui.selectedClientId, secciones, (sec, clientId, pendientes) => {
+            ui.pendingSections = pendientes.length ? { fromClientId: clientSelect.value || ui.selectedClientId, items: pendientes, inboxId: ui.inboxLoading ? ui.inboxLoading.id : null } : null;
+            ui.selectedClientId = clientId;
+            ui.orderDraft = {};
+            ui.orderWhatsappDraft = sec.text;
+            ui.lastParsedText = "";
+            ui.inboxAutoParse = true;
+            ui.skipSectionsOnce = true;
+            render();
+          });
+          return;
+        }
+      }
+      ui.skipSections = false;
       ui.pendingWhatsappText = String(pasteInput.value || "").trim();
       // Si se corrigio el texto despues de cargarlo, se aprende de la correccion (alias del cliente).
       const aprendidos = learnFromParseEdit(ui.lastParsedText, pasteInput.value, ui.lastParsedClient, clientSelect.value);
@@ -5980,7 +6001,9 @@
         alert(resultado === "pendiente"
           ? "El pedido de " + client.name + " (" + order.id + ") se esta terminando de enviar. No cierres la app hasta que diga \"Guardado\" arriba."
           : "Pedido guardado: " + order.id);
-        if (ui.inboxLoading) finishWhatsappInboxItem(ui.inboxLoading.id, order.id);
+        // Si el mensaje tenia partes para otros clientes, la bandeja se cierra al cargar la ultima.
+        if (ui.inboxLoading && !(ui.pendingSections && ui.pendingSections.items.length)) finishWhatsappInboxItem(ui.inboxLoading.id, order.id);
+        else if (ui.inboxLoading) ui.inboxLoading = null;
       }
       ui.selectedClientId = "";
       ui.orderProductFilter = "";
@@ -5995,8 +6018,27 @@
     // Viene de la bandeja de WhatsApp: el texto ya esta pegado y el cliente elegido, se lee solo.
     if (ui.inboxAutoParse) {
       ui.inboxAutoParse = false;
+      if (ui.skipSectionsOnce) { ui.skipSections = true; ui.skipSectionsOnce = false; }
       setTimeout(() => { const b = document.getElementById("parse-whatsapp-order"); if (b) b.click(); }, 60);
     }
+    const secBtn = document.getElementById("pending-section-load");
+    if (secBtn) secBtn.addEventListener("click", () => {
+      const ps = ui.pendingSections;
+      if (!ps || !ps.items.length) return;
+      const [sig, ...resto] = ps.items;
+      if (!sig.clientId) { openOrderSectionsModal(ps.fromClientId, ps.items, (sec, clientId, pend) => { ui.pendingSections = pend.length ? { ...ps, items: pend } : null; ui.selectedClientId = clientId; ui.orderDraft = {}; ui.orderWhatsappDraft = sec.text; ui.lastParsedText = ""; ui.inboxAutoParse = true; ui.skipSectionsOnce = true; render(); }); return; }
+      ui.pendingSections = resto.length ? { ...ps, items: resto } : null;
+      ui.selectedClientId = sig.clientId;
+      ui.orderDraft = {};
+      ui.orderWhatsappDraft = sig.text;
+      ui.lastParsedText = "";
+      ui.inboxAutoParse = true;
+      ui.skipSectionsOnce = true;
+      if (ps.inboxId && !ui.inboxLoading) ui.inboxLoading = { id: ps.inboxId, name: "" };
+      render();
+    });
+    const secDrop = document.getElementById("pending-section-drop");
+    if (secDrop) secDrop.addEventListener("click", () => { if (confirm("¿Olvidar las partes que faltan cargar?")) { ui.pendingSections = null; render(); } });
   }
 
   // ---- Bandeja de WhatsApp ----
@@ -21383,10 +21425,23 @@
     (j.messages || []).forEach((m) => {
       const cid = m.is_group || String(m.chat_id).endsWith("@g.us") ? porGrupo.get(String(m.chat_id)) || porAgenda.get(m.chat_id) : porTel.get(String(m.chat_id).replace(/\D/g, "").slice(-8)) || porAgenda.get(m.chat_id);
       if (!cid) return;
+      // Mensaje con partes para otros clientes ("Para heladeria ..."): cada parte va a su cliente.
+      const mapa = ((state.appSettings && state.appSettings.orderSectionMap) || {})[cid];
+      if (mapa && Object.keys(mapa).length) {
+        const secciones = splitOrderSections(String(m.text || ""));
+        if (secciones.length >= 2) {
+          secciones.forEach((x) => {
+            const dest = (x.label && mapa[normalizeText(x.label)]) || cid;
+            if (!msgsPorCliente.has(dest)) msgsPorCliente.set(dest, []);
+            msgsPorCliente.get(dest).push({ text: x.text, t: new Date(m.ts).getTime() });
+          });
+          return;
+        }
+      }
       if (!msgsPorCliente.has(cid)) msgsPorCliente.set(cid, []);
       msgsPorCliente.get(cid).push({ text: String(m.text || ""), t: new Date(m.ts).getTime() });
     });
-    const clientesConTel = new Set([...porTel.values(), ...porGrupo.values(), ...porAgenda.values()]);
+    const clientesConTel = new Set([...porTel.values(), ...porGrupo.values(), ...porAgenda.values(), ...msgsPorCliente.keys()]);
     const pedidos = (state.orders || []).filter((o) => o && String(o.date || "") >= desde && !["cancelado", "anulado"].includes(o.status) && !o.exampleOnly && !o.deletedAt)
       .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.clientId).localeCompare(String(b.clientId)));
     const res = { desde, archivo: j.archivo || {}, total: pedidos.length, ok: [], alias: [], cantidad: [], editado: [], revisados: [], sinMensaje: [], sinTelefono: [], sinProductos: [] };
@@ -21488,7 +21543,7 @@
       ${f.difAlias.length && f.explica ? `<p style="margin-bottom:4px"><strong>Renglón por renglón, cómo lo lee hoy el sistema:</strong></p>
         <table class="alias-check-table"><thead><tr><th>Escribió</th><th>El sistema entiende</th><th></th></tr></thead><tbody>${f.explica.filas.map((x) => `<tr class="ac-${x.estado}"><td>${escapeHtml(x.line)}</td><td>${x.entiende ? escapeHtml(x.entiende) : "<em>—</em>"}</td><td>${x.estado === "ok" ? "&#9989;" : (x.estado === "cant" ? "&#9888;&#65039; " : "&#10060; ") + escapeHtml(x.detalle) + (tipo === "alias" ? `<div class="ac-fix"><select data-ac-line="${escapeAttr(f.order.id)}" data-ac-text="${escapeAttr(x.line)}"><option value="">Este renglón es...</option><option value="__nota">Una aclaración (nota del producto anterior)</option><option value="__ignorar">Ignorar este renglón (no es un producto)</option><option value="__otro">Otro producto (buscar en todo el catálogo)...</option>${(f.order.items || []).map((it) => { const p = getProduct(it.productId); return `<option value="${escapeAttr(it.productId)}">${escapeHtml(p ? p.name : it.productName || it.productId)}${it.note ? " (" + escapeHtml(it.note) + ")" : ""}</option>`; }).join("")}</select></div>` : "")}</td></tr>`).join("")}</tbody></table>
         ${f.explica.faltan.length ? `<p style="margin:4px 0"><strong>En el pedido, pero no sale del mensaje:</strong> ${f.explica.faltan.map(escapeHtml).join(", ")}</p>` : ""}` : ""}
-      ${f.difEditado.length ? `<p style="margin-bottom:4px"><strong>Qué cambió entre el texto cargado y el pedido de hoy:</strong></p><ul class="order-parse-list">${describeOrderChanges(f.difEditado).map((x) => `<li>${x}</li>`).join("")}</ul>
+      ${tipo === "editado" && f.difEditado.length ? `<p style="margin-bottom:4px"><strong>Qué cambió entre el texto cargado y el pedido de hoy:</strong></p><ul class="order-parse-list">${describeOrderChanges(f.difEditado).map((x) => `<li>${x}</li>`).join("")}</ul>
         <p class="muted" style="font-size:12px;margin:2px 0 0">El mensaje del cliente da lo mismo que el texto cargado, así que los alias están bien. Revisá que el cambio haya sido a propósito (no había, se reemplazó, el cliente pidió otra cosa después).</p>` : ""}
       ${tipo === "alias" ? `<div class="page-actions" style="margin:6px 0"><button class="btn small ghost" type="button" data-ac-ok="${escapeAttr(f.order.id)}">No es error de alias: fue un cambio en el pedido</button></div><p class="muted" style="font-size:12px;margin:0 0 6px">Elegí en cada renglón marcado de qué producto del pedido se trata (guarda el alias para este cliente). Si la diferencia es porque se cambió el pedido (no había, se reemplazó, cambió la cantidad), tocá "No es error de alias".</p>` : ""}
       ${f.sugerencias.length ? `<p style="margin-bottom:4px"><strong>Alias que lo arreglan (para este cliente):</strong></p><ul class="order-parse-list">${f.sugerencias.map((x) => `<li>"${escapeHtml(x.alias)}" → ${escapeHtml(x.productName)}${x.nota ? " (nota: " + escapeHtml(x.nota) + ")" : ""} <span class="muted">(escribió "${escapeHtml(x.from)}")</span></li>`).join("")}</ul>` : ""}
@@ -22912,6 +22967,92 @@
     warningBox.prepend(box);
   }
 
+  // ---- Un mensaje con pedidos para varios clientes ----
+  // "Para la confi ... / Para heladeria ...": cada titulo abre una seccion. Se recuerda, por cliente
+  // que escribe, a que cliente va cada titulo (appSettings.orderSectionMap[cliente][titulo] = otro).
+  const SECTION_SKIP_RE = /^(ma[nñ]ana|hoy|el|la|los|las)?\s*(lunes|martes|miercoles|jueves|viernes|sabado|domingo|ma[nñ]ana|hoy|semana|esta semana|la semana)\b/;
+  function orderSectionHeader(line) {
+    const raw = String(line || "").trim();
+    const clean = normalizeText(raw);
+    if (!clean || /\d/.test(clean) || clean.split(" ").length > 6) return "";
+    let m = clean.match(/^(?:pedido\s+)?(?:para|p\/)\s+(?:la|el|los|las)?\s*(.+)$/);
+    if (!m && /:\s*$/.test(raw)) m = [clean, clean];
+    if (!m) return "";
+    const label = m[1].replace(/\s+(por favor|porfa|gracias)$/, "").trim();
+    if (!label || label.length < 3 || SECTION_SKIP_RE.test(label) || /^(el|la)\s+(lunes|martes|miercoles|jueves|viernes|sabado|domingo)/.test(label)) return "";
+    // Si el titulo es un producto ("Para la banana:") no es seccion.
+    if (findProductForParsedLine(label, "", "")) {
+      const p = findProductForParsedLine(label, "", "");
+      if (p && normalizeText(p.name).split(" ")[0] === label.split(" ")[0]) return "";
+    }
+    return label;
+  }
+
+  function splitOrderSections(text) {
+    const secciones = [];
+    let actual = { label: "", lines: [] };
+    String(text || "").split(/\r?\n/).forEach((line) => {
+      const h = orderSectionHeader(stripOrderCourtesy(line) || line);
+      if (h) {
+        if (actual.lines.some((l) => l.trim())) secciones.push(actual);
+        actual = { label: h, header: line.trim(), lines: [] };
+        return;
+      }
+      actual.lines.push(line);
+    });
+    if (actual.lines.some((l) => l.trim())) secciones.push(actual);
+    // Solo cuentan las secciones con algo que parezca producto (un numero o un renglon con texto).
+    return secciones.map((x) => ({ ...x, text: x.lines.join("\n").trim() })).filter((x) => x.label || /\d/.test(x.text));
+  }
+
+  function orderSectionTarget(clientId, label) {
+    const map = (state.appSettings && state.appSettings.orderSectionMap) || {};
+    const t = map[clientId] && map[clientId][normalizeText(label)];
+    if (t && getClient(t)) return t;
+    const c = label ? findClientByLooseText(label) : null;
+    return c ? c.id : "";
+  }
+
+  function rememberOrderSection(clientId, label, targetId) {
+    if (!clientId || !label || !targetId) return;
+    state.appSettings = state.appSettings || {};
+    const map = { ...(state.appSettings.orderSectionMap || {}) };
+    map[clientId] = { ...(map[clientId] || {}), [normalizeText(label)]: targetId };
+    state.appSettings.orderSectionMap = map;
+  }
+
+  // Muestra la eleccion de cliente por seccion. onLoad(section, clientId) carga esa parte.
+  function openOrderSectionsModal(fromClientId, secciones, onLoad) {
+    const fila = (x, i) => {
+      const t = orderSectionTarget(fromClientId, x.label) || (i === 0 && !x.label ? fromClientId : "");
+      const lineas = x.text.split(/\r?\n/).filter((l) => l.trim());
+      return `<div class="sec-row" data-sec="${i}">
+        <div><strong>${escapeHtml(x.header || (x.label ? "Para " + x.label : "Sin título"))}</strong> <span class="muted">(${lineas.length} renglón/es)</span>
+          <div class="muted sec-prev">${lineas.slice(0, 4).map(escapeHtml).join(" · ")}${lineas.length > 4 ? " · ..." : ""}</div></div>
+        <div class="sec-client"><input list="sec-clients" data-sec-client="${i}" value="${escapeAttr(t && getClient(t) ? t + " - " + getClient(t).name : "")}" placeholder="Elegí el cliente" autocomplete="off" />
+          <button class="btn small primary" type="button" data-sec-load="${i}">Cargar esta parte</button></div>
+      </div>`;
+    };
+    const from = getClient(fromClientId);
+    showModal("Pedido para varios clientes", `
+      <p class="muted" style="margin-top:0">El mensaje${from ? " de <strong>" + escapeHtml(from.id + " - " + from.name) + "</strong>" : ""} trae ${secciones.length} partes. Elegí el cliente de cada una y cargalas de a una (después de enviar una, la otra queda para cargar). El cliente que elijas para cada título queda recordado.</p>
+      <datalist id="sec-clients">${activeClients().map((c) => `<option value="${escapeAttr(c.id + " - " + c.name)}"></option>`).join("")}</datalist>
+      ${secciones.map(fila).join("")}`, () => {
+      document.querySelectorAll("[data-sec-load]").forEach((b) => b.addEventListener("click", () => {
+        const i = Number(b.dataset.secLoad);
+        const inp = document.querySelector(`[data-sec-client="${i}"]`);
+        const c = inp ? findClientByInput(inp.value) : null;
+        if (!c) return alert("Elegí el cliente de esta parte.");
+        // Recordar a que cliente va cada titulo (las que tienen cliente elegido).
+        secciones.forEach((x, k) => { const e = document.querySelector(`[data-sec-client="${k}"]`); const cc = e ? findClientByInput(e.value) : null; if (x.label && cc) rememberOrderSection(fromClientId, x.label, cc.id); });
+        saveState();
+        const pendientes = secciones.map((x, k) => { const e = document.querySelector(`[data-sec-client="${k}"]`); const cc = e ? findClientByInput(e.value) : null; return { ...x, clientId: cc ? cc.id : "" }; }).filter((x, k) => k !== i);
+        closeModal();
+        onLoad(secciones[i], c.id, pendientes);
+      }));
+    }, { hideSave: true, cancelLabel: "Cerrar", className: "modal-wide" });
+  }
+
   let parseMemo = null;
   function parseWhatsappOrder(text, clientId) {
     if (parseMemo) {
@@ -23060,7 +23201,15 @@
     // "C. Verdeo  2 atados Apio": la cantidad que quedo sola despues de un espacio doble es del
     // producto de antes ("C. Verdeo 2 atados"); lo que sigue es otro producto ("Apio").
     const trozos = [];
-    crudos.forEach((t) => {
+    // Pedido en columnas ("1      ATADO    ALBAHACA X ATADO"): la cantidad y la unidad sueltas van con
+    // lo que sigue, no son productos aparte.
+    let prefijo = "";
+    crudos.forEach((t0) => {
+      const soloCantidad = /^\d+([.,/]\d+)?$/.test(t0);
+      const soloUnidad = RUN_UNIT_TOKEN.test(t0.replace(/\.$/, ""));
+      if ((soloCantidad && (!trozos.length || /\d/.test(trozos[trozos.length - 1]) || prefijo)) || (soloUnidad && prefijo)) { prefijo = (prefijo + " " + t0).trim(); return; }
+      const t = prefijo ? prefijo + " " + t0 : t0;
+      prefijo = "";
       const prev = trozos[trozos.length - 1];
       const m = t.match(/^(\d+(?:[.,]\d+)?(?:\/\d+)?\s*(?:[a-záéíóúñ.]+)?)(?:\s+(.*))?$/i);
       if (prev !== undefined && !/\d/.test(prev) && m) {
@@ -23074,6 +23223,7 @@
       }
       trozos.push(t);
     });
+    if (prefijo) { if (trozos.length) trozos[trozos.length - 1] += " " + prefijo; else trozos.push(prefijo); }
     const out = [];
     trozos.forEach((trozo) => {
       const tokens = trozo.split(/\s+/);
@@ -23907,6 +24057,8 @@
     // Titulos de seccion: "Pedido barra", "Pedido cocina", "Barra:", "Cocina".
     if (/^(pedidos?\s+(de\s+|para\s+)?(la\s+|el\s+)?)?(barra|cocina|salon|local|bar|resto|restaurante|cafeteria|kiosco|deposito|sucursal(\s+\d+)?)$/.test(clean)) return true;
     if (/^pedidos?\s+[a-z]+$/.test(clean) && !/\d/.test(clean)) return true;
+    // Titulo de una seccion para otro cliente ("Para heladeria"): no es un producto.
+    if (!/\d/.test(clean) && /^(pedido\s+)?(para|p\/)\s/.test(clean) && orderSectionHeader(line)) return true;
     // Renglones que alguien marco "Ignorar este renglón" en Comprobar alias.
     const ignorar = (state.appSettings && state.appSettings.orderIgnoreLines) || [];
     if (ignorar.includes(clean)) return true;

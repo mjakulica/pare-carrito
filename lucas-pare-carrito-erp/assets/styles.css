@@ -4429,3 +4429,8 @@ tr:last-child td {
 .wa-arch-msg:not(.mine) { margin-right: 32px; }
 .wa-arch-msg.sel { outline: 2px solid var(--green, #1f7a5a); }
 .wa-arch-tobox { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; background: #eaf5ee; border: 1px solid #b9dcc6; border-radius: 8px; padding: 8px 10px; margin-top: 8px; }
+.sec-row { display: grid; grid-template-columns: 1fr minmax(200px, 300px); gap: 10px; align-items: start; border: 1px solid #e3e8ef; border-radius: 8px; padding: 8px 10px; margin: 6px 0; }
+.sec-prev { font-size: 12px; margin-top: 2px; overflow-wrap: anywhere; }
+.sec-client { display: flex; flex-direction: column; gap: 6px; }
+.pending-sections { background: #fff4e5; border: 1px solid #f2c48d; border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; color: #6b3d06; }
+@media (max-width: 640px) { .sec-row { grid-template-columns: 1fr; } }
