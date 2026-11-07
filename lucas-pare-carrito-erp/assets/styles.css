@@ -4414,3 +4414,12 @@ tr:last-child td {
 .ac-card-link .card { cursor: pointer; border-color: #9fc7b0; }
 .alias-check-qty { border: 1px solid #e3e8ef; border-left: 4px solid #e8a33d; border-radius: 8px; padding: 8px 10px; margin: 6px 0; }
 .wa-linked-today { background: #f3f7fb; border: 1px solid #d9e0e8; border-radius: 8px; padding: 8px 10px; margin: 6px 0; }
+.lc-list { max-height: 60vh; overflow-y: auto; border: 1px solid #e3e8ef; border-radius: 8px; }
+.lc-row { display: grid; grid-template-columns: auto 1fr minmax(180px, 280px); gap: 8px; align-items: start; padding: 8px 10px; border-bottom: 1px solid #eef1f5; }
+.lc-row.on { background: #f1f8f4; }
+.lc-meta { font-size: 12px; overflow-wrap: anywhere; }
+.lc-client input { width: 100%; }
+.lc-why { display: block; font-size: 12px; }
+.lc-alts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.lc-alts .btn { min-height: auto; padding: 2px 8px; font-size: 12px; }
+@media (max-width: 640px) { .lc-row { grid-template-columns: auto 1fr; } .lc-client { grid-column: 2; } }

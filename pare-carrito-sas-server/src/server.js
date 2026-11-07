@@ -12,7 +12,7 @@ const jwt = require("jsonwebtoken");
 const { billingConfig, nowArt, computeDueInvoices, runBilling, regeneratePdf, emitCreditNote, creditNoteTypeFor } = require("./billing");
 const { controlDailySummary, controlPaymentChecks, parseBankText, parseBankJson } = require("./control");
 const { repairAccounting, repairSummary, isOpeningRow, alignChangedOrderSaldos } = require("./dataRepair");
-const { matchClients, phoneSuggestions, groupSuggestions, normalizeArPhone } = require("./whatsappInbox");
+const { matchClients, phoneSuggestions, groupSuggestions, chatSuggestions, normalizeArPhone } = require("./whatsappInbox");
 const { dailySalesSummary, dailySalesHtml, dailySalesLine, archiveEmailHtml } = require("./dailyReport");
 const { syncSheetsFromStateDiff, pushPrecio } = require("./sheetsSync");
 
@@ -3970,6 +3970,65 @@ app.post("/whatsapp/archive/link", authenticate, requireRole("manager", "admin")
     await pool.query("DELETE FROM whatsapp_identify WHERE phone = $1", [phone]);
   }
   console.log("WhatsApp: chat " + (esGrupo ? "de grupo" : "..." + phone.slice(-4)) + " vinculado a mano al cliente " + clientId + " por " + req.user.username + ".");
+  res.json(out);
+});
+
+// Todos los chats del archivo que no tienen cliente, con el cliente probable: para vincularlos de a muchos.
+app.get("/whatsapp/archive/unlinked", authenticate, requireRole("manager", "admin"), async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT chat_id, max(chat_name) FILTER (WHERE chat_name <> '' AND NOT from_me) AS chat_name, max(sender_name) FILTER (WHERE NOT from_me AND sender_name <> '') AS sender_name,
+       bool_or(is_group) AS is_group, count(*) FILTER (WHERE NOT from_me)::int AS recibidos, count(*)::int AS total, max(ts) AS last_ts,
+       (array_agg(text ORDER BY ts DESC) FILTER (WHERE NOT from_me))[1] AS last_text
+     FROM whatsapp_archive GROUP BY chat_id ORDER BY max(ts) DESC LIMIT 2000`);
+  const stored = await loadStateData();
+  const clients = stored ? stored.data.clients || [] : [];
+  const porTel = new Set();
+  const grupos = new Set();
+  clients.forEach((c) => {
+    [c && c.phone].concat(c && Array.isArray(c.phones) ? c.phones : []).forEach((ph) => { const t = phoneDigits(ph).slice(-8); if (t.length === 8) porTel.add(t); });
+    (c && Array.isArray(c.waGroups) ? c.waGroups : []).forEach((g) => grupos.add(String(g)));
+  });
+  const sinVincular = rows.filter((r) => (r.is_group ? !grupos.has(r.chat_id) : !porTel.has(phoneDigits(r.chat_id).slice(-8))) && r.recibidos > 0);
+  const lista = chatSuggestions(clients, sinVincular.map((r) => ({ chatId: r.chat_id, name: r.chat_name || r.sender_name || "", isGroup: !!r.is_group, recibidos: r.recibidos, lastTs: r.last_ts, lastText: String(r.last_text || "").slice(0, 120) })));
+  res.json({ ok: true, chats: lista, vinculados: rows.length - sinVincular.length, total: rows.length });
+});
+
+// Vincular varios chats a la vez: [{ chat, clientId }] (numeros, identificadores ocultos o grupos).
+app.post("/whatsapp/archive/link-bulk", authenticate, requireRole("manager", "admin"), async (req, res) => {
+  const links = (Array.isArray(req.body && req.body.links) ? req.body.links : []).slice(0, 2000).map((l) => {
+    const chat = String(l.chat || "").trim();
+    const esGrupo = /^[\d-]+@g\.us$/.test(chat);
+    return { chat, clientId: String(l.clientId || "").trim(), esGrupo, phone: esGrupo ? "" : normalizeArPhone(chat) || (/^\d{10,20}$/.test(chat) ? chat : "") };
+  }).filter((l) => l.clientId && (l.esGrupo || l.phone));
+  if (!links.length) return res.status(400).json({ error: "No hay chats para vincular." });
+  const out = await withStateExt((data) => {
+    const stamp = new Date().toISOString();
+    let n = 0;
+    for (const l of links) {
+      const client = (data.clients || []).find((c) => c && c.id === l.clientId);
+      if (!client) continue;
+      (data.clients || []).forEach((c) => {
+        if (!c || c.id === l.clientId) return;
+        if (l.esGrupo && Array.isArray(c.waGroups) && c.waGroups.includes(l.chat)) { c.waGroups = c.waGroups.filter((g) => g !== l.chat); c.updatedAt = stamp; }
+        if (!l.esGrupo && Array.isArray(c.phones) && c.phones.some((ph) => phoneDigits(ph).slice(-8) === l.phone.slice(-8))) { c.phones = c.phones.filter((ph) => phoneDigits(ph).slice(-8) !== l.phone.slice(-8)); c.updatedAt = stamp; }
+      });
+      if (l.esGrupo) {
+        if (!(client.waGroups || []).includes(l.chat)) { client.waGroups = (client.waGroups || []).concat([l.chat]); client.updatedAt = stamp; }
+      } else if (![client.phone].concat(Array.isArray(client.phones) ? client.phones : []).some((ph) => phoneDigits(ph).slice(-8) === l.phone.slice(-8))) {
+        client.phones = (Array.isArray(client.phones) ? client.phones : []).concat([l.phone]);
+        client.updatedAt = stamp;
+      }
+      n += 1;
+    }
+    return { ok: true, linked: n, links: links.map((l) => ({ chat: l.chat, clientId: l.clientId, phone: l.phone, group: l.esGrupo ? l.chat : "" })) };
+  });
+  if (out.error) return res.status(out.status || 500).json({ error: out.error });
+  for (const l of links) {
+    if (l.esGrupo) continue;
+    await pool.query("UPDATE whatsapp_inbox SET client_id = $1 WHERE right(phone, 8) = right($2, 8) AND client_id IS NULL AND status = 'pendiente' AND phone <> ''", [l.clientId, l.phone]);
+    await pool.query("DELETE FROM whatsapp_identify WHERE phone = $1", [l.phone]);
+  }
+  console.log("WhatsApp: " + out.linked + " chat(s) vinculados a clientes de una vez por " + req.user.username + ".");
   res.json(out);
 });
 

@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v105";
+  const APP_VERSION = "v106";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -21050,6 +21050,8 @@
       document.querySelectorAll("[data-wa-chat]").forEach((b) => b.addEventListener("click", () => loadWaArchiveChat(b.dataset.waChat)));
       const chk = document.getElementById("wa-alias-check");
       if (chk) chk.addEventListener("click", () => openAliasCheck());
+      const lc = document.getElementById("wa-link-chats");
+      if (lc) lc.addEventListener("click", () => openLinkChatsModal());
       const all = document.getElementById("wa-arch-all");
       if (all) all.addEventListener("click", () => { ui.waArchiveQ = ""; ui.waArchiveChat = ""; loadWaArchiveChats(); render(); });
       const back = document.getElementById("wa-arch-back");
@@ -21119,7 +21121,7 @@
     return pageShell(
       "Mensajes de WhatsApp",
       "Copia de todos los chats del WhatsApp vinculado por QR (individuales y grupos, recibidos y enviados). Se guardan 90 días: si bloquean el número, acá queda todo.",
-      `${["manager", "admin"].includes(currentUser.role) ? `<button class="btn primary" type="button" id="wa-alias-check">Comprobar alias (30 días)</button><button class="btn ghost" type="button" data-route="configuracion">Vinculación</button>` : ""}`,
+      `${["manager", "admin"].includes(currentUser.role) ? `<button class="btn primary" type="button" id="wa-link-chats">Vincular chats con clientes</button><button class="btn primary" type="button" id="wa-alias-check">Comprobar alias (30 días)</button><button class="btn ghost" type="button" data-route="configuracion">Vinculación</button>` : ""}`,
       `${ui.waArchiveError ? `<div class="alert warn">${escapeHtml(ui.waArchiveError)}</div>` : ""}
       <form id="wa-arch-search" class="page-actions" style="margin-bottom:12px"><input id="wa-arch-q" placeholder="Buscar por cliente, nombre, número o texto" value="${escapeAttr(ui.waArchiveQ || "")}" style="flex:1;min-width:220px" /><button class="btn primary" type="submit">Buscar</button>${ui.waArchiveQ ? `<button class="btn ghost" type="button" id="wa-arch-all">Ver todos</button>` : ""}</form>
       <div class="wa-arch ${ui.waArchiveChat ? "con-chat" : ""}">
@@ -21178,6 +21180,118 @@
       ...c.agregados.map((x) => `&#10133; <strong>Se agregó</strong>: ${escapeHtml(c.fmt(x.productId, x.b))}`),
       ...c.cantidad.map((x) => { const p = getProduct(x.productId); return `&#9998;&#65039; <strong>Otra cantidad</strong>: ${escapeHtml(p ? p.name : x.productId)} ${escapeHtml(formatAmountInput(x.a))} → ${escapeHtml(formatAmountInput(x.b))}`; })
     ];
+  }
+
+  // ---- Vincular chats con clientes, de a muchos ----
+  // Todos los chats del WhatsApp vinculado que no tienen cliente, con el cliente probable (por el
+  // numero de agenda "15) ..." o por el nombre). Se tildan, se corrige el que haga falta y se guardan
+  // todos juntos. Sin entrar a cada conversacion.
+  function openLinkChatsModal() {
+    let datos = null;
+    let filtro = "sugeridos";
+    let buscar = "";
+    const elegidos = new Map(); // chatId -> { clientId, check }
+    const etiqueta = (id) => { const c = getClient(id); return c ? c.id + " - " + c.name : ""; };
+    const pintar = () => {
+      const box = document.getElementById("lc-body");
+      if (!box) return;
+      if (!datos) { box.innerHTML = `<p class="muted">Buscando chats sin cliente...</p>`; return; }
+      if (datos.error) { box.innerHTML = `<div class="alert warn">${escapeHtml(datos.error)}</div>`; return; }
+      const chats = datos.chats || [];
+      chats.forEach((x) => { if (!elegidos.has(x.chatId)) elegidos.set(x.chatId, { clientId: x.suggested || "", check: !!x.suggested }); });
+      const con = chats.filter((x) => x.suggested);
+      const sin = chats.filter((x) => !x.suggested);
+      const q = normalizeText(buscar);
+      const lista = (filtro === "sugeridos" ? con : filtro === "sin" ? sin : chats)
+        .filter((x) => !q || normalizeText([x.name, x.chatId, x.lastText, etiqueta(x.suggested)].join(" ")).includes(q));
+      const marcados = Array.from(elegidos.values()).filter((e) => e.check && e.clientId).length;
+      box.innerHTML = `
+        <p class="muted" style="margin:0 0 8px">${chats.length} chat(s) sin cliente · ${datos.vinculados || 0} ya vinculados. Revisá los tildados y tocá <strong>Vincular tildados</strong>.</p>
+        <div class="page-actions" style="margin-bottom:8px;flex-wrap:wrap">
+          <button class="btn small ${filtro === "sugeridos" ? "primary" : "ghost"}" type="button" data-lc-f="sugeridos">Con cliente probable (${con.length})</button>
+          <button class="btn small ${filtro === "sin" ? "primary" : "ghost"}" type="button" data-lc-f="sin">Sin cliente probable (${sin.length})</button>
+          <button class="btn small ${filtro === "todos" ? "primary" : "ghost"}" type="button" data-lc-f="todos">Todos</button>
+          <input id="lc-q" placeholder="Buscar nombre, número o texto" value="${escapeAttr(buscar)}" style="flex:1;min-width:160px" />
+        </div>
+        <div class="page-actions" style="margin-bottom:6px"><button class="btn small ghost" type="button" id="lc-all">Tildar todos los de la lista</button><button class="btn small ghost" type="button" id="lc-none">Destildar todos</button></div>
+        <datalist id="lc-clients">${activeClients().map((c) => `<option value="${escapeAttr(c.id + " - " + c.name)}"></option>`).join("")}</datalist>
+        <div class="lc-list">${lista.length ? lista.map((x) => {
+          const e = elegidos.get(x.chatId);
+          const otros = (x.candidates || []).filter((k) => k.id !== e.clientId).slice(0, 2);
+          return `<div class="lc-row ${e.check ? "on" : ""}" data-lc-row="${escapeAttr(x.chatId)}">
+            <input type="checkbox" data-lc-check="${escapeAttr(x.chatId)}" ${e.check ? "checked" : ""} style="width:auto;min-height:auto" />
+            <div class="lc-chat"><strong>${x.isGroup ? "&#128101; " : ""}${escapeHtml(x.name || "(sin nombre)")}</strong> <span class="muted">${x.isGroup ? "grupo" : escapeHtml(formatWaPhone(x.chatId))}</span>
+              <div class="muted lc-meta">${x.recibidos} mensaje(s) · ${escapeHtml(formatTimestampShort(x.lastTs))}${x.lastText ? " · “" + escapeHtml(x.lastText.slice(0, 70)) + "”" : ""}</div></div>
+            <div class="lc-client"><input list="lc-clients" data-lc-client="${escapeAttr(x.chatId)}" value="${escapeAttr(etiqueta(e.clientId))}" placeholder="Elegir cliente" autocomplete="off" />
+              ${x.suggested && e.clientId === x.suggested ? `<span class="muted lc-why">${x.motivo === "numero" ? "por el número de agenda" : "por el nombre"}</span>` : ""}
+              ${otros.length ? `<span class="lc-alts">${otros.map((k) => `<button class="btn small ghost" type="button" data-lc-alt="${escapeAttr(x.chatId)}|${escapeAttr(k.id)}">${escapeHtml(k.id + " - " + k.name)}</button>`).join("")}</span>` : ""}</div>
+          </div>`;
+        }).join("") : `<p class="muted">No hay chats en esta lista.</p>`}</div>`;
+      const save = document.getElementById("modal-save");
+      if (save) save.textContent = "Vincular tildados (" + marcados + ")";
+      box.querySelectorAll("[data-lc-f]").forEach((b) => b.addEventListener("click", () => { filtro = b.dataset.lcF; pintar(); }));
+      const qi = document.getElementById("lc-q");
+      if (qi) qi.addEventListener("change", () => { buscar = qi.value; pintar(); });
+      const marcar = (val) => { box.querySelectorAll("[data-lc-check]").forEach((c) => { const e = elegidos.get(c.dataset.lcCheck); if (e && (!val || e.clientId)) e.check = val; }); pintar(); };
+      document.getElementById("lc-all").addEventListener("click", () => marcar(true));
+      document.getElementById("lc-none").addEventListener("click", () => marcar(false));
+      box.querySelectorAll("[data-lc-check]").forEach((c) => c.addEventListener("change", () => { const e = elegidos.get(c.dataset.lcCheck); e.check = c.checked; c.closest(".lc-row").classList.toggle("on", c.checked); const sv = document.getElementById("modal-save"); if (sv) sv.textContent = "Vincular tildados (" + Array.from(elegidos.values()).filter((x) => x.check && x.clientId).length + ")"; }));
+      box.querySelectorAll("[data-lc-client]").forEach((inp) => inp.addEventListener("change", () => {
+        const e = elegidos.get(inp.dataset.lcClient);
+        const found = findClientByInput(inp.value);
+        e.clientId = found ? found.id : "";
+        e.check = !!found;
+        pintar();
+      }));
+      box.querySelectorAll("[data-lc-alt]").forEach((b) => b.addEventListener("click", () => {
+        const [chat, id] = b.dataset.lcAlt.split("|");
+        const e = elegidos.get(chat);
+        e.clientId = id; e.check = true;
+        pintar();
+      }));
+    };
+    const cargar = async () => {
+      datos = null; pintar();
+      try {
+        const r = await cloudRequest(getCloudSyncConfig(), "/whatsapp/archive/unlinked", { method: "GET" });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(j.error || "HTTP " + r.status);
+        datos = j;
+      } catch (e) { datos = { error: e.message }; }
+      pintar();
+    };
+    showModal("Vincular chats con clientes", `<div id="lc-body"></div>`, () => {
+      cargar();
+      const save = document.getElementById("modal-save");
+      if (save) save.addEventListener("click", async () => {
+        const links = Array.from(elegidos.entries()).filter(([, e]) => e.check && e.clientId).map(([chat, e]) => ({ chat, clientId: e.clientId }));
+        if (!links.length) return alert("No hay chats tildados con cliente elegido.");
+        if (!confirm("Vincular " + links.length + " chat(s) a sus clientes?")) return;
+        save.disabled = true;
+        try {
+          const r = await cloudRequest(getCloudSyncConfig(), "/whatsapp/archive/link-bulk", { method: "POST", body: JSON.stringify({ links }) });
+          const j = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(j.error || "HTTP " + r.status);
+          // Tambien en este equipo, sin esperar la proxima descarga.
+          (j.links || []).forEach((l) => {
+            (state.clients || []).forEach((c) => {
+              if (c.id === l.clientId) return;
+              if (l.group && Array.isArray(c.waGroups)) c.waGroups = c.waGroups.filter((g) => g !== l.group);
+              if (l.phone && Array.isArray(c.phones)) c.phones = c.phones.filter((ph) => String(ph).replace(/\D/g, "").slice(-8) !== l.phone.slice(-8));
+            });
+            const c = getClient(l.clientId);
+            if (!c) return;
+            if (l.group && !(c.waGroups || []).includes(l.group)) c.waGroups = (c.waGroups || []).concat([l.group]);
+            if (l.phone && !(c.phones || []).some((ph) => String(ph).replace(/\D/g, "").slice(-8) === l.phone.slice(-8))) c.phones = (c.phones || []).concat([l.phone]);
+          });
+          alert("Listo: " + (j.linked || 0) + " chat(s) vinculados.");
+          save.disabled = false;
+          elegidos.clear();
+          ui.waArchiveChats = null;
+          cargar();
+        } catch (e) { save.disabled = false; alert("No se pudo vincular: " + e.message); }
+      });
+    }, { saveLabel: "Vincular tildados", className: "modal-wide", cancelLabel: "Cerrar" });
   }
 
   // ---- Comprobar alias contra los pedidos de los ultimos 30 dias ----

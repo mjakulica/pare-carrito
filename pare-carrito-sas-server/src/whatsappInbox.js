@@ -167,4 +167,26 @@ function groupSuggestions(clients, groups) {
   return { groups: out, vinculados, sinParecido };
 }
 
-module.exports = { groupSuggestions, matchClients, clearCandidate, scoreClient, norm, normalizeArPhone, phoneSuggestions };
+// Chats del archivo sin cliente: cliente probable por el numero de agenda ("15) Hotel ...") o por el
+// nombre (de agenda o el que puso la persona en su WhatsApp). chats: [{ chatId, name, isGroup }].
+function chatSuggestions(clients, chats) {
+  return (chats || []).map((ch) => {
+    const name = String(ch.name || "");
+    const pref = name.match(/^\s*(\d{1,4})\s*[)\-.:]\s*(.*)$/);
+    const porNumero = pref ? (clients || []).find((c) => c && c.isActive !== false && /^\d+$/.test(String(c.id)) && Number(c.id) === Number(pref[1])) : null;
+    let candidates = name ? matchClients(clients, pref ? pref[2] : name, 3, true) : [];
+    let suggested = "";
+    let motivo = "";
+    if (porNumero) {
+      candidates = [{ id: porNumero.id, name: porNumero.name || "", address: porNumero.address || "", score: 2 }].concat(candidates.filter((c) => c.id !== porNumero.id)).slice(0, 3);
+      suggested = porNumero.id;
+      motivo = "numero";
+    } else if (candidates.length && candidates[0].score >= 0.5) {
+      const claro = clearCandidate(candidates);
+      if (claro) { suggested = claro.id; motivo = "nombre"; }
+    }
+    return { ...ch, candidates: candidates.filter((c) => c.score >= 0.5 || c.id === suggested), suggested, motivo };
+  });
+}
+
+module.exports = { chatSuggestions, groupSuggestions, matchClients, clearCandidate, scoreClient, norm, normalizeArPhone, phoneSuggestions };
