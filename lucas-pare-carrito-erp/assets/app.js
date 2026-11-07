@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v109";
+  const APP_VERSION = "v110";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -17942,6 +17942,23 @@
             <p class="muted" style="margin:6px 0 0;font-size:12px">Reglas para corregir errores tipicos del OCR (ej. "nzna" -> "manzana"). Se aplican al texto de la foto antes de interpretarlo. ${getOcrCorrections().length ? getOcrCorrections().length + " regla(s) cargada(s)." : ""}</p>
           </div>
         </div>` : ""}
+        ${(currentUser.role === "manager" || currentUser.role === "admin") ? `<div class="panel" id="order-text-words">
+          <h2 class="page-title" style="font-size:18px">Lectura de pedidos por texto: saludos y aclaraciones</h2>
+          <p class="muted">Lo que el sistema saltea al leer un pedido pegado o de WhatsApp. Uno por renglón. Sin acentos ni mayúsculas importa: "Mañana" y "manana" son lo mismo.</p>
+          <div class="form-grid" style="margin-top:8px">
+            <div class="field span-4"><label>Saludos y palabras que se ignoran</label>
+              <textarea id="ow-phrases" rows="5" placeholder="te encargo&#10;lista de mercado&#10;buen dia">${escapeHtml(((state.appSettings && state.appSettings.orderIgnorePhrases) || []).join("\n"))}</textarea>
+              <span class="muted" style="font-size:12px">Un renglón SIN cantidad que tenga alguna de estas palabras o frases no se lee como producto (ej. "lista de mercado", "te encargo"). Los renglones con números se leen siempre.</span></div>
+            <div class="field span-4"><label>Renglones exactos que se ignoran</label>
+              <textarea id="ow-lines" rows="3">${escapeHtml(((state.appSettings && state.appSettings.orderIgnoreLines) || []).join("\n"))}</textarea>
+              <span class="muted" style="font-size:12px">Se agregan solos cuando en Comprobar alias elegís "Ignorar este renglón".</span></div>
+            <div class="field span-4"><label>Aclaraciones (van a la nota del producto anterior)</label>
+              <textarea id="ow-notes" rows="3">${escapeHtml(((state.appSettings && state.appSettings.orderNoteLines) || []).join("\n"))}</textarea>
+              <span class="muted" style="font-size:12px">Se agregan solos con "Es una aclaración" en Comprobar alias. Además ya se reconocen frases como "en lo posible", "que no estén", "que sean", "bien maduros".</span></div>
+          </div>
+          <details style="margin-top:6px"><summary class="muted">Los que el sistema ya reconoce solo</summary><p class="muted" style="font-size:12px;margin:6px 0">hola, buenas/buen día/tardes/noches, gracias, saludos, porfa/por favor, te paso/mando/dejo el pedido, pedido para mañana/hoy/el lunes, días de la semana, fechas y horas (08/09, 7:30, 7hs), "pedido barra/cocina", "lista de verduras/frutas/compras/mercado", te encargo/necesito/quiero/mandame/anotame... (siempre que el renglón no tenga cantidad).</p></details>
+          <div class="page-actions" style="margin-top:8px"><button class="btn primary" type="button" id="ow-save">Guardar</button></div>
+        </div>` : ""}
         ${(currentUser.role === "manager" || currentUser.role === "admin") ? `<div class="panel">
           <h2 class="page-title" style="font-size:18px">Aviso de feriados (WhatsApp)</h2>
           <p class="muted">Texto que se manda a los clientes al bloquear un feriado. Podes usar {fecha} y {feriado}.</p>
@@ -18277,6 +18294,16 @@
     if (holidayTemplateInput) holidayTemplateInput.addEventListener("change", () => { state.appSettings.holidayTemplateName = holidayTemplateInput.value.trim(); saveState(); });
     const settingsHolidaysBtn = document.getElementById("config-holidays-btn");
     if (settingsHolidaysBtn) settingsHolidaysBtn.addEventListener("click", openHolidaysModal);
+    const owSave = document.getElementById("ow-save");
+    if (owSave) owSave.addEventListener("click", () => {
+      const lista = (id) => Array.from(new Set(String((document.getElementById(id) || {}).value || "").split(/\r?\n/).map((x) => normalizeText(x)).filter((x) => x && x.length >= 2)));
+      state.appSettings = state.appSettings || {};
+      state.appSettings.orderIgnorePhrases = lista("ow-phrases");
+      state.appSettings.orderIgnoreLines = lista("ow-lines");
+      state.appSettings.orderNoteLines = lista("ow-notes");
+      saveState();
+      alert("Guardado: " + state.appSettings.orderIgnorePhrases.length + " saludo(s)/palabra(s), " + state.appSettings.orderIgnoreLines.length + " renglón(es) a ignorar y " + state.appSettings.orderNoteLines.length + " aclaración(es).");
+    });
     const ocEnabled = document.getElementById("orderchange-enabled");
     if (ocEnabled) ocEnabled.addEventListener("change", () => { state.appSettings.orderChangeNotifyEnabled = ocEnabled.checked; saveState(); });
     const ocMessage = document.getElementById("orderchange-message");
@@ -20125,6 +20152,7 @@
             <strong>${escapeHtml(line)}</strong>
             <button class="btn icon danger unmatched-alias-remove" type="button" data-remove-unmatched-alias title="Eliminar">X</button>
           </div>
+          <div class="unmatched-alias-kind"><button class="btn small ghost" type="button" data-unmatched-greeting="${escapeAttr(line)}">Es un saludo (ignorar siempre)</button><button class="btn small ghost" type="button" data-unmatched-note="${escapeAttr(line)}">Es una aclaración (nota)</button></div>
           <input type="hidden" data-unmatched-alias-name value="${escapeAttr(aliasName)}" />
           <div class="field span-2"><label>Producto existente</label><select data-unmatched-product><option value="">No vincular</option>${activeProductsByName().map((product) => `<option value="${product.id}">${escapeHtml(product.name)}</option>`).join("")}</select></div>
           <label class="field" style="display:flex;align-items:center;gap:8px;grid-template-columns:auto 1fr">
@@ -20148,6 +20176,30 @@
             if (row) row.remove();
           });
         });
+        // Saludo o aclaracion: queda guardado (Configuracion > Lectura de pedidos por texto) para siempre.
+        const marcar = (button, tipo) => {
+          const clean = normalizeText(stripOrderCourtesy(button.dataset.unmatchedGreeting || button.dataset.unmatchedNote) || (button.dataset.unmatchedGreeting || button.dataset.unmatchedNote));
+          if (!clean) return;
+          state.appSettings = state.appSettings || {};
+          let donde;
+          if (tipo === "nota") {
+            if (/\d/.test(clean)) return alert("Tiene números: no puede ser una aclaración. Elegí el producto o eliminalo.");
+            state.appSettings.orderNoteLines = Array.from(new Set([...(state.appSettings.orderNoteLines || []), clean]));
+            donde = "Se va a cargar como nota del producto anterior";
+          } else if (/\d/.test(clean)) {
+            state.appSettings.orderIgnoreLines = Array.from(new Set([...(state.appSettings.orderIgnoreLines || []), clean]));
+            donde = "Este renglón se va a ignorar";
+          } else {
+            state.appSettings.orderIgnorePhrases = Array.from(new Set([...(state.appSettings.orderIgnorePhrases || []), clean]));
+            donde = "Guardado como saludo: se ignora";
+          }
+          saveState();
+          ui.unmatchedReparse = true;
+          const row = button.closest("[data-unmatched-alias-row]");
+          if (row) { row.removeAttribute("data-unmatched-alias-row"); row.innerHTML = `<p class="muted" style="margin:4px 0">&#9989; "${escapeHtml(button.dataset.unmatchedGreeting || button.dataset.unmatchedNote)}": ${donde} desde ahora (se puede cambiar en Configuración).</p>`; }
+        };
+        document.querySelectorAll("[data-unmatched-greeting]").forEach((b) => b.addEventListener("click", () => marcar(b, "saludo")));
+        document.querySelectorAll("[data-unmatched-note]").forEach((b) => b.addEventListener("click", () => marcar(b, "nota")));
         document.getElementById("modal-save").textContent = "Guardar alias";
         document.getElementById("modal-save").addEventListener("click", () => {
           document.querySelectorAll("[data-unmatched-alias-row]").forEach((row) => {
@@ -20165,6 +20217,11 @@
           });
           saveState();
           closeModal();
+          if (ui.unmatchedReparse) {
+            ui.unmatchedReparse = false;
+            const b = document.getElementById("parse-whatsapp-order");
+            if (b) { ui.skipSections = true; setTimeout(() => b.click(), 50); return; }
+          }
           if (onApply) onApply();
         });
       }
@@ -24065,11 +24122,18 @@
     // Renglones que alguien marco "Ignorar este renglón" en Comprobar alias.
     const ignorar = (state.appSettings && state.appSettings.orderIgnoreLines) || [];
     if (ignorar.includes(clean)) return true;
+    // Saludos y palabras agregadas en Configuracion: un renglon SIN cantidad que las tiene se ignora.
+    const frases = (state.appSettings && state.appSettings.orderIgnorePhrases) || [];
+    if (frases.length && !/\d/.test(clean)) {
+      const conEspacios = " " + clean + " ";
+      if (frases.some((f) => f && conEspacios.includes(" " + f + " "))) return true;
+    }
     // Saludo o presentacion sin ninguna cantidad ("hola buenas para mañna pedimos", "te paso el
     // pedido de hoy"): no es un producto, aunque tenga errores de tipeo que el limpiador no conoce.
-    if (!/\d/.test(clean) && !/(^|\s)(un|una|medio|media|par|cuarto)(\s|$)/.test(clean) && /(^|\s)(hola+|buen[oa]s+|buen|dias?|tardes?|noches?|pedimos|pedido|pedidos|pido|pedir|hacerte|haceme|ma[nñ]+a?n?a|manana|hoy|gracias|porfa|favor|lunes|martes|miercoles|jueves|viernes|sabado|domingo|semana|entrega|entregar)(\s|$)/.test(clean)) return true;
+    if (!/\d/.test(clean) && !/(^|\s)(un|una|medio|media|par|cuarto)(\s|$)/.test(clean) && /(^|\s)(hola+|buen[oa]s+|buen|dias?|tardes?|noches?|pedimos|pedido|pedidos|pido|pedir|hacerte|haceme|ma[nñ]+a?n?a?|manana|man|hoy|gracias|porfa|favor|lunes|martes|miercoles|jueves|viernes|sabado|domingo|semana|entrega|entregar|encargo|encargar|encargamos|encargue|encarga|paso|mando|necesito|necesitamos|quiero|queremos|quisiera|quisieramos|traeme|traenos|mandame|mandanos|enviame|envianos|haceme|hacenos|anotame|anota|anotar)(\s|$)/.test(clean)) return true;
     if (/^(pedido|pedidos)\s*(\d{1,2}[\/-]\d{1,2}(?:[\/-]\d{2,4})?)?$/.test(clean)) return true;
-    if (/^(lista|listado)\s+(de\s+)?(verduras|frutas|productos)$/.test(clean)) return true;
+    // Titulos de lista: "LISTA DE MERCADO", "Lista de compras", "Listado de verduras", "Lista".
+    if (!/\d/.test(clean) && /^(mi\s+|la\s+)?(lista|listado)(\s+(de|del|para))?(\s+(la|el))?(\s+(verduras?|frutas?|productos|mercado|compras?|pedidos?|feria|verduleria|semana|hoy|manana|la semana))*$/.test(clean)) return true;
     if (/^(fecha|cliente|total|subtotal|observaciones|nota|notas)\b/.test(clean)) return true;
     if (/^\d{1,2}[\/-]\d{1,2}(?:[\/-]\d{2,4})?$/.test(clean)) return true;
     return false;

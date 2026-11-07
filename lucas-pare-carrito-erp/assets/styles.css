@@ -4434,3 +4434,5 @@ tr:last-child td {
 .sec-client { display: flex; flex-direction: column; gap: 6px; }
 .pending-sections { background: #fff4e5; border: 1px solid #f2c48d; border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; color: #6b3d06; }
 @media (max-width: 640px) { .sec-row { grid-template-columns: 1fr; } }
+.unmatched-alias-kind { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 6px; }
+.unmatched-alias-kind .btn { min-height: auto; padding: 4px 10px; font-size: 13px; }
