@@ -4423,3 +4423,9 @@ tr:last-child td {
 .lc-alts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
 .lc-alts .btn { min-height: auto; padding: 2px 8px; font-size: 12px; }
 @media (max-width: 640px) { .lc-row { grid-template-columns: auto 1fr; } .lc-client { grid-column: 2; } }
+.wa-arch-msg { position: relative; }
+.wa-arch-pick { position: absolute; top: 4px; right: -30px; }
+.wa-arch-pick input { width: 18px; height: 18px; min-height: auto; }
+.wa-arch-msg:not(.mine) { margin-right: 32px; }
+.wa-arch-msg.sel { outline: 2px solid var(--green, #1f7a5a); }
+.wa-arch-tobox { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; background: #eaf5ee; border: 1px solid #b9dcc6; border-radius: 8px; padding: 8px 10px; margin-top: 8px; }

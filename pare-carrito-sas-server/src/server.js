@@ -4032,6 +4032,36 @@ app.post("/whatsapp/archive/link-bulk", authenticate, requireRole("manager", "ad
   res.json(out);
 });
 
+// "Mandar a la bandeja" desde Mensajes de WhatsApp: uno o varios mensajes recibidos de un chat pasan a
+// la bandeja de Nuevo Pedido como un pedido (para los que llegaron antes o que el bot no reconocio).
+app.post("/whatsapp/archive/to-inbox", authenticate, requireRole(...INBOX_ROLES), canSeeWaArchive, async (req, res) => {
+  const chat = String((req.body && req.body.chat) || "").trim();
+  const ids = (Array.isArray(req.body && req.body.waIds) ? req.body.waIds : []).map(String).slice(0, 50);
+  if (!chat || !ids.length) return res.status(400).json({ error: "Elegí al menos un mensaje." });
+  const { rows } = await pool.query("SELECT wa_id, chat_name, is_group, sender_phone, sender_name, text, ts FROM whatsapp_archive WHERE chat_id = $1 AND wa_id = ANY($2) AND NOT from_me ORDER BY ts", [chat, ids]);
+  if (!rows.length) return res.status(404).json({ error: "No se encontraron esos mensajes." });
+  const text = rows.map((r) => String(r.text || "").trim()).filter(Boolean).join("\n");
+  const esGrupo = !!rows[0].is_group;
+  const phone = esGrupo ? phoneDigits(rows[0].sender_phone) : phoneDigits(chat);
+  // Cliente: por el grupo, el telefono o el numero de agenda ("15) Hotel ...").
+  const stored = await loadStateData();
+  const clients = stored ? stored.data.clients || [] : [];
+  let client = esGrupo ? clients.find((c) => c && Array.isArray(c.waGroups) && c.waGroups.includes(chat)) : clients.find((c) => c && [c.phone].concat(Array.isArray(c.phones) ? c.phones : []).some((ph) => { const d = phoneDigits(ph); return d && d.slice(-8) === phone.slice(-8); }));
+  if (!client) {
+    const pref = String(rows[0].chat_name || "").match(/^\s*(\d{1,4})\s*[)\-.:]/);
+    if (pref) client = clients.find((c) => c && c.isActive !== false && /^\d+$/.test(String(c.id)) && Number(c.id) === Number(pref[1]));
+  }
+  const ya = await pool.query("SELECT id FROM whatsapp_inbox WHERE status = 'pendiente' AND text = $1 AND created_at > now() - interval '3 days' LIMIT 1", [text.slice(0, 4000)]);
+  if (ya.rows.length) return res.status(409).json({ error: "Ese pedido ya está en la bandeja." });
+  const nombre = [rows[0].sender_name || rows[0].chat_name || "", esGrupo ? "grupo " + (rows[0].chat_name || "") : ""].filter(Boolean).join(" · ");
+  const ins = await pool.query(
+    "INSERT INTO whatsapp_inbox (phone, profile_name, client_id, kind, text, channel) VALUES ($1,$2,$3,'pedido',$4,'linked') RETURNING id",
+    [phone || "", String(nombre).slice(0, 120), client ? client.id : null, text.slice(0, 4000)]
+  );
+  console.log("WhatsApp: " + rows.length + " mensaje(s) a la bandeja a mano por " + req.user.username + (client ? " (cliente " + client.id + ")" : " (sin cliente)") + ".");
+  res.json({ ok: true, id: ins.rows[0].id, clientId: client ? client.id : "", clientName: client ? client.name || "" : "" });
+});
+
 app.get("/whatsapp/archive/messages", authenticate, requireRole("manager", "admin", "employee", "contador"), canSeeWaArchive, async (req, res) => {
   const chat = String(req.query.chat || "");
   if (!chat) return res.status(400).json({ error: "Falta el chat." });
