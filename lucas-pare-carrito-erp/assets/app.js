@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v111";
+  const APP_VERSION = "v112";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -23270,8 +23270,11 @@
     // Pedido en columnas ("1      ATADO    ALBAHACA X ATADO"): la cantidad y la unidad sueltas van con
     // lo que sigue, no son productos aparte.
     let prefijo = "";
+    // Solo cantidad (y quiza unidad): "1", "1/2", "1 1/2", "1 y 1/2", "1,5", "2 kg", "3 bolsas".
+    const UNID = "(kgs?|kilos?|k|grs?|gramos|bolsas?|atados?|cajon(es)?|cajas?|jaulas?|unidad(es)?|unid|uni|u|docenas?|doc|maples?|bandejas?|plantas?)";
+    const SOLO_CANT = new RegExp("^(\\d+([.,]\\d+)?(\\s+\\d+/\\d+)?|\\d+/\\d+)(\\s*y\\s*(medio|media|\\d+/\\d+))?(\\s*" + UNID + ")?\\.?$", "i");
     crudos.forEach((t0) => {
-      const soloCantidad = /^\d+([.,/]\d+)?$/.test(t0);
+      const soloCantidad = SOLO_CANT.test(t0);
       const soloUnidad = RUN_UNIT_TOKEN.test(t0.replace(/\.$/, ""));
       // "Naranja   bolsa   1": la unidad suelta despues de un nombre sin cantidad va con ese nombre.
       if (soloUnidad && !prefijo && trozos.length && !/\d/.test(trozos[trozos.length - 1])) { trozos[trozos.length - 1] += " " + t0; return; }
@@ -23351,7 +23354,9 @@
 
   function expandWhatsappOrderLines(text) {
     const rawLines = String(text || "").split(/\r?\n/).map(stripDatesAndTimes).flatMap(splitRunOnOrderLine)
-      .map((line) => articleQuantityToNumber(String(line || ""))
+      .map((line) => articleQuantityToNumber(String(line || "")
+          // "1 y 1/2", "2 y 1/4": numero mixto.
+          .replace(/(^|[^\d/,.])(\d+)\s+y\s+(\d)\/(\d)(?![\d/])/gi, (m, pre, a, n, d) => pre + String(Number(a) + Number(n) / Number(d)).replace(".", ",")))
         .replace(UNIT_ABBREVIATIONS, "$1$2")
         // La unidad puede venir pegada al numero ("1k y medio"): sin contemplarla, el "y medio"
         // no se resolvia, la linea se partia por la "y" y salian dos productos.
