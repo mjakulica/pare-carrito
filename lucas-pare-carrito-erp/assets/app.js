@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v117";
+  const APP_VERSION = "v118";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -754,6 +754,7 @@
       if (!r.ok) return;
       const limite = Date.now() - 36 * 3600 * 1000;
       const candidatos = (j.items || []).filter((x) => x.status === "pendiente" && x.kind === "pedido" && !x.auto_note && new Date(x.created_at).getTime() >= limite);
+      await autoInboxChangeNotices(j.items || []);
       for (const x of candidatos) {
         const c = x.client_id ? getClient(x.client_id) : null;
         const nombre = c ? c.id + " - " + c.name : (x.profile_name || "") + " " + (x.phone ? formatWaPhone(x.phone) : "(sin número)");
@@ -807,6 +808,38 @@
       ui.autoInboxRunning = false;
     }
   }
+  // Agregados y cosas para sacar que llegan de 5:30 a 8 (el pedido de hoy ya se esta armando): se
+  // avisan al grupo para que lo sumen ya. Quedan en la bandeja para cargarlos en el pedido.
+  async function autoInboxChangeNotices(items) {
+    const plan = autoInboxSchedule();
+    if (!plan.tarde) return;
+    const cfg = (state.appSettings && state.appSettings.autoInbox) || {};
+    const desde = /^\d{2}:\d{2}$/.test(cfg.lateFrom || "") ? cfg.lateFrom : "05:30";
+    const [hh, mm] = desde.split(":").map(Number);
+    const inicio = new Date(); inicio.setHours(hh, mm, 0, 0);
+    const cambios = items.filter((x) => x.status === "pendiente" && (x.kind === "agregar" || x.kind === "cancelar") && !x.auto_note && new Date(x.created_at).getTime() >= inicio.getTime());
+    for (const x of cambios) {
+      const c = x.client_id ? getClient(x.client_id) : null;
+      const nombre = c ? c.id + " - " + c.name : ((x.profile_name || "") + " " + (x.phone ? formatWaPhone(x.phone) : "")).trim();
+      try {
+        const claim = await cloudRequest(getCloudSyncConfig(), "/inbox/" + x.id + "/claim", { method: "POST", body: "{}" });
+        if (!claim.ok) continue;
+        const que = x.kind === "agregar" ? "AGREGA a su pedido de hoy" : "SACA de su pedido de hoy";
+        const texto = "⚠️ Cambio de último momento: " + nombre + " " + que + "\n---\n" + String(x.text || "").slice(0, 700) + "\n---\nSumalo al pedido desde la bandeja de Nuevo Pedido.";
+        let enviado = false;
+        try {
+          const rn = await cloudRequest(getCloudSyncConfig(), "/inbox/auto-late-notify", { method: "POST", body: JSON.stringify({ text: texto }) });
+          const jn = await rn.json().catch(() => ({}));
+          enviado = rn.ok && !!jn.sent;
+        } catch (e) { /* sin aviso */ }
+        await cloudRequest(getCloudSyncConfig(), "/inbox/" + x.id + "/release", { method: "POST", body: JSON.stringify({ reason: enviado ? "Aviso: se avisó al grupo de este cambio de último momento. Falta sumarlo a su pedido." : "no se pudo avisar al grupo de este cambio; sumalo a su pedido" }) });
+        autoInboxLog((enviado ? "Aviso al grupo: " : "No se pudo avisar al grupo: ") + "cambio de último momento de " + nombre);
+      } catch (e) {
+        try { await cloudRequest(getCloudSyncConfig(), "/inbox/" + x.id + "/release", { method: "POST", body: JSON.stringify({ reason: "error: " + e.message }) }); } catch (e2) { /* vuelve solo */ }
+      }
+    }
+  }
+
   // Configuracion de "pedidos que llegan tarde": horarios y a quien avisar.
   async function bindAutoLate() {
     const dl = document.getElementById("auto-late-chats");
@@ -6419,7 +6452,7 @@
       return `<div class="wa-inbox-item ${ui.inboxLoading && ui.inboxLoading.id === x.id ? "active" : ""}">
         <div class="wa-inbox-head">${quien}${canal} <span class="pill ${x.kind === "identificar" || !x.client_id ? "amber" : x.kind === "pedido" ? "green" : "blue"}">${escapeHtml(WA_INBOX_KIND[x.kind] || x.kind)}</span> <span class="muted">${escapeHtml(hace(x.created_at))}</span></div>
         <div class="wa-inbox-text">${escapeHtml(x.text)}</div>
-        ${x.auto_note ? `<div class="wa-inbox-auto">&#9881;&#65039; No se cargó solo: ${escapeHtml(x.auto_note)}</div>` : ""}
+        ${x.auto_note ? `<div class="wa-inbox-auto">&#9881;&#65039; ${/^Aviso:/.test(x.auto_note) ? "" : "No se cargó solo: "}${escapeHtml(x.auto_note)}</div>` : ""}
         <div class="page-actions wa-inbox-actions">${acciones}<button class="btn small ghost" type="button" data-wa-discard="${x.id}">Descartar</button></div>
       </div>`;
     };
@@ -23492,11 +23525,21 @@
 
   // Hay un alias que ya dice esa unidad para ese producto ("naranja bolsa" -> Naranja Jaula): no hace
   // falta avisar que se pidio "bolsa" y se vende por jaula.
+  // Tambien aprende de los alias de OTROS productos: si "naranja bolsa" -> Naranja Jaula, entonces
+  // "bolsa" es una jaula y "limon 1/2 bolsa" -> 0,5 Limon Jaula no necesita revision.
+  // "Lechuga 1 planta", "ajo 2 cabezas": se cuentan por unidad.
+  const UNIDADES_CONTADAS = ["planta", "cabeza", "pieza", "unidad"];
   function aliasCoversUnit(product, unit, clientId) {
     const u = normalizeText(unit || "");
     if (!product || !u) return false;
-    const tiene = (a) => a && a.productId === product.id && normalizeText(a.alias).split(" ").some((w) => w === u || w.replace(/(es|s)$/, "") === u);
-    return (state.productAliases || []).some(tiene) || (state.clientProductAliases || []).some((a) => a && a.clientId === clientId && tiene(a));
+    const propia = normalizeText(product.unitType || "").replace(/unidades/g, "unidad");
+    if (UNIDADES_CONTADAS.includes(u) && propia === "unidad") return true;
+    const dice = (a) => normalizeText(a.alias).split(" ").some((w) => w === u || w.replace(/(es|s)$/, "") === u);
+    const tiene = (a) => a && a.productId === product.id && dice(a);
+    if ((state.productAliases || []).some(tiene) || (state.clientProductAliases || []).some((a) => a && a.clientId === clientId && tiene(a))) return true;
+    if (!propia || propia === "kg" || propia === "unidad") return false;
+    const mismaUnidad = (a) => { if (!a || !dice(a)) return false; const p = getProduct(a.productId); return !!p && normalizeText(p.unitType || "") === propia && !normalizeText(p.name).split(" ").includes(u); };
+    return (state.productAliases || []).some(mismaUnidad) || (state.clientProductAliases || []).some(mismaUnidad);
   }
 
   let parseMemo = null;
@@ -24532,6 +24575,8 @@
     // Titulos de lista: "LISTA DE MERCADO", "Lista de compras", "Listado de verduras", "Lista".
     if (!/\d/.test(clean) && /^(mi\s+|la\s+)?(lista|listado)(\s+(de|del|para))?(\s+(la|el))?(\s+(verduras?|frutas?|productos|mercado|compras?|pedidos?|feria|verduleria|semana|hoy|manana|la semana))*$/.test(clean)) return true;
     if (/^(fecha|cliente|total|subtotal|observaciones|nota|notas)\b/.test(clean)) return true;
+    // Titulos de seccion sueltos: "Verduras", "FRUTAS:", "Frutas y verduras", "Almacén".
+    if (/^(las\s+|los\s+)?(verduras?|frutas?|frutas?\s+y\s+verduras?|verduras?\s+y\s+frutas?|verduleria|fruteria|almacen|hierbas|aromaticas|hojas|varios|otros|huevos\s+y\s+otros)$/.test(clean)) return true;
     if (/^\d{1,2}[\/-]\d{1,2}(?:[\/-]\d{2,4})?$/.test(clean)) return true;
     return false;
   }
