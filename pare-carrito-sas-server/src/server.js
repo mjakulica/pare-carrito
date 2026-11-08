@@ -3700,6 +3700,20 @@ app.post("/inbox/auto-late-notify", authenticate, requireRole(...INBOX_ROLES), a
   res.status(sent ? 200 : 502).json({ ok: sent > 0, sent, errores, error: sent ? "" : errores.join("; ") });
 });
 
+// Aviso al cliente de un mensaje de la bandeja (p. ej. "tu pedido queda para mañana"), por donde
+// escribio. Lo pide la carga automatica cuando esta prendido en Configuracion; sale aunque el
+// WhatsApp vinculado este en "solo recibir" (es una respuesta a quien nos escribio).
+app.post("/inbox/:id/notify-client", authenticate, requireRole(...INBOX_ROLES), async (req, res) => {
+  const text = String((req.body && req.body.text) || "").trim().slice(0, 600);
+  if (!text) return res.status(400).json({ error: "Falta el texto." });
+  const { rows } = await pool.query("SELECT phone, channel FROM whatsapp_inbox WHERE id = $1", [req.params.id]);
+  if (!rows.length || !rows[0].phone) return res.status(404).json({ error: "Ese mensaje no tiene a quién contestar." });
+  const r = rows[0].channel === "linked"
+    ? await botRequest("/send", { to: rows[0].phone, text, channel: "linked", notice: true })
+    : await botRequest("/send", { to: rows[0].phone, text, channel: "cloud" });
+  res.status(r.ok ? 200 : 502).json(r.ok ? { ok: true } : { error: r.error || "No se pudo enviar." });
+});
+
 // Latido de los equipos que hacen la carga automatica (para ver en Configuracion si andan).
 const autoInboxBeats = new Map();
 app.post("/inbox/auto-heartbeat", authenticate, requireRole(...INBOX_ROLES), (req, res) => {

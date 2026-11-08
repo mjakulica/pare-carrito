@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v116";
+  const APP_VERSION = "v117";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -638,6 +638,30 @@
     return { ok: true, parsed, date, client, tarde: plan.tarde };
   }
 
+  // Aviso al cliente de 8 a 12: su pedido queda para el dia siguiente (configurable).
+  const DIAS_SEMANA = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
+  function autoNextDayCfg() {
+    const cfg = (state.appSettings && state.appSettings.autoInbox) || {};
+    return {
+      on: cfg.nextDayNotice !== false,
+      desde: /^\d{2}:\d{2}$/.test(cfg.nextDayFrom || "") ? cfg.nextDayFrom : (/^\d{2}:\d{2}$/.test(cfg.lateTo || "") ? cfg.lateTo : "08:00"),
+      hasta: /^\d{2}:\d{2}$/.test(cfg.nextDayTo || "") ? cfg.nextDayTo : "12:00",
+      texto: cfg.nextDayText || "¡Hola! Recibimos tu pedido. Como llegó después de las {hora}, lo preparamos para el {dia} {fecha}. ¡Gracias!"
+    };
+  }
+  async function autoInboxClientNotice(x, plan) {
+    const cfg = autoNextDayCfg();
+    if (!cfg.on || !x.phone || plan.date === todayISO()) return;
+    const h = currentTimeHHMM();
+    if (h < cfg.desde || h >= cfg.hasta) return;
+    const d = new Date(plan.date + "T00:00:00");
+    const texto = cfg.texto.replace(/\{hora\}/g, ((state.appSettings || {}).autoInbox || {}).lateTo || "08:00").replace(/\{dia\}/g, DIAS_SEMANA[d.getDay()]).replace(/\{fecha\}/g, formatDate(plan.date).slice(0, 5));
+    try {
+      const r = await cloudRequest(getCloudSyncConfig(), "/inbox/" + x.id + "/notify-client", { method: "POST", body: JSON.stringify({ text: texto }) });
+      autoInboxLog(r.ok ? "Aviso al cliente " + formatWaPhone(x.phone) + ": pedido para el " + formatDate(plan.date) : "No se pudo avisar al cliente " + formatWaPhone(x.phone));
+    } catch (e) { /* sin aviso */ }
+  }
+
   // Fecha del pedido segun la hora en que llega: antes de las 5:30 -> hoy; de 5:30 a 8:00 -> hoy y se
   // avisa al grupo/WhatsApp elegido (ya salio o esta saliendo el reparto); desde las 8:00 -> mañana.
   function autoInboxSchedule() {
@@ -729,17 +753,27 @@
       const j = await r.json().catch(() => ({}));
       if (!r.ok) return;
       const limite = Date.now() - 36 * 3600 * 1000;
-      const candidatos = (j.items || []).filter((x) => x.status === "pendiente" && x.kind === "pedido" && x.client_id && !x.auto_note && new Date(x.created_at).getTime() >= limite);
+      const candidatos = (j.items || []).filter((x) => x.status === "pendiente" && x.kind === "pedido" && !x.auto_note && new Date(x.created_at).getTime() >= limite);
       for (const x of candidatos) {
-        const c = getClient(x.client_id);
-        const nombre = c ? c.id + " - " + c.name : x.client_id;
+        const c = x.client_id ? getClient(x.client_id) : null;
+        const nombre = c ? c.id + " - " + c.name : (x.profile_name || "") + " " + (x.phone ? formatWaPhone(x.phone) : "(sin número)");
         try {
           const claim = await cloudRequest(getCloudSyncConfig(), "/inbox/" + x.id + "/claim", { method: "POST", body: "{}" });
           if (!claim.ok) continue;
+          const plan = autoInboxSchedule();
+          await autoInboxClientNotice(x, plan);
           const ev = autoInboxEvaluate(x);
           if (!ev.ok) {
             await cloudRequest(getCloudSyncConfig(), "/inbox/" + x.id + "/release", { method: "POST", body: JSON.stringify({ reason: ev.motivo }) });
             autoInboxLog("No cargado (" + nombre + "): " + ev.motivo);
+            // De 5:30 a 8:00 tambien se avisa al grupo, para que alguien lo cargue a mano ya.
+            if (plan.tarde) {
+              const texto = "⚠️ Pedido de último momento que NO se pudo cargar solo\n" + nombre.trim() + "\nMotivo: " + ev.motivo + "\n---\n" + String(x.text || "").slice(0, 700) + "\n---\nCargalo a mano desde la bandeja de Nuevo Pedido.";
+              try {
+                const rn = await cloudRequest(getCloudSyncConfig(), "/inbox/auto-late-notify", { method: "POST", body: JSON.stringify({ text: texto }) });
+                autoInboxLog(rn.ok ? "Aviso al grupo: pedido tarde sin cargar (" + nombre.trim() + ")" : "No se pudo avisar al grupo el pedido tarde sin cargar");
+              } catch (e) { /* sin aviso */ }
+            }
             continue;
           }
           const order = autoInboxCreateOrder(ev, x);
@@ -813,6 +847,20 @@
       alert("Guardado: de " + f + " a " + t + " se carga para hoy y se avisa; desde las " + t + ", para el día siguiente.");
       render();
     });
+    const ndOn = document.getElementById("auto-nd-on");
+    const ndSave = document.getElementById("auto-nd-save");
+    const guardarNd = () => {
+      const f = document.getElementById("auto-nd-from").value || "08:00";
+      const t = document.getElementById("auto-nd-to").value || "12:00";
+      if (f >= t) return alert("La hora 'Desde' tiene que ser antes que 'Hasta'.");
+      const texto = document.getElementById("auto-nd-text").value.trim();
+      state.appSettings = state.appSettings || {};
+      state.appSettings.autoInbox = { ...(state.appSettings.autoInbox || {}), nextDayNotice: !!(ndOn && ndOn.checked), nextDayFrom: f, nextDayTo: t, nextDayText: texto || undefined };
+      saveState();
+      return true;
+    };
+    if (ndOn) ndOn.addEventListener("change", () => { guardarNd(); autoInboxLog(ndOn.checked ? "Aviso al cliente (día siguiente) activado" : "Aviso al cliente (día siguiente) desactivado"); });
+    if (ndSave) ndSave.addEventListener("click", () => { if (guardarNd()) alert("Guardado."); });
     const test = document.getElementById("auto-late-test");
     if (test) test.addEventListener("click", async () => {
       if (!actuales().length) return alert("Primero agregá a quién avisar.");
@@ -15145,6 +15193,16 @@
         <div id="auto-late-list">${(((state.appSettings || {}).autoInbox || {}).lateNotify || []).map((x, i) => `<span class="pill green" style="margin:2px">${escapeHtml(x.name || x.chat)} <button class="btn small ghost" type="button" data-late-del="${i}" style="min-height:auto;padding:0 6px">x</button></span>`).join("") || `<span class="muted" style="font-size:13px">Nadie todavía.</span>`}</div>
         <div class="page-actions" style="margin-top:6px"><input id="auto-late-add" list="auto-late-chats" placeholder="Buscar: LA BANDA DE PARE CARRITO, Lucas Vilte 2..." style="flex:1;min-width:200px" autocomplete="off" /><button class="btn small primary" type="button" id="auto-late-add-btn">Agregar</button></div>
         <div class="page-actions" style="margin-top:6px"><button class="btn small ghost" type="button" id="auto-late-save">Guardar horarios</button><button class="btn small ghost" type="button" id="auto-late-test">Mandar un aviso de prueba</button></div>
+        <p class="muted" style="font-size:12px;margin:4px 0 0">En esa franja también se avisa cuando un pedido NO se pudo cargar solo (con el motivo y el texto), para que alguien lo cargue a mano.</p>
+      </div>
+      <div class="auto-late">
+        <label style="display:flex;gap:8px;align-items:flex-start"><input type="checkbox" id="auto-nd-on" ${autoNextDayCfg().on ? "checked" : ""} style="width:auto;min-height:auto;margin-top:3px" /><span><strong>Avisar al cliente que su pedido queda para el día siguiente</strong><br><span class="muted" style="font-size:13px">A quien escribe en este horario se le contesta por el WhatsApp vinculado (también en "Solo recibir"). Puede usar {dia}, {fecha} y {hora}.</span></span></label>
+        <div class="page-actions" style="flex-wrap:wrap;gap:8px;margin-top:6px">
+          <label style="display:flex;gap:6px;align-items:center">Desde <input type="time" id="auto-nd-from" value="${escapeAttr(autoNextDayCfg().desde)}" style="width:auto" /></label>
+          <label style="display:flex;gap:6px;align-items:center">Hasta <input type="time" id="auto-nd-to" value="${escapeAttr(autoNextDayCfg().hasta)}" style="width:auto" /></label>
+        </div>
+        <textarea id="auto-nd-text" rows="2" style="margin-top:6px">${escapeHtml(autoNextDayCfg().texto)}</textarea>
+        <div class="page-actions" style="margin-top:6px"><button class="btn small ghost" type="button" id="auto-nd-save">Guardar aviso al cliente</button></div>
       </div>
       <div style="margin:6px 0"><strong style="font-size:14px">Equipos que hacen la carga</strong><div id="auto-inbox-status"><p class="muted" style="margin:4px 0">Consultando...</p></div></div>
       <div><strong style="font-size:14px">Últimos movimientos en este equipo</strong><div id="auto-inbox-log">${autoInboxLogHtml()}</div></div>
