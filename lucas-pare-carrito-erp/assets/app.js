@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v114";
+  const APP_VERSION = "v115";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -630,11 +630,24 @@
     if (qc.length) return { ok: false, motivo: "cantidad sospechosa: " + formatAmountInput(qc[0].qty) + " " + qc[0].product.name };
     const sinPrecio = parsed.items.find((it) => !(getAdjustedProductPrice(it.product, client) > 0));
     if (sinPrecio) return { ok: false, motivo: sinPrecio.product.name + " no tiene precio" };
-    const date = defaultNewOrderDate();
+    const plan = autoInboxSchedule();
+    const date = plan.date;
     if (isSundayISO(date)) return { ok: false, motivo: "el día de entrega es domingo" };
     const ya = (state.orders || []).find((o) => o && o.clientId === client.id && o.date === date && !["cancelado", "anulado"].includes(o.status) && !o.deletedAt);
     if (ya) return { ok: false, motivo: "ya tiene un pedido para el " + formatDate(date) + " (" + ya.id + "): revisá si es un agregado" };
-    return { ok: true, parsed, date, client };
+    return { ok: true, parsed, date, client, tarde: plan.tarde };
+  }
+
+  // Fecha del pedido segun la hora en que llega: antes de las 5:30 -> hoy; de 5:30 a 8:00 -> hoy y se
+  // avisa al grupo/WhatsApp elegido (ya salio o esta saliendo el reparto); desde las 8:00 -> mañana.
+  function autoInboxSchedule() {
+    const cfg = (state.appSettings && state.appSettings.autoInbox) || {};
+    const desde = /^\d{2}:\d{2}$/.test(cfg.lateFrom || "") ? cfg.lateFrom : "05:30";
+    const hasta = /^\d{2}:\d{2}$/.test(cfg.lateTo || "") ? cfg.lateTo : "08:00";
+    const h = currentTimeHHMM();
+    if (h < desde) return { date: todayISO(), tarde: false };
+    if (h < hasta) return { date: todayISO(), tarde: true };
+    return { date: addDaysISO(todayISO(), 1), tarde: false };
   }
 
   function autoInboxCreateOrder(ev, x) {
@@ -737,6 +750,15 @@
           }
           await cloudRequest(getCloudSyncConfig(), "/inbox/" + x.id + "/done", { method: "POST", body: JSON.stringify({ orderId: order.id, auto: true }) });
           autoInboxLog("Cargado " + order.id + " de " + nombre + " para el " + formatDate(order.date) + " (" + order.items.length + " productos)");
+          if (ev.tarde) {
+            const detalle = order.items.map((it) => "• " + formatAmountInput(it.quantity) + " " + it.productName + (it.note ? " (" + it.note + ")" : "")).join("\n");
+            const texto = "⚠️ Pedido de último momento para HOY " + formatDate(order.date) + "\n" + nombre + " · " + order.id + "\n" + detalle;
+            try {
+              const rn = await cloudRequest(getCloudSyncConfig(), "/inbox/auto-late-notify", { method: "POST", body: JSON.stringify({ text: texto }) });
+              const jn = await rn.json().catch(() => ({}));
+              autoInboxLog(rn.ok && jn.sent ? "Aviso de pedido tarde enviado (" + jn.sent + ")" : "No se pudo avisar el pedido tarde: " + (jn.error || "sin destino configurado"));
+            } catch (e) { autoInboxLog("No se pudo avisar el pedido tarde: " + e.message); }
+          }
         } catch (e) {
           autoInboxLog("Error con un mensaje de " + nombre + ": " + e.message);
           try { await cloudRequest(getCloudSyncConfig(), "/inbox/" + x.id + "/release", { method: "POST", body: JSON.stringify({ reason: "error: " + e.message }) }); } catch (e2) { /* vuelve solo a los 10 min */ }
@@ -749,6 +771,59 @@
       ui.autoInboxRunning = false;
     }
   }
+  // Configuracion de "pedidos que llegan tarde": horarios y a quien avisar.
+  async function bindAutoLate() {
+    const dl = document.getElementById("auto-late-chats");
+    if (!dl) return;
+    let chats = [];
+    try {
+      const r = await cloudRequest(getCloudSyncConfig(), "/whatsapp/archive/chats", { method: "GET" });
+      const j = await r.json().catch(() => ({}));
+      chats = (j.chats || []).filter((c) => c.chat_name || c.client);
+    } catch (e) { /* sin lista: se puede escribir el nombre igual */ }
+    const etiqueta = (c) => (c.is_group ? "Grupo: " : "") + (c.chat_name || c.client || c.chat_id) + (c.is_group ? "" : " (" + formatWaPhone(c.chat_id) + ")");
+    dl.innerHTML = chats.map((c) => `<option value="${escapeAttr(etiqueta(c))}"></option>`).join("");
+    const guardar = (lista) => {
+      state.appSettings = state.appSettings || {};
+      state.appSettings.autoInbox = { ...(state.appSettings.autoInbox || {}), lateNotify: lista };
+      saveState();
+      render();
+    };
+    const actuales = () => ((state.appSettings && state.appSettings.autoInbox && state.appSettings.autoInbox.lateNotify) || []).slice();
+    const add = document.getElementById("auto-late-add-btn");
+    if (add) add.addEventListener("click", () => {
+      const v = document.getElementById("auto-late-add").value.trim();
+      const c = chats.find((x) => etiqueta(x) === v) || chats.find((x) => normalizeText(x.chat_name || "").includes(normalizeText(v)));
+      if (!c) return alert("Elegí un chat o grupo de la lista (tiene que haber escrito al WhatsApp vinculado).");
+      const lista = actuales();
+      if (!lista.some((x) => x.chat === c.chat_id)) lista.push({ chat: c.chat_id, name: etiqueta(c) });
+      guardar(lista);
+    });
+    document.querySelectorAll("[data-late-del]").forEach((b) => b.addEventListener("click", () => { const lista = actuales(); lista.splice(Number(b.dataset.lateDel), 1); guardar(lista); }));
+    const save = document.getElementById("auto-late-save");
+    if (save) save.addEventListener("click", () => {
+      const f = document.getElementById("auto-late-from").value || "05:30";
+      const t = document.getElementById("auto-late-to").value || "08:00";
+      if (f >= t) return alert("La hora 'Desde' tiene que ser antes que 'Hasta'.");
+      state.appSettings = state.appSettings || {};
+      state.appSettings.autoInbox = { ...(state.appSettings.autoInbox || {}), lateFrom: f, lateTo: t };
+      saveState();
+      alert("Guardado: de " + f + " a " + t + " se carga para hoy y se avisa; desde las " + t + ", para el día siguiente.");
+      render();
+    });
+    const test = document.getElementById("auto-late-test");
+    if (test) test.addEventListener("click", async () => {
+      if (!actuales().length) return alert("Primero agregá a quién avisar.");
+      test.disabled = true;
+      try {
+        const r = await cloudRequest(getCloudSyncConfig(), "/inbox/auto-late-notify", { method: "POST", body: JSON.stringify({ text: "Prueba del sistema: así llegan los avisos de pedidos de último momento (carga automática)." }) });
+        const j = await r.json().catch(() => ({}));
+        alert(r.ok ? "Aviso de prueba enviado a " + (j.sent || 0) + " chat(s)." : "No se pudo: " + (j.error || "HTTP " + r.status));
+      } catch (e) { alert("No se pudo: " + e.message); }
+      test.disabled = false;
+    });
+  }
+
   async function paintAutoInboxStatus() {
     const box = document.getElementById("auto-inbox-status");
     if (!box || !currentUser || !["manager", "admin"].includes(currentUser.role)) return;
@@ -15056,6 +15131,19 @@
       <label style="display:flex;gap:8px;align-items:flex-start;margin:6px 0"><input type="checkbox" id="auto-inbox-device" ${autoInboxThisDevice() ? "checked" : ""} style="width:auto;min-height:auto;margin-top:3px" /><span><strong>Este equipo hace la carga</strong><br><span class="muted" style="font-size:13px">Elegí un equipo que quede prendido con el sistema abierto (una PC de la oficina). Revisa la bandeja cada minuto. Si hay más de uno marcado no se duplica: cada mensaje lo toma uno solo.</span></span></label>
       <label style="display:flex;gap:8px;align-items:flex-start;margin:6px 0"><input type="checkbox" id="auto-inbox-robot" ${autoInboxRobotAllowed() ? "checked" : ""} style="width:auto;min-height:auto;margin-top:3px" /><span><strong>Usar el equipo del servidor</strong><br><span class="muted" style="font-size:13px">Un navegador que corre en el servidor y hace la carga solo, sin dejar ninguna PC ni celular prendido. Destildalo para pausarlo (si hay otro equipo marcado, sigue ese).</span></span></label>
       ${autoInboxOn() && !autoInboxThisDevice() ? `<p class="muted" style="font-size:13px">Está activada; la hacen el equipo del servidor y los equipos marcados.</p>` : ""}
+      <div class="auto-late">
+        <strong style="font-size:14px">Pedidos que llegan tarde</strong>
+        <p class="muted" style="margin:2px 0 6px;font-size:13px">Antes de <strong>${escapeHtml(((state.appSettings || {}).autoInbox || {}).lateFrom || "05:30")}</strong> se cargan para hoy. Entre esa hora y las <strong>${escapeHtml(((state.appSettings || {}).autoInbox || {}).lateTo || "08:00")}</strong> se cargan para hoy y se avisa por el WhatsApp vinculado a los chats elegidos (el reparto ya está saliendo). Desde las ${escapeHtml(((state.appSettings || {}).autoInbox || {}).lateTo || "08:00")} se cargan para el día siguiente.</p>
+        <div class="page-actions" style="flex-wrap:wrap;gap:8px">
+          <label style="display:flex;gap:6px;align-items:center">Desde <input type="time" id="auto-late-from" value="${escapeAttr(((state.appSettings || {}).autoInbox || {}).lateFrom || "05:30")}" style="width:auto" /></label>
+          <label style="display:flex;gap:6px;align-items:center">Hasta <input type="time" id="auto-late-to" value="${escapeAttr(((state.appSettings || {}).autoInbox || {}).lateTo || "08:00")}" style="width:auto" /></label>
+        </div>
+        <label style="display:block;margin-top:6px">Avisar a (grupos o chats del WhatsApp vinculado):</label>
+        <datalist id="auto-late-chats"></datalist>
+        <div id="auto-late-list">${(((state.appSettings || {}).autoInbox || {}).lateNotify || []).map((x, i) => `<span class="pill green" style="margin:2px">${escapeHtml(x.name || x.chat)} <button class="btn small ghost" type="button" data-late-del="${i}" style="min-height:auto;padding:0 6px">x</button></span>`).join("") || `<span class="muted" style="font-size:13px">Nadie todavía.</span>`}</div>
+        <div class="page-actions" style="margin-top:6px"><input id="auto-late-add" list="auto-late-chats" placeholder="Buscar: LA BANDA DE PARE CARRITO, Lucas Vilte 2..." style="flex:1;min-width:200px" autocomplete="off" /><button class="btn small primary" type="button" id="auto-late-add-btn">Agregar</button></div>
+        <div class="page-actions" style="margin-top:6px"><button class="btn small ghost" type="button" id="auto-late-save">Guardar horarios</button><button class="btn small ghost" type="button" id="auto-late-test">Mandar un aviso de prueba</button></div>
+      </div>
       <div style="margin:6px 0"><strong style="font-size:14px">Equipos que hacen la carga</strong><div id="auto-inbox-status"><p class="muted" style="margin:4px 0">Consultando...</p></div></div>
       <div><strong style="font-size:14px">Últimos movimientos en este equipo</strong><div id="auto-inbox-log">${autoInboxLogHtml()}</div></div>
     </div><div id="wa-linked-panel" class="panel" style="margin-top:14px">${waLinkedPanelInner()}</div>${waArchiveAccessHtml()}` : ""}${["manager", "admin"].includes(currentUser.role) ? metaReviewerPanelHtml() : ""}${window.WhatsAppTemplates ? window.WhatsAppTemplates.html() : ""}`;
@@ -15192,6 +15280,7 @@
     });
     if (document.getElementById("wa-linked-panel")) { paintWaLinked(); scheduleWaLinkedPoll(); }
     if (document.getElementById("auto-inbox-status")) paintAutoInboxStatus();
+    bindAutoLate();
     if (window.WhatsAppTemplates) window.WhatsAppTemplates.mount({ request: (path, options) => cloudRequest(getCloudSyncConfig(), path, options) });
     const check = document.getElementById("wa-status-check");
     const cargar = async () => {

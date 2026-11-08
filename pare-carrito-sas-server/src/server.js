@@ -3682,6 +3682,24 @@ app.post("/external/robot-login", externalAuth, async (req, res) => {
   res.json({ ok: true, username: ROBOT_USERNAME, password });
 });
 
+// Aviso de pedido de ultimo momento (carga automatica entre 5:30 y 8:00): a los chats/grupos elegidos
+// en Configuracion, por el WhatsApp vinculado.
+app.post("/inbox/auto-late-notify", authenticate, requireRole(...INBOX_ROLES), async (req, res) => {
+  const text = String((req.body && req.body.text) || "").trim().slice(0, 1500);
+  if (!text) return res.status(400).json({ error: "Falta el texto." });
+  const stored = await loadStateData();
+  const dest = (((stored && stored.data.appSettings) || {}).autoInbox || {}).lateNotify || [];
+  if (!dest.length) return res.status(400).json({ error: "No hay a quién avisar (Configuración > Carga automática)." });
+  let sent = 0;
+  const errores = [];
+  for (const d of dest.slice(0, 5)) {
+    const r = await botRequest("/send", { to: String(d.chat || ""), text, channel: "linked", notice: true });
+    if (r.ok) sent += 1; else errores.push((d.name || d.chat) + ": " + (r.error || "error"));
+  }
+  console.log("Aviso de pedido tarde: " + sent + " enviado(s)" + (errores.length ? ", errores: " + errores.join("; ") : "") + ".");
+  res.status(sent ? 200 : 502).json({ ok: sent > 0, sent, errores, error: sent ? "" : errores.join("; ") });
+});
+
 // Latido de los equipos que hacen la carga automatica (para ver en Configuracion si andan).
 const autoInboxBeats = new Map();
 app.post("/inbox/auto-heartbeat", authenticate, requireRole(...INBOX_ROLES), (req, res) => {
