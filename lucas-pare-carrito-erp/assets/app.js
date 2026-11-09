@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v120";
+  const APP_VERSION = "v121";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -23581,6 +23581,10 @@
     if (!product || !u) return false;
     const propia = normalizeText(product.unitType || "").replace(/unidades/g, "unidad");
     if (UNIDADES_CONTADAS.includes(u) && propia === "unidad") return true;
+    // Atado y unidad: la rucula, el perejil o la albahaca se piden "por atado" aunque el producto
+    // diga Unidad, y al reves. Si no hay una variante en lo que escribieron, es lo mismo.
+    const SUELTOS = ["atado", "unidad", "planta", "mazo", "ramo", "cabeza", "pieza"];
+    if (SUELTOS.includes(u) && ["atado", "unidad"].includes(propia)) return true;
     const dice = (a) => normalizeText(a.alias).split(" ").some((w) => w === u || w.replace(/(es|s)$/, "") === u);
     const tiene = (a) => a && a.productId === product.id && dice(a);
     if ((state.productAliases || []).some(tiene) || (state.clientProductAliases || []).some((a) => a && a.clientId === clientId && tiene(a))) return true;
@@ -24069,6 +24073,8 @@
       .replace(/\bkilos?\s+de\b/gi, "kg de")
       .replace(/\bkgs?\s+de\b/gi, "kg de")
       .replace(/\bbolsas?\s+de\b/gi, "bolsa de")
+      // Errores de tipeo de "atado": "2 atafos", "1 atadp", "3 atdos".
+      .replace(/\b(?:atafos?|atadp|atdos?|atadoa)\b/gi, (m) => (/s$/i.test(m) ? "atados" : "atado"))
       // "2A de rucula", "1/2 A de verdeo", "1A grande de zanahoria": la "a" suelta pegada a una
       // cantidad es la abreviatura de atado. Sin esto quedaba como parte del nombre ("a rucula")
       // y el producto matcheaba por la inicial (Albahaca) dejando el verdadero nombre como nota.
@@ -24079,6 +24085,8 @@
       // SALVO que la linea venga en kilos: el verdeo se vende por atado, asi que "6 kg cebolla
       // verde" es cebolla comun y no verdeo.
       .replace(/\bcebollas?\s+(?:de\s+)?verdeos?\b/gi, "verdeo")
+      // "C. Verdeo", "Ceb. verdeo": abreviatura de cebolla (salia Choclo por la "c").
+      .replace(/\b(?:c|ceb|ceboll?)\.?\s*(?:de\s+)?verdeos?\b/gi, "verdeo")
       .replace(/\bcebollas?\s+verdes?\b/gi, (match, offset, full) => (/\b(kg|kgs|kilos?|grs?|gramos)\b/i.test(full) ? "cebolla" : "verdeo"))
       // "1 docena y media", "2 atados y medio", etc. -> "1,5 docena" / "2,5 atados"
       .replace(/(\d+(?:[.,]\d+)?)\s+(docenas?|atados?|bolsas?|cajones?|cajon|jaulas?|plantas?|unidad(?:es)?|maples?|kg|kgs|kilos?)\s+y\s+medi[oa]\b/gi, (mm, n, u) => (parseFloat(String(n).replace(",", ".")) + 0.5).toString().replace(".", ",") + " " + u)
@@ -24258,7 +24266,7 @@
   function requestedUnitFromToken(token) {
     const t = normalizeText(token);
     if (!t) return "";
-    if (t === "at" || t === "ot" || t.startsWith("atad")) return "atado";
+    if (t === "at" || t === "ot" || t.startsWith("atad") || t.startsWith("ataf")) return "atado";
     if (t === "pl" || t === "plta" || t.startsWith("plant")) return "planta";
     if (/^(botel|frasc|pote|horma|paq)/.test(t) || t === "pq") return "";
     return normalizeParsedUnit(t);
