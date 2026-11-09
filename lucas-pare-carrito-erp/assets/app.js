@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v121";
+  const APP_VERSION = "v122";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -625,9 +625,10 @@
     const parsed = parseWhatsappOrder(x.text, client.id);
     if (!parsed.items.length) return { ok: false, motivo: "no se encontró ningún producto" };
     if (parsed.unmatched.length) return { ok: false, motivo: "no se reconocen: " + parsed.unmatched.slice(0, 3).join(", ") };
-    if ((parsed.warnings || []).length) return { ok: false, motivo: "hay que revisar: " + parsed.warnings[0] };
+    // Igual que al pegar el texto a mano: los avisos (unidad distinta, cantidad rara) no frenan la
+    // carga; quedan anotados en el pedido para revisarlos. Solo frena un producto que no se reconoce.
     const qc = quantityChecks(parsed, client.id);
-    if (qc.length) return { ok: false, motivo: "cantidad sospechosa: " + formatAmountInput(qc[0].qty) + " " + qc[0].product.name };
+    const revisar = (parsed.warnings || []).concat(qc.map((c) => "Cantidad rara: " + formatAmountInput(c.qty) + " " + c.product.name + " (" + c.motivo + ")"));
     const sinPrecio = parsed.items.find((it) => !(getAdjustedProductPrice(it.product, client) > 0));
     if (sinPrecio) return { ok: false, motivo: sinPrecio.product.name + " no tiene precio" };
     const plan = autoInboxSchedule();
@@ -635,7 +636,7 @@
     if (isSundayISO(date)) return { ok: false, motivo: "el día de entrega es domingo" };
     const ya = (state.orders || []).find((o) => o && o.clientId === client.id && o.date === date && !["cancelado", "anulado"].includes(o.status) && !o.deletedAt);
     if (ya) return { ok: false, motivo: "ya tiene un pedido para el " + formatDate(date) + " (" + ya.id + "): revisá si es un agregado" };
-    return { ok: true, parsed, date, client, tarde: plan.tarde };
+    return { ok: true, parsed, date, client, tarde: plan.tarde, revisar };
   }
 
   // Aviso al cliente de 8 a 12: su pedido queda para el dia siguiente (configurable).
@@ -715,7 +716,7 @@
       paymentReceived: 0,
       paymentStatus: "pending",
       remitoPrinted: false,
-      notes: "",
+      notes: (ev.revisar || []).length ? "Revisar (carga automática): " + ev.revisar.join(" | ") : "",
       autoLoaded: true,
       whatsappText: { name: fileDate(date) + " Pedido " + client.name, text: x.text },
       createdAt: new Date().toISOString(),
@@ -801,10 +802,10 @@
             continue;
           }
           await cloudRequest(getCloudSyncConfig(), "/inbox/" + x.id + "/done", { method: "POST", body: JSON.stringify({ orderId: order.id, auto: true }) });
-          autoInboxLog("Cargado " + order.id + " de " + nombre + " para el " + formatDate(order.date) + " (" + order.items.length + " productos)");
+          autoInboxLog("Cargado " + order.id + " de " + nombre + " para el " + formatDate(order.date) + " (" + order.items.length + " productos)" + ((ev.revisar || []).length ? " — con " + ev.revisar.length + " aviso(s) anotados en el pedido" : ""));
           if (ev.tarde) {
             const detalle = order.items.map((it) => "• " + formatAmountInput(it.quantity) + " " + it.productName + (it.note ? " (" + it.note + ")" : "")).join("\n");
-            const texto = "⚠️ Pedido de último momento para HOY " + formatDate(order.date) + "\n" + nombre + " · " + order.id + "\n" + detalle;
+            const texto = "⚠️ Pedido de último momento para HOY " + formatDate(order.date) + "\n" + nombre + " · " + order.id + "\n" + detalle + ((ev.revisar || []).length ? "\nRevisar: " + ev.revisar.join(" | ") : "");
             try {
               const rn = await cloudRequest(getCloudSyncConfig(), "/inbox/auto-late-notify", { method: "POST", body: JSON.stringify({ text: texto }) });
               const jn = await rn.json().catch(() => ({}));
@@ -15248,7 +15249,7 @@
       </div>
     </div>${["manager", "admin"].includes(currentUser.role) ? `<div class="panel auto-inbox-panel" style="margin-top:14px">
       <h2 class="page-title" style="font-size:18px">Carga automática de pedidos de WhatsApp</h2>
-      <p class="muted" style="margin-top:0">Los pedidos de la bandeja se cargan solos, sin que nadie toque nada, <strong>solo si salen 100% limpios</strong>: cliente vinculado, todos los renglones reconocidos, sin avisos ni cantidades sospechosas, sin partes para otros clientes y sin otro pedido del cliente para ese día. El resto queda en la bandeja con el motivo, para cargarlo a mano. La fecha es la del próximo reparto (después de las 10 h, mañana).</p>
+      <p class="muted" style="margin-top:0">Los pedidos de la bandeja se cargan solos, sin que nadie toque nada, igual que al pegar el texto en Nuevo Pedido (con los alias). <strong>Se frena solo si</strong> hay un producto que no se reconoce, el número no está vinculado, trae partes para varios clientes o el cliente ya tiene pedido ese día. Los avisos (unidad distinta, cantidad rara) no frenan: quedan anotados en las notas del pedido. Lo que se frena queda en la bandeja con el motivo, para cargarlo a mano.</p>
       <label style="display:flex;gap:8px;align-items:flex-start;margin:6px 0"><input type="checkbox" id="auto-inbox-on" ${autoInboxOn() ? "checked" : ""} style="width:auto;min-height:auto;margin-top:3px" /><span><strong>Activar la carga automática</strong></span></label>
       <label style="display:flex;gap:8px;align-items:flex-start;margin:6px 0"><input type="checkbox" id="auto-inbox-device" ${autoInboxThisDevice() ? "checked" : ""} style="width:auto;min-height:auto;margin-top:3px" /><span><strong>Este equipo hace la carga</strong><br><span class="muted" style="font-size:13px">Elegí un equipo que quede prendido con el sistema abierto (una PC de la oficina). Revisa la bandeja cada minuto. Si hay más de uno marcado no se duplica: cada mensaje lo toma uno solo.</span></span></label>
       <label style="display:flex;gap:8px;align-items:flex-start;margin:6px 0"><input type="checkbox" id="auto-inbox-robot" ${autoInboxRobotAllowed() ? "checked" : ""} style="width:auto;min-height:auto;margin-top:3px" /><span><strong>Usar el equipo del servidor</strong><br><span class="muted" style="font-size:13px">Un navegador que corre en el servidor y hace la carga solo, sin dejar ninguna PC ni celular prendido. Destildalo para pausarlo (si hay otro equipo marcado, sigue ese).</span></span></label>
