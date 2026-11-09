@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v122";
+  const APP_VERSION = "v123";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -6485,8 +6485,10 @@
       const canal = x.channel === "linked" ? ` <span class="pill gray" title="Llegó al WhatsApp vinculado por QR">QR</span>` : "";
       const candidatos = (Array.isArray(x.candidates) ? x.candidates : []).filter((k) => getClient(k.id));
       let acciones = "";
-      if (x.kind === "pedido" && x.client_id) acciones = `<button class="btn small primary" type="button" data-wa-load="${x.id}">Cargar en Nuevo Pedido</button>`;
-      else if (x.kind === "agregar" || x.kind === "cancelar") acciones = (x.client_id && x.order_id && getOrder(x.order_id) ? `<button class="btn small primary" type="button" data-wa-open-order="${escapeAttr(x.order_id)}">Abrir su pedido de hoy</button>` : x.client_id ? `<button class="btn small primary" type="button" data-wa-load="${x.id}">Cargar como pedido nuevo</button>` : "") + `<button class="btn small ghost" type="button" data-wa-done="${x.id}">Hecho</button>`;
+      const destino = x.client_id && (x.kind === "agregar" || (x.kind === "pedido" && /ya tiene un pedido/.test(x.auto_note || ""))) ? waAddTargetOrder(x) : null;
+      const sumarBtn = destino ? `<button class="btn small primary" type="button" data-wa-add-to="${x.id}">Sumar al pedido ${destino.date === todayISO() ? "de hoy" : "del " + escapeHtml(formatDate(destino.date).slice(0, 5))}</button>` : "";
+      if (x.kind === "pedido" && x.client_id) acciones = sumarBtn + `<button class="btn small ${sumarBtn ? "ghost" : "primary"}" type="button" data-wa-load="${x.id}">Cargar en Nuevo Pedido</button>`;
+      else if (x.kind === "agregar" || x.kind === "cancelar") acciones = sumarBtn + (x.client_id && x.order_id && getOrder(x.order_id) ? `<button class="btn small primary" type="button" data-wa-open-order="${escapeAttr(x.order_id)}">Abrir su pedido de hoy</button>` : x.client_id ? `<button class="btn small primary" type="button" data-wa-load="${x.id}">Cargar como pedido nuevo</button>` : "") + `<button class="btn small ghost" type="button" data-wa-done="${x.id}">Hecho</button>`;
       if (!x.client_id && compartido) acciones = `<button class="btn small primary" type="button" data-wa-load="${x.id}">Cargar en Nuevo Pedido</button><span class="muted" style="font-size:12px">(el cliente se elige en el pedido)</span>`;
       else if (!x.client_id) acciones = (candidatos.length ? candidatos.map((k) => `<button class="btn small blue" type="button" data-wa-link="${x.id}" data-wa-client="${escapeAttr(k.id)}">Es ${escapeHtml(k.name)}${k.address ? " (" + escapeHtml(k.address) + ")" : ""}</button>`).join("") : "") + clienteBox(x);
       return `<div class="wa-inbox-item ${ui.inboxLoading && ui.inboxLoading.id === x.id ? "active" : ""}">
@@ -6513,6 +6515,58 @@
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j.error || "HTTP " + r.status);
     return j;
+  }
+
+  // "Sumar al pedido de hoy": el pedido del cliente al que se suman los productos del mensaje. El
+  // que dijo el bot; si no, el de hoy; si no, el proximo que tenga (pendiente, no anulado).
+  function waAddTargetOrder(x) {
+    const vivo = (o) => o && !o.exampleOnly && !o.deletedAt && !["cancelado", "anulado", "entregado"].includes(o.status);
+    const delBot = x.order_id ? getOrder(x.order_id) : null;
+    if (vivo(delBot)) return delBot;
+    const hoy = todayISO();
+    const suyos = (state.orders || []).filter((o) => vivo(o) && o.clientId === x.client_id && String(o.date || "") >= hoy).sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    return suyos[0] || null;
+  }
+
+  async function waAddToOrder(x) {
+    const client = getClient(x.client_id);
+    const order = waAddTargetOrder(x);
+    if (!client || !order) return alert("No encontré un pedido de este cliente para sumarle los productos.");
+    const parsed = parseWhatsappOrder(x.text, client.id);
+    if (!parsed.items.length) return alert("No reconocí ningún producto en el mensaje. Usá \"Abrir su pedido\" y sumalo a mano.");
+    // Mismo armado de precios e IVA que un pedido nuevo.
+    const prev = ui.orderDraft;
+    ui.orderDraft = {};
+    parsed.items.forEach((entry) => {
+      const actual = ui.orderDraft[entry.product.id];
+      ui.orderDraft[entry.product.id] = { productId: entry.product.id, quantity: (actual ? Number(actual.quantity || 0) : 0) + Number(entry.quantity || 0), note: [actual && actual.note, entry.note].filter(Boolean).join(" - "), price: getAdjustedProductPrice(entry.product, client), unitType: entry.unitType };
+    });
+    let nuevos;
+    try { nuevos = collectOrderDraftItems(client, true); } finally { ui.orderDraft = prev; }
+    const resumen = nuevos.map((it) => "• " + formatAmountInput(it.quantity) + " " + it.productName).join("\n");
+    const faltan = parsed.unmatched.length ? "\n\nNO se reconocen (no se suman): " + parsed.unmatched.join(", ") : "";
+    const avisos = (parsed.warnings || []).length ? "\n\nRevisar: " + parsed.warnings.join(" | ") : "";
+    if (!confirm("Sumar al pedido " + order.id + " (" + formatDate(order.date) + ") de " + client.name + ":\n" + resumen + faltan + avisos + "\n\n¿Sumarlos?")) return;
+    nuevos.forEach((it) => {
+      const ya = order.items.find((o) => o.productId === it.productId && String(o.unitType || "") === String(it.unitType || ""));
+      if (ya) {
+        ya.quantity = Number(ya.quantity || 0) + Number(it.quantity || 0);
+        ya.subtotal = ya.quantity * Number(ya.unitPrice || 0);
+        ya.ivaAmount = ya.subtotal * (Number(ya.ivaRate || 0) / 100);
+        ya.totalWithIva = ya.subtotal + ya.ivaAmount;
+        if (it.note) ya.note = [ya.note, it.note].filter(Boolean).join(" - ");
+      } else {
+        order.items.push(it);
+      }
+    });
+    recalcOrderTotals(order);
+    updateOrderAccounting(order);
+    saveState();
+    const llego = await confirmChangesReachedServer();
+    if (llego === "rechazado") return alert("El servidor no aceptó el cambio. Abrí el pedido y sumalo a mano.");
+    try { await waInboxPost("/inbox/" + x.id + "/done", { orderId: order.id }); } catch (e) { alert("Se sumó al pedido, pero no se pudo marcar el mensaje como hecho: " + e.message); }
+    refreshWhatsappInbox(true);
+    if (parsed.unmatched.length) alert("Listo. Ojo: no se sumaron " + parsed.unmatched.join(", ") + " (no se reconocen). Abrí el pedido " + order.id + " para agregarlos.");
   }
 
   async function finishWhatsappInboxItem(id, orderId) {
@@ -6543,6 +6597,12 @@
       if (paste) paste.scrollIntoView({ behavior: "smooth", block: "center" });
     }));
     document.querySelectorAll("[data-wa-open-order]").forEach((b) => b.addEventListener("click", () => openOrderForm(b.dataset.waOpenOrder)));
+    document.querySelectorAll("[data-wa-add-to]").forEach((b) => b.addEventListener("click", async () => {
+      const x = item(b.dataset.waAddTo);
+      if (!x) return;
+      b.disabled = true;
+      try { await waAddToOrder(x); } finally { b.disabled = false; }
+    }));
     document.querySelectorAll("[data-wa-done]").forEach((b) => b.addEventListener("click", async () => {
       b.disabled = true;
       try { await waInboxPost("/inbox/" + b.dataset.waDone + "/done", {}); } catch (e) { alert(e.message); }
