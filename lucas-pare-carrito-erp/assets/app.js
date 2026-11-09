@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v119";
+  const APP_VERSION = "v120";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -498,7 +498,7 @@
   }
   async function applyServedVersionWhenSafe() {
     if (!latestServedVersion || latestServedVersion === APP_VERSION) return;
-    if (hasUnsavedWork()) { showUpdateBanner(); return; }
+    if (hasUnsavedWork() && !(typeof autoInboxIsRobot === "function" && autoInboxIsRobot())) { showUpdateBanner(); return; }
     // Lo pendiente sale antes de recargar; si no puede salir, no se recarga (ver forceReloadFresh).
     await forceReloadFresh();
   }
@@ -740,11 +740,17 @@
     if (autoInboxIsRobot()) return "Servidor (equipo automático)";
     try { return (typeof deviceLabel === "function" ? deviceLabel() : "") || navigator.userAgent.slice(0, 60); } catch (e) { return "equipo"; }
   }
+  function autoInboxTried() {
+    try { const j = JSON.parse(localStorage.getItem("lpc_auto_tried") || "{}"); return j.v === APP_VERSION ? (j.ids || []) : []; } catch (e) { return []; }
+  }
+  function autoInboxMarkTried(id) {
+    try { const ids = autoInboxTried().concat([id]).slice(-500); localStorage.setItem("lpc_auto_tried", JSON.stringify({ v: APP_VERSION, ids })); } catch (e) { /* sin memoria: se reintenta */ }
+  }
   async function runAutoInbox() {
     if (ui.autoInboxRunning || !currentUser || !WA_INBOX_ROLES.includes(currentUser.role) || !autoInboxThisDevice() || !navigator.onLine) return;
     // Latido: que se vea en Configuracion que este equipo esta andando (y si esta en pausa).
     const pausa = !autoInboxOn() ? "desactivada" : autoInboxIsRobot() && !autoInboxRobotAllowed() ? "en pausa (equipo del servidor apagado)" : "activa";
-    cloudRequest(getCloudSyncConfig(), "/inbox/auto-heartbeat", { method: "POST", body: JSON.stringify({ device: autoInboxDeviceName(), robot: autoInboxIsRobot(), estado: pausa }) }).catch(() => {});
+    cloudRequest(getCloudSyncConfig(), "/inbox/auto-heartbeat", { method: "POST", body: JSON.stringify({ device: autoInboxDeviceName(), robot: autoInboxIsRobot(), estado: pausa, version: APP_VERSION }) }).catch(() => {});
     if (pausa !== "activa") return;
     if (typeof serverDataReady === "function" && !serverDataReady()) return;
     ui.autoInboxRunning = true;
@@ -753,22 +759,31 @@
       const j = await r.json().catch(() => ({}));
       if (!r.ok) return;
       const limite = Date.now() - 36 * 3600 * 1000;
-      const candidatos = (j.items || []).filter((x) => x.status === "pendiente" && x.kind === "pedido" && !x.auto_note && new Date(x.created_at).getTime() >= limite);
+      // Los que ya quedaron "No se cargó solo" (de las ultimas 6 h, para no cargar uno viejo en otro
+      // dia) se reintentan una vez con cada versión nueva: puede que ahora la lectura los reconozca.
+      const probados = autoInboxTried();
+      const candidatos = (j.items || []).filter((x) => x.status === "pendiente" && x.kind === "pedido" && new Date(x.created_at).getTime() >= limite && (!x.auto_note || (!/^Aviso:/.test(x.auto_note) && !probados.includes(x.id) && new Date(x.created_at).getTime() >= Date.now() - 6 * 3600 * 1000)));
       await autoInboxChangeNotices(j.items || []);
       for (const x of candidatos) {
         const c = x.client_id ? getClient(x.client_id) : null;
         const nombre = c ? c.id + " - " + c.name : (x.profile_name || "") + " " + (x.phone ? formatWaPhone(x.phone) : "(sin número)");
+        const reintento = !!x.auto_note;
+        if (reintento) {
+          autoInboxMarkTried(x.id);
+          // Reintento: solo si ahora sale limpio; si no, queda como estaba (sin avisos repetidos).
+          if (!autoInboxEvaluate(x).ok) continue;
+        }
         try {
           const claim = await cloudRequest(getCloudSyncConfig(), "/inbox/" + x.id + "/claim", { method: "POST", body: "{}" });
           if (!claim.ok) continue;
           const plan = autoInboxSchedule();
-          await autoInboxClientNotice(x, plan);
+          if (!reintento) await autoInboxClientNotice(x, plan);
           const ev = autoInboxEvaluate(x);
           if (!ev.ok) {
             await cloudRequest(getCloudSyncConfig(), "/inbox/" + x.id + "/release", { method: "POST", body: JSON.stringify({ reason: ev.motivo }) });
             autoInboxLog("No cargado (" + nombre + "): " + ev.motivo);
             // De 5:30 a 8:00 tambien se avisa al grupo, para que alguien lo cargue a mano ya.
-            if (plan.tarde) {
+            if (plan.tarde && !reintento) {
               const texto = "⚠️ Pedido de último momento que NO se pudo cargar solo\n" + nombre.trim() + "\nMotivo: " + ev.motivo + "\n---\n" + String(x.text || "").slice(0, 700) + "\n---\nCargalo a mano desde la bandeja de Nuevo Pedido.";
               try {
                 const rn = await cloudRequest(getCloudSyncConfig(), "/inbox/auto-late-notify", { method: "POST", body: JSON.stringify({ text: texto }) });
@@ -940,7 +955,7 @@
       const eq = j.equipos || [];
       const hace = (iso) => { const m = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000)); return m < 1 ? "recién" : m < 60 ? "hace " + m + " min" : "hace " + Math.round(m / 60) + " h"; };
       const tarde = (iso) => Date.now() - new Date(iso).getTime() > 5 * 60000;
-      box.innerHTML = eq.length ? `<ul class="order-parse-list">${eq.map((x) => `<li>${x.robot ? "&#128421;&#65039; " : "&#128187; "}<strong>${escapeHtml(x.device)}</strong> — ${tarde(x.at) ? `<span style="color:var(--red, #b42318)">sin señal (${escapeHtml(hace(x.at))})</span>` : escapeHtml(x.estado || "activa") + " · " + escapeHtml(hace(x.at))}</li>`).join("")}</ul>` : `<p class="muted" style="margin:4px 0">Ningún equipo está haciendo la carga ahora.${autoInboxRobotAllowed() ? " El del servidor aparece acá cuando arranca (después de publicar la versión)." : ""}</p>`;
+      box.innerHTML = eq.length ? `<ul class="order-parse-list">${eq.map((x) => `<li>${x.robot ? "&#128421;&#65039; " : "&#128187; "}<strong>${escapeHtml(x.device)}</strong> — ${tarde(x.at) ? `<span style="color:var(--red, #b42318)">sin señal (${escapeHtml(hace(x.at))})</span>` : escapeHtml(x.estado || "activa") + " · " + escapeHtml(hace(x.at))}${x.version ? (x.version === APP_VERSION ? ` <span class="muted">(${escapeHtml(x.version)})</span>` : ` <span style="color:var(--red, #b42318)">(versión vieja ${escapeHtml(x.version)})</span>`) : ""}</li>`).join("")}</ul>` : `<p class="muted" style="margin:4px 0">Ningún equipo está haciendo la carga ahora.${autoInboxRobotAllowed() ? " El del servidor aparece acá cuando arranca (después de publicar la versión)." : ""}</p>`;
     } catch (e) { box.innerHTML = `<p class="muted" style="margin:4px 0">No se pudo consultar.</p>`; }
   }
   setInterval(() => { paintAutoInboxStatus(); }, 30 * 1000);
@@ -6881,7 +6896,7 @@
       const creator = getUser(order.userId);
       const metaLine = deletedView
         ? `<br><small class="muted order-meta">Eliminado ${formatTimestampShort(order.deletedAt)} por ${escapeHtml(order.deletedBy || "-")}</small>`
-        : `<br><small class="muted order-meta">${escapeHtml(creator ? creator.name : "")}${creator && order.createdAt ? " - " : ""}${formatTimestampShort(order.createdAt)}</small>`;
+        : `<br><small class="muted order-meta">${order.autoLoaded ? "&#9881;&#65039; Carga automática - " : escapeHtml(creator ? creator.name : "")}${creator && !order.autoLoaded && order.createdAt ? " - " : ""}${formatTimestampShort(order.createdAt)}</small>`;
       return `
         <tr>
           <td><strong>${escapeHtml(order.id)}</strong> <span class="muted">${formatDateShort(order.date)}</span>${metaLine}</td>
@@ -23570,6 +23585,10 @@
     const tiene = (a) => a && a.productId === product.id && dice(a);
     if ((state.productAliases || []).some(tiene) || (state.clientProductAliases || []).some((a) => a && a.clientId === clientId && tiene(a))) return true;
     if (!propia || propia === "kg" || propia === "unidad") return false;
+    // Envases de bulto: si el producto se vende por jaula/cajon/bolsa y no hay variante en lo que
+    // escribieron, "bolsa" es su bulto (las cantidades raras igual las frena el control de cantidad).
+    const BULTOS = ["jaula", "cajon", "bolsa", "caja", "bulto", "saco", "red"];
+    if (BULTOS.includes(u) && BULTOS.includes(propia)) return true;
     const mismaUnidad = (a) => { if (!a || !dice(a)) return false; const p = getProduct(a.productId); return !!p && normalizeText(p.unitType || "") === propia && !normalizeText(p.name).split(" ").includes(u); };
     return (state.productAliases || []).some(mismaUnidad) || (state.clientProductAliases || []).some(mismaUnidad);
   }

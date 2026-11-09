@@ -3719,7 +3719,7 @@ const autoInboxBeats = new Map();
 app.post("/inbox/auto-heartbeat", authenticate, requireRole(...INBOX_ROLES), (req, res) => {
   const b = req.body || {};
   const key = String(b.device || req.user.username).slice(0, 80);
-  autoInboxBeats.set(key, { device: key, robot: !!b.robot, user: req.user.name || req.user.username, estado: String(b.estado || "").slice(0, 120), at: new Date().toISOString() });
+  autoInboxBeats.set(key, { device: key, robot: !!b.robot, user: req.user.name || req.user.username, estado: String(b.estado || "").slice(0, 120), version: String(b.version || "").slice(0, 20), at: new Date().toISOString() });
   res.json({ ok: true });
 });
 app.get("/inbox/auto-status", authenticate, requireRole("manager", "admin"), (req, res) => {
