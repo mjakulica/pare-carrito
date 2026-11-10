@@ -146,7 +146,13 @@ linked.init(async (msg) => {
     linkedStats.ultimoErrorAt = new Date().toISOString();
     console.error("WhatsApp vinculado, al procesar un mensaje:", e.message);
   }
-}, (messages) => erp.archive(messages));
+}, (messages) => erp.archive(messages), async (img) => {
+  // Foto que llega al WhatsApp vinculado: puede ser un comprobante de transferencia. El servidor la
+  // lee con IA y, si es un comprobante, queda en Pagos para registrarlo.
+  let clientId = "";
+  try { const r = await erp.findClientByPhone(img.from, img.group || ""); clientId = (r && (r.clientId || (r.client && r.client.id))) || ""; } catch (e) { /* sin vincular */ }
+  await erp.receipt({ waId: img.waId, phone: img.from, chatId: img.group || img.from, isGroup: !!img.group, clientId, senderName: img.name, caption: img.caption, imageData: img.imageData });
+});
 
 async function handleMessage(msg, flowIn, waIn) {
   const inbox = flowIn || inboxFlow;

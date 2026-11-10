@@ -229,6 +229,30 @@ ALTER TABLE whatsapp_inbox ADD COLUMN IF NOT EXISTS channel TEXT NOT NULL DEFAUL
 ALTER TABLE whatsapp_inbox ADD COLUMN IF NOT EXISTS auto_note TEXT;
 ALTER TABLE whatsapp_inbox ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ;
 
+-- Comprobantes de transferencia que llegan por WhatsApp: la IA los lee y quedan para registrar el
+-- pago (a mano con un toque, o solo si esta prendido el modo automatico).
+CREATE TABLE IF NOT EXISTS wa_receipts (
+  id BIGSERIAL PRIMARY KEY,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  wa_id TEXT UNIQUE,
+  phone TEXT,
+  chat_id TEXT,
+  is_group BOOLEAN NOT NULL DEFAULT FALSE,
+  client_id TEXT,
+  sender_name TEXT,
+  caption TEXT,
+  image_key TEXT,
+  status TEXT NOT NULL DEFAULT 'leyendo',
+  ai JSONB,
+  dup_of BIGINT,
+  note TEXT,
+  payment_id TEXT,
+  handled_by TEXT,
+  handled_at TIMESTAMPTZ,
+  claimed_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS wa_receipts_status ON wa_receipts (status, created_at);
+
 -- Archivo de mensajes del WhatsApp vinculado (chats individuales y grupos, recibidos y enviados).
 -- Respaldo por si bloquean el numero; se borra solo a los 90 dias.
 CREATE TABLE IF NOT EXISTS whatsapp_archive (

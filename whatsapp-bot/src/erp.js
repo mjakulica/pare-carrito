@@ -84,4 +84,9 @@ function archive(messages) {
   return erpRequest("POST", "/external/wa-archive", { messages });
 }
 
-module.exports = { archive, erpRequest, findClientByPhone, getTodayOrder, createOrder, addItems, cancelItems, listProductNames, inbox, getIdentify, setIdentify, matchClients, linkPhone };
+// Imagen que puede ser un comprobante de transferencia.
+function receipt(entry) {
+  return erpRequest("POST", "/external/wa-receipt", entry);
+}
+
+module.exports = { receipt, archive, erpRequest, findClientByPhone, getTodayOrder, createOrder, addItems, cancelItems, listProductNames, inbox, getIdentify, setIdentify, matchClients, linkPhone };

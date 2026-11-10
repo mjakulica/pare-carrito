@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v125";
+  const APP_VERSION = "v126";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -611,6 +611,271 @@
     const box = document.getElementById("auto-inbox-log");
     if (box) box.innerHTML = autoInboxLogHtml();
   }
+  // ---- Comprobantes de transferencia por WhatsApp ----
+  // El bot manda cada foto que llega al WhatsApp vinculado; el servidor la lee con IA. Los que son
+  // comprobantes aparecen en Pagos para registrarlos con un toque (o solos, si esta prendido el modo
+  // automatico). Las cuentas propias sirven para controlar a donde fue la plata y para el resumen de
+  // cuanto entro a cada cuenta.
+  function receiptCfg() {
+    const c = (state.appSettings && state.appSettings.receipts) || {};
+    return { auto: !!c.auto, checkAccount: !!c.checkAccount, accounts: Array.isArray(c.accounts) ? c.accounts : [] };
+  }
+  function saveReceiptCfg(patch) {
+    state.appSettings = state.appSettings || {};
+    state.appSettings.receipts = { ...receiptCfg(), ...patch };
+    saveState();
+  }
+  const soloDigitos = (v) => String(v || "").replace(/\D/g, "");
+  function receiptAccountMatch(ai) {
+    if (!ai) return null;
+    const dCbu = soloDigitos(ai.destino_cbu), dCuit = soloDigitos(ai.destino_cuit);
+    const dAlias = normalizeText(ai.destino_alias || "").replace(/\s/g, "");
+    const dName = normalizeText(ai.destino_nombre || "");
+    return receiptCfg().accounts.find((a) => {
+      const cbu = soloDigitos(a.cbu);
+      if (cbu && dCbu && (cbu === dCbu || (dCbu.length >= 4 && dCbu.length < 22 && cbu.endsWith(dCbu.slice(-4))))) return true;
+      if (a.alias && dAlias && normalizeText(a.alias).replace(/\s/g, "") === dAlias) return true;
+      if (a.cuit && dCuit && soloDigitos(a.cuit) === dCuit) return true;
+      const palabras = normalizeText(a.titular || "").split(" ").filter((w) => w.length >= 3);
+      return palabras.length && dName && palabras.every((w) => dName.includes(w));
+    }) || null;
+  }
+  // Lo que hay que mirar antes de registrar (y lo que frena el modo automatico).
+  function receiptProblems(r, clientId, amount) {
+    const ai = r.ai || {};
+    const out = [];
+    if (r.note) out.push(r.note);
+    if (!clientId || !getClient(clientId)) out.push("el número no está vinculado a un cliente");
+    if (!(amount > 0)) out.push("no se pudo leer el monto");
+    if (ai.confianza && ai.confianza !== "alta") out.push("la IA no está segura de lo que leyó (" + ai.confianza + ")");
+    if (r.dup_of) out.push("el número de operación ya llegó en otro comprobante (#" + r.dup_of + ")");
+    const cfg = receiptCfg();
+    if (cfg.checkAccount && cfg.accounts.length && !receiptAccountMatch(ai)) out.push("no va a ninguna de tus cuentas" + (ai.destino_nombre ? " (dice: " + ai.destino_nombre + ")" : ""));
+    if (ai.fecha && ai.fecha < addDaysISO(todayISO(), -7)) out.push("es de hace más de una semana (" + formatDate(ai.fecha) + ")");
+    if (clientId && amount > 0) {
+      const desde = addDaysISO(todayISO(), -3);
+      const igual = (state.payments || []).find((p) => p && p.clientId === clientId && p.status !== "anulado" && Math.abs(Number(p.amount || 0) - amount) < 0.01 && String(p.date || "") >= desde);
+      if (igual) out.push("ya hay un pago igual de este cliente (" + igual.id + " del " + formatDate(igual.date) + ")");
+    }
+    return out;
+  }
+  async function registerReceipt(r, clientId, amount, auto) {
+    const ai = r.ai || {};
+    const cuenta = receiptAccountMatch(ai);
+    recordPayment({
+      clientId,
+      orderIds: [],
+      amount,
+      method: "transferencia",
+      receivedByUserId: currentUser ? currentUser.id : "",
+      notes: ["Comprobante por WhatsApp", ai.banco, ai.operacion ? "Op " + ai.operacion : "", ai.fecha ? formatDate(ai.fecha) : "", ai.origen_nombre ? "de " + ai.origen_nombre : "", cuenta ? "a " + cuenta.name : ""].filter(Boolean).join(" · "),
+      transferProofKey: r.image_key || ""
+    });
+    const pay = state.payments[state.payments.length - 1];
+    pay.receiptId = r.id;
+    pay.receiptOperation = ai.operacion || "";
+    if (cuenta) { pay.receiptAccountId = cuenta.id; pay.receiptAccountName = cuenta.name; }
+    if (auto) pay.autoLoaded = true;
+    saveState();
+    const llego = await confirmChangesReachedServer();
+    if (llego === "rechazado" || !(state.payments || []).some((p) => p.id === pay.id)) throw new Error("el servidor no aceptó el pago; revisá Pagos antes de cargarlo de nuevo");
+    await waInboxPost("/receipts/" + r.id + "/done", { paymentId: pay.id, clientId, auto: !!auto });
+    return pay;
+  }
+
+  // Modo automatico (lo hace el mismo equipo que la carga automatica de pedidos).
+  async function runAutoReceipts() {
+    if (!receiptCfg().auto || ui.autoReceiptsRunning) return;
+    ui.autoReceiptsRunning = true;
+    try {
+      const r = await cloudRequest(getCloudSyncConfig(), "/receipts?status=pendiente", { method: "GET" });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) return;
+      const probados = autoReceiptsTried();
+      for (const x of (j.items || []).filter((y) => !probados.includes(y.id)).slice(0, 10)) {
+        autoReceiptsMarkTried(x.id);
+        const monto = Number((x.ai && x.ai.monto) || 0);
+        const prob = receiptProblems(x, x.client_id, monto);
+        const c = getClient(x.client_id);
+        const quien = c ? c.id + " - " + c.name : (x.sender_name || formatWaPhone(x.phone || ""));
+        if (prob.length) { autoInboxLog("Comprobante de " + quien + " queda para revisar: " + prob[0]); continue; }
+        const claim = await cloudRequest(getCloudSyncConfig(), "/receipts/" + x.id + "/claim", { method: "POST", body: "{}" });
+        if (!claim.ok) continue;
+        try {
+          const pay = await registerReceipt(x, x.client_id, monto, true);
+          autoInboxLog("Pago registrado solo: " + formatMoney(monto) + " de " + quien + " (" + pay.id + ")");
+        } catch (e) {
+          await cloudRequest(getCloudSyncConfig(), "/receipts/" + x.id + "/release", { method: "POST", body: JSON.stringify({ reason: "No se registró solo: " + e.message }) }).catch(() => {});
+          autoInboxLog("Comprobante de " + quien + ": " + e.message);
+        }
+      }
+    } catch (e) { /* se reintenta */ } finally { ui.autoReceiptsRunning = false; }
+  }
+  function autoReceiptsTried() {
+    try { const j = JSON.parse(localStorage.getItem("lpc_auto_receipts_tried") || "{}"); return j.v === APP_VERSION ? (j.ids || []) : []; } catch (e) { return []; }
+  }
+  function autoReceiptsMarkTried(id) {
+    try { localStorage.setItem("lpc_auto_receipts_tried", JSON.stringify({ v: APP_VERSION, ids: autoReceiptsTried().concat([id]).slice(-500) })); } catch (e) { /* nada */ }
+  }
+
+  // Panel en Pagos: comprobantes por revisar.
+  function waReceiptsPanelHtml() {
+    if (!currentUser || !["manager", "admin"].includes(currentUser.role)) return "";
+    afterRender.push(() => refreshWaReceipts());
+    return `<div class="panel" id="wa-receipts" style="margin-bottom:14px"><p class="muted" style="margin:0">Buscando comprobantes de WhatsApp...</p></div>${receiptAccountsTrackerHtml()}`;
+  }
+  async function refreshWaReceipts() {
+    const box = document.getElementById("wa-receipts");
+    if (!box) return;
+    try {
+      const r = await cloudRequest(getCloudSyncConfig(), "/receipts?status=pendiente,procesando", { method: "GET" });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || "HTTP " + r.status);
+      ui.waReceipts = j.items || [];
+    } catch (e) { box.innerHTML = `<p class="muted" style="margin:0">Comprobantes de WhatsApp: ${escapeHtml(e.message)}</p>`; return; }
+    paintWaReceipts();
+  }
+  function paintWaReceipts() {
+    const box = document.getElementById("wa-receipts");
+    if (!box) return;
+    const items = ui.waReceipts || [];
+    const cfg = receiptCfg();
+    const fila = (x) => {
+      const ai = x.ai || {};
+      const c = x.client_id ? getClient(x.client_id) : null;
+      const prob = receiptProblems(x, x.client_id, Number(ai.monto || 0));
+      const cuenta = receiptAccountMatch(ai);
+      const datos = [ai.banco, ai.fecha ? formatDate(ai.fecha) + (ai.hora ? " " + ai.hora : "") : "", ai.operacion ? "Op " + ai.operacion : "", ai.origen_nombre ? "De: " + ai.origen_nombre : "", ai.destino_nombre || ai.destino_alias || ai.destino_cbu ? "A: " + [ai.destino_nombre, ai.destino_alias, ai.destino_cbu].filter(Boolean).join(" · ") : ""].filter(Boolean);
+      return `<div class="wa-inbox-item" data-receipt-row="${x.id}">
+        <div class="wa-inbox-head"><strong>${c ? escapeHtml(c.id + " - " + c.name) : "Sin vincular: " + escapeHtml(x.phone ? formatWaPhone(x.phone) : "")}</strong>${x.sender_name ? ` <span class="muted">(${escapeHtml(x.sender_name)})</span>` : ""} <span class="muted">${escapeHtml(formatTimestampShort(x.created_at))}</span>${cuenta ? ` <span class="pill green">${escapeHtml(cuenta.name)}</span>` : ""}${x.status === "procesando" ? ` <span class="pill gray">registrando...</span>` : ""}</div>
+        <div class="muted" style="font-size:13px;margin:4px 0">${datos.map(escapeHtml).join(" · ") || "Sin datos leídos"}${x.caption ? "<br>Mensaje: " + escapeHtml(x.caption) : ""}</div>
+        ${prob.length ? `<div class="wa-inbox-auto">&#9888;&#65039; ${prob.map(escapeHtml).join(" · ")}</div>` : ""}
+        <div class="page-actions wa-inbox-actions" style="flex-wrap:wrap">
+          <input list="receipt-clients" data-receipt-client="${x.id}" value="${c ? escapeAttr(c.id + " - " + c.name) : ""}" placeholder="Cliente" style="flex:1;min-width:180px" autocomplete="off" />
+          <input data-receipt-amount="${x.id}" inputmode="decimal" value="${ai.monto ? escapeAttr(formatAmountInput(ai.monto)) : ""}" placeholder="Monto" style="width:130px" />
+          <button class="btn small primary" type="button" data-receipt-pay="${x.id}">Registrar pago</button>
+          <button class="btn small ghost" type="button" data-receipt-view="${x.id}">Ver comprobante</button>
+          ${!x.ai ? `<button class="btn small ghost" type="button" data-receipt-reread="${x.id}">Leer de nuevo</button>` : ""}
+          <button class="btn small ghost" type="button" data-receipt-discard="${x.id}">Descartar</button>
+        </div>
+      </div>`;
+    };
+    box.innerHTML = `<div class="page-actions" style="justify-content:space-between;align-items:center">
+        <h2 class="page-title" style="font-size:18px;margin:0">&#129534; Comprobantes de WhatsApp por revisar (${items.length})</h2>
+        <button class="btn small ghost" type="button" data-receipts-refresh>Actualizar</button>
+      </div>
+      <p class="muted" style="font-size:13px;margin:4px 0 8px">Fotos de transferencias que llegaron al WhatsApp vinculado, leídas con IA. Revisá el cliente y el monto y tocá <strong>Registrar pago</strong>: se descuenta del saldo como una transferencia, con la foto como comprobante. ${cfg.auto ? "El modo automático está <strong>prendido</strong>: acá quedan solo los que no pasaron los controles." : "Se puede pasar a automático en Configuración."}</p>
+      <datalist id="receipt-clients">${activeClients().map((c) => `<option value="${escapeAttr(c.id + " - " + c.name)}"></option>`).join("")}</datalist>
+      ${items.length ? items.map(fila).join("") : `<p class="muted" style="margin:0">No hay comprobantes por revisar.</p>`}`;
+    const item = (id) => (ui.waReceipts || []).find((y) => String(y.id) === String(id));
+    box.querySelectorAll("[data-receipts-refresh]").forEach((b) => b.addEventListener("click", () => refreshWaReceipts()));
+    box.querySelectorAll("[data-receipt-view]").forEach((b) => b.addEventListener("click", () => { const x = item(b.dataset.receiptView); if (x) openProofViewer(x.image_key, "", "Comprobante de WhatsApp"); }));
+    box.querySelectorAll("[data-receipt-reread]").forEach((b) => b.addEventListener("click", async () => {
+      b.disabled = true; b.textContent = "Leyendo...";
+      try { await waInboxPost("/receipts/" + b.dataset.receiptReread + "/reread", {}); } catch (e) { alert(e.message); }
+      refreshWaReceipts();
+    }));
+    box.querySelectorAll("[data-receipt-discard]").forEach((b) => b.addEventListener("click", async () => {
+      const no = confirm("¿Es una foto que NO es un comprobante? (Aceptar = no es comprobante, Cancelar = es un comprobante pero no lo registro)");
+      if (!no && !confirm("¿Descartar este comprobante sin registrar el pago?")) return;
+      b.disabled = true;
+      try { await waInboxPost("/receipts/" + b.dataset.receiptDiscard + "/discard", { notReceipt: no }); } catch (e) { alert(e.message); }
+      refreshWaReceipts();
+    }));
+    box.querySelectorAll("[data-receipt-pay]").forEach((b) => b.addEventListener("click", async () => {
+      const x = item(b.dataset.receiptPay);
+      if (!x) return;
+      const inp = box.querySelector(`[data-receipt-client="${x.id}"]`);
+      const c = inp ? findClientByInput(inp.value) : null;
+      if (!c) return alert("Elegí el cliente.");
+      const montoInp = box.querySelector(`[data-receipt-amount="${x.id}"]`);
+      const monto = parseAmount(montoInp ? montoInp.value : "");
+      if (!(monto > 0)) return alert("Poné el monto.");
+      const prob = receiptProblems(x, c.id, monto).filter((p) => !/no está vinculado|no se pudo leer el monto/.test(p));
+      if (!confirm("Registrar pago por transferencia de " + formatMoney(monto) + " de " + c.id + " - " + c.name + "?" + (prob.length ? "\n\nOjo: " + prob.join(" · ") : ""))) return;
+      b.disabled = true;
+      try {
+        await waInboxPost("/receipts/" + x.id + "/claim", {});
+        const pay = await registerReceipt(x, c.id, monto, false);
+        alert("Pago registrado: " + pay.id);
+      } catch (e) {
+        await waInboxPost("/receipts/" + x.id + "/release", {}).catch(() => {});
+        alert("No se pudo registrar: " + e.message);
+      }
+      render();
+    }));
+  }
+
+  // Resumen: cuanto entro por transferencia a cada cuenta propia (este mes y el anterior).
+  function receiptAccountsTrackerHtml() {
+    const cfg = receiptCfg();
+    if (!cfg.accounts.length) return "";
+    const mes = todayISO().slice(0, 7);
+    const ant = addDaysISO(mes + "-01", -1).slice(0, 7);
+    const pagos = (state.payments || []).filter((p) => p && p.method === "transferencia" && p.status !== "anulado");
+    const suma = (id, m) => pagos.filter((p) => (id ? p.receiptAccountId === id : !p.receiptAccountId) && String(p.date || "").slice(0, 7) === m).reduce((t, p) => t + Number(p.amount || 0), 0);
+    const filas = cfg.accounts.map((a) => `<tr><td>${escapeHtml(a.name)}</td><td class="num">${formatMoney(suma(a.id, mes))}</td><td class="num">${formatMoney(suma(a.id, ant))}</td></tr>`).join("");
+    return `<div class="panel" style="margin-bottom:14px"><h2 class="page-title" style="font-size:18px">Transferencias por cuenta</h2>
+      <div class="table-wrap"><table><thead><tr><th>Cuenta</th><th class="num">Este mes</th><th class="num">Mes anterior</th></tr></thead>
+      <tbody>${filas}<tr><td class="muted">Sin cuenta identificada</td><td class="num">${formatMoney(suma("", mes))}</td><td class="num">${formatMoney(suma("", ant))}</td></tr></tbody></table></div>
+      <p class="muted" style="font-size:12px;margin:4px 0 0">Cuenta según lo que lee la IA en el comprobante (titular, CUIT, CBU/CVU o alias). Las transferencias cargadas a mano sin comprobante de WhatsApp quedan en "Sin cuenta identificada".</p></div>`;
+  }
+
+  // Configuracion: modo automatico, control de cuenta y cuentas propias.
+  function receiptsConfigHtml() {
+    if (!currentUser || !["manager", "admin"].includes(currentUser.role)) return "";
+    const cfg = receiptCfg();
+    afterRender.push(bindReceiptsConfig);
+    return `<div class="panel" style="margin-top:14px" id="receipts-config">
+      <h2 class="page-title" style="font-size:18px">&#129534; Comprobantes de transferencia por WhatsApp</h2>
+      <p class="muted" style="margin-top:0;font-size:13px">Las fotos que llegan al WhatsApp vinculado se leen con IA. Los comprobantes aparecen en <strong>Pagos</strong> para registrarlos con un toque.</p>
+      <label style="display:flex;gap:8px;align-items:flex-start;margin:6px 0"><input type="checkbox" id="rc-auto" ${cfg.auto ? "checked" : ""} style="width:auto;min-height:auto;margin-top:3px" /><span><strong>Registrar los pagos solos</strong><br><span class="muted" style="font-size:13px">Solo si: el número está vinculado a un cliente, la IA leyó el monto con seguridad, el nº de operación no llegó antes, no hay un pago igual de ese cliente en los últimos 3 días, es de la última semana${cfg.checkAccount ? " y va a una de tus cuentas" : ""}. Si falla algo, queda en Pagos para revisar. Lo hace el equipo de la carga automática de pedidos (tiene que estar activada).</span></span></label>
+      <label style="display:flex;gap:8px;align-items:flex-start;margin:6px 0"><input type="checkbox" id="rc-check" ${cfg.checkAccount ? "checked" : ""} style="width:auto;min-height:auto;margin-top:3px" /><span><strong>Controlar que la transferencia vaya a una de mis cuentas</strong><br><span class="muted" style="font-size:13px">Si el comprobante no muestra el titular, CUIT, CBU/CVU o alias de alguna cuenta de abajo, queda para revisar.</span></span></label>
+      <strong style="font-size:14px">Mis cuentas</strong>
+      <div class="table-wrap" style="margin-top:4px"><table><thead><tr><th>Nombre</th><th>Titular</th><th>CUIT</th><th>CBU/CVU</th><th>Alias</th><th></th></tr></thead><tbody>
+        ${cfg.accounts.map((a, i) => `<tr><td>${escapeHtml(a.name)}</td><td>${escapeHtml(a.titular || "")}</td><td>${escapeHtml(a.cuit || "")}</td><td>${escapeHtml(a.cbu || "")}</td><td>${escapeHtml(a.alias || "")}</td><td><button class="btn small ghost" type="button" data-rc-del="${i}">Quitar</button></td></tr>`).join("") || `<tr><td colspan="6" class="muted">Ninguna todavía.</td></tr>`}
+      </tbody></table></div>
+      <div class="form-grid" style="margin-top:6px">
+        <div class="field"><label>Nombre (ej. Galicia Lucas)</label><input id="rc-name" /></div>
+        <div class="field"><label>Titular</label><input id="rc-titular" /></div>
+        <div class="field"><label>CUIT</label><input id="rc-cuit" inputmode="numeric" /></div>
+        <div class="field"><label>CBU / CVU</label><input id="rc-cbu" inputmode="numeric" /></div>
+        <div class="field"><label>Alias</label><input id="rc-alias" /></div>
+      </div>
+      <div class="page-actions" style="margin-top:6px"><button class="btn small primary" type="button" id="rc-add">Agregar cuenta</button></div>
+    </div>`;
+  }
+  function bindReceiptsConfig() {
+    const auto = document.getElementById("rc-auto");
+    if (!auto) return;
+    auto.addEventListener("change", () => {
+      if (auto.checked && !confirm("Con esto los pagos de los comprobantes que pasen todos los controles se registran solos (se descuentan del saldo) sin que nadie los revise. ¿Prenderlo?")) { auto.checked = false; return; }
+      saveReceiptCfg({ auto: auto.checked });
+      autoInboxLog(auto.checked ? "Registro automático de comprobantes prendido" : "Registro automático de comprobantes apagado");
+    });
+    const chk = document.getElementById("rc-check");
+    chk.addEventListener("change", () => {
+      if (chk.checked && !receiptCfg().accounts.length) alert("Agregá abajo al menos una cuenta: sin cuentas no se controla nada.");
+      saveReceiptCfg({ checkAccount: chk.checked });
+      render();
+    });
+    document.querySelectorAll("[data-rc-del]").forEach((b) => b.addEventListener("click", () => {
+      const accounts = receiptCfg().accounts.slice();
+      const [a] = accounts.splice(Number(b.dataset.rcDel), 1);
+      if (!a || !confirm("¿Quitar la cuenta " + a.name + "?")) return;
+      saveReceiptCfg({ accounts });
+      render();
+    }));
+    document.getElementById("rc-add").addEventListener("click", () => {
+      const v = (id) => document.getElementById(id).value.trim();
+      const a = { id: "CTA-" + Date.now().toString(36), name: v("rc-name"), titular: v("rc-titular"), cuit: v("rc-cuit"), cbu: v("rc-cbu"), alias: v("rc-alias") };
+      if (!a.name) return alert("Poné un nombre para reconocer la cuenta.");
+      if (!a.titular && !a.cuit && !a.cbu && !a.alias) return alert("Poné al menos el titular, el CUIT, el CBU/CVU o el alias.");
+      saveReceiptCfg({ accounts: receiptCfg().accounts.concat([a]) });
+      render();
+    });
+  }
+
   function autoInboxLogHtml() {
     const l = ui.autoInboxLog || [];
     return l.length ? `<ul class="order-parse-list">${l.map((x) => `<li><span class="muted">${escapeHtml(formatTimestampShort(x.at))}</span> ${escapeHtml(x.texto)}</li>`).join("")}</ul>` : `<p class="muted" style="margin:4px 0">Todavía no cargó nada en esta sesión.</p>`;
@@ -848,6 +1113,7 @@
         }
       }
       if (candidatos.length && typeof refreshWhatsappInbox === "function") refreshWhatsappInbox(true);
+      await runAutoReceipts();
     } catch (e) {
       /* sin conexion: se reintenta en el proximo ciclo */
     } finally {
@@ -14105,6 +14371,7 @@
       currentUser.role === "employee" ? "Registro de cobranza en ruta para cualquier cliente." : "Registro de cobros con transferencia y comprobantes.",
       "",
       `
+      ${waReceiptsPanelHtml()}
       <div class="grid">
         <form id="payment-form" class="panel">
           <div class="form-grid payment-form-grid">
@@ -15379,7 +15646,7 @@
       </div>
       <div style="margin:6px 0"><strong style="font-size:14px">Equipos que hacen la carga</strong><div id="auto-inbox-status"><p class="muted" style="margin:4px 0">Consultando...</p></div></div>
       <div><strong style="font-size:14px">Últimos movimientos en este equipo</strong><div id="auto-inbox-log">${autoInboxLogHtml()}</div></div>
-    </div><div id="wa-linked-panel" class="panel" style="margin-top:14px">${waLinkedPanelInner()}</div>${waArchiveAccessHtml()}` : ""}${["manager", "admin"].includes(currentUser.role) ? metaReviewerPanelHtml() : ""}${window.WhatsAppTemplates ? window.WhatsAppTemplates.html() : ""}`;
+    </div>${receiptsConfigHtml()}<div id="wa-linked-panel" class="panel" style="margin-top:14px">${waLinkedPanelInner()}</div>${waArchiveAccessHtml()}` : ""}${["manager", "admin"].includes(currentUser.role) ? metaReviewerPanelHtml() : ""}${window.WhatsAppTemplates ? window.WhatsAppTemplates.html() : ""}`;
   }
 
   // ---- WhatsApp vinculado por QR (mientras Meta no aprueba) ----

@@ -3594,6 +3594,143 @@ app.post("/external/inbox", externalAuth, async (req, res) => {
   res.json({ ok: true, id: rows[0].id });
 });
 
+// ---------- Comprobantes de transferencia por WhatsApp ----------
+// El bot manda cada imagen que llega al WhatsApp vinculado. La IA dice si es un comprobante y saca
+// monto, fecha, banco, numero de operacion y las cuentas de origen y destino. El pago lo registra la
+// app (a mano con un toque, o solo si esta prendido el modo automatico).
+const RECEIPT_PROMPT = [
+  "Esta imagen la mandó un cliente por WhatsApp a una verdulería mayorista de Argentina.",
+  "Decí si es un comprobante de transferencia o de pago (banco, Mercado Pago, Ualá, Brubank, cuenta DNI, etc.).",
+  "Respondé SOLO un JSON, sin texto alrededor, con estas claves:",
+  '{"es_comprobante": true/false, "monto": número en pesos (ej. 45300.5; en Argentina "45.300,50" es 45300.5) o null, "fecha": "AAAA-MM-DD" o null, "hora": "HH:MM" o null,',
+  '"banco": nombre del banco o billetera o null, "operacion": número de operación/transacción/comprobante/código de identificación o null,',
+  '"origen_nombre": quien pagó o null, "origen_cuit": CUIT/CUIL de quien pagó o null,',
+  '"destino_nombre": a quien le pagaron o null, "destino_cuit": CUIT/CUIL del destino o null, "destino_cbu": CBU/CVU del destino o null, "destino_alias": alias del destino o null,',
+  '"confianza": "alta" si el monto se lee clarito y es un comprobante real, "media" o "baja" si hay dudas}'
+].join(" ");
+
+function parseReceiptJson(text) {
+  const t = String(text || "").replace(/```(?:json)?/gi, "").trim();
+  const a = t.indexOf("{"), b = t.lastIndexOf("}");
+  if (a < 0 || b <= a) return null;
+  try {
+    const j = JSON.parse(t.slice(a, b + 1));
+    let monto = j.monto;
+    if (typeof monto === "string") monto = Number(monto.replace(/[^\d.,]/g, "").replace(/\.(?=\d{3}(\D|$))/g, "").replace(",", "."));
+    j.monto = Number.isFinite(Number(monto)) && Number(monto) > 0 ? Math.round(Number(monto) * 100) / 100 : null;
+    if (j.fecha && !/^\d{4}-\d{2}-\d{2}$/.test(String(j.fecha))) j.fecha = null;
+    j.es_comprobante = !!j.es_comprobante;
+    j.confianza = ["alta", "media", "baja"].includes(j.confianza) ? j.confianza : "baja";
+    ["banco", "operacion", "origen_nombre", "origen_cuit", "destino_nombre", "destino_cuit", "destino_cbu", "destino_alias", "hora"].forEach((k) => { j[k] = j[k] == null ? null : String(j[k]).slice(0, 120); });
+    return j;
+  } catch (e) { return null; }
+}
+
+async function readReceiptImage(image) {
+  const errors = [];
+  const llms = [];
+  if (OPENROUTER_API_KEY) llms.push(["OpenRouter", () => visionOcrRequest(OPENROUTER_API_URL, OPENROUTER_API_KEY, OPENROUTER_VISION_MODEL, image, RECEIPT_PROMPT, { "HTTP-Referer": "https://parecarrito.app", "X-Title": "Pare Carrito" })]);
+  if (MOONSHOT_API_KEY) llms.push(["Moonshot", () => visionOcrRequest(MOONSHOT_API_URL, MOONSHOT_API_KEY, MOONSHOT_VISION_MODEL, image, RECEIPT_PROMPT)]);
+  for (const [name, fn] of llms) {
+    try {
+      const j = parseReceiptJson(await fn());
+      if (j) return j;
+      errors.push(name + ": respuesta sin JSON");
+    } catch (e) { errors.push(name + ": " + e.message); }
+  }
+  throw new Error(errors.join(" | ") || "La lectura con IA no está configurada (falta OPENROUTER_API_KEY).");
+}
+
+async function processReceipt(id, image) {
+  try {
+    const ai = await readReceiptImage(image);
+    if (!ai.es_comprobante) {
+      await pool.query("UPDATE wa_receipts SET status = 'no_es', ai = $2 WHERE id = $1", [id, JSON.stringify(ai)]);
+      return;
+    }
+    let dupOf = null;
+    const op = String(ai.operacion || "").replace(/\s/g, "");
+    if (op.length >= 4) {
+      const { rows } = await pool.query("SELECT id FROM wa_receipts WHERE id <> $1 AND status IN ('pendiente','procesando','registrado') AND regexp_replace(COALESCE(ai->>'operacion',''), '\\s', '', 'g') = $2 ORDER BY id LIMIT 1", [id, op]);
+      if (rows.length) dupOf = rows[0].id;
+    }
+    await pool.query("UPDATE wa_receipts SET status = 'pendiente', ai = $2, dup_of = $3 WHERE id = $1", [id, JSON.stringify(ai), dupOf]);
+  } catch (e) {
+    await pool.query("UPDATE wa_receipts SET status = 'pendiente', note = $2 WHERE id = $1", [id, ("No se pudo leer con IA: " + e.message).slice(0, 400)]).catch(() => {});
+  }
+}
+
+app.post("/external/wa-receipt", externalAuth, async (req, res) => {
+  const b = req.body || {};
+  const image = parseImageDataUrl(b.imageData);
+  if (!image) return res.status(400).json({ error: "Se espera imageData (PNG, JPG o WEBP en base64)." });
+  if (image.byteLength > 8 * 1024 * 1024) return res.status(413).json({ error: "Imagen muy grande." });
+  const waId = String(b.waId || "").slice(0, 120) || null;
+  if (waId) {
+    const ya = await pool.query("SELECT id FROM wa_receipts WHERE wa_id = $1", [waId]);
+    if (ya.rows.length) return res.json({ ok: true, id: ya.rows[0].id, repetido: true });
+  }
+  const ext = image.mimeType.includes("png") ? "png" : image.mimeType.includes("webp") ? "webp" : "jpg";
+  const key = Date.now() + "-" + crypto.randomBytes(4).toString("hex") + "-comprobante-whatsapp." + ext;
+  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+  fs.writeFileSync(path.join(UPLOAD_DIR, key), Buffer.from(image.base64, "base64"));
+  await pool.query("INSERT INTO proofs (key, content_type, uploaded_by) VALUES ($1,$2,$3)", [key, image.mimeType, "whatsapp"]);
+  const { rows } = await pool.query(
+    "INSERT INTO wa_receipts (wa_id, phone, chat_id, is_group, client_id, sender_name, caption, image_key) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (wa_id) DO NOTHING RETURNING id",
+    [waId, phoneDigits(b.phone) || null, String(b.chatId || "").slice(0, 80) || null, !!b.isGroup, b.clientId ? String(b.clientId) : null, String(b.senderName || "").slice(0, 120), String(b.caption || "").slice(0, 500), key]
+  );
+  if (!rows.length) return res.json({ ok: true, repetido: true });
+  res.json({ ok: true, id: rows[0].id });
+  processReceipt(rows[0].id, image).catch(() => {});
+});
+
+const RECEIPT_COLS = "id, created_at, phone, chat_id, is_group, client_id, sender_name, caption, image_key, status, ai, dup_of, note, payment_id, handled_by, handled_at";
+app.get("/receipts", authenticate, requireRole("manager", "admin", "employee"), async (req, res) => {
+  // Los que quedaron "procesando" mas de 10 minutos (un equipo se colgo) vuelven a pendientes.
+  await pool.query("UPDATE wa_receipts SET status = 'pendiente', claimed_at = NULL WHERE status = 'procesando' AND claimed_at < now() - interval '10 minutes'");
+  const estado = String(req.query.status || "pendiente");
+  const { rows } = estado === "todos"
+    ? await pool.query("SELECT " + RECEIPT_COLS + " FROM wa_receipts WHERE status <> 'no_es' AND created_at > now() - interval '60 days' ORDER BY id DESC LIMIT 300")
+    : await pool.query("SELECT " + RECEIPT_COLS + " FROM wa_receipts WHERE status = ANY($1) ORDER BY id DESC LIMIT 200", [estado.split(",")]);
+  res.json({ ok: true, items: rows });
+});
+app.post("/receipts/:id/claim", authenticate, requireRole("manager", "admin", "employee"), async (req, res) => {
+  const { rows } = await pool.query("UPDATE wa_receipts SET status = 'procesando', claimed_at = now() WHERE id = $1 AND status = 'pendiente' RETURNING id", [req.params.id]);
+  if (!rows.length) return res.status(409).json({ error: "Ya lo tomó otro equipo o una persona." });
+  res.json({ ok: true });
+});
+app.post("/receipts/:id/release", authenticate, requireRole("manager", "admin", "employee"), async (req, res) => {
+  const note = String((req.body && req.body.reason) || "").slice(0, 400);
+  await pool.query("UPDATE wa_receipts SET status = 'pendiente', claimed_at = NULL, note = COALESCE(NULLIF($2, ''), note) WHERE id = $1 AND status = 'procesando'", [req.params.id, note]);
+  res.json({ ok: true });
+});
+app.post("/receipts/:id/done", authenticate, requireRole("manager", "admin", "employee"), async (req, res) => {
+  const paymentId = String((req.body && req.body.paymentId) || "");
+  if (!paymentId) return res.status(400).json({ error: "Falta el pago." });
+  const quien = (req.body && req.body.auto ? "Automático (" : "") + (req.user.name || req.user.username) + (req.body && req.body.auto ? ")" : "");
+  const { rows } = await pool.query("UPDATE wa_receipts SET status = 'registrado', payment_id = $2, handled_by = $3, handled_at = now(), client_id = COALESCE($4, client_id) WHERE id = $1 AND status IN ('pendiente','procesando') RETURNING id", [req.params.id, paymentId, quien, (req.body && req.body.clientId) || null]);
+  if (!rows.length) return res.status(409).json({ error: "Ese comprobante ya lo resolvió otra persona." });
+  res.json({ ok: true });
+});
+app.post("/receipts/:id/discard", authenticate, requireRole("manager", "admin", "employee"), async (req, res) => {
+  const estado = req.body && req.body.notReceipt ? "no_es" : "descartado";
+  await pool.query("UPDATE wa_receipts SET status = $2, handled_by = $3, handled_at = now() WHERE id = $1 AND status IN ('pendiente','procesando')", [req.params.id, estado, req.user.name || req.user.username]);
+  res.json({ ok: true });
+});
+// Volver a leer con IA (por ejemplo, si al llegar la IA no estaba configurada).
+app.post("/receipts/:id/reread", authenticate, requireRole("manager", "admin"), async (req, res) => {
+  const { rows } = await pool.query("SELECT image_key FROM wa_receipts WHERE id = $1", [req.params.id]);
+  if (!rows.length) return res.status(404).json({ error: "No existe." });
+  const file = path.join(UPLOAD_DIR, String(rows[0].image_key || "").replace(/[^a-zA-Z0-9._-]/g, "_"));
+  if (!fs.existsSync(file)) return res.status(404).json({ error: "No está la imagen." });
+  const mime = /\.png$/.test(file) ? "image/png" : /\.webp$/.test(file) ? "image/webp" : "image/jpeg";
+  const b64 = fs.readFileSync(file).toString("base64");
+  await pool.query("UPDATE wa_receipts SET note = NULL WHERE id = $1", [req.params.id]);
+  await processReceipt(req.params.id, { mimeType: mime, base64: b64, byteLength: b64.length, dataUrl: "data:" + mime + ";base64," + b64 });
+  const r = await pool.query("SELECT " + RECEIPT_COLS + " FROM wa_receipts WHERE id = $1", [req.params.id]);
+  res.json({ ok: true, item: r.rows[0] });
+});
+
 // Estado de la conversacion para identificar un numero (vence a los 7 dias).
 app.get("/external/identify/:phone", externalAuth, async (req, res) => {
   const { rows } = await pool.query("SELECT stage, candidate_id FROM whatsapp_identify WHERE phone = $1 AND updated_at > now() - interval '7 days'", [phoneDigits(req.params.phone)]);

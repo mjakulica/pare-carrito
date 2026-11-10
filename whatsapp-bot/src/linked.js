@@ -31,6 +31,8 @@ const info = { status: "apagado", qr: "", qrAt: 0, me: "", connectedAt: "", last
 let sock = null;
 let connecting = false;
 let onMessage = null;
+let onImage = null;
+let Baileys = null;
 let jids = {};
 try { jids = JSON.parse(fs.readFileSync(JIDS_FILE, "utf8")) || {}; } catch (e) { jids = {}; }
 
@@ -175,6 +177,7 @@ async function connect() {
   connecting = true;
   try {
     const B = await import("@whiskeysockets/baileys");
+    Baileys = B;
     const makeWASocket = B.default;
     const { useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = B;
     const QRCode = require("qrcode");
@@ -236,6 +239,8 @@ async function connect() {
           const jid = String(key.remoteJid || "");
           // Chats con personas y grupos: ni estados, ni canales, ni lo que manda el propio celular.
           if (key.fromMe || !jid || /@(broadcast|newsletter)$/.test(jid) || jid === "status@broadcast") continue;
+          // Fotos (comprobantes de transferencia): se bajan y se mandan al servidor para leerlas.
+          if (onImage) handleImage(m, jid, key).catch((e) => console.error("WhatsApp vinculado, imagen:", e.message));
           const text = messageText(m);
           if (!text) continue;
           if (jid.endsWith("@g.us")) {
@@ -263,10 +268,29 @@ async function connect() {
   }
 }
 
+// Imagen recibida (foto o documento de imagen): se baja y se pasa a onImage con el chat y quien la
+// manda. Solo imagenes de hasta 6 MB; los PDF por ahora no (la IA lee imagenes).
+async function handleImage(m, jid, key) {
+  const msg = m && m.message ? m.message : {};
+  const inner = msg.ephemeralMessage ? msg.ephemeralMessage.message || {} : msg.viewOnceMessage ? msg.viewOnceMessage.message || {} : msg;
+  const media = inner.imageMessage || (inner.documentMessage && /^image\//.test(inner.documentMessage.mimetype || "") ? inner.documentMessage : null);
+  if (!media || !Baileys || !sock) return;
+  const size = Number(media.fileLength && media.fileLength.low != null ? media.fileLength.low : media.fileLength || 0);
+  if (size > 6 * 1024 * 1024) return;
+  const logger = (await import("pino")).default({ level: "silent" });
+  const buf = await Baileys.downloadMediaMessage(m, "buffer", {}, { logger, reuploadRequest: sock.updateMediaMessage });
+  if (!buf || !buf.length) return;
+  const mime = /png/.test(media.mimetype || "") ? "image/png" : /webp/.test(media.mimetype || "") ? "image/webp" : "image/jpeg";
+  const isGroup = jid.endsWith("@g.us");
+  const from = isGroup ? phoneOf(key.participant || "", { senderPn: key.participantPn || key.participantAlt }) : phoneOf(jid, key);
+  await onImage({ waId: key.id, from, group: isGroup ? jid : "", name: m.pushName || "", caption: String(media.caption || "").trim(), imageData: "data:" + mime + ";base64," + buf.toString("base64") });
+}
+
 // Arranca solo si ya estaba vinculado (se reinicia el bot y sigue conectado).
-function init(handler, archiver) {
+function init(handler, archiver, imageHandler) {
   onMessage = handler;
   archiveSink = archiver || null;
+  onImage = imageHandler || null;
   if (fs.existsSync(ENABLED_FILE)) connect().catch(() => {});
 }
 
