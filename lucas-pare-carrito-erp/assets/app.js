@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v133";
+  const APP_VERSION = "v134";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -681,6 +681,7 @@
       transferProofKey: r.image_key || ""
     });
     const pay = state.payments[state.payments.length - 1];
+    learnPayer(ai.origen_cuit, ai.origen_nombre, clientId);
     pay.receiptId = r.id;
     pay.receiptOperation = ai.operacion || "";
     if (cuenta) { pay.receiptAccountId = cuenta.id; pay.receiptAccountName = cuenta.name; }
@@ -920,6 +921,149 @@
     } catch (e) { alert(e.message); }
     btn.disabled = false;
     if (after) after();
+  }
+
+  // ---- Resumenes bancarios (Brubank, Galicia Office...) ----
+  // Se suben en Pagos. El servidor deja solo los creditos y los compara con los pagos cargados. Quien
+  // paga se aprende (CUIT o nombre que muestra el banco -> cliente) al registrar o confirmar, y
+  // tambien de los comprobantes de WhatsApp.
+  const PAYER_GENERIC_RE = /\b(transf(erencia)?s?|transferencia|recibida|recib|credito|cred|de|del|terceros?|inmediata|cta|cuenta|cbu|cvu|alias|pago|pagos|debin|deposito|dep|acreditacion|acred|via|mismo|titular|banco|bco|galicia|brubank|mercado|mp|internet|home|banking|office|ref|nro|n|op|operacion|origen|concepto|varios|var|haberes|interbanking|en|ars|pesos|\$)\b/g;
+  function payerNameKey(desc) {
+    return String(desc || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-zñ ]/g, " ").replace(PAYER_GENERIC_RE, " ").replace(/\s+/g, " ").trim().split(" ").filter((w) => w.length > 1).slice(0, 5).join(" ");
+  }
+  function learnPayer(cuit, nombre, clientId) {
+    if (!clientId) return;
+    const mapa = { ...((state.appSettings && state.appSettings.payerMap) || {}) };
+    const c = String(cuit || "").replace(/\D/g, "");
+    if (c.length === 11) mapa["cuit:" + c] = clientId;
+    const n = payerNameKey(nombre);
+    if (n && n.length >= 4) mapa["nom:" + n] = clientId;
+    state.appSettings = state.appSettings || {};
+    state.appSettings.payerMap = mapa;
+  }
+
+  function bankPanelHtml() {
+    if (!currentUser || !["manager", "admin"].includes(currentUser.role)) return "";
+    afterRender.push(() => refreshBankMovements());
+    const cuentas = ["Brubank", "Galicia"].concat(receiptCfg().accounts.filter((a) => !a.providerId).map((a) => a.name));
+    return `<div class="panel" id="bank-panel" style="margin-bottom:14px">
+      <h2 class="page-title" style="font-size:18px;margin:0">&#127974; Resúmenes del banco</h2>
+      <p class="muted" style="font-size:13px;margin:4px 0 8px">Subí los movimientos de la cuenta (Excel .xlsx o CSV es lo más exacto; PDF también, leído con IA). Se toman solo los créditos y se comparan con los pagos ya cargados. Los que faltan los registrás con la fecha del banco. El sistema aprende quién es cada pagador.</p>
+      <div class="page-actions" style="flex-wrap:wrap;gap:8px">
+        <input id="bank-account" list="bank-accounts" placeholder="Cuenta (Brubank, Galicia...)" style="width:200px" autocomplete="off" />
+        <datalist id="bank-accounts">${[...new Set(cuentas)].map((c) => `<option value="${escapeAttr(c)}"></option>`).join("")}</datalist>
+        <input type="file" id="bank-file" accept=".csv,.xlsx,.pdf,text/csv,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+        <button class="btn small primary" type="button" id="bank-upload">Subir resumen</button>
+        <span class="muted" id="bank-msg"></span>
+      </div>
+      <div id="bank-list" style="margin-top:8px"></div>
+    </div>`;
+  }
+  async function refreshBankMovements() {
+    const up = document.getElementById("bank-upload");
+    if (up && !up.dataset.bound) {
+      up.dataset.bound = "1";
+      up.addEventListener("click", async () => {
+        const f = document.getElementById("bank-file").files[0];
+        const cuenta = document.getElementById("bank-account").value.trim();
+        const msg = document.getElementById("bank-msg");
+        if (!f) return alert("Elegí el archivo del resumen.");
+        if (!cuenta) return alert("Poné de qué cuenta es (Brubank, Galicia...).");
+        up.disabled = true;
+        msg.textContent = /\.pdf$/i.test(f.name) ? "Leyendo el PDF con IA (puede tardar un minuto)..." : "Subiendo...";
+        try {
+          const data = await new Promise((ok, mal) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = () => mal(new Error("no se pudo leer el archivo")); r.readAsDataURL(f); });
+          const j = await waInboxPost("/bank/import", { fileName: f.name, account: cuenta, data });
+          msg.textContent = j.creditos + " créditos en el archivo: " + j.nuevos + " nuevos" + (j.repetidos ? ", " + j.repetidos + " ya estaban subidos" : "") + ".";
+        } catch (e) { msg.textContent = ""; alert(e.message); }
+        up.disabled = false;
+        refreshBankMovements();
+      });
+    }
+    const box = document.getElementById("bank-list");
+    if (!box) return;
+    try {
+      const r = await cloudRequest(getCloudSyncConfig(), "/bank/movements?status=pendiente", { method: "GET" });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || "HTTP " + r.status);
+      ui.bankMovs = j.items || [];
+    } catch (e) { box.innerHTML = `<p class="muted">${escapeHtml(e.message)}</p>`; return; }
+    paintBankMovements();
+  }
+  function paintBankMovements() {
+    const box = document.getElementById("bank-list");
+    if (!box) return;
+    const items = ui.bankMovs || [];
+    if (!items.length) { box.innerHTML = `<p class="muted" style="margin:0">No hay movimientos del banco por revisar.</p>`; return; }
+    const seguros = items.filter((x) => x.match && x.match.seguro);
+    const posibles = items.filter((x) => x.match && !x.match.seguro);
+    const faltan = items.filter((x) => !x.match);
+    const cli = (id) => { const c = getClient(id); return c ? c.id + " - " + c.name : id || ""; };
+    const fila = (x) => `<div class="wa-inbox-item">
+      <div class="wa-inbox-head"><strong>${escapeHtml(formatDate(x.fecha))}</strong> · <strong>${formatMoney(x.monto)}</strong> <span class="pill gray">${escapeHtml(x.account || "")}</span></div>
+      <div class="muted" style="font-size:13px">${escapeHtml(x.descripcion || "")}${x.cuit ? " · CUIT " + escapeHtml(x.cuit) : ""}</div>
+      ${x.match ? `<div style="font-size:13px;margin:4px 0">${x.match.seguro ? "&#9989; Ya está cargado" : "&#10067; Puede ser"}: <strong>${escapeHtml(x.match.id)}</strong> del ${escapeHtml(formatDate(x.match.date))} de ${escapeHtml(cli(x.match.clientId))}</div>` : ""}
+      <div class="page-actions wa-inbox-actions" style="flex-wrap:wrap">
+        ${x.match ? `<button class="btn small primary" type="button" data-bank-match="${x.id}">${x.match.seguro ? "Ok, ya estaba" : "Es ese pago"}</button>` : ""}
+        <input list="bank-clients" data-bank-client="${x.id}" value="${escapeAttr(x.client_id ? cli(x.client_id) : "")}" placeholder="Cliente" style="flex:1;min-width:160px" autocomplete="off" />
+        <button class="btn small ${x.match ? "ghost" : "primary"}" type="button" data-bank-pay="${x.id}">Registrar con fecha ${escapeHtml(formatDate(x.fecha).slice(0, 5))}</button>
+        <button class="btn small ghost" type="button" data-bank-discard="${x.id}">No es un cobro</button>
+      </div>
+    </div>`;
+    box.innerHTML = `<p class="muted" style="font-size:13px;margin:0 0 6px"><strong>${faltan.length}</strong> sin cargar · <strong>${posibles.length}</strong> posibles · <strong>${seguros.length}</strong> ya cargados.</p>
+      <datalist id="bank-clients">${activeClients().map((c) => `<option value="${escapeAttr(c.id + " - " + c.name)}"></option>`).join("")}</datalist>
+      ${seguros.length ? `<div class="page-actions" style="margin-bottom:8px"><button class="btn small blue" type="button" data-bank-match-all>Marcar los ${seguros.length} que ya estaban cargados</button></div>` : ""}
+      ${faltan.length ? `<h3 style="font-size:15px;margin:8px 0 4px">Sin cargar (${faltan.length})</h3>${faltan.map(fila).join("")}` : ""}
+      ${posibles.length ? `<h3 style="font-size:15px;margin:8px 0 4px">Posibles (mismo monto y fecha, falta confirmar el cliente) (${posibles.length})</h3>${posibles.map(fila).join("")}` : ""}
+      ${seguros.length ? `<details style="margin-top:8px"><summary><strong>Ya cargados (${seguros.length})</strong></summary>${seguros.map(fila).join("")}</details>` : ""}`;
+    const item = (id) => items.find((y) => String(y.id) === String(id));
+    const confirmarMatch = async (x) => {
+      await waInboxPost("/bank/movements/" + x.id + "/done", { paymentId: x.match.id, clientId: x.match.clientId });
+      learnPayer(x.cuit, x.nombre || x.descripcion, x.match.clientId);
+    };
+    box.querySelectorAll("[data-bank-match]").forEach((b) => b.addEventListener("click", async () => {
+      const x = item(b.dataset.bankMatch);
+      if (!x) return;
+      b.disabled = true;
+      try { await confirmarMatch(x); saveState(); } catch (e) { alert(e.message); }
+      refreshBankMovements();
+    }));
+    box.querySelectorAll("[data-bank-match-all]").forEach((b) => b.addEventListener("click", async () => {
+      if (!confirm("Marcar " + seguros.length + " movimientos como ya cargados (no se registra ningún pago nuevo)?")) return;
+      b.disabled = true;
+      let mal = 0;
+      for (const x of seguros) { try { await confirmarMatch(x); } catch (e) { mal += 1; } }
+      saveState();
+      if (mal) alert(mal + " no se pudieron marcar.");
+      refreshBankMovements();
+    }));
+    box.querySelectorAll("[data-bank-discard]").forEach((b) => b.addEventListener("click", async () => {
+      if (!confirm("¿No es un cobro de un cliente (por ejemplo una transferencia entre tus cuentas)? Se saca de la lista.")) return;
+      b.disabled = true;
+      try { await waInboxPost("/bank/movements/" + b.dataset.bankDiscard + "/discard", {}); } catch (e) { alert(e.message); }
+      refreshBankMovements();
+    }));
+    box.querySelectorAll("[data-bank-pay]").forEach((b) => b.addEventListener("click", async () => {
+      const x = item(b.dataset.bankPay);
+      if (!x) return;
+      const inp = box.querySelector(`[data-bank-client="${x.id}"]`);
+      const c = inp ? findClientByInput(inp.value) : null;
+      if (!c) return alert("Elegí el cliente.");
+      if (x.match && !confirm("Ojo: puede que ya esté cargado (" + x.match.id + "). ¿Registrar otro pago igual?")) return;
+      if (!confirm("Registrar pago por transferencia de " + formatMoney(x.monto) + " de " + c.id + " - " + c.name + " con fecha " + formatDate(x.fecha) + "?")) return;
+      b.disabled = true;
+      try {
+        recordPayment({ date: x.fecha, clientId: c.id, orderIds: [], amount: x.monto, method: "transferencia", receivedByUserId: currentUser.id, notes: ["Resumen " + (x.account || "banco"), x.descripcion].filter(Boolean).join(" · ").slice(0, 300) });
+        const pay = state.payments[state.payments.length - 1];
+        pay.bankMovementId = x.id;
+        learnPayer(x.cuit, x.nombre || x.descripcion, c.id);
+        saveState();
+        const llego = await confirmChangesReachedServer();
+        if (llego === "rechazado" || !(state.payments || []).some((p) => p.id === pay.id)) throw new Error("el servidor no aceptó el pago; revisá Pagos");
+        await waInboxPost("/bank/movements/" + x.id + "/done", { paymentId: pay.id, clientId: c.id });
+      } catch (e) { alert("No se pudo registrar: " + e.message); }
+      refreshBankMovements();
+    }));
   }
 
   // ---- Comprobantes viejos (historial de WhatsApp) ----
@@ -14695,6 +14839,7 @@
       `
       ${waReceiptsPanelHtml()}
       ${waHistoricPanelHtml()}
+      ${bankPanelHtml()}
       <div class="grid">
         <form id="payment-form" class="panel">
           <div class="form-grid payment-form-grid">

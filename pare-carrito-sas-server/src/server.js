@@ -3822,6 +3822,116 @@ app.post("/receipts/discard-chat", authenticate, requireRole("manager", "admin")
   res.json({ ok: true, descartados: rowCount });
 });
 
+// ---------- Resumenes bancarios (Brubank, Galicia Office...) ----------
+// Se sube el archivo (CSV, Excel .xlsx o PDF). Quedan solo los creditos. Cada uno se empareja con los
+// pagos ya cargados; los que faltan se registran desde la app con la fecha del banco.
+const bankImport = require("./bankImport");
+const BANK_PDF_PROMPT = [
+  "Este es el texto de un resumen o extracto de cuenta bancaria de Argentina.",
+  "Devolvé SOLO un JSON (sin texto alrededor) con la lista de los CRÉDITOS (plata que ENTRÓ a la cuenta; ignorá débitos, saldos, impuestos y comisiones):",
+  '[{"fecha":"AAAA-MM-DD","monto":número (ej. "45.300,50" es 45300.5),"descripcion":"texto del movimiento tal cual, con nombre y CUIT de quien pagó si figuran"}]',
+  "Si no hay créditos devolvé []."
+].join(" ");
+async function textLlm(prompt, text) {
+  if (!OPENROUTER_API_KEY) throw new Error("falta OPENROUTER_API_KEY para leer el PDF");
+  const r = await fetch(OPENROUTER_API_URL, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: "Bearer " + OPENROUTER_API_KEY, "HTTP-Referer": "https://parecarrito.app", "X-Title": "Pare Carrito" },
+    body: JSON.stringify({ model: OPENROUTER_VISION_MODEL, temperature: 0, max_tokens: 6000, messages: [{ role: "user", content: prompt + "\n\n" + text }] })
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(sanitizeExternalApiError(j && j.error && (j.error.message || j.error)) || "HTTP " + r.status);
+  return String((j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content) || "");
+}
+async function pdfBankCredits(buf) {
+  const { execFile } = require("child_process");
+  const os = require("os");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bank-"));
+  try {
+    fs.writeFileSync(path.join(dir, "in.pdf"), buf);
+    const texto = await new Promise((resolve, reject) => execFile("pdftotext", ["-layout", path.join(dir, "in.pdf"), "-"], { timeout: 60000, maxBuffer: 20 * 1024 * 1024 }, (err, out) => err ? reject(new Error(err.code === "ENOENT" ? "falta pdftotext en el servidor" : "no se pudo leer el PDF")) : resolve(out)));
+    if (!texto.trim()) throw new Error("el PDF no tiene texto (¿es una foto escaneada?)");
+    const out = [];
+    const lineas = texto.split("\n");
+    for (let i = 0; i < lineas.length; i += 250) {
+      const resp = await textLlm(BANK_PDF_PROMPT, lineas.slice(i, i + 250).join("\n"));
+      const a = resp.indexOf("["), b = resp.lastIndexOf("]");
+      if (a < 0 || b < a) continue;
+      let lista = [];
+      try { lista = JSON.parse(resp.slice(a, b + 1)); } catch (e) { continue; }
+      lista.forEach((x) => {
+        const monto = bankImport.parseMonto(x.monto);
+        const fecha = bankImport.parseFecha(x.fecha);
+        if (!(monto > 0) || !fecha) return;
+        const desc = String(x.descripcion || "").slice(0, 500);
+        const c = desc.match(bankImport.CUIT_RE);
+        out.push({ fecha, monto: Math.round(monto * 100) / 100, descripcion: desc, cuit: c ? c[1] + c[2] + c[3] : "", nombre: bankImport.nombrePagador(desc), saldo: null });
+      });
+    }
+    return out;
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+}
+
+app.post("/bank/import", authenticate, requireRole("manager", "admin"), async (req, res) => {
+  const b = req.body || {};
+  const fileName = String(b.fileName || "resumen").slice(0, 120);
+  const account = String(b.account || "").slice(0, 80);
+  const m = String(b.data || "").match(/^data:[^;]*;base64,(.+)$/);
+  const buf = Buffer.from(m ? m[1] : String(b.data || ""), "base64");
+  if (!buf.length) return res.status(400).json({ error: "Archivo vacío." });
+  if (buf.length > 15 * 1024 * 1024) return res.status(413).json({ error: "Archivo muy grande." });
+  let creditos;
+  try {
+    creditos = /\.pdf$/i.test(fileName) || buf.slice(0, 4).toString() === "%PDF" ? await pdfBankCredits(buf) : bankImport.parseBankFile(buf, fileName);
+  } catch (e) { return res.status(422).json({ error: "No se pudo leer el archivo: " + e.message }); }
+  let nuevos = 0;
+  const vistos = new Map();
+  for (const c of creditos) {
+    // Dos movimientos iguales el mismo dia (mismo monto y texto) son dos pagos: se numeran.
+    const base = [account, c.fecha, c.monto.toFixed(2), bankImport.nombrePagador(c.descripcion), c.saldo == null ? "" : c.saldo].join("|");
+    const k = (vistos.get(base) || 0) + 1;
+    vistos.set(base, k);
+    const hash = crypto.createHash("sha1").update(base + "|" + k).digest("hex");
+    const r = await pool.query("INSERT INTO bank_movements (hash, account, fecha, monto, descripcion, cuit, nombre, file_name, uploaded_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (hash) DO NOTHING RETURNING id", [hash, account || null, c.fecha, c.monto, c.descripcion, c.cuit || null, c.nombre || null, fileName, req.user.username]);
+    if (r.rows.length) nuevos += 1;
+  }
+  res.json({ ok: true, creditos: creditos.length, nuevos, repetidos: creditos.length - nuevos });
+});
+
+app.get("/bank/movements", authenticate, requireRole("manager", "admin"), async (req, res) => {
+  const estado = String(req.query.status || "pendiente");
+  const { rows } = await pool.query("SELECT id, account, fecha::text AS fecha, monto::float AS monto, descripcion, cuit, nombre, file_name, status, client_id, payment_id, handled_by, handled_at FROM bank_movements WHERE status = ANY($1) ORDER BY fecha DESC, id DESC LIMIT 2000", [estado.split(",")]);
+  // Cliente: por lo aprendido (CUIT o nombre de quien paga -> cliente). Pago ya cargado: mismo
+  // cliente (o, sin cliente, cualquier transferencia) con monto +-1 peso y fecha a 3 dias o menos.
+  try {
+    const stored = await loadStateData();
+    const data = (stored && stored.data) || {};
+    const mapa = (data.appSettings && data.appSettings.payerMap) || {};
+    const pagos = (data.payments || []).filter((p) => p && p.status !== "anulado");
+    const usados = new Set(pagos.filter((p) => p.bankMovementId).map((p) => p.id));
+    const dias = (a, b2) => Math.abs(new Date(a + "T00:00:00") - new Date(b2 + "T00:00:00")) / 86400000;
+    rows.filter((r) => r.status === "pendiente").sort((a, b2) => String(a.fecha).localeCompare(String(b2.fecha))).forEach((r) => {
+      const sug = (r.cuit && mapa["cuit:" + r.cuit]) || (r.nombre && mapa["nom:" + r.nombre]) || "";
+      if (!r.client_id && sug) r.client_id = sug;
+      const cand = pagos.filter((p) => !usados.has(p.id) && Math.abs(Number(p.amount || 0) - r.monto) <= 1 && dias(String(p.date || ""), r.fecha) <= 3 && (r.client_id ? (p.clientId === r.client_id || (p.groupClientIds || []).includes(r.client_id)) : p.method === "transferencia"))
+        .sort((x, y) => dias(String(x.date), r.fecha) - dias(String(y.date), r.fecha));
+      if (cand.length) { usados.add(cand[0].id); r.match = { id: cand[0].id, date: cand[0].date, amount: Number(cand[0].amount || 0), clientId: cand[0].clientId, seguro: !!r.client_id }; }
+    });
+  } catch (e) { /* sin sugerencias */ }
+  res.json({ ok: true, items: rows });
+});
+app.post("/bank/movements/:id/done", authenticate, requireRole("manager", "admin"), async (req, res) => {
+  const paymentId = String((req.body && req.body.paymentId) || "");
+  if (!paymentId) return res.status(400).json({ error: "Falta el pago." });
+  const { rows } = await pool.query("UPDATE bank_movements SET status = 'registrado', payment_id = $2, client_id = COALESCE($3, client_id), handled_by = $4, handled_at = now() WHERE id = $1 AND status = 'pendiente' RETURNING id", [req.params.id, paymentId, (req.body && req.body.clientId) || null, req.user.name || req.user.username]);
+  if (!rows.length) return res.status(409).json({ error: "Ese movimiento ya lo resolvió otra persona." });
+  res.json({ ok: true });
+});
+app.post("/bank/movements/:id/discard", authenticate, requireRole("manager", "admin"), async (req, res) => {
+  await pool.query("UPDATE bank_movements SET status = 'descartado', handled_by = $2, handled_at = now() WHERE id = $1 AND status = 'pendiente'", [req.params.id, req.user.name || req.user.username]);
+  res.json({ ok: true });
+});
+
 // Volver a leer con IA todos los que fallaron (por ejemplo, despues de arreglar la clave de la IA).
 // Se hace de a uno, en segundo plano.
 let rereadRunning = false;

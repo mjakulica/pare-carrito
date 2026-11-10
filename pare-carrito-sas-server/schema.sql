@@ -256,6 +256,28 @@ CREATE INDEX IF NOT EXISTS wa_receipts_status ON wa_receipts (status, created_at
 ALTER TABLE wa_receipts ADD COLUMN IF NOT EXISTS historic BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE wa_receipts ADD COLUMN IF NOT EXISTS msg_ts TIMESTAMPTZ;
 
+-- Movimientos de los resumenes bancarios (solo creditos): se emparejan con los pagos cargados y los
+-- que faltan se registran con su fecha.
+CREATE TABLE IF NOT EXISTS bank_movements (
+  id BIGSERIAL PRIMARY KEY,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  hash TEXT UNIQUE,
+  account TEXT,
+  fecha DATE NOT NULL,
+  monto NUMERIC(14,2) NOT NULL,
+  descripcion TEXT,
+  cuit TEXT,
+  nombre TEXT,
+  file_name TEXT,
+  status TEXT NOT NULL DEFAULT 'pendiente',
+  client_id TEXT,
+  payment_id TEXT,
+  handled_by TEXT,
+  handled_at TIMESTAMPTZ,
+  uploaded_by TEXT
+);
+CREATE INDEX IF NOT EXISTS bank_movements_status ON bank_movements (status, fecha);
+
 -- Archivo de mensajes del WhatsApp vinculado (chats individuales y grupos, recibidos y enviados).
 -- Respaldo por si bloquean el numero; se borra solo a los 90 dias.
 CREATE TABLE IF NOT EXISTS whatsapp_archive (
