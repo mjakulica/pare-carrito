@@ -3720,6 +3720,33 @@ app.get("/receipts", authenticate, requireRole("manager", "admin", "employee"), 
   const { rows } = estado === "todos"
     ? await pool.query("SELECT " + RECEIPT_COLS + " FROM wa_receipts WHERE status <> 'no_es' AND created_at > now() - interval '60 days' ORDER BY id DESC LIMIT 300")
     : await pool.query("SELECT " + RECEIPT_COLS + " FROM wa_receipts WHERE status = ANY($1) AND historic = $2 ORDER BY COALESCE(msg_ts, created_at) DESC LIMIT 1000", [estado.split(","), req.query.historic === "1"]);
+  // Quien lo mando: nombre del chat (agenda o grupo) del archivo y, si no estaba vinculado al llegar,
+  // el cliente que hoy tiene ese telefono o grupo (o el numero "NN)" con que esta agendado).
+  if (rows.length) {
+    try {
+      const chats = [...new Set(rows.map((r) => r.chat_id).filter(Boolean))];
+      const nombres = new Map();
+      if (chats.length) {
+        const q = await pool.query("SELECT DISTINCT ON (chat_id) chat_id, chat_name FROM whatsapp_archive WHERE chat_id = ANY($1) AND COALESCE(chat_name, '') <> '' ORDER BY chat_id, ts DESC", [chats]);
+        q.rows.forEach((x) => nombres.set(x.chat_id, x.chat_name));
+      }
+      const sinCliente = rows.filter((r) => !r.client_id);
+      const stored = sinCliente.length ? await loadStateData() : null;
+      const clientes = ((stored && stored.data && stored.data.clients) || []).filter((c) => c && c.isActive !== false);
+      rows.forEach((r) => {
+        r.chat_name = nombres.get(r.chat_id) || "";
+        if (r.client_id) return;
+        const chat = String(r.chat_id || "");
+        let c = null;
+        if (chat.endsWith("@g.us")) c = clientes.find((x) => Array.isArray(x.waGroups) && x.waGroups.includes(chat));
+        const tel = phoneDigits(r.phone || (chat.endsWith("@g.us") ? "" : chat));
+        if (!c && tel.length >= 8) c = clientes.find((x) => (x.phones || [x.phone]).some((ph) => phoneDigits(ph).length >= 8 && phoneDigits(ph).slice(-8) === tel.slice(-8)));
+        const k = r.chat_name.match(/^\s*(\d{1,4})\s*[)\-.:]/);
+        if (!c && k) c = clientes.find((x) => /^\d+$/.test(String(x.id)) && Number(x.id) === Number(k[1]));
+        if (c) r.client_id = c.id;
+      });
+    } catch (e) { /* sin nombres */ }
+  }
   // Comprobantes viejos: se buscan los pagos que ya estan cargados con TODO el historial del
   // servidor (en el celular solo estan los ultimos dias): mismo cliente, monto +-1 peso, fecha a 5
   // dias o menos, y cada pago se usa para un solo comprobante.
@@ -3765,6 +3792,26 @@ app.post("/receipts/:id/discard", authenticate, requireRole("manager", "admin", 
   await pool.query("UPDATE wa_receipts SET status = $2, handled_by = $3, handled_at = now() WHERE id = $1 AND status IN ('pendiente','procesando')", [req.params.id, estado, req.user.name || req.user.username]);
   res.json({ ok: true });
 });
+// Volver a leer con IA todos los que fallaron (por ejemplo, despues de arreglar la clave de la IA).
+// Se hace de a uno, en segundo plano.
+let rereadRunning = false;
+app.post("/receipts/reread-failed", authenticate, requireRole("manager", "admin"), async (req, res) => {
+  const { rows } = await pool.query("SELECT id, image_key FROM wa_receipts WHERE status = 'pendiente' AND ai IS NULL AND note IS NOT NULL ORDER BY id");
+  res.json({ ok: true, total: rows.length, yaCorriendo: rereadRunning });
+  if (rereadRunning) return;
+  rereadRunning = true;
+  try {
+    for (const r of rows) {
+      const file = path.join(UPLOAD_DIR, String(r.image_key || "").replace(/[^a-zA-Z0-9._-]/g, "_"));
+      if (!fs.existsSync(file)) continue;
+      const mime = /\.png$/.test(file) ? "image/png" : /\.webp$/.test(file) ? "image/webp" : "image/jpeg";
+      const b64 = fs.readFileSync(file).toString("base64");
+      await pool.query("UPDATE wa_receipts SET note = NULL WHERE id = $1", [r.id]);
+      await processReceipt(r.id, { mimeType: mime, base64: b64, byteLength: b64.length, dataUrl: "data:" + mime + ";base64," + b64 });
+    }
+  } finally { rereadRunning = false; }
+});
+
 // Volver a leer con IA (por ejemplo, si al llegar la IA no estaba configurada).
 app.post("/receipts/:id/reread", authenticate, requireRole("manager", "admin"), async (req, res) => {
   const { rows } = await pool.query("SELECT image_key FROM wa_receipts WHERE id = $1", [req.params.id]);
@@ -3993,7 +4040,7 @@ app.get("/whatsapp/history-receipts", authenticate, requireRole("manager", "admi
   res.status(r.ok ? 200 : 502).json(r);
 });
 app.post("/whatsapp/history-receipts", authenticate, requireRole("manager", "admin"), async (req, res) => {
-  const days = Math.max(0, Math.min(90, Number((req.body && req.body.days) || 0)));
+  const days = Math.max(0, Math.min(400, Number((req.body && req.body.days) || 0)));
   const r = await botRequest("/linked/history-receipts", { days });
   console.log("Comprobantes viejos: " + (days ? "buscar " + days + " días" : "apagado") + " por " + req.user.username + ".");
   res.status(r.ok ? 200 : 502).json(r);

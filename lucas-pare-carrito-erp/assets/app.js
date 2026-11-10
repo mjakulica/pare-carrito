@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v128";
+  const APP_VERSION = "v129";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -764,7 +764,7 @@
       const cuenta = receiptAccountMatch(ai);
       const datos = [ai.banco, ai.fecha ? formatDate(ai.fecha) + (ai.hora ? " " + ai.hora : "") : "", ai.operacion ? "Op " + ai.operacion : "", ai.origen_nombre ? "De: " + ai.origen_nombre : "", ai.destino_nombre || ai.destino_alias || ai.destino_cbu ? "A: " + [ai.destino_nombre, ai.destino_alias, ai.destino_cbu].filter(Boolean).join(" · ") : ""].filter(Boolean);
       return `<div class="wa-inbox-item" data-receipt-row="${x.id}">
-        <div class="wa-inbox-head"><strong>${c ? escapeHtml(c.id + " - " + c.name) : "Sin vincular: " + escapeHtml(x.phone ? formatWaPhone(x.phone) : "")}</strong>${x.sender_name ? ` <span class="muted">(${escapeHtml(x.sender_name)})</span>` : ""} <span class="muted">${escapeHtml(formatTimestampShort(x.created_at))}</span>${cuenta ? ` <span class="pill ${cuenta.providerId ? "blue" : "green"}">${escapeHtml(cuenta.name)}${cuenta.providerId && getProvider(cuenta.providerId) ? " · proveedor " + escapeHtml(getProvider(cuenta.providerId).name) : ""}</span>` : ""}${x.status === "procesando" ? ` <span class="pill gray">registrando...</span>` : ""}</div>
+        <div class="wa-inbox-head"><strong>${c ? escapeHtml(c.id + " - " + c.name) : "Sin vincular: " + escapeHtml(receiptWho(x))}</strong>${c ? ` <span class="muted">(${escapeHtml(receiptWho(x))})</span>` : ""} <span class="muted">${escapeHtml(formatTimestampShort(x.created_at))}</span>${cuenta ? ` <span class="pill ${cuenta.providerId ? "blue" : "green"}">${escapeHtml(cuenta.name)}${cuenta.providerId && getProvider(cuenta.providerId) ? " · proveedor " + escapeHtml(getProvider(cuenta.providerId).name) : ""}</span>` : ""}${x.status === "procesando" ? ` <span class="pill gray">registrando...</span>` : ""}</div>
         <div class="muted" style="font-size:13px;margin:4px 0">${datos.map(escapeHtml).join(" · ") || "Sin datos leídos"}${x.caption ? "<br>Mensaje: " + escapeHtml(x.caption) : ""}</div>
         ${prob.length ? `<div class="wa-inbox-auto">&#9888;&#65039; ${prob.map(escapeHtml).join(" · ")}</div>` : ""}
         <div class="page-actions wa-inbox-actions" style="flex-wrap:wrap">
@@ -782,10 +782,12 @@
         <button class="btn small ghost" type="button" data-receipts-refresh>Actualizar</button>
       </div>
       <p class="muted" style="font-size:13px;margin:4px 0 8px">Fotos de transferencias que llegaron al WhatsApp vinculado, leídas con IA. Revisá el cliente y el monto y tocá <strong>Registrar pago</strong>: se descuenta del saldo como una transferencia, con la foto como comprobante. ${cfg.auto ? "El modo automático está <strong>prendido</strong>: acá quedan solo los que no pasaron los controles." : "Se puede pasar a automático en Configuración."}</p>
+      ${items.some((x) => !x.ai) ? `<div class="page-actions" style="margin-bottom:8px"><button class="btn small primary" type="button" data-receipts-reread-all>Leer de nuevo los ${items.filter((x) => !x.ai).length} que no se pudieron leer</button></div>` : ""}
       <datalist id="receipt-clients">${activeClients().map((c) => `<option value="${escapeAttr(c.id + " - " + c.name)}"></option>`).join("")}</datalist>
       ${items.length ? items.map(fila).join("") : `<p class="muted" style="margin:0">No hay comprobantes por revisar.</p>`}`;
     const item = (id) => (ui.waReceipts || []).find((y) => String(y.id) === String(id));
     box.querySelectorAll("[data-receipts-refresh]").forEach((b) => b.addEventListener("click", () => refreshWaReceipts()));
+    box.querySelectorAll("[data-receipts-reread-all]").forEach((b) => b.addEventListener("click", () => rereadFailedReceipts(b, refreshWaReceipts)));
     box.querySelectorAll("[data-receipt-view]").forEach((b) => b.addEventListener("click", () => { const x = item(b.dataset.receiptView); if (x) openProofViewer(x.image_key, "", "Comprobante de WhatsApp"); }));
     box.querySelectorAll("[data-receipt-reread]").forEach((b) => b.addEventListener("click", async () => {
       b.disabled = true; b.textContent = "Leyendo...";
@@ -818,6 +820,7 @@
         await waInboxPost("/receipts/" + x.id + "/claim", {});
         const pay = await registerReceipt(x, c.id, monto, false);
         alert("Pago registrado: " + pay.id);
+        await offerLinkReceiptChat(x, c);
       } catch (e) {
         await waInboxPost("/receipts/" + x.id + "/release", {}).catch(() => {});
         alert("No se pudo registrar: " + e.message);
@@ -868,6 +871,29 @@
       ${historyReceiptsConfigHtml()}
     </div>`;
   }
+  // Quien mando el comprobante: nombre del chat (agenda o grupo), telefono y quien escribio.
+  function receiptWho(x) {
+    const grupo = String(x.chat_id || "").endsWith("@g.us") || x.is_group;
+    const tel = x.phone ? formatWaPhone(x.phone) : "";
+    const nombre = x.chat_name || "";
+    return (grupo ? "Grupo " + (nombre || "sin nombre") : [nombre, tel].filter(Boolean).join(" ") || x.chat_id || "número desconocido") + (x.sender_name ? " · mandó " + x.sender_name : "");
+  }
+  // Si el comprobante era de un chat sin vincular y se eligio el cliente, se ofrece vincularlo.
+  async function offerLinkReceiptChat(x, c) {
+    if (x.client_id || !x.chat_id || !c) return;
+    if (!confirm("¿Vincular " + receiptWho(x) + " al cliente " + c.id + " - " + c.name + "? Así los próximos pedidos y comprobantes de ese chat van solos a este cliente.")) return;
+    try { await waInboxPost("/whatsapp/archive/link", { chat: x.chat_id, clientId: c.id }); } catch (e) { alert("No se pudo vincular: " + e.message); }
+  }
+  async function rereadFailedReceipts(btn, after) {
+    btn.disabled = true;
+    try {
+      const j = await waInboxPost("/receipts/reread-failed", {});
+      alert(j.total ? "Leyendo de nuevo " + j.total + " comprobantes, de a uno. Tocá Actualizar en un rato." : "No hay comprobantes que hayan fallado.");
+    } catch (e) { alert(e.message); }
+    btn.disabled = false;
+    if (after) after();
+  }
+
   // ---- Comprobantes viejos (historial de WhatsApp) ----
   // Fecha del comprobante: la que leyo la IA o, si no, la del mensaje.
   function receiptDate(r) {
@@ -924,11 +950,12 @@
       const c = x.client_id ? getClient(x.client_id) : null;
       const prob = ya ? [] : receiptProblems(x, x.client_id, monto);
       return `<div class="wa-inbox-item">
-        <div class="wa-inbox-head"><strong>${escapeHtml(formatDate(receiptDate(x)))}</strong> · ${c ? escapeHtml(c.id + " - " + c.name) : "Sin vincular: " + escapeHtml(x.phone ? formatWaPhone(x.phone) : "")} · <strong>${monto ? formatMoney(monto) : "sin monto"}</strong> <span class="muted">${escapeHtml([ai.banco, ai.operacion ? "Op " + ai.operacion : "", ai.origen_nombre ? "De: " + ai.origen_nombre : ""].filter(Boolean).join(" · "))}</span></div>
+        <div class="wa-inbox-head"><strong>${escapeHtml(formatDate(receiptDate(x)))}</strong> · ${c ? escapeHtml(c.id + " - " + c.name) + ` <span class="muted">(${escapeHtml(receiptWho(x))})</span>` : "Sin vincular: " + escapeHtml(receiptWho(x))} · <strong>${monto ? formatMoney(monto) : "sin monto"}</strong> <span class="muted">${escapeHtml([ai.banco, ai.operacion ? "Op " + ai.operacion : "", ai.origen_nombre ? "De: " + ai.origen_nombre : ""].filter(Boolean).join(" · "))}</span></div>
         ${ya ? `<div class="muted" style="font-size:13px">&#9989; Ya está cargado: <strong>${escapeHtml(ya.id)}</strong> del ${escapeHtml(formatDate(ya.date))} por ${formatMoney(ya.amount)}</div>` : prob.length ? `<div class="wa-inbox-auto">&#9888;&#65039; ${prob.map(escapeHtml).join(" · ")}</div>` : ""}
         <div class="page-actions wa-inbox-actions" style="flex-wrap:wrap">
           ${ya ? `<button class="btn small primary" type="button" data-hist-match="${x.id}">Ok, ya estaba</button>` : `<input list="receipt-clients-h" data-hist-client="${x.id}" value="${c ? escapeAttr(c.id + " - " + c.name) : ""}" placeholder="Cliente" style="flex:1;min-width:160px" autocomplete="off" /><input data-hist-amount="${x.id}" inputmode="decimal" value="${monto ? escapeAttr(formatAmountInput(monto)) : ""}" placeholder="Monto" style="width:120px" /><button class="btn small primary" type="button" data-hist-pay="${x.id}">Registrar con fecha ${escapeHtml(formatDate(receiptDate(x)).slice(0, 5))}</button>`}
           <button class="btn small ghost" type="button" data-hist-view="${x.id}">Ver</button>
+          ${!x.ai ? `<button class="btn small ghost" type="button" data-receipt-reread="${x.id}">Leer de nuevo</button>` : ""}
           <button class="btn small ghost" type="button" data-hist-discard="${x.id}">Descartar</button>
         </div>
       </div>`;
@@ -940,10 +967,17 @@
       <p class="muted" style="font-size:13px;margin:4px 0 8px">Leídos del historial. Cada uno se compara con los pagos que ya están en el sistema (mismo cliente, mismo monto, hasta 5 días de diferencia). <strong>${yaCargados.length}</strong> ya están cargados y <strong>${faltan.length}</strong> no los encuentro. Nada se registra solo.</p>
       <datalist id="receipt-clients-h">${activeClients().map((c) => `<option value="${escapeAttr(c.id + " - " + c.name)}"></option>`).join("")}</datalist>
       ${yaCargados.length ? `<div class="page-actions" style="margin-bottom:8px"><button class="btn small blue" type="button" data-hist-match-all>Marcar los ${yaCargados.length} que ya estaban cargados</button></div>` : ""}
+      ${items.some((x) => !x.ai) ? `<div class="page-actions" style="margin-bottom:8px"><button class="btn small primary" type="button" data-receipts-reread-all>Leer de nuevo los ${items.filter((x) => !x.ai).length} que no se pudieron leer</button></div>` : ""}
       ${faltan.length ? `<h3 style="font-size:15px;margin:8px 0 4px">No los encuentro cargados (${faltan.length})</h3>${faltan.map(fila).join("")}` : ""}
       ${yaCargados.length ? `<details style="margin-top:8px"><summary><strong>Ya estaban cargados (${yaCargados.length})</strong></summary>${yaCargados.map(fila).join("")}</details>` : ""}`;
     const fila$ = (id) => (ui.waHistoricRows || []).find((f) => String(f.x.id) === String(id));
     box.querySelectorAll("[data-hist-refresh]").forEach((b) => b.addEventListener("click", () => refreshWaHistoric()));
+    box.querySelectorAll("[data-receipts-reread-all]").forEach((b) => b.addEventListener("click", () => rereadFailedReceipts(b, refreshWaHistoric)));
+    box.querySelectorAll("[data-receipt-reread]").forEach((b) => b.addEventListener("click", async () => {
+      b.disabled = true; b.textContent = "Leyendo...";
+      try { await waInboxPost("/receipts/" + b.dataset.receiptReread + "/reread", {}); } catch (e) { alert(e.message); }
+      refreshWaHistoric();
+    }));
     box.querySelectorAll("[data-hist-view]").forEach((b) => b.addEventListener("click", () => { const f = fila$(b.dataset.histView); if (f) openProofViewer(f.x.image_key, "", "Comprobante del " + formatDate(receiptDate(f.x))); }));
     box.querySelectorAll("[data-hist-discard]").forEach((b) => b.addEventListener("click", async () => {
       if (!confirm("¿Descartar este comprobante viejo sin registrar nada?")) return;
@@ -989,6 +1023,7 @@
         await waInboxPost("/receipts/" + f.x.id + "/claim", {});
         const pay = await registerReceipt(f.x, c.id, monto, false, fecha);
         b.textContent = "Registrado " + pay.id;
+        await offerLinkReceiptChat(f.x, c);
       } catch (e) {
         await waInboxPost("/receipts/" + f.x.id + "/release", {}).catch(() => {});
         alert("No se pudo registrar: " + e.message);
@@ -1003,7 +1038,7 @@
     return `<div class="auto-late" style="margin-top:10px">
       <strong style="font-size:14px">Buscar comprobantes viejos</strong>
       <p class="muted" style="font-size:13px;margin:2px 0 6px">Para leer las transferencias que mandaron antes: 1) elegí cuántos días y tocá <strong>Preparar</strong>; 2) en "WhatsApp vinculado" tocá <strong>Desvincular</strong> y después <strong>Vincular</strong> y escaneá el QR de nuevo. Al vincular, WhatsApp manda el historial con las fotos y el sistema las lee (el celular tiene que estar prendido). Aparecen en Pagos → "Comprobantes viejos", comparados con los pagos que ya cargaste. Nada se registra solo.</p>
-      <div class="page-actions" style="flex-wrap:wrap;gap:8px"><select id="hr-days" style="width:auto"><option value="30">30 días</option><option value="60">60 días</option><option value="90" selected>90 días</option></select><button class="btn small primary" type="button" id="hr-arm">Preparar</button><button class="btn small ghost" type="button" id="hr-off">Terminar búsqueda</button></div>
+      <div class="page-actions" style="flex-wrap:wrap;gap:8px"><select id="hr-days" style="width:auto"><option value="30">30 días</option><option value="60">60 días</option><option value="90" selected>90 días</option><option value="180">6 meses</option><option value="365">1 año</option></select><button class="btn small primary" type="button" id="hr-arm">Preparar</button><button class="btn small ghost" type="button" id="hr-off">Terminar búsqueda</button></div>
       <div id="hr-status" class="muted" style="font-size:13px;margin-top:6px"></div>
     </div>`;
   }

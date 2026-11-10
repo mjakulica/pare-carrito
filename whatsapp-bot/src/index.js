@@ -152,7 +152,7 @@ linked.init(async (msg) => {
   // Foto que llega al WhatsApp vinculado: puede ser un comprobante de transferencia. El servidor la
   // lee con IA y, si es un comprobante, queda en Pagos para registrarlo.
   let clientId = "";
-  try { const r = await erp.findClientByPhone(img.from, img.group || ""); clientId = (r && (r.clientId || (r.client && r.client.id))) || ""; } catch (e) { /* sin vincular */ }
+  try { const r = await erp.findClientByPhone(img.from || "0", img.group || ""); clientId = (r && (r.clientId || (r.client && r.client.id))) || ""; } catch (e) { /* sin vincular */ }
   await erp.receipt({ waId: img.waId, phone: img.from, chatId: img.group || img.from, isGroup: !!img.group, clientId, senderName: img.name, caption: img.caption, imageData: img.imageData, pdfData: img.pdfData, historic: !!img.historico, ts: img.ts });
 });
 
