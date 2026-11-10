@@ -3798,8 +3798,9 @@ app.post("/receipts/:id/done", authenticate, requireRole("manager", "admin", "em
   const paymentId = String((req.body && req.body.paymentId) || "");
   if (!paymentId) return res.status(400).json({ error: "Falta el pago." });
   const quien = (req.body && req.body.auto ? "Automático (" : "") + (req.user.name || req.user.username) + (req.body && req.body.auto ? ")" : "");
-  const { rows } = await pool.query("UPDATE wa_receipts SET status = 'registrado', payment_id = $2, handled_by = $3, handled_at = now(), client_id = COALESCE($4, client_id) WHERE id = $1 AND status IN ('pendiente','procesando') RETURNING id", [req.params.id, paymentId, quien, (req.body && req.body.clientId) || null]);
+  const { rows } = await pool.query("UPDATE wa_receipts SET status = 'registrado', payment_id = $2, handled_by = $3, handled_at = now(), client_id = COALESCE($4, client_id) WHERE id = $1 AND status IN ('pendiente','procesando') RETURNING id, client_id", [req.params.id, paymentId, quien, (req.body && req.body.clientId) || null]);
   if (!rows.length) return res.status(409).json({ error: "Ese comprobante ya lo resolvió otra persona." });
+  await closeBankTwinOfReceipt(req.params.id, paymentId, rows[0].client_id).catch(() => {});
   res.json({ ok: true });
 });
 app.post("/receipts/:id/discard", authenticate, requireRole("manager", "admin", "employee"), async (req, res) => {
@@ -3821,6 +3822,24 @@ app.post("/receipts/discard-chat", authenticate, requireRole("manager", "admin")
   const { rowCount } = await pool.query("UPDATE wa_receipts SET status = 'descartado', handled_by = $2, handled_at = now(), note = 'chat excluido' WHERE status = 'pendiente' AND chat_id = $1", [chat, req.user.name || req.user.username]);
   res.json({ ok: true, descartados: rowCount });
 });
+
+// ---------- Comprobante de WhatsApp <-> movimiento del banco ----------
+// Son el mismo pago si coinciden el monto (+-1 peso), la fecha (3 dias o menos) y el cliente (o uno
+// de los dos no tiene cliente). Cuando se registra el pago por un lado, el otro se cierra solo con ese
+// mismo pago, siempre que haya UNO solo que coincida (si hay dudas, queda para revisar).
+const RECEIPT_DATE_SQL = "COALESCE(NULLIF(ai->>'fecha',''), to_char((COALESCE(msg_ts, created_at) AT TIME ZONE 'America/Argentina/Buenos_Aires'), 'YYYY-MM-DD'))";
+async function closeBankTwinOfReceipt(receiptId, paymentId, clientId) {
+  const r = (await pool.query("SELECT (ai->>'monto')::numeric AS monto, " + RECEIPT_DATE_SQL + " AS fecha FROM wa_receipts WHERE id = $1", [receiptId])).rows[0];
+  if (!r || !(Number(r.monto) > 0) || !/^\d{4}-\d{2}-\d{2}$/.test(r.fecha || "")) return;
+  const { rows } = await pool.query("SELECT id FROM bank_movements WHERE status = 'pendiente' AND abs(monto - $1) <= 1 AND abs(fecha - $2::date) <= 3 AND (client_id IS NULL OR client_id = $3)", [r.monto, r.fecha, clientId || null]);
+  if (rows.length === 1) await pool.query("UPDATE bank_movements SET status = 'registrado', payment_id = $2, client_id = COALESCE(client_id, $3), handled_by = 'Automático (mismo pago que el comprobante de WhatsApp)', handled_at = now() WHERE id = $1 AND status = 'pendiente'", [rows[0].id, paymentId, clientId || null]);
+}
+async function closeReceiptTwinOfBank(bankId, paymentId, clientId) {
+  const m = (await pool.query("SELECT monto, fecha::text AS fecha FROM bank_movements WHERE id = $1", [bankId])).rows[0];
+  if (!m) return;
+  const { rows } = await pool.query("SELECT id FROM wa_receipts WHERE status = 'pendiente' AND abs((ai->>'monto')::numeric - $1) <= 1 AND abs(" + RECEIPT_DATE_SQL + "::date - $2::date) <= 3 AND (client_id IS NULL OR client_id = $3) AND ai ? 'monto' AND ai->>'monto' IS NOT NULL", [m.monto, m.fecha, clientId || null]);
+  if (rows.length === 1) await pool.query("UPDATE wa_receipts SET status = 'registrado', payment_id = $2, client_id = COALESCE(client_id, $3), handled_by = 'Automático (mismo pago que el resumen del banco)', handled_at = now() WHERE id = $1 AND status = 'pendiente'", [rows[0].id, paymentId, clientId || null]);
+}
 
 // ---------- Resumenes bancarios (Brubank, Galicia Office...) ----------
 // Se sube el archivo (CSV, Excel .xlsx o PDF). Quedan solo los creditos. Cada uno se empareja con los
@@ -3917,14 +3936,21 @@ app.get("/bank/movements", authenticate, requireRole("manager", "admin"), async 
         .sort((x, y) => dias(String(x.date), r.fecha) - dias(String(y.date), r.fecha));
       if (cand.length) { usados.add(cand[0].id); r.match = { id: cand[0].id, date: cand[0].date, amount: Number(cand[0].amount || 0), clientId: cand[0].clientId, seguro: !!r.client_id }; }
     });
+    // Comprobante de WhatsApp pendiente que parece el mismo pago: se muestra y da el cliente.
+    const pend = (await pool.query("SELECT id, client_id, sender_name, (ai->>'monto')::float AS monto, " + RECEIPT_DATE_SQL + " AS fecha FROM wa_receipts WHERE status = 'pendiente' AND ai ? 'monto' AND ai->>'monto' IS NOT NULL")).rows;
+    rows.filter((r) => r.status === "pendiente").forEach((r) => {
+      const t = pend.filter((x) => Math.abs(Number(x.monto) - r.monto) <= 1 && dias(String(x.fecha), r.fecha) <= 3 && (!r.client_id || !x.client_id || x.client_id === r.client_id));
+      if (t.length === 1) { r.receipt = { id: t[0].id, client_id: t[0].client_id, sender: t[0].sender_name || "" }; if (!r.client_id && t[0].client_id) r.client_id = t[0].client_id; }
+    });
   } catch (e) { /* sin sugerencias */ }
   res.json({ ok: true, items: rows });
 });
 app.post("/bank/movements/:id/done", authenticate, requireRole("manager", "admin"), async (req, res) => {
   const paymentId = String((req.body && req.body.paymentId) || "");
   if (!paymentId) return res.status(400).json({ error: "Falta el pago." });
-  const { rows } = await pool.query("UPDATE bank_movements SET status = 'registrado', payment_id = $2, client_id = COALESCE($3, client_id), handled_by = $4, handled_at = now() WHERE id = $1 AND status = 'pendiente' RETURNING id", [req.params.id, paymentId, (req.body && req.body.clientId) || null, req.user.name || req.user.username]);
+  const { rows } = await pool.query("UPDATE bank_movements SET status = 'registrado', payment_id = $2, client_id = COALESCE($3, client_id), handled_by = $4, handled_at = now() WHERE id = $1 AND status = 'pendiente' RETURNING id, client_id", [req.params.id, paymentId, (req.body && req.body.clientId) || null, req.user.name || req.user.username]);
   if (!rows.length) return res.status(409).json({ error: "Ese movimiento ya lo resolvió otra persona." });
+  await closeReceiptTwinOfBank(req.params.id, paymentId, rows[0].client_id).catch(() => {});
   res.json({ ok: true });
 });
 app.post("/bank/movements/:id/discard", authenticate, requireRole("manager", "admin"), async (req, res) => {
