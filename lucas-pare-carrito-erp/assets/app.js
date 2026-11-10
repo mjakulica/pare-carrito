@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v131";
+  const APP_VERSION = "v132";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -8522,8 +8522,8 @@
     const value = Number(margin || 0);
     return (MARGIN_BANDS.find((band) => value < band.max) || MARGIN_BANDS[MARGIN_BANDS.length - 1]).cls;
   }
-  function marginLegendHtml() {
-    return `<div class="margin-legend"><strong>Margen:</strong>${MARGIN_BANDS.map((band) => `<span class="${band.cls}">${escapeHtml(band.label)}</span>`).join("")}</div>`;
+  function marginLegendHtml(clickable) {
+    return `<div class="margin-legend"><strong>Margen:</strong>${MARGIN_BANDS.map((band, i) => `<span class="${band.cls}${clickable ? " sortable" : ""}" ${clickable ? `data-price-band="${i}" title="Mostrar primero los de ${escapeAttr(band.label)}"` : ""}>${escapeHtml(band.label)}</span>`).join("")}</div>`;
   }
 
   function pricesBelowMinMarginBannerHtml() {
@@ -8570,7 +8570,7 @@
       `
       ${pricesBelowMinMarginBannerHtml()}
       <div class="panel">
-        ${marginLegendHtml()}
+        ${marginLegendHtml(true)}
         <div class="price-search-bar">
           <input id="price-search" list="price-search-options" placeholder="Buscar producto e ir a su linea..." autocomplete="off" />
           <datalist id="price-search-options">${ordenarOpcionesPorTexto(activeProductsByName().map((product) => `<option value="${escapeAttr(product.name)}"></option>`).join("") + datalistOptionsSinTildes(activeProductsByName().map((product) => product.name)))}</datalist>
@@ -8579,7 +8579,7 @@
         </div>
         <div class="table-wrap">
           <table class="prices-table">
-            <thead><tr><th>Producto</th><th>Costo</th><th>Precio mercado</th><th>Margen %</th><th>Precio lista</th><th>Sección</th><th>Auto</th></tr></thead>
+            <thead><tr><th class="sortable" data-price-sort="nombre">Producto</th><th class="sortable" data-price-sort="costo">Costo</th><th class="sortable" data-price-sort="mercado">Precio mercado</th><th class="sortable" data-price-sort="margen">Margen %</th><th class="sortable" data-price-sort="precio">Precio lista</th><th>Sección</th><th>Auto</th></tr></thead>
             <tbody>${rows}</tbody>
           </table>
         </div>
@@ -8606,7 +8606,54 @@
     );
   }
 
+  // Orden momentaneo de la lista de precios: tocando el titulo de una columna (o un tramo de margen
+  // de la leyenda). No se guarda: al recargar o cambiar de pagina vuelve el orden de siempre. Se
+  // ordena moviendo las filas, asi no se pierde lo que ya se escribio.
+  window.addEventListener("hashchange", () => { ui.priceSort = null; });
+  function applyPriceSort() {
+    const tbody = document.querySelector(".prices-table tbody");
+    if (!tbody) return;
+    const filas = Array.from(tbody.querySelectorAll("[data-price-row]"));
+    const ps = ui.priceSort;
+    const val = (row, key) => {
+      if (key === "nombre") { const p = getProduct(row.dataset.priceRow); return normalizeText(p ? p.name : ""); }
+      const sel = { costo: "[data-cost]", mercado: "[data-market-price]", margen: "[data-margin-pct]", precio: "[data-sale-price]" }[key];
+      const inp = row.querySelector(sel);
+      return inp ? parseAmount(inp.value) : 0;
+    };
+    const orden = new Map(filas.map((r, i) => [r, Number(r.dataset.defaultOrder != null ? r.dataset.defaultOrder : (r.dataset.defaultOrder = i))]));
+    let lista = filas.slice();
+    if (!ps) lista.sort((a, b) => orden.get(a) - orden.get(b));
+    else if (ps.band != null) {
+      const band = MARGIN_BANDS[ps.band];
+      const enTramo = (r) => marginBandClass(val(r, "margen")) === band.cls;
+      lista.sort((a, b) => (enTramo(b) - enTramo(a)) || (val(a, "margen") - val(b, "margen")));
+    } else {
+      lista.sort((a, b) => { const x = val(a, ps.key), y = val(b, ps.key); const c = typeof x === "string" ? x.localeCompare(y) : x - y; return (ps.dir === "desc" ? -c : c) || (orden.get(a) - orden.get(b)); });
+    }
+    lista.forEach((r) => tbody.appendChild(r));
+    document.querySelectorAll("[data-price-sort]").forEach((th) => {
+      const activo = ps && ps.key === th.dataset.priceSort;
+      th.classList.toggle("sorted", !!activo);
+      th.dataset.arrow = activo ? (ps.dir === "desc" ? " ▼" : " ▲") : "";
+    });
+    document.querySelectorAll("[data-price-band]").forEach((el) => el.classList.toggle("band-active", !!(ps && String(ps.band) === el.dataset.priceBand)));
+  }
+
   function bindPrices() {
+    document.querySelectorAll("[data-price-sort]").forEach((th) => th.addEventListener("click", () => {
+      const key = th.dataset.priceSort;
+      const ps = ui.priceSort;
+      // Primer toque: de menor a mayor (A-Z); segundo: al reves; tercero: el orden de siempre.
+      ui.priceSort = !ps || ps.key !== key ? { key, dir: "asc" } : ps.dir === "asc" ? { key, dir: "desc" } : null;
+      applyPriceSort();
+    }));
+    document.querySelectorAll("[data-price-band]").forEach((el) => el.addEventListener("click", () => {
+      const band = Number(el.dataset.priceBand);
+      ui.priceSort = ui.priceSort && ui.priceSort.band === band ? null : { band };
+      applyPriceSort();
+    }));
+    if (ui.priceSort) applyPriceSort();
     const recalcRow = (row, source) => {
       const costInput = row.querySelector("[data-cost]");
       const marginInput = row.querySelector("[data-margin-pct]");

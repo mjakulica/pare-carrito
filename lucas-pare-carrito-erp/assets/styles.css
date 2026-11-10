@@ -4095,6 +4095,12 @@ tr:last-child td {
   border-radius: 999px;
   border: 1px solid rgba(15, 23, 42, 0.12);
 }
+/* Orden momentaneo de la lista de precios */
+.prices-table th.sortable, .margin-legend span.sortable { cursor: pointer; user-select: none; }
+.prices-table th.sortable:hover { text-decoration: underline; }
+.prices-table th.sortable::after { content: attr(data-arrow); }
+.prices-table th.sorted { color: var(--green, #0f7a52); }
+.margin-legend span.band-active { outline: 2px solid #0f172a; font-weight: 700; }
 
 /* Cuanto falta comprar del producto, debajo del nombre en la linea de compra. */
 .purchase-line .pl-falta {
