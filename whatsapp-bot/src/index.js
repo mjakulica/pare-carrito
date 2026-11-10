@@ -99,6 +99,8 @@ const linkedAuth = (req, res, next) => {
   next();
 };
 app.get("/linked/status", linkedAuth, (req, res) => res.json({ ok: true, ...linked.status(), stats: linkedStats, ia: !!config.openrouter.apiKey }));
+app.post("/linked/history-receipts", linkedAuth, (req, res) => res.json({ ok: true, ...linked.setHistoryReceipts(Number((req.body && req.body.days) || 0)) }));
+app.get("/linked/history-receipts", linkedAuth, (req, res) => res.json({ ok: true, ...linked.historyStatus() }));
 app.post("/linked/start", linkedAuth, async (req, res) => res.json({ ok: true, ...(await linked.startLinking()) }));
 app.get("/linked/contacts", linkedAuth, (req, res) => res.json({ ok: true, connected: linked.isConnected(), contacts: linked.listContacts(), lids: linked.listLids() }));
 app.post("/linked/mode", linkedAuth, (req, res) => res.json({ ok: true, ...linked.setReceiveOnly(!!(req.body && req.body.receiveOnly)) }));
@@ -151,7 +153,7 @@ linked.init(async (msg) => {
   // lee con IA y, si es un comprobante, queda en Pagos para registrarlo.
   let clientId = "";
   try { const r = await erp.findClientByPhone(img.from, img.group || ""); clientId = (r && (r.clientId || (r.client && r.client.id))) || ""; } catch (e) { /* sin vincular */ }
-  await erp.receipt({ waId: img.waId, phone: img.from, chatId: img.group || img.from, isGroup: !!img.group, clientId, senderName: img.name, caption: img.caption, imageData: img.imageData, pdfData: img.pdfData });
+  await erp.receipt({ waId: img.waId, phone: img.from, chatId: img.group || img.from, isGroup: !!img.group, clientId, senderName: img.name, caption: img.caption, imageData: img.imageData, pdfData: img.pdfData, historic: !!img.historico, ts: img.ts });
 });
 
 async function handleMessage(msg, flowIn, waIn) {

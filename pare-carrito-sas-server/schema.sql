@@ -252,6 +252,9 @@ CREATE TABLE IF NOT EXISTS wa_receipts (
   claimed_at TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS wa_receipts_status ON wa_receipts (status, created_at);
+-- Comprobantes viejos (del historial al volver a vincular): se revisan aparte.
+ALTER TABLE wa_receipts ADD COLUMN IF NOT EXISTS historic BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE wa_receipts ADD COLUMN IF NOT EXISTS msg_ts TIMESTAMPTZ;
 
 -- Archivo de mensajes del WhatsApp vinculado (chats individuales y grupos, recibidos y enviados).
 -- Respaldo por si bloquean el numero; se borra solo a los 90 dias.

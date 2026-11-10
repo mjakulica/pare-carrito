@@ -3704,22 +3704,42 @@ app.post("/external/wa-receipt", externalAuth, async (req, res) => {
   fs.writeFileSync(path.join(UPLOAD_DIR, key), Buffer.from(image.base64, "base64"));
   await pool.query("INSERT INTO proofs (key, content_type, uploaded_by) VALUES ($1,$2,$3)", [key, image.mimeType, "whatsapp"]);
   const { rows } = await pool.query(
-    "INSERT INTO wa_receipts (wa_id, phone, chat_id, is_group, client_id, sender_name, caption, image_key) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (wa_id) DO NOTHING RETURNING id",
-    [waId, phoneDigits(b.phone) || null, String(b.chatId || "").slice(0, 80) || null, !!b.isGroup, b.clientId ? String(b.clientId) : null, String(b.senderName || "").slice(0, 120), String(b.caption || "").slice(0, 500), key]
+    "INSERT INTO wa_receipts (wa_id, phone, chat_id, is_group, client_id, sender_name, caption, image_key, historic, msg_ts) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (wa_id) DO NOTHING RETURNING id",
+    [waId, phoneDigits(b.phone) || null, String(b.chatId || "").slice(0, 80) || null, !!b.isGroup, b.clientId ? String(b.clientId) : null, String(b.senderName || "").slice(0, 120), String(b.caption || "").slice(0, 500), key, !!b.historic, Number(b.ts) > 0 ? new Date(Number(b.ts)) : null]
   );
   if (!rows.length) return res.json({ ok: true, repetido: true });
   res.json({ ok: true, id: rows[0].id });
   processReceipt(rows[0].id, image).catch(() => {});
 });
 
-const RECEIPT_COLS = "id, created_at, phone, chat_id, is_group, client_id, sender_name, caption, image_key, status, ai, dup_of, note, payment_id, handled_by, handled_at";
+const RECEIPT_COLS = "id, created_at, phone, chat_id, is_group, client_id, sender_name, caption, image_key, status, ai, dup_of, note, payment_id, handled_by, handled_at, historic, msg_ts";
 app.get("/receipts", authenticate, requireRole("manager", "admin", "employee"), async (req, res) => {
   // Los que quedaron "procesando" mas de 10 minutos (un equipo se colgo) vuelven a pendientes.
   await pool.query("UPDATE wa_receipts SET status = 'pendiente', claimed_at = NULL WHERE status = 'procesando' AND claimed_at < now() - interval '10 minutes'");
   const estado = String(req.query.status || "pendiente");
   const { rows } = estado === "todos"
     ? await pool.query("SELECT " + RECEIPT_COLS + " FROM wa_receipts WHERE status <> 'no_es' AND created_at > now() - interval '60 days' ORDER BY id DESC LIMIT 300")
-    : await pool.query("SELECT " + RECEIPT_COLS + " FROM wa_receipts WHERE status = ANY($1) ORDER BY id DESC LIMIT 200", [estado.split(",")]);
+    : await pool.query("SELECT " + RECEIPT_COLS + " FROM wa_receipts WHERE status = ANY($1) AND historic = $2 ORDER BY COALESCE(msg_ts, created_at) DESC LIMIT 1000", [estado.split(","), req.query.historic === "1"]);
+  // Comprobantes viejos: se buscan los pagos que ya estan cargados con TODO el historial del
+  // servidor (en el celular solo estan los ultimos dias): mismo cliente, monto +-1 peso, fecha a 5
+  // dias o menos, y cada pago se usa para un solo comprobante.
+  if (req.query.historic === "1" && rows.length) {
+    try {
+      const stored = await loadStateData();
+      const pagos = ((stored && stored.data && stored.data.payments) || []).filter((p) => p && p.status !== "anulado");
+      const usados = new Set(pagos.filter((p) => p.receiptId).map((p) => p.id));
+      const fechaDe = (r) => (r.ai && r.ai.fecha) || new Date(new Date(r.msg_ts || r.created_at).getTime() - 3 * 3600000).toISOString().slice(0, 10);
+      const dias = (a, b2) => Math.abs(new Date(a + "T00:00:00") - new Date(b2 + "T00:00:00")) / 86400000;
+      rows.forEach((r) => {
+        const monto = Number((r.ai && r.ai.monto) || 0);
+        if (!r.client_id || !(monto > 0)) return;
+        const f = fechaDe(r);
+        const m = pagos.filter((p) => !usados.has(p.id) && (p.clientId === r.client_id || (p.groupClientIds || []).includes(r.client_id)) && Math.abs(Number(p.amount || 0) - monto) <= 1 && dias(String(p.date || ""), f) <= 5)
+          .sort((x, y) => dias(String(x.date), f) - dias(String(y.date), f))[0];
+        if (m) { usados.add(m.id); r.match = { id: m.id, date: m.date, amount: Number(m.amount || 0) }; }
+      });
+    } catch (e) { /* sin comparacion */ }
+  }
   res.json({ ok: true, items: rows });
 });
 app.post("/receipts/:id/claim", authenticate, requireRole("manager", "admin", "employee"), async (req, res) => {
@@ -3961,6 +3981,21 @@ app.get("/whatsapp/linked", authenticate, requireRole("manager", "admin"), async
       r.hoy = { mensajes: a.rows[0].n, bandeja: b.rows[0].n, pendientes: b.rows[0].pend };
     } catch (e) { /* sin datos */ }
   }
+  res.status(r.ok ? 200 : 502).json(r);
+});
+// Buscar comprobantes viejos: se prende en el bot antes de volver a vincular (ver linked.js).
+app.get("/whatsapp/history-receipts", authenticate, requireRole("manager", "admin"), async (req, res) => {
+  const r = await botRequest("/linked/history-receipts");
+  try {
+    const c = await pool.query("SELECT count(*)::int AS total, count(*) FILTER (WHERE status = 'leyendo')::int AS leyendo, count(*) FILTER (WHERE status IN ('pendiente','procesando'))::int AS pendientes, count(*) FILTER (WHERE status = 'registrado')::int AS registrados, count(*) FILTER (WHERE status = 'no_es')::int AS no_es FROM wa_receipts WHERE historic");
+    r.servidor = c.rows[0];
+  } catch (e) { /* sin datos */ }
+  res.status(r.ok ? 200 : 502).json(r);
+});
+app.post("/whatsapp/history-receipts", authenticate, requireRole("manager", "admin"), async (req, res) => {
+  const days = Math.max(0, Math.min(90, Number((req.body && req.body.days) || 0)));
+  const r = await botRequest("/linked/history-receipts", { days });
+  console.log("Comprobantes viejos: " + (days ? "buscar " + days + " días" : "apagado") + " por " + req.user.username + ".");
   res.status(r.ok ? 200 : 502).json(r);
 });
 app.post("/whatsapp/linked/:action", authenticate, requireRole("manager", "admin"), async (req, res) => {

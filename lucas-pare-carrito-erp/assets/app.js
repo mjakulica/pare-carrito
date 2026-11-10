@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v127";
+  const APP_VERSION = "v128";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -651,7 +651,7 @@
     if (r.dup_of) out.push("el número de operación ya llegó en otro comprobante (#" + r.dup_of + ")");
     const cfg = receiptCfg();
     if (cfg.checkAccount && cfg.accounts.length && !receiptAccountMatch(ai)) out.push("no va a ninguna de tus cuentas" + (ai.destino_nombre ? " (dice: " + ai.destino_nombre + ")" : ""));
-    if (ai.fecha && ai.fecha < addDaysISO(todayISO(), -7)) out.push("es de hace más de una semana (" + formatDate(ai.fecha) + ")");
+    if (!r.historic && ai.fecha && ai.fecha < addDaysISO(todayISO(), -7)) out.push("es de hace más de una semana (" + formatDate(ai.fecha) + ")");
     // Cuenta de un proveedor: el cliente le pago directo al proveedor; tambien baja lo que le debemos.
     const cta = receiptAccountMatch(ai);
     const prov = cta && cta.providerId ? getProvider(cta.providerId) : null;
@@ -660,17 +660,18 @@
       const deuda = getProviderBalance(prov.id);
       if (amount > deuda + 0.005) out.push("es más de lo que le debés a " + prov.name + " (saldo " + formatMoney(deuda) + ")");
     }
-    if (clientId && amount > 0) {
+    if (clientId && amount > 0 && !r.historic) {
       const desde = addDaysISO(todayISO(), -3);
       const igual = (state.payments || []).find((p) => p && p.clientId === clientId && p.status !== "anulado" && Math.abs(Number(p.amount || 0) - amount) < 0.01 && String(p.date || "") >= desde);
       if (igual) out.push("ya hay un pago igual de este cliente (" + igual.id + " del " + formatDate(igual.date) + ")");
     }
     return out;
   }
-  async function registerReceipt(r, clientId, amount, auto) {
+  async function registerReceipt(r, clientId, amount, auto, fecha) {
     const ai = r.ai || {};
     const cuenta = receiptAccountMatch(ai);
     recordPayment({
+      date: fecha || "",
       clientId,
       orderIds: [],
       amount,
@@ -689,7 +690,7 @@
     const prov = cuenta && cuenta.providerId ? getProvider(cuenta.providerId) : null;
     if (prov) {
       const c = getClient(clientId);
-      const pp = processProviderPayment({ provider: prov, mode: "partial", amount, method: "transferencia", cashBoxId: "cash-banco", date: todayISO(), notes: "Pago directo del cliente " + (c ? c.id + " - " + c.name : clientId) + " (" + pay.id + ")" + (ai.operacion ? " · Op " + ai.operacion : "") });
+      const pp = processProviderPayment({ provider: prov, mode: "partial", amount, method: "transferencia", cashBoxId: "cash-banco", date: fecha || todayISO(), notes: "Pago directo del cliente " + (c ? c.id + " - " + c.name : clientId) + " (" + pay.id + ")" + (ai.operacion ? " · Op " + ai.operacion : "") });
       if (pp) { pay.providerPaymentId = pp.id; pay.paidToProviderId = prov.id; pay.notes = (pay.notes ? pay.notes + " · " : "") + "pagado directo a " + prov.name + " (" + pp.id + ")"; }
     }
     saveState();
@@ -864,8 +865,170 @@
       </div>
       <p class="muted" style="font-size:12px;margin:4px 0 0">Cuenta de un proveedor: cuando un cliente le transfiere directo a ese proveedor, al registrar el pago se descuenta el saldo del cliente <strong>y</strong> lo que le debés al proveedor.</p>
       <div class="page-actions" style="margin-top:6px"><button class="btn small primary" type="button" id="rc-add">Agregar cuenta</button></div>
+      ${historyReceiptsConfigHtml()}
     </div>`;
   }
+  // ---- Comprobantes viejos (historial de WhatsApp) ----
+  // Fecha del comprobante: la que leyo la IA o, si no, la del mensaje.
+  function receiptDate(r) {
+    const ai = r.ai || {};
+    if (ai.fecha) return ai.fecha;
+    const t = r.msg_ts || r.created_at;
+    return t ? new Date(new Date(t).getTime() - 3 * 3600000).toISOString().slice(0, 10) : todayISO();
+  }
+  // Pago que ya esta cargado para ese comprobante: mismo cliente, mismo monto (+-1 peso) y fecha a 5
+  // dias o menos. "usados": pagos ya emparejados con otro comprobante de la lista.
+  function receiptExistingPayment(r, clientId, amount, usados) {
+    if (!clientId || !(amount > 0)) return null;
+    const f = receiptDate(r);
+    const dias = (a, b) => Math.abs(new Date(a + "T00:00:00") - new Date(b + "T00:00:00")) / 86400000;
+    return (state.payments || []).filter((p) => p && p.status !== "anulado" && (p.clientId === clientId || (p.groupClientIds || []).includes(clientId)) && Math.abs(Number(p.amount || 0) - amount) <= 1 && !(usados && usados.has(p.id)) && !(p.receiptId && String(p.receiptId) !== String(r.id)) && dias(String(p.date || f), f) <= 5)
+      .sort((a, b) => dias(String(a.date), f) - dias(String(b.date), f))[0] || null;
+  }
+
+  function waHistoricPanelHtml() {
+    if (!currentUser || !["manager", "admin"].includes(currentUser.role)) return "";
+    afterRender.push(() => refreshWaHistoric());
+    return `<div class="panel" id="wa-historic" style="margin-bottom:14px;display:none"></div>`;
+  }
+  async function refreshWaHistoric() {
+    const box = document.getElementById("wa-historic");
+    if (!box) return;
+    try {
+      const r = await cloudRequest(getCloudSyncConfig(), "/receipts?status=pendiente,procesando&historic=1", { method: "GET" });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) return;
+      ui.waHistoric = j.items || [];
+    } catch (e) { return; }
+    paintWaHistoric();
+  }
+  function paintWaHistoric() {
+    const box = document.getElementById("wa-historic");
+    if (!box) return;
+    const items = ui.waHistoric || [];
+    if (!items.length) { box.style.display = "none"; return; }
+    box.style.display = "";
+    // La comparacion la hace el servidor (tiene todos los pagos); si no vino, la de este equipo.
+    const usados = new Set(items.filter((x) => x.match).map((x) => x.match.id));
+    const filas = items.map((x) => {
+      const monto = Number((x.ai && x.ai.monto) || 0);
+      let ya = x.match || null;
+      if (!ya) { ya = receiptExistingPayment(x, x.client_id, monto, usados); if (ya) usados.add(ya.id); }
+      return { x, monto, ya };
+    });
+    ui.waHistoricRows = filas;
+    const yaCargados = filas.filter((f) => f.ya);
+    const faltan = filas.filter((f) => !f.ya);
+    const fila = ({ x, monto, ya }) => {
+      const ai = x.ai || {};
+      const c = x.client_id ? getClient(x.client_id) : null;
+      const prob = ya ? [] : receiptProblems(x, x.client_id, monto);
+      return `<div class="wa-inbox-item">
+        <div class="wa-inbox-head"><strong>${escapeHtml(formatDate(receiptDate(x)))}</strong> · ${c ? escapeHtml(c.id + " - " + c.name) : "Sin vincular: " + escapeHtml(x.phone ? formatWaPhone(x.phone) : "")} · <strong>${monto ? formatMoney(monto) : "sin monto"}</strong> <span class="muted">${escapeHtml([ai.banco, ai.operacion ? "Op " + ai.operacion : "", ai.origen_nombre ? "De: " + ai.origen_nombre : ""].filter(Boolean).join(" · "))}</span></div>
+        ${ya ? `<div class="muted" style="font-size:13px">&#9989; Ya está cargado: <strong>${escapeHtml(ya.id)}</strong> del ${escapeHtml(formatDate(ya.date))} por ${formatMoney(ya.amount)}</div>` : prob.length ? `<div class="wa-inbox-auto">&#9888;&#65039; ${prob.map(escapeHtml).join(" · ")}</div>` : ""}
+        <div class="page-actions wa-inbox-actions" style="flex-wrap:wrap">
+          ${ya ? `<button class="btn small primary" type="button" data-hist-match="${x.id}">Ok, ya estaba</button>` : `<input list="receipt-clients-h" data-hist-client="${x.id}" value="${c ? escapeAttr(c.id + " - " + c.name) : ""}" placeholder="Cliente" style="flex:1;min-width:160px" autocomplete="off" /><input data-hist-amount="${x.id}" inputmode="decimal" value="${monto ? escapeAttr(formatAmountInput(monto)) : ""}" placeholder="Monto" style="width:120px" /><button class="btn small primary" type="button" data-hist-pay="${x.id}">Registrar con fecha ${escapeHtml(formatDate(receiptDate(x)).slice(0, 5))}</button>`}
+          <button class="btn small ghost" type="button" data-hist-view="${x.id}">Ver</button>
+          <button class="btn small ghost" type="button" data-hist-discard="${x.id}">Descartar</button>
+        </div>
+      </div>`;
+    };
+    box.innerHTML = `<div class="page-actions" style="justify-content:space-between;align-items:center">
+        <h2 class="page-title" style="font-size:18px;margin:0">&#128197; Comprobantes viejos de WhatsApp (${items.length})</h2>
+        <button class="btn small ghost" type="button" data-hist-refresh>Actualizar</button>
+      </div>
+      <p class="muted" style="font-size:13px;margin:4px 0 8px">Leídos del historial. Cada uno se compara con los pagos que ya están en el sistema (mismo cliente, mismo monto, hasta 5 días de diferencia). <strong>${yaCargados.length}</strong> ya están cargados y <strong>${faltan.length}</strong> no los encuentro. Nada se registra solo.</p>
+      <datalist id="receipt-clients-h">${activeClients().map((c) => `<option value="${escapeAttr(c.id + " - " + c.name)}"></option>`).join("")}</datalist>
+      ${yaCargados.length ? `<div class="page-actions" style="margin-bottom:8px"><button class="btn small blue" type="button" data-hist-match-all>Marcar los ${yaCargados.length} que ya estaban cargados</button></div>` : ""}
+      ${faltan.length ? `<h3 style="font-size:15px;margin:8px 0 4px">No los encuentro cargados (${faltan.length})</h3>${faltan.map(fila).join("")}` : ""}
+      ${yaCargados.length ? `<details style="margin-top:8px"><summary><strong>Ya estaban cargados (${yaCargados.length})</strong></summary>${yaCargados.map(fila).join("")}</details>` : ""}`;
+    const fila$ = (id) => (ui.waHistoricRows || []).find((f) => String(f.x.id) === String(id));
+    box.querySelectorAll("[data-hist-refresh]").forEach((b) => b.addEventListener("click", () => refreshWaHistoric()));
+    box.querySelectorAll("[data-hist-view]").forEach((b) => b.addEventListener("click", () => { const f = fila$(b.dataset.histView); if (f) openProofViewer(f.x.image_key, "", "Comprobante del " + formatDate(receiptDate(f.x))); }));
+    box.querySelectorAll("[data-hist-discard]").forEach((b) => b.addEventListener("click", async () => {
+      if (!confirm("¿Descartar este comprobante viejo sin registrar nada?")) return;
+      b.disabled = true;
+      try { await waInboxPost("/receipts/" + b.dataset.histDiscard + "/discard", {}); } catch (e) { alert(e.message); }
+      refreshWaHistoric();
+    }));
+    const marcar = async (f) => waInboxPost("/receipts/" + f.x.id + "/done", { paymentId: f.ya.id, clientId: f.x.client_id });
+    box.querySelectorAll("[data-hist-match]").forEach((b) => b.addEventListener("click", async () => {
+      const f = fila$(b.dataset.histMatch);
+      if (!f || !f.ya) return;
+      b.disabled = true;
+      try { await marcar(f); } catch (e) { alert(e.message); }
+      refreshWaHistoric();
+    }));
+    box.querySelectorAll("[data-hist-match-all]").forEach((b) => b.addEventListener("click", async () => {
+      const lista = (ui.waHistoricRows || []).filter((f) => f.ya);
+      if (!confirm("Marcar " + lista.length + " comprobantes como ya cargados (no se registra ningún pago nuevo)?")) return;
+      b.disabled = true;
+      let mal = 0;
+      for (const f of lista) { try { await marcar(f); } catch (e) { mal += 1; } }
+      if (mal) alert(mal + " no se pudieron marcar.");
+      refreshWaHistoric();
+    }));
+    box.querySelectorAll("[data-hist-pay]").forEach((b) => b.addEventListener("click", async () => {
+      const f = fila$(b.dataset.histPay);
+      if (!f) return;
+      const inp = box.querySelector(`[data-hist-client="${f.x.id}"]`);
+      const c = inp ? findClientByInput(inp.value) : null;
+      if (!c) return alert("Elegí el cliente.");
+      const mi = box.querySelector(`[data-hist-amount="${f.x.id}"]`);
+      const monto = parseAmount(mi ? mi.value : "");
+      if (!(monto > 0)) return alert("Poné el monto.");
+      const fecha = receiptDate(f.x);
+      const otro = receiptExistingPayment(f.x, c.id, monto, null);
+      if (otro && !confirm("Ojo: ya hay un pago parecido (" + otro.id + " del " + formatDate(otro.date) + " por " + formatMoney(otro.amount) + "). ¿Registrar otro igual?")) return;
+      const cta = receiptAccountMatch(f.x.ai || {});
+      const prov = cta && cta.providerId ? getProvider(cta.providerId) : null;
+      if (prov && monto > getProviderBalance(prov.id) + 0.005) return alert("Fue a la cuenta de " + prov.name + " y supera lo que le debés (" + formatMoney(getProviderBalance(prov.id)) + ").");
+      if (!confirm("Registrar pago por transferencia de " + formatMoney(monto) + " de " + c.id + " - " + c.name + " con fecha " + formatDate(fecha) + "?" + (prov ? "\n\nFue a la cuenta de " + prov.name + ": también baja lo que le debés." : ""))) return;
+      b.disabled = true;
+      try {
+        await waInboxPost("/receipts/" + f.x.id + "/claim", {});
+        const pay = await registerReceipt(f.x, c.id, monto, false, fecha);
+        b.textContent = "Registrado " + pay.id;
+      } catch (e) {
+        await waInboxPost("/receipts/" + f.x.id + "/release", {}).catch(() => {});
+        alert("No se pudo registrar: " + e.message);
+      }
+      refreshWaHistoric();
+    }));
+  }
+
+  // Configuracion: preparar la busqueda de comprobantes viejos (antes de volver a vincular).
+  function historyReceiptsConfigHtml() {
+    afterRender.push(paintHistoryReceiptsStatus);
+    return `<div class="auto-late" style="margin-top:10px">
+      <strong style="font-size:14px">Buscar comprobantes viejos</strong>
+      <p class="muted" style="font-size:13px;margin:2px 0 6px">Para leer las transferencias que mandaron antes: 1) elegí cuántos días y tocá <strong>Preparar</strong>; 2) en "WhatsApp vinculado" tocá <strong>Desvincular</strong> y después <strong>Vincular</strong> y escaneá el QR de nuevo. Al vincular, WhatsApp manda el historial con las fotos y el sistema las lee (el celular tiene que estar prendido). Aparecen en Pagos → "Comprobantes viejos", comparados con los pagos que ya cargaste. Nada se registra solo.</p>
+      <div class="page-actions" style="flex-wrap:wrap;gap:8px"><select id="hr-days" style="width:auto"><option value="30">30 días</option><option value="60">60 días</option><option value="90" selected>90 días</option></select><button class="btn small primary" type="button" id="hr-arm">Preparar</button><button class="btn small ghost" type="button" id="hr-off">Terminar búsqueda</button></div>
+      <div id="hr-status" class="muted" style="font-size:13px;margin-top:6px"></div>
+    </div>`;
+  }
+  async function paintHistoryReceiptsStatus() {
+    const box = document.getElementById("hr-status");
+    if (!box) return;
+    const bind = (id, days) => { const b = document.getElementById(id); if (b && !b.dataset.bound) { b.dataset.bound = "1"; b.addEventListener("click", async () => {
+      const d = days === null ? Number(document.getElementById("hr-days").value) : days;
+      if (d && !confirm("Preparar la búsqueda de comprobantes de los últimos " + d + " días. Después tenés que Desvincular y Vincular el WhatsApp (escanear el QR). ¿Seguir?")) return;
+      try { await waInboxPost("/whatsapp/history-receipts", { days: d }); } catch (e) { return alert(e.message); }
+      if (d) alert("Listo. Ahora andá a \"WhatsApp vinculado\" (más abajo): Desvincular y después Vincular, y escaneá el QR desde el celular.");
+      paintHistoryReceiptsStatus();
+    }); } };
+    bind("hr-arm", null);
+    bind("hr-off", 0);
+    try {
+      const r = await cloudRequest(getCloudSyncConfig(), "/whatsapp/history-receipts", { method: "GET" });
+      const j = await r.json().catch(() => ({}));
+      const sv = j.servidor || {};
+      box.innerHTML = (j.activo ? `&#9203; Búsqueda preparada (${j.dias} días, desde ${escapeHtml(formatTimestampShort(j.armadoAt))}). ` : r.ok ? "Búsqueda apagada. " : "No se pudo consultar el bot. ")
+        + (j.encolados ? `Fotos del historial: ${j.encolados} encontradas, ${j.procesados} enviadas a leer${j.pendientes ? ", " + j.pendientes + " en cola" : ""}${j.errores ? ", " + j.errores + " no se pudieron bajar" : ""}. ` : "")
+        + (sv.total ? `Leídas: ${sv.total} (${sv.pendientes} comprobantes por revisar, ${sv.registrados} resueltos, ${sv.no_es} no eran comprobantes${sv.leyendo ? ", " + sv.leyendo + " leyendo" : ""}).` : "");
+    } catch (e) { box.textContent = "No se pudo consultar."; }
+  }
+
   function bindReceiptsConfig() {
     const auto = document.getElementById("rc-auto");
     if (!auto) return;
@@ -14393,6 +14556,7 @@
       "",
       `
       ${waReceiptsPanelHtml()}
+      ${waHistoricPanelHtml()}
       <div class="grid">
         <form id="payment-form" class="panel">
           <div class="form-grid payment-form-grid">
@@ -27948,7 +28112,8 @@
     const selectedPendingTotal = orders.reduce((sum, order) => sum + Math.max(0, Number(order.totalAmount || 0) - Number(order.paymentReceived || 0)), 0);
     const paymentRecord = {
       id: nextDatedId("PAY", state.payments),
-      date: todayISO(),
+      // Comprobante viejo (historial de WhatsApp): el pago va con la fecha del comprobante.
+      date: /^\d{4}-\d{2}-\d{2}$/.test(String(payment.date || "")) ? payment.date : todayISO(),
       timestamp: new Date().toISOString(),
       clientId: payment.clientId,
       orderId: orderIds[0] || "",
@@ -28008,6 +28173,7 @@
       const allocationClient = getClient(clientId);
       addSaldoEntry({
         clientId,
+        date: paymentRecord.date,
         type: "pago",
         description: "Pago recibido - " + (allocationClient ? allocationClient.name : clientId) + " - " + (PAYMENT_METHODS[payment.method] || payment.method),
         amount: -byClient[clientId],
@@ -28018,6 +28184,7 @@
       });
     });
     addCajaEntry({
+      date: paymentRecord.date,
       type: "payment_" + payment.method,
       concept: "Pago recibido - " + (client ? client.name : payment.clientId) + " - " + (PAYMENT_METHODS[payment.method] || payment.method),
       relatedEntityId: paymentRecord.id,

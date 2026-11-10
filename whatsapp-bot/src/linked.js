@@ -14,6 +14,56 @@ const ENABLED_FILE = path.join(path.dirname(DIR), "wa-linked-enabled");
 // "Solo recibir": el sistema no manda NINGUN mensaje por este WhatsApp (menor riesgo de bloqueo). Los
 // pedidos igual entran a la bandeja y todo se archiva. Prendido salvo que el gerente lo apague.
 const SENDING_FILE = path.join(path.dirname(DIR), "wa-linked-send-enabled");
+// "Buscar comprobantes viejos": al volver a vincular, WhatsApp manda el historial con las fotos. Si
+// esta prendido, las fotos y PDF de los ultimos N dias se bajan y se mandan a leer (de a una).
+const HISTORY_FILE = path.join(path.dirname(DIR), "wa-history-receipts.json");
+let historyCfg = null;
+try { historyCfg = JSON.parse(fs.readFileSync(HISTORY_FILE, "utf8")); } catch (e) { historyCfg = null; }
+const historyStats = { encolados: 0, procesados: 0, errores: 0, ultimoError: "" };
+let historyQueue = [];
+let historyRunning = false;
+function setHistoryReceipts(days) {
+  fs.mkdirSync(path.dirname(DIR), { recursive: true });
+  if (!days) { historyCfg = null; try { fs.unlinkSync(HISTORY_FILE); } catch (e) { /* ya estaba */ } return historyStatus(); }
+  historyCfg = { desde: Date.now() - Number(days) * 86400000, hasta: Date.now(), dias: Number(days), armadoAt: new Date().toISOString() };
+  fs.writeFileSync(HISTORY_FILE, JSON.stringify(historyCfg));
+  Object.assign(historyStats, { encolados: 0, procesados: 0, errores: 0, ultimoError: "" });
+  return historyStatus();
+}
+function historyStatus() {
+  return { activo: !!historyCfg, dias: historyCfg ? historyCfg.dias : 0, armadoAt: historyCfg ? historyCfg.armadoAt : "", pendientes: historyQueue.length, ...historyStats };
+}
+function queueHistoryImage(m) {
+  if (!historyCfg || !onImage) return;
+  const key = m && m.key || {};
+  const jid = String(key.remoteJid || "");
+  if (key.fromMe || !jid || /@(broadcast|newsletter)$/.test(jid)) return;
+  const ts = Number(m.messageTimestamp && m.messageTimestamp.low != null ? m.messageTimestamp.low : m.messageTimestamp || 0) * 1000;
+  if (!ts || ts < historyCfg.desde || ts > historyCfg.hasta) return;
+  const msg = m.message || {};
+  const inner = msg.ephemeralMessage ? msg.ephemeralMessage.message || {} : msg.viewOnceMessage ? msg.viewOnceMessage.message || {} : msg;
+  const doc = inner.documentMessage || (inner.documentWithCaptionMessage && inner.documentWithCaptionMessage.message && inner.documentWithCaptionMessage.message.documentMessage);
+  if (!inner.imageMessage && !(doc && /^(image\/|application\/pdf)/.test(doc.mimetype || ""))) return;
+  historyQueue.push(m);
+  historyStats.encolados += 1;
+  if (!historyRunning) runHistoryQueue();
+}
+async function runHistoryQueue() {
+  historyRunning = true;
+  while (historyQueue.length) {
+    const m = historyQueue.shift();
+    try {
+      const key = m.key || {};
+      await handleImage(m, String(key.remoteJid || ""), key, { historico: true });
+      historyStats.procesados += 1;
+    } catch (e) {
+      historyStats.errores += 1;
+      historyStats.ultimoError = e.message;
+    }
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+  historyRunning = false;
+}
 
 function receiveOnly() {
   return !fs.existsSync(SENDING_FILE);
@@ -228,7 +278,7 @@ async function connect() {
     sock.ev.on("messaging-history.set", (h) => {
       addContacts(h && h.contacts);
       // Historial que manda WhatsApp al vincular: tambien al archivo (lo de mas de 90 dias se descarta).
-      (h && h.messages || []).forEach((m) => archiveMessage(m).catch(() => {}));
+      (h && h.messages || []).forEach((m) => { archiveMessage(m).catch(() => {}); queueHistoryImage(m); });
     });
     sock.ev.on("messages.upsert", async ({ messages, type }) => {
       for (const m of messages || []) archiveMessage(m).catch(() => {});
@@ -270,7 +320,7 @@ async function connect() {
 
 // Imagen o PDF recibido (foto, documento de imagen o comprobante en PDF): se baja y se pasa a onImage
 // con el chat y quien lo manda. Hasta 6 MB. El servidor pasa el PDF a imagen para la IA.
-async function handleImage(m, jid, key) {
+async function handleImage(m, jid, key, extra) {
   const msg = m && m.message ? m.message : {};
   const inner = msg.ephemeralMessage ? msg.ephemeralMessage.message || {} : msg.viewOnceMessage ? msg.viewOnceMessage.message || {} : msg;
   const doc = inner.documentMessage || (inner.documentWithCaptionMessage && inner.documentWithCaptionMessage.message && inner.documentWithCaptionMessage.message.documentMessage) || null;
@@ -286,7 +336,8 @@ async function handleImage(m, jid, key) {
   const isGroup = jid.endsWith("@g.us");
   const from = isGroup ? phoneOf(key.participant || "", { senderPn: key.participantPn || key.participantAlt }) : phoneOf(jid, key);
   const archivo = esPdf ? { pdfData: "data:application/pdf;base64," + buf.toString("base64") } : { imageData: "data:" + mime + ";base64," + buf.toString("base64") };
-  await onImage({ waId: key.id, from, group: isGroup ? jid : "", name: m.pushName || "", caption: String(media.caption || media.fileName || "").trim(), ...archivo });
+  const ts = Number(m.messageTimestamp && m.messageTimestamp.low != null ? m.messageTimestamp.low : m.messageTimestamp || 0) * 1000 || Date.now();
+  await onImage({ ...(extra || {}), ts, waId: key.id, from, group: isGroup ? jid : "", name: m.pushName || "", caption: String(media.caption || media.fileName || "").trim(), ...archivo });
 }
 
 // Arranca solo si ya estaba vinculado (se reinicia el bot y sigue conectado).
@@ -349,4 +400,4 @@ async function sendText(phone, text, opts) {
   }
 }
 
-module.exports = { listLids, phoneOf, init, startLinking, stop, status, isConnected, sendText, addContacts, listContacts, archiveMessage, flushArchive, receiveOnly, setReceiveOnly };
+module.exports = { setHistoryReceipts, historyStatus, listLids, phoneOf, init, startLinking, stop, status, isConnected, sendText, addContacts, listContacts, archiveMessage, flushArchive, receiveOnly, setReceiveOnly };
