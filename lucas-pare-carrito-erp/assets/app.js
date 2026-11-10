@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v124";
+  const APP_VERSION = "v125";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -620,8 +620,29 @@
   function autoInboxEvaluate(x) {
     const client = x.client_id ? getClient(x.client_id) : null;
     if (!client || client.isActive === false) return { ok: false, motivo: "el número no está vinculado a un cliente" };
-    const secciones = splitOrderSections(x.text);
-    if (secciones.length >= 2 && secciones.some((y) => y.label)) return { ok: false, motivo: "trae partes para varios clientes" };
+    // Un numero que pide para varios clientes ("para la confi" / "para heladeria"): cada parte va al
+    // cliente que se eligio la primera vez para ese titulo (queda recordado al cargarlo a mano).
+    const secciones = splitOrderSections(x.text, client.id);
+    if (secciones.some((y) => y.label)) {
+      // Se agrupa por cliente. Un titulo que no es "para ..." ("Verduras:", "Frutas:") y no es de
+      // otro cliente es solo un titulo: queda en el pedido de quien escribe.
+      const porCliente = new Map();
+      for (const sec of secciones) {
+        // "para el local", "para mi negocio": si no es de otro cliente conocido, es de quien escribe.
+        const destino = sec.label ? (orderSectionTargetSafe(client.id, sec.label) || client.id) : client.id;
+        if (!destino || !getClient(destino)) return { ok: false, motivo: "no sé a qué cliente va la parte \"" + (sec.header || sec.label) + "\": cargalo a mano y elegí el cliente (queda recordado)" };
+        porCliente.set(destino, (porCliente.get(destino) || []).concat([sec.text]));
+      }
+      const partes = [];
+      for (const [destino, textos] of porCliente) {
+        const ev = autoInboxEvaluate({ ...x, client_id: destino, text: textos.join("\n"), _parte: true });
+        const c = getClient(destino);
+        if (!ev.ok) return { ok: false, motivo: (porCliente.size > 1 ? "parte de " + c.id + " - " + c.name + ": " : "") + ev.motivo };
+        partes.push(...ev.partes);
+      }
+      const plan = autoInboxSchedule();
+      return { ok: true, partes, date: plan.date, tarde: plan.tarde };
+    }
     const parsed = parseWhatsappOrder(x.text, client.id);
     if (!parsed.items.length) return { ok: false, motivo: "no se encontró ningún producto" };
     if (parsed.unmatched.length) return { ok: false, motivo: "no se reconocen: " + parsed.unmatched.slice(0, 3).join(", ") };
@@ -638,7 +659,7 @@
     if (isSundayISO(date)) return { ok: false, motivo: "el día de entrega es domingo" };
     const ya = (state.orders || []).find((o) => o && o.clientId === client.id && o.date === date && !["cancelado", "anulado"].includes(o.status) && !o.deletedAt);
     if (ya) return { ok: false, motivo: "ya tiene un pedido para el " + formatDate(date) + " (" + ya.id + "): revisá si es un agregado" };
-    return { ok: true, parsed, date, client, tarde: plan.tarde, revisar };
+    return { ok: true, parsed, date, client, tarde: plan.tarde, revisar, partes: [{ parsed, client, revisar, text: x.text }] };
   }
 
   // Aviso al cliente de 8 a 12: su pedido queda para el dia siguiente (configurable).
@@ -795,24 +816,31 @@
             }
             continue;
           }
-          const order = autoInboxCreateOrder(ev, x);
-          if (!order) { await cloudRequest(getCloudSyncConfig(), "/inbox/" + x.id + "/release", { method: "POST", body: JSON.stringify({ reason: "no se pudo armar el pedido" }) }); continue; }
+          const creados = [];
+          for (const parte of ev.partes) {
+            const o = autoInboxCreateOrder({ parsed: parte.parsed, client: parte.client, date: ev.date, revisar: parte.revisar }, { ...x, text: parte.text });
+            if (o) creados.push({ order: o, parte });
+          }
+          if (!creados.length) { await cloudRequest(getCloudSyncConfig(), "/inbox/" + x.id + "/release", { method: "POST", body: JSON.stringify({ reason: "no se pudo armar el pedido" }) }); continue; }
           const resultado = await confirmChangesReachedServer();
-          if (resultado === "rechazado" || !getOrder(order.id)) {
-            await cloudRequest(getCloudSyncConfig(), "/inbox/" + x.id + "/release", { method: "POST", body: JSON.stringify({ reason: "el servidor no confirmó el pedido; cargalo a mano" }) });
+          if (resultado === "rechazado" || creados.some((c) => !getOrder(c.order.id))) {
+            await cloudRequest(getCloudSyncConfig(), "/inbox/" + x.id + "/release", { method: "POST", body: JSON.stringify({ reason: "el servidor no confirmó el pedido; revisá Pedidos antes de cargarlo a mano" }) });
             autoInboxLog("ERROR (" + nombre + "): el servidor no confirmó el pedido");
             continue;
           }
-          await cloudRequest(getCloudSyncConfig(), "/inbox/" + x.id + "/done", { method: "POST", body: JSON.stringify({ orderId: order.id, auto: true }) });
-          autoInboxLog("Cargado " + order.id + " de " + nombre + " para el " + formatDate(order.date) + " (" + order.items.length + " productos)" + ((ev.revisar || []).length ? " — con " + ev.revisar.length + " aviso(s) anotados en el pedido" : ""));
+          await cloudRequest(getCloudSyncConfig(), "/inbox/" + x.id + "/done", { method: "POST", body: JSON.stringify({ orderId: creados.map((c) => c.order.id).join(","), auto: true }) });
+          for (const { order, parte } of creados) {
+          const quien = parte.client.id + " - " + parte.client.name;
+          autoInboxLog("Cargado " + order.id + " de " + quien + " para el " + formatDate(order.date) + " (" + order.items.length + " productos)" + ((parte.revisar || []).length ? " — con " + parte.revisar.length + " aviso(s) anotados en el pedido" : ""));
           if (ev.tarde) {
             const detalle = order.items.map((it) => "• " + formatAmountInput(it.quantity) + " " + it.productName + (it.note ? " (" + it.note + ")" : "")).join("\n");
-            const texto = "⚠️ Pedido de último momento para HOY " + formatDate(order.date) + "\n" + nombre + " · " + order.id + "\n" + detalle + ((ev.revisar || []).length ? "\nRevisar: " + ev.revisar.join(" | ") : "");
+            const texto = "⚠️ Pedido de último momento para HOY " + formatDate(order.date) + "\n" + quien + " · " + order.id + "\n" + detalle + ((parte.revisar || []).length ? "\nRevisar: " + parte.revisar.join(" | ") : "");
             try {
               const rn = await cloudRequest(getCloudSyncConfig(), "/inbox/auto-late-notify", { method: "POST", body: JSON.stringify({ text: texto }) });
               const jn = await rn.json().catch(() => ({}));
               autoInboxLog(rn.ok && jn.sent ? "Aviso de pedido tarde enviado (" + jn.sent + ")" : "No se pudo avisar el pedido tarde: " + (jn.error || "sin destino configurado"));
             } catch (e) { autoInboxLog("No se pudo avisar el pedido tarde: " + e.message); }
+          }
           }
         } catch (e) {
           autoInboxLog("Error con un mensaje de " + nombre + ": " + e.message);
@@ -6206,8 +6234,10 @@
       // Un mensaje con partes para varios clientes ("Para la confi ... Para heladeria ..."): se elige
       // el cliente de cada parte y se carga de a una.
       if (!ui.skipSections) {
-        const secciones = splitOrderSections(pasteInput.value);
-        if (secciones.length >= 2 && secciones.filter((x) => x.label).length >= 1) {
+        const deQuien = clientSelect.value || ui.selectedClientId;
+        const secciones = splitOrderSections(pasteInput.value, deQuien);
+        const otroCliente = secciones.length === 1 && secciones[0].label && orderSectionTarget(deQuien, secciones[0].label) && orderSectionTarget(deQuien, secciones[0].label) !== deQuien;
+        if ((secciones.length >= 2 && secciones.filter((x) => x.label).length >= 1) || otroCliente) {
           openOrderSectionsModal(clientSelect.value || ui.selectedClientId, secciones, (sec, clientId, pendientes) => {
             ui.pendingSections = pendientes.length ? { fromClientId: clientSelect.value || ui.selectedClientId, items: pendientes, inboxId: ui.inboxLoading ? ui.inboxLoading.id : null } : null;
             ui.selectedClientId = clientId;
@@ -23568,11 +23598,39 @@
     return label;
   }
 
-  function splitOrderSections(text) {
+  // Titulo metido en el saludo: "Buenas noches! Te hago pedido para la confi Los Diaz". Solo cuenta
+  // si ese titulo ya se sabe a que cliente va (o se parece al nombre de un cliente).
+  function introSectionLabel(line, clientId) {
+    const clean = normalizeText(line);
+    if (!clientId || !clean || /\d/.test(clean) || clean.split(" ").length > 14) return "";
+    const m = clean.match(/\bpara\s+(?:la|el|los|las)\s+([a-z\u00f1 ]{3,40})$/) || clean.match(/\bpara\s+([a-z\u00f1 ]{3,40})$/);
+    if (!m) return "";
+    const label = m[1].replace(/\s+(por favor|porfa|gracias)$/, "").trim();
+    if (!label || SECTION_SKIP_RE.test(label) || /^(ma[nñ]ana|hoy|el|la|semana)\b/.test(label)) return "";
+    return orderSectionTargetSafe(clientId, label) ? label : "";
+  }
+
+  // A que cliente va un titulo, sin adivinar de mas: lo recordado, o un cliente que se parezca al
+  // titulo y sea el mismo o un "hermano" del que escribe (comparten una palabra del nombre, como
+  // "Los Diaz Confiteria" y "Los Diaz Heladeria"). Asi "para el local" no manda el pedido a otro
+  // cliente que se llame "Local ...".
+  function orderSectionTargetSafe(clientId, label) {
+    const map = (state.appSettings && state.appSettings.orderSectionMap) || {};
+    const rec = map[clientId] && map[clientId][normalizeText(label)];
+    if (rec && getClient(rec)) return rec;
+    const t = orderSectionTarget(clientId, label);
+    if (!t) return "";
+    if (t === clientId) return t;
+    const palabras = (id) => normalizeText((getClient(id) || {}).name || "").split(" ").filter((w) => w.length >= 4);
+    const mias = palabras(clientId);
+    return palabras(t).some((w) => mias.includes(w)) ? t : "";
+  }
+
+  function splitOrderSections(text, clientId) {
     const secciones = [];
     let actual = { label: "", lines: [] };
     String(text || "").split(/\r?\n/).forEach((line) => {
-      const h = orderSectionHeader(stripOrderCourtesy(line) || line);
+      const h = orderSectionHeader(stripOrderCourtesy(line) || line) || introSectionLabel(line, clientId);
       if (h) {
         if (actual.lines.some((l) => l.trim())) secciones.push(actual);
         actual = { label: h, header: line.trim(), lines: [] };
