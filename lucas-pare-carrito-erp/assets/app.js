@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v126";
+  const APP_VERSION = "v127";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -652,6 +652,14 @@
     const cfg = receiptCfg();
     if (cfg.checkAccount && cfg.accounts.length && !receiptAccountMatch(ai)) out.push("no va a ninguna de tus cuentas" + (ai.destino_nombre ? " (dice: " + ai.destino_nombre + ")" : ""));
     if (ai.fecha && ai.fecha < addDaysISO(todayISO(), -7)) out.push("es de hace más de una semana (" + formatDate(ai.fecha) + ")");
+    // Cuenta de un proveedor: el cliente le pago directo al proveedor; tambien baja lo que le debemos.
+    const cta = receiptAccountMatch(ai);
+    const prov = cta && cta.providerId ? getProvider(cta.providerId) : null;
+    if (cta && cta.providerId && !prov) out.push("la cuenta " + cta.name + " está asociada a un proveedor que ya no existe");
+    if (prov && amount > 0) {
+      const deuda = getProviderBalance(prov.id);
+      if (amount > deuda + 0.005) out.push("es más de lo que le debés a " + prov.name + " (saldo " + formatMoney(deuda) + ")");
+    }
     if (clientId && amount > 0) {
       const desde = addDaysISO(todayISO(), -3);
       const igual = (state.payments || []).find((p) => p && p.clientId === clientId && p.status !== "anulado" && Math.abs(Number(p.amount || 0) - amount) < 0.01 && String(p.date || "") >= desde);
@@ -676,6 +684,14 @@
     pay.receiptOperation = ai.operacion || "";
     if (cuenta) { pay.receiptAccountId = cuenta.id; pay.receiptAccountName = cuenta.name; }
     if (auto) pay.autoLoaded = true;
+    // El cliente le transfirio directo a un proveedor: la plata entra y sale del Banco (queda en
+    // cero) y baja tanto el saldo del cliente como lo que le debemos al proveedor.
+    const prov = cuenta && cuenta.providerId ? getProvider(cuenta.providerId) : null;
+    if (prov) {
+      const c = getClient(clientId);
+      const pp = processProviderPayment({ provider: prov, mode: "partial", amount, method: "transferencia", cashBoxId: "cash-banco", date: todayISO(), notes: "Pago directo del cliente " + (c ? c.id + " - " + c.name : clientId) + " (" + pay.id + ")" + (ai.operacion ? " · Op " + ai.operacion : "") });
+      if (pp) { pay.providerPaymentId = pp.id; pay.paidToProviderId = prov.id; pay.notes = (pay.notes ? pay.notes + " · " : "") + "pagado directo a " + prov.name + " (" + pp.id + ")"; }
+    }
     saveState();
     const llego = await confirmChangesReachedServer();
     if (llego === "rechazado" || !(state.payments || []).some((p) => p.id === pay.id)) throw new Error("el servidor no aceptó el pago; revisá Pagos antes de cargarlo de nuevo");
@@ -747,7 +763,7 @@
       const cuenta = receiptAccountMatch(ai);
       const datos = [ai.banco, ai.fecha ? formatDate(ai.fecha) + (ai.hora ? " " + ai.hora : "") : "", ai.operacion ? "Op " + ai.operacion : "", ai.origen_nombre ? "De: " + ai.origen_nombre : "", ai.destino_nombre || ai.destino_alias || ai.destino_cbu ? "A: " + [ai.destino_nombre, ai.destino_alias, ai.destino_cbu].filter(Boolean).join(" · ") : ""].filter(Boolean);
       return `<div class="wa-inbox-item" data-receipt-row="${x.id}">
-        <div class="wa-inbox-head"><strong>${c ? escapeHtml(c.id + " - " + c.name) : "Sin vincular: " + escapeHtml(x.phone ? formatWaPhone(x.phone) : "")}</strong>${x.sender_name ? ` <span class="muted">(${escapeHtml(x.sender_name)})</span>` : ""} <span class="muted">${escapeHtml(formatTimestampShort(x.created_at))}</span>${cuenta ? ` <span class="pill green">${escapeHtml(cuenta.name)}</span>` : ""}${x.status === "procesando" ? ` <span class="pill gray">registrando...</span>` : ""}</div>
+        <div class="wa-inbox-head"><strong>${c ? escapeHtml(c.id + " - " + c.name) : "Sin vincular: " + escapeHtml(x.phone ? formatWaPhone(x.phone) : "")}</strong>${x.sender_name ? ` <span class="muted">(${escapeHtml(x.sender_name)})</span>` : ""} <span class="muted">${escapeHtml(formatTimestampShort(x.created_at))}</span>${cuenta ? ` <span class="pill ${cuenta.providerId ? "blue" : "green"}">${escapeHtml(cuenta.name)}${cuenta.providerId && getProvider(cuenta.providerId) ? " · proveedor " + escapeHtml(getProvider(cuenta.providerId).name) : ""}</span>` : ""}${x.status === "procesando" ? ` <span class="pill gray">registrando...</span>` : ""}</div>
         <div class="muted" style="font-size:13px;margin:4px 0">${datos.map(escapeHtml).join(" · ") || "Sin datos leídos"}${x.caption ? "<br>Mensaje: " + escapeHtml(x.caption) : ""}</div>
         ${prob.length ? `<div class="wa-inbox-auto">&#9888;&#65039; ${prob.map(escapeHtml).join(" · ")}</div>` : ""}
         <div class="page-actions wa-inbox-actions" style="flex-wrap:wrap">
@@ -792,7 +808,10 @@
       const monto = parseAmount(montoInp ? montoInp.value : "");
       if (!(monto > 0)) return alert("Poné el monto.");
       const prob = receiptProblems(x, c.id, monto).filter((p) => !/no está vinculado|no se pudo leer el monto/.test(p));
-      if (!confirm("Registrar pago por transferencia de " + formatMoney(monto) + " de " + c.id + " - " + c.name + "?" + (prob.length ? "\n\nOjo: " + prob.join(" · ") : ""))) return;
+      const cta = receiptAccountMatch(x.ai || {});
+      const prov = cta && cta.providerId ? getProvider(cta.providerId) : null;
+      if (prov && monto > getProviderBalance(prov.id) + 0.005) return alert("Este comprobante es de la cuenta de " + prov.name + " y el monto supera lo que le debés (" + formatMoney(getProviderBalance(prov.id)) + "). Revisalo en Proveedores.");
+      if (!confirm("Registrar pago por transferencia de " + formatMoney(monto) + " de " + c.id + " - " + c.name + "?" + (prov ? "\n\nFue a la cuenta de " + prov.name + ": también se descuenta " + formatMoney(monto) + " de lo que le debés a " + prov.name + "." : "") + (prob.length ? "\n\nOjo: " + prob.join(" · ") : ""))) return;
       b.disabled = true;
       try {
         await waInboxPost("/receipts/" + x.id + "/claim", {});
@@ -814,7 +833,7 @@
     const ant = addDaysISO(mes + "-01", -1).slice(0, 7);
     const pagos = (state.payments || []).filter((p) => p && p.method === "transferencia" && p.status !== "anulado");
     const suma = (id, m) => pagos.filter((p) => (id ? p.receiptAccountId === id : !p.receiptAccountId) && String(p.date || "").slice(0, 7) === m).reduce((t, p) => t + Number(p.amount || 0), 0);
-    const filas = cfg.accounts.map((a) => `<tr><td>${escapeHtml(a.name)}</td><td class="num">${formatMoney(suma(a.id, mes))}</td><td class="num">${formatMoney(suma(a.id, ant))}</td></tr>`).join("");
+    const filas = cfg.accounts.map((a) => `<tr><td>${escapeHtml(a.name)}${a.providerId ? ` <span class="muted">(proveedor ${escapeHtml((getProvider(a.providerId) || {}).name || "")})</span>` : ""}</td><td class="num">${formatMoney(suma(a.id, mes))}</td><td class="num">${formatMoney(suma(a.id, ant))}</td></tr>`).join("");
     return `<div class="panel" style="margin-bottom:14px"><h2 class="page-title" style="font-size:18px">Transferencias por cuenta</h2>
       <div class="table-wrap"><table><thead><tr><th>Cuenta</th><th class="num">Este mes</th><th class="num">Mes anterior</th></tr></thead>
       <tbody>${filas}<tr><td class="muted">Sin cuenta identificada</td><td class="num">${formatMoney(suma("", mes))}</td><td class="num">${formatMoney(suma("", ant))}</td></tr></tbody></table></div>
@@ -831,9 +850,9 @@
       <p class="muted" style="margin-top:0;font-size:13px">Las fotos que llegan al WhatsApp vinculado se leen con IA. Los comprobantes aparecen en <strong>Pagos</strong> para registrarlos con un toque.</p>
       <label style="display:flex;gap:8px;align-items:flex-start;margin:6px 0"><input type="checkbox" id="rc-auto" ${cfg.auto ? "checked" : ""} style="width:auto;min-height:auto;margin-top:3px" /><span><strong>Registrar los pagos solos</strong><br><span class="muted" style="font-size:13px">Solo si: el número está vinculado a un cliente, la IA leyó el monto con seguridad, el nº de operación no llegó antes, no hay un pago igual de ese cliente en los últimos 3 días, es de la última semana${cfg.checkAccount ? " y va a una de tus cuentas" : ""}. Si falla algo, queda en Pagos para revisar. Lo hace el equipo de la carga automática de pedidos (tiene que estar activada).</span></span></label>
       <label style="display:flex;gap:8px;align-items:flex-start;margin:6px 0"><input type="checkbox" id="rc-check" ${cfg.checkAccount ? "checked" : ""} style="width:auto;min-height:auto;margin-top:3px" /><span><strong>Controlar que la transferencia vaya a una de mis cuentas</strong><br><span class="muted" style="font-size:13px">Si el comprobante no muestra el titular, CUIT, CBU/CVU o alias de alguna cuenta de abajo, queda para revisar.</span></span></label>
-      <strong style="font-size:14px">Mis cuentas</strong>
-      <div class="table-wrap" style="margin-top:4px"><table><thead><tr><th>Nombre</th><th>Titular</th><th>CUIT</th><th>CBU/CVU</th><th>Alias</th><th></th></tr></thead><tbody>
-        ${cfg.accounts.map((a, i) => `<tr><td>${escapeHtml(a.name)}</td><td>${escapeHtml(a.titular || "")}</td><td>${escapeHtml(a.cuit || "")}</td><td>${escapeHtml(a.cbu || "")}</td><td>${escapeHtml(a.alias || "")}</td><td><button class="btn small ghost" type="button" data-rc-del="${i}">Quitar</button></td></tr>`).join("") || `<tr><td colspan="6" class="muted">Ninguna todavía.</td></tr>`}
+      <strong style="font-size:14px">Cuentas (mías y de proveedores)</strong>
+      <div class="table-wrap" style="margin-top:4px"><table><thead><tr><th>Nombre</th><th>De</th><th>Titular</th><th>CUIT</th><th>CBU/CVU</th><th>Alias</th><th></th></tr></thead><tbody>
+        ${cfg.accounts.map((a, i) => `<tr><td>${escapeHtml(a.name)}</td><td>${a.providerId ? "Proveedor: " + escapeHtml((getProvider(a.providerId) || {}).name || a.providerId) : "Mía"}</td><td>${escapeHtml(a.titular || "")}</td><td>${escapeHtml(a.cuit || "")}</td><td>${escapeHtml(a.cbu || "")}</td><td>${escapeHtml(a.alias || "")}</td><td><button class="btn small ghost" type="button" data-rc-del="${i}">Quitar</button></td></tr>`).join("") || `<tr><td colspan="7" class="muted">Ninguna todavía.</td></tr>`}
       </tbody></table></div>
       <div class="form-grid" style="margin-top:6px">
         <div class="field"><label>Nombre (ej. Galicia Lucas)</label><input id="rc-name" /></div>
@@ -841,7 +860,9 @@
         <div class="field"><label>CUIT</label><input id="rc-cuit" inputmode="numeric" /></div>
         <div class="field"><label>CBU / CVU</label><input id="rc-cbu" inputmode="numeric" /></div>
         <div class="field"><label>Alias</label><input id="rc-alias" /></div>
+        <div class="field"><label>Es la cuenta de</label><select id="rc-provider"><option value="">Mía</option>${activeProviders().map((p) => `<option value="${escapeAttr(p.id)}">Proveedor: ${escapeHtml(p.name)}</option>`).join("")}</select></div>
       </div>
+      <p class="muted" style="font-size:12px;margin:4px 0 0">Cuenta de un proveedor: cuando un cliente le transfiere directo a ese proveedor, al registrar el pago se descuenta el saldo del cliente <strong>y</strong> lo que le debés al proveedor.</p>
       <div class="page-actions" style="margin-top:6px"><button class="btn small primary" type="button" id="rc-add">Agregar cuenta</button></div>
     </div>`;
   }
@@ -868,7 +889,7 @@
     }));
     document.getElementById("rc-add").addEventListener("click", () => {
       const v = (id) => document.getElementById(id).value.trim();
-      const a = { id: "CTA-" + Date.now().toString(36), name: v("rc-name"), titular: v("rc-titular"), cuit: v("rc-cuit"), cbu: v("rc-cbu"), alias: v("rc-alias") };
+      const a = { id: "CTA-" + Date.now().toString(36), name: v("rc-name"), titular: v("rc-titular"), cuit: v("rc-cuit"), cbu: v("rc-cbu"), alias: v("rc-alias"), providerId: v("rc-provider") };
       if (!a.name) return alert("Poné un nombre para reconocer la cuenta.");
       if (!a.titular && !a.cuit && !a.cbu && !a.alias) return alert("Poné al menos el titular, el CUIT, el CBU/CVU o el alias.");
       saveReceiptCfg({ accounts: receiptCfg().accounts.concat([a]) });

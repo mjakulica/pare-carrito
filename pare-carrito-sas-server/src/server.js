@@ -3660,8 +3660,36 @@ async function processReceipt(id, image) {
   }
 }
 
+// PDF (comprobante que mandan como archivo): la primera pagina se pasa a imagen, como una captura,
+// y la IA la lee igual que una foto. Usa pdftoppm (poppler).
+function pdfFirstPageToPng(buffer) {
+  const { execFile } = require("child_process");
+  const os = require("os");
+  return new Promise((resolve, reject) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pdf-"));
+    const entrada = path.join(dir, "in.pdf");
+    fs.writeFileSync(entrada, buffer);
+    execFile("pdftoppm", ["-png", "-r", "130", "-f", "1", "-l", "1", "-singlefile", entrada, path.join(dir, "out")], { timeout: 30000 }, (err) => {
+      try {
+        if (err) return reject(new Error(err.code === "ENOENT" ? "falta pdftoppm en el servidor" : "no se pudo abrir el PDF"));
+        const png = fs.readFileSync(path.join(dir, "out.png"));
+        resolve(png);
+      } catch (e) { reject(new Error("no se pudo pasar el PDF a imagen")); } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+    });
+  });
+}
+
 app.post("/external/wa-receipt", externalAuth, async (req, res) => {
   const b = req.body || {};
+  const pdf = String(b.pdfData || "").match(/^data:application\/pdf;base64,([a-z0-9+/=\s]+)$/i);
+  if (pdf) {
+    const buf = Buffer.from(pdf[1].replace(/\s/g, ""), "base64");
+    if (buf.length > 10 * 1024 * 1024) return res.status(413).json({ error: "PDF muy grande." });
+    try {
+      const png = await pdfFirstPageToPng(buf);
+      b.imageData = "data:image/png;base64," + png.toString("base64");
+    } catch (e) { return res.status(422).json({ error: "PDF: " + e.message }); }
+  }
   const image = parseImageDataUrl(b.imageData);
   if (!image) return res.status(400).json({ error: "Se espera imageData (PNG, JPG o WEBP en base64)." });
   if (image.byteLength > 8 * 1024 * 1024) return res.status(413).json({ error: "Imagen muy grande." });

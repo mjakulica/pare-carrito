@@ -268,13 +268,15 @@ async function connect() {
   }
 }
 
-// Imagen recibida (foto o documento de imagen): se baja y se pasa a onImage con el chat y quien la
-// manda. Solo imagenes de hasta 6 MB; los PDF por ahora no (la IA lee imagenes).
+// Imagen o PDF recibido (foto, documento de imagen o comprobante en PDF): se baja y se pasa a onImage
+// con el chat y quien lo manda. Hasta 6 MB. El servidor pasa el PDF a imagen para la IA.
 async function handleImage(m, jid, key) {
   const msg = m && m.message ? m.message : {};
   const inner = msg.ephemeralMessage ? msg.ephemeralMessage.message || {} : msg.viewOnceMessage ? msg.viewOnceMessage.message || {} : msg;
-  const media = inner.imageMessage || (inner.documentMessage && /^image\//.test(inner.documentMessage.mimetype || "") ? inner.documentMessage : null);
+  const doc = inner.documentMessage || (inner.documentWithCaptionMessage && inner.documentWithCaptionMessage.message && inner.documentWithCaptionMessage.message.documentMessage) || null;
+  const media = inner.imageMessage || (doc && /^(image\/|application\/pdf)/.test(doc.mimetype || "") ? doc : null);
   if (!media || !Baileys || !sock) return;
+  const esPdf = /pdf/.test(media.mimetype || "");
   const size = Number(media.fileLength && media.fileLength.low != null ? media.fileLength.low : media.fileLength || 0);
   if (size > 6 * 1024 * 1024) return;
   const logger = (await import("pino")).default({ level: "silent" });
@@ -283,7 +285,8 @@ async function handleImage(m, jid, key) {
   const mime = /png/.test(media.mimetype || "") ? "image/png" : /webp/.test(media.mimetype || "") ? "image/webp" : "image/jpeg";
   const isGroup = jid.endsWith("@g.us");
   const from = isGroup ? phoneOf(key.participant || "", { senderPn: key.participantPn || key.participantAlt }) : phoneOf(jid, key);
-  await onImage({ waId: key.id, from, group: isGroup ? jid : "", name: m.pushName || "", caption: String(media.caption || "").trim(), imageData: "data:" + mime + ";base64," + buf.toString("base64") });
+  const archivo = esPdf ? { pdfData: "data:application/pdf;base64," + buf.toString("base64") } : { imageData: "data:" + mime + ";base64," + buf.toString("base64") };
+  await onImage({ waId: key.id, from, group: isGroup ? jid : "", name: m.pushName || "", caption: String(media.caption || media.fileName || "").trim(), ...archivo });
 }
 
 // Arranca solo si ya estaba vinculado (se reinicia el bot y sigue conectado).
