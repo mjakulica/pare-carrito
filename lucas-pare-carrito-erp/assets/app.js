@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v130";
+  const APP_VERSION = "v131";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -784,7 +784,10 @@
       <p class="muted" style="font-size:13px;margin:4px 0 8px">Fotos de transferencias que llegaron al WhatsApp vinculado, leídas con IA. Revisá el cliente y el monto y tocá <strong>Registrar pago</strong>: se descuenta del saldo como una transferencia, con la foto como comprobante. ${cfg.auto ? "El modo automático está <strong>prendido</strong>: acá quedan solo los que no pasaron los controles." : "Se puede pasar a automático en Configuración."}</p>
       ${items.some((x) => !x.ai) ? `<div class="page-actions" style="margin-bottom:8px"><button class="btn small primary" type="button" data-receipts-reread-all>Leer de nuevo los ${items.filter((x) => !x.ai).length} que no se pudieron leer</button></div>` : ""}
       <datalist id="receipt-clients">${activeClients().map((c) => `<option value="${escapeAttr(c.id + " - " + c.name)}"></option>`).join("")}</datalist>
-      ${items.length ? items.map(fila).join("") : `<p class="muted" style="margin:0">No hay comprobantes por revisar.</p>`}`;
+      ${items.length ? items.map(fila).join("") : `<p class="muted" style="margin:0">No hay comprobantes por revisar.</p>`}
+      <details id="wa-receipts-done" style="margin-top:10px"><summary><strong>Ya procesados</strong> <span class="muted">(registrados, ya cargados y descartados de los últimos 60 días)</span></summary><div data-receipts-done-list><p class="muted">Cargando...</p></div></details>`;
+    const det = box.querySelector("#wa-receipts-done");
+    if (det) det.addEventListener("toggle", () => { if (det.open) paintWaReceiptsDone(det.querySelector("[data-receipts-done-list]")); });
     const item = (id) => (ui.waReceipts || []).find((y) => String(y.id) === String(id));
     box.querySelectorAll("[data-receipts-refresh]").forEach((b) => b.addEventListener("click", () => refreshWaReceipts()));
     box.querySelectorAll("[data-receipts-reread-all]").forEach((b) => b.addEventListener("click", () => rereadFailedReceipts(b, refreshWaReceipts)));
@@ -827,6 +830,24 @@
       }
       render();
     }));
+  }
+
+  // Lista de los comprobantes ya resueltos: quien y cuando, y el pago que quedo.
+  async function paintWaReceiptsDone(el) {
+    if (!el) return;
+    try {
+      const r = await cloudRequest(getCloudSyncConfig(), "/receipts?status=todos", { method: "GET" });
+      const j = await r.json().catch(() => ({}));
+      const hechos = (j.items || []).filter((x) => ["registrado", "descartado"].includes(x.status));
+      if (!hechos.length) { el.innerHTML = `<p class="muted">Todavía no hay comprobantes procesados.</p>`; return; }
+      el.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Cliente / chat</th><th class="num">Monto</th><th>Resultado</th><th></th></tr></thead><tbody>${hechos.map((x) => {
+        const c = x.client_id ? getClient(x.client_id) : null;
+        const monto = Number((x.ai && x.ai.monto) || 0);
+        const res = x.status === "registrado" ? (/^Automático/.test(x.handled_by || "") ? "&#9881;&#65039; Registrado solo" : "Registrado") + (x.payment_id ? " · " + escapeHtml(x.payment_id) : "") : "Descartado" + (x.note ? " (" + escapeHtml(x.note) + ")" : "");
+        return `<tr><td>${escapeHtml(formatDate(receiptDate(x)))}${x.historic ? ` <span class="pill gray">viejo</span>` : ""}</td><td>${c ? escapeHtml(c.id + " - " + c.name) : escapeHtml(receiptWho(x))}</td><td class="num">${monto ? formatMoney(monto) : "-"}</td><td>${res}<br><span class="muted" style="font-size:12px">${escapeHtml(x.handled_by || "")}${x.handled_at ? " · " + escapeHtml(formatTimestampShort(x.handled_at)) : ""}</span></td><td><button class="btn small ghost" type="button" data-done-view="${escapeAttr(x.image_key || "")}">Ver</button></td></tr>`;
+      }).join("")}</tbody></table></div>`;
+      el.querySelectorAll("[data-done-view]").forEach((b) => b.addEventListener("click", () => openProofViewer(b.dataset.doneView, "", "Comprobante de WhatsApp")));
+    } catch (e) { el.innerHTML = `<p class="muted">No se pudo cargar.</p>`; }
   }
 
   // Resumen: cuanto entro por transferencia a cada cuenta propia (este mes y el anterior).
