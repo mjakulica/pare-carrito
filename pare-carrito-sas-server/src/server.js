@@ -2496,10 +2496,13 @@ async function googleVisionOcrRequest(url, apiKey, image, lang) {
 }
 
 async function visionOcrRequest(url, apiKey, model, image, prompt, extraHeaders) {
-  // Kimi K3 requires its default temperature; OCR only needs the final text.
+  // Kimi K3 requires its default temperature.
   const generation = /^kimi-k3(?:[.-]|$)/.test(model)
     ? { thinking: { type: "disabled" } }
     : { temperature: 0 };
+  if (model === "google/gemini-3.5-flash") {
+    generation.reasoning = { effort: "minimal" };
+  }
   const response = await fetch(url, {
     method: "POST",
     headers: Object.assign({ "content-type": "application/json", authorization: "Bearer " + apiKey }, extraHeaders || {}),
