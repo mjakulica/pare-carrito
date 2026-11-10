@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v129";
+  const APP_VERSION = "v130";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -618,7 +618,7 @@
   // cuanto entro a cada cuenta.
   function receiptCfg() {
     const c = (state.appSettings && state.appSettings.receipts) || {};
-    return { auto: !!c.auto, checkAccount: !!c.checkAccount, accounts: Array.isArray(c.accounts) ? c.accounts : [] };
+    return { auto: !!c.auto, checkAccount: !!c.checkAccount, accounts: Array.isArray(c.accounts) ? c.accounts : [], excludedChats: Array.isArray(c.excludedChats) ? c.excludedChats : [] };
   }
   function saveReceiptCfg(patch) {
     state.appSettings = state.appSettings || {};
@@ -868,6 +868,13 @@
       </div>
       <p class="muted" style="font-size:12px;margin:4px 0 0">Cuenta de un proveedor: cuando un cliente le transfiere directo a ese proveedor, al registrar el pago se descuenta el saldo del cliente <strong>y</strong> lo que le debés al proveedor.</p>
       <div class="page-actions" style="margin-top:6px"><button class="btn small primary" type="button" id="rc-add">Agregar cuenta</button></div>
+      <div class="auto-late" style="margin-top:10px">
+        <strong style="font-size:14px">No leer las fotos de estos chats</strong>
+        <p class="muted" style="font-size:13px;margin:2px 0 6px">Por ejemplo el grupo del equipo: ahí no mandan comprobantes los clientes, así no se gasta IA en esas fotos.</p>
+        <div>${cfg.excludedChats.map((x, i) => `<span class="pill gray" style="margin:2px">${escapeHtml(x.name || x.chat)} <button class="btn small ghost" type="button" data-rc-excl-del="${i}" style="min-height:auto;padding:0 6px">x</button></span>`).join("") || `<span class="muted" style="font-size:13px">Ninguno: se leen las fotos de todos los chats.</span>`}</div>
+        <datalist id="rc-excl-chats"></datalist>
+        <div class="page-actions" style="margin-top:6px"><input id="rc-excl-add" list="rc-excl-chats" placeholder="Buscar: LA BANDA DE PARE CARRITO..." style="flex:1;min-width:200px" autocomplete="off" /><button class="btn small primary" type="button" id="rc-excl-btn">Excluir</button></div>
+      </div>
       ${historyReceiptsConfigHtml()}
     </div>`;
   }
@@ -1067,6 +1074,34 @@
   function bindReceiptsConfig() {
     const auto = document.getElementById("rc-auto");
     if (!auto) return;
+    // Chats a no leer: lista de chats del archivo de WhatsApp.
+    let chats = [];
+    const etiqueta = (c) => (c.is_group ? "Grupo: " : "") + (c.chat_name || c.chat_id) + (c.is_group ? "" : " (" + formatWaPhone(c.chat_id) + ")");
+    cloudRequest(getCloudSyncConfig(), "/whatsapp/archive/chats", { method: "GET" }).then((r) => r.json()).then((j) => {
+      chats = (j.chats || []).filter((c) => c.chat_name || c.is_group);
+      const dl = document.getElementById("rc-excl-chats");
+      if (dl) dl.innerHTML = chats.map((c) => `<option value="${escapeAttr(etiqueta(c))}"></option>`).join("");
+    }).catch(() => {});
+    document.getElementById("rc-excl-btn").addEventListener("click", async () => {
+      const v = document.getElementById("rc-excl-add").value.trim();
+      if (!v) return;
+      const c = chats.find((x) => etiqueta(x) === v) || chats.find((x) => normalizeText(x.chat_name || "").includes(normalizeText(v)));
+      if (!c) return alert("Elegí un chat o grupo de la lista.");
+      const lista = receiptCfg().excludedChats.slice();
+      if (!lista.some((x) => x.chat === c.chat_id)) lista.push({ chat: c.chat_id, name: etiqueta(c) });
+      saveReceiptCfg({ excludedChats: lista });
+      try {
+        const j = await waInboxPost("/receipts/discard-chat", { chat: c.chat_id });
+        if (j.descartados) alert("Listo. También se sacaron " + j.descartados + " fotos de ese chat que estaban por revisar.");
+      } catch (e) { /* queda excluido igual */ }
+      render();
+    });
+    document.querySelectorAll("[data-rc-excl-del]").forEach((b) => b.addEventListener("click", () => {
+      const lista = receiptCfg().excludedChats.slice();
+      lista.splice(Number(b.dataset.rcExclDel), 1);
+      saveReceiptCfg({ excludedChats: lista });
+      render();
+    }));
     auto.addEventListener("change", () => {
       if (auto.checked && !confirm("Con esto los pagos de los comprobantes que pasen todos los controles se registran solos (se descuentan del saldo) sin que nadie los revise. ¿Prenderlo?")) { auto.checked = false; return; }
       saveReceiptCfg({ auto: auto.checked });

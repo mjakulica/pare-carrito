@@ -3697,6 +3697,14 @@ app.post("/external/wa-receipt", externalAuth, async (req, res) => {
       b.imageData = "data:image/png;base64," + png.toString("base64");
     } catch (e) { return res.status(422).json({ error: "PDF: " + e.message }); }
   }
+  // Chats excluidos en Configuracion (ej. el grupo del equipo): no se leen, asi no se gasta IA.
+  try {
+    const stored = await loadStateData();
+    const excl = ((stored && stored.data && stored.data.appSettings && stored.data.appSettings.receipts && stored.data.appSettings.receipts.excludedChats) || []).map((x) => String(x.chat || ""));
+    const chat = String(b.chatId || "");
+    const tel = phoneDigits(b.phone);
+    if (excl.some((c) => c && (c === chat || (tel.length >= 8 && phoneDigits(c).length >= 8 && !c.endsWith("@g.us") && phoneDigits(c).slice(-8) === tel.slice(-8))))) return res.json({ ok: true, excluido: true });
+  } catch (e) { /* si no se puede leer la configuracion, se procesa */ }
   const image = parseImageDataUrl(b.imageData);
   if (!image) return res.status(400).json({ error: "Se espera imageData (PNG, JPG o WEBP en base64)." });
   if (image.byteLength > 8 * 1024 * 1024) return res.status(413).json({ error: "Imagen muy grande." });
@@ -3799,6 +3807,14 @@ app.post("/receipts/:id/discard", authenticate, requireRole("manager", "admin", 
   await pool.query("UPDATE wa_receipts SET status = $2, handled_by = $3, handled_at = now() WHERE id = $1 AND status IN ('pendiente','procesando')", [req.params.id, estado, req.user.name || req.user.username]);
   res.json({ ok: true });
 });
+// Al excluir un chat: lo que ya llego de ese chat y esta por revisar se descarta.
+app.post("/receipts/discard-chat", authenticate, requireRole("manager", "admin"), async (req, res) => {
+  const chat = String((req.body && req.body.chat) || "").trim();
+  if (!chat) return res.status(400).json({ error: "Falta el chat." });
+  const { rowCount } = await pool.query("UPDATE wa_receipts SET status = 'descartado', handled_by = $2, handled_at = now(), note = 'chat excluido' WHERE status = 'pendiente' AND chat_id = $1", [chat, req.user.name || req.user.username]);
+  res.json({ ok: true, descartados: rowCount });
+});
+
 // Volver a leer con IA todos los que fallaron (por ejemplo, despues de arreglar la clave de la IA).
 // Se hace de a uno, en segundo plano.
 let rereadRunning = false;
