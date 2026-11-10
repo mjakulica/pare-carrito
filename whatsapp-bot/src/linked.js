@@ -19,9 +19,46 @@ const SENDING_FILE = path.join(path.dirname(DIR), "wa-linked-send-enabled");
 const HISTORY_FILE = path.join(path.dirname(DIR), "wa-history-receipts.json");
 let historyCfg = null;
 try { historyCfg = JSON.parse(fs.readFileSync(HISTORY_FILE, "utf8")); } catch (e) { historyCfg = null; }
-const historyStats = { encolados: 0, procesados: 0, errores: 0, ultimoError: "" };
+const historyStats = { encolados: 0, procesados: 0, errores: 0, excluidos: 0, ultimoError: "" };
 let historyQueue = [];
 let historyRunning = false;
+// La fila se guarda en disco: si el bot se reinicia (por ejemplo al publicar una version) sigue
+// donde quedo. Antes estaba solo en memoria y un reinicio la perdia.
+const HISTORY_QUEUE_FILE = path.join(path.dirname(DIR), "wa-history-queue.json");
+let historySaveTimer = null;
+function saveHistoryQueue() {
+  clearTimeout(historySaveTimer);
+  historySaveTimer = setTimeout(() => {
+    try {
+      const rep = Baileys && Baileys.BufferJSON ? Baileys.BufferJSON.replacer : undefined;
+      fs.writeFileSync(HISTORY_QUEUE_FILE, JSON.stringify({ stats: historyStats, queue: historyQueue }, rep));
+    } catch (e) { /* se reintenta en el proximo cambio */ }
+  }, 3000);
+}
+function loadHistoryQueue() {
+  try {
+    const rev = Baileys && Baileys.BufferJSON ? Baileys.BufferJSON.reviver : undefined;
+    const j = JSON.parse(fs.readFileSync(HISTORY_QUEUE_FILE, "utf8"), rev);
+    if (Array.isArray(j.queue) && j.queue.length && !historyQueue.length) {
+      historyQueue = j.queue;
+      Object.assign(historyStats, j.stats || {});
+    }
+  } catch (e) { /* sin fila guardada */ }
+}
+// Chats que no se leen (Configuracion -> "No leer las fotos de estos chats"): se saltean antes de
+// bajar la foto. La lista la da el servidor.
+let excludedChats = [];
+let excludedFetcher = null;
+function setExcludedFetcher(fn) {
+  excludedFetcher = fn;
+  const traer = () => Promise.resolve(fn()).then((l) => { if (Array.isArray(l)) excludedChats = l.map(String); }).catch(() => {});
+  traer();
+  setInterval(traer, 5 * 60 * 1000);
+}
+function chatExcluded(jid, phone) {
+  const tel = digits(phone || "");
+  return excludedChats.some((c) => c && (c === jid || (tel.length >= 8 && !c.endsWith("@g.us") && digits(c).slice(-8) === tel.slice(-8))));
+}
 function setHistoryReceipts(days) {
   fs.mkdirSync(path.dirname(DIR), { recursive: true });
   if (!days) { historyCfg = null; try { fs.unlinkSync(HISTORY_FILE); } catch (e) { /* ya estaba */ } return historyStatus(); }
@@ -44,22 +81,30 @@ function queueHistoryImage(m) {
   const inner = msg.ephemeralMessage ? msg.ephemeralMessage.message || {} : msg.viewOnceMessage ? msg.viewOnceMessage.message || {} : msg;
   const doc = inner.documentMessage || (inner.documentWithCaptionMessage && inner.documentWithCaptionMessage.message && inner.documentWithCaptionMessage.message.documentMessage);
   if (!inner.imageMessage && !(doc && /^(image\/|application\/pdf)/.test(doc.mimetype || ""))) return;
-  historyQueue.push(m);
+  if (chatExcluded(jid, jid.endsWith("@g.us") ? "" : phoneOf(jid, key))) { historyStats.excluidos += 1; return; }
+  // Primero los chats con personas (clientes), los grupos al final.
+  if (jid.endsWith("@g.us")) historyQueue.push(m); else historyQueue.splice(historyQueue.findIndex((x) => String((x.key || {}).remoteJid || "").endsWith("@g.us")) >>> 0, 0, m);
   historyStats.encolados += 1;
+  saveHistoryQueue();
   if (!historyRunning) runHistoryQueue();
 }
 async function runHistoryQueue() {
+  if (historyRunning) return;
   historyRunning = true;
   while (historyQueue.length) {
-    const m = historyQueue.shift();
+    if (!sock || info.status !== "conectado") break; // sin conexion: sigue al reconectar
+    const m = historyQueue[0];
+    const key = m.key || {};
+    const jid = String(key.remoteJid || "");
     try {
-      const key = m.key || {};
-      await handleImage(m, String(key.remoteJid || ""), key, { historico: true });
-      historyStats.procesados += 1;
+      if (chatExcluded(jid, jid.endsWith("@g.us") ? "" : phoneOf(jid, key))) historyStats.excluidos += 1;
+      else { await handleImage(m, jid, key, { historico: true }); historyStats.procesados += 1; }
     } catch (e) {
       historyStats.errores += 1;
       historyStats.ultimoError = e.message;
     }
+    historyQueue.shift();
+    saveHistoryQueue();
     await new Promise((r) => setTimeout(r, 1500));
   }
   historyRunning = false;
@@ -255,6 +300,9 @@ async function connect() {
         info.connectedAt = new Date().toISOString();
         info.lastError = "";
         console.log("WhatsApp vinculado: conectado como ..." + info.me.slice(-4));
+        // Fila de fotos del historial que habia quedado a medias (reinicio del bot): se sigue.
+        loadHistoryQueue();
+        if (historyQueue.length) setTimeout(() => runHistoryQueue().catch(() => {}), 10000);
       }
       if (u.connection === "close") {
         const code = u.lastDisconnect && u.lastDisconnect.error && u.lastDisconnect.error.output ? u.lastDisconnect.error.output.statusCode : 0;
@@ -326,6 +374,7 @@ async function handleImage(m, jid, key, extra) {
   const doc = inner.documentMessage || (inner.documentWithCaptionMessage && inner.documentWithCaptionMessage.message && inner.documentWithCaptionMessage.message.documentMessage) || null;
   const media = inner.imageMessage || (doc && /^(image\/|application\/pdf)/.test(doc.mimetype || "") ? doc : null);
   if (!media || !Baileys || !sock) return;
+  if (chatExcluded(jid, jid.endsWith("@g.us") ? "" : phoneOf(jid, key))) return;
   const esPdf = /pdf/.test(media.mimetype || "");
   const size = Number(media.fileLength && media.fileLength.low != null ? media.fileLength.low : media.fileLength || 0);
   if (size > 6 * 1024 * 1024) return;
@@ -400,4 +449,4 @@ async function sendText(phone, text, opts) {
   }
 }
 
-module.exports = { setHistoryReceipts, historyStatus, listLids, phoneOf, init, startLinking, stop, status, isConnected, sendText, addContacts, listContacts, archiveMessage, flushArchive, receiveOnly, setReceiveOnly };
+module.exports = { setExcludedFetcher, setHistoryReceipts, historyStatus, listLids, phoneOf, init, startLinking, stop, status, isConnected, sendText, addContacts, listContacts, archiveMessage, flushArchive, receiveOnly, setReceiveOnly };

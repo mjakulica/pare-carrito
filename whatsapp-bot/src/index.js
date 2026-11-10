@@ -99,6 +99,7 @@ const linkedAuth = (req, res, next) => {
   next();
 };
 app.get("/linked/status", linkedAuth, (req, res) => res.json({ ok: true, ...linked.status(), stats: linkedStats, ia: !!config.openrouter.apiKey }));
+linked.setExcludedFetcher(() => erp.erpRequest("GET", "/external/receipt-excluded").then((r) => r.chats || []));
 app.post("/linked/history-receipts", linkedAuth, (req, res) => res.json({ ok: true, ...linked.setHistoryReceipts(Number((req.body && req.body.days) || 0)) }));
 app.get("/linked/history-receipts", linkedAuth, (req, res) => res.json({ ok: true, ...linked.historyStatus() }));
 app.post("/linked/start", linkedAuth, async (req, res) => res.json({ ok: true, ...(await linked.startLinking()) }));

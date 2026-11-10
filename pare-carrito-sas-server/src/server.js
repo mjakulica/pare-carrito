@@ -3807,6 +3807,13 @@ app.post("/receipts/:id/discard", authenticate, requireRole("manager", "admin", 
   await pool.query("UPDATE wa_receipts SET status = $2, handled_by = $3, handled_at = now() WHERE id = $1 AND status IN ('pendiente','procesando')", [req.params.id, estado, req.user.name || req.user.username]);
   res.json({ ok: true });
 });
+// Lista de chats excluidos para el bot (asi no baja esas fotos).
+app.get("/external/receipt-excluded", externalAuth, async (req, res) => {
+  const stored = await loadStateData();
+  const excl = (stored && stored.data && stored.data.appSettings && stored.data.appSettings.receipts && stored.data.appSettings.receipts.excludedChats) || [];
+  res.json({ ok: true, chats: excl.map((x) => String(x.chat || "")).filter(Boolean) });
+});
+
 // Al excluir un chat: lo que ya llego de ese chat y esta por revisar se descarta.
 app.post("/receipts/discard-chat", authenticate, requireRole("manager", "admin"), async (req, res) => {
   const chat = String((req.body && req.body.chat) || "").trim();
