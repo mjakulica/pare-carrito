@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v135";
+  const APP_VERSION = "v136";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -618,7 +618,7 @@
   // cuanto entro a cada cuenta.
   function receiptCfg() {
     const c = (state.appSettings && state.appSettings.receipts) || {};
-    return { auto: !!c.auto, checkAccount: !!c.checkAccount, accounts: Array.isArray(c.accounts) ? c.accounts : [], excludedChats: Array.isArray(c.excludedChats) ? c.excludedChats : [] };
+    return { auto: !!c.auto, autoHistoric: !!c.autoHistoric, autoBank: !!c.autoBank, checkAccount: !!c.checkAccount, accounts: Array.isArray(c.accounts) ? c.accounts : [], excludedChats: Array.isArray(c.excludedChats) ? c.excludedChats : [] };
   }
   function saveReceiptCfg(patch) {
     state.appSettings = state.appSettings || {};
@@ -703,7 +703,9 @@
 
   // Modo automatico (lo hace el mismo equipo que la carga automatica de pedidos).
   async function runAutoReceipts() {
-    if (!receiptCfg().auto || ui.autoReceiptsRunning) return;
+    if (ui.autoReceiptsRunning) return;
+    const cfgA = receiptCfg();
+    if (!cfgA.auto) { if (cfgA.autoHistoric || cfgA.autoBank) await runAutoSources(); return; }
     ui.autoReceiptsRunning = true;
     try {
       const r = await cloudRequest(getCloudSyncConfig(), "/receipts?status=pendiente", { method: "GET" });
@@ -728,6 +730,53 @@
         }
       }
     } catch (e) { /* se reintenta */ } finally { ui.autoReceiptsRunning = false; }
+    await runAutoSources();
+  }
+  // Comprobantes viejos y creditos de los resumenes, solos (si estan prendidos en Configuracion).
+  async function runAutoSources() {
+    const cfg = receiptCfg();
+    if (ui.autoSourcesRunning || (!cfg.autoHistoric && !cfg.autoBank)) return;
+    ui.autoSourcesRunning = true;
+    try {
+      if (cfg.autoHistoric) {
+        const r = await cloudRequest(getCloudSyncConfig(), "/receipts?status=pendiente&historic=1", { method: "GET" });
+        const j = await r.json().catch(() => ({}));
+        const probados = autoReceiptsTried();
+        let n = 0;
+        for (const x of (r.ok ? j.items || [] : []).filter((y) => !probados.includes(y.id))) {
+          if (n >= 20) break;
+          autoReceiptsMarkTried(x.id);
+          const monto = Number((x.ai && x.ai.monto) || 0);
+          const c = getClient(x.client_id);
+          try {
+            if (x.match) { await waInboxPost("/receipts/" + x.id + "/done", { paymentId: x.match.id, clientId: x.client_id, auto: true }); n += 1; continue; }
+            const prob = receiptProblems(x, x.client_id, monto);
+            const cta = receiptAccountMatch(x.ai || {});
+            const prov = cta && cta.providerId ? getProvider(cta.providerId) : null;
+            if (prob.length || !c || (prov && monto > getProviderBalance(prov.id) + 0.005)) continue;
+            await waInboxPost("/receipts/" + x.id + "/claim", {});
+            const pay = await registerReceipt(x, c.id, monto, true, x.bank ? x.bank.fecha : receiptDate(x));
+            autoInboxLog("Comprobante viejo registrado solo: " + formatMoney(monto) + " de " + c.id + " - " + c.name + " (" + pay.id + ")");
+            n += 1;
+          } catch (e) { await waInboxPost("/receipts/" + x.id + "/release", {}).catch(() => {}); }
+        }
+      }
+      if (cfg.autoBank) {
+        const r = await cloudRequest(getCloudSyncConfig(), "/bank/movements?status=pendiente", { method: "GET" });
+        const j = await r.json().catch(() => ({}));
+        let n = 0;
+        for (const x of (r.ok ? j.items || [] : [])) {
+          if (n >= 20) break;
+          try {
+            if (x.match && x.match.seguro) { await waInboxPost("/bank/movements/" + x.id + "/done", { paymentId: x.match.id, clientId: x.match.clientId, auto: true }); n += 1; continue; }
+            if (x.match || !x.client_id || !getClient(x.client_id)) continue; // dudoso o sin cliente: a mano
+            const pay = await bankRegister(x, getClient(x.client_id), true);
+            autoInboxLog("Crédito del banco registrado solo: " + formatMoney(x.monto) + " de " + x.client_id + " (" + pay.id + ")");
+            n += 1;
+          } catch (e) { /* queda para revisar */ }
+        }
+      }
+    } catch (e) { /* se reintenta */ } finally { ui.autoSourcesRunning = false; }
   }
   function autoReceiptsTried() {
     try { const j = JSON.parse(localStorage.getItem("lpc_auto_receipts_tried") || "{}"); return j.v === APP_VERSION ? (j.ids || []) : []; } catch (e) { return []; }
@@ -767,6 +816,7 @@
       return `<div class="wa-inbox-item" data-receipt-row="${x.id}">
         <div class="wa-inbox-head"><strong>${c ? escapeHtml(c.id + " - " + c.name) : "Sin vincular: " + escapeHtml(receiptWho(x))}</strong>${c ? ` <span class="muted">(${escapeHtml(receiptWho(x))})</span>` : ""} <span class="muted">${escapeHtml(formatTimestampShort(x.created_at))}</span>${cuenta ? ` <span class="pill ${cuenta.providerId ? "blue" : "green"}">${escapeHtml(cuenta.name)}${cuenta.providerId && getProvider(cuenta.providerId) ? " · proveedor " + escapeHtml(getProvider(cuenta.providerId).name) : ""}</span>` : ""}${x.status === "procesando" ? ` <span class="pill gray">registrando...</span>` : ""}</div>
         <div class="muted" style="font-size:13px;margin:4px 0">${datos.map(escapeHtml).join(" · ") || "Sin datos leídos"}${x.caption ? "<br>Mensaje: " + escapeHtml(x.caption) : ""}</div>
+        ${x.bank ? `<div style="font-size:13px">&#127974; Está en el resumen de ${escapeHtml(x.bank.account || "banco")} del ${escapeHtml(formatDate(x.bank.fecha))}: la transferencia llegó.</div>` : ""}
         ${prob.length ? `<div class="wa-inbox-auto">&#9888;&#65039; ${prob.map(escapeHtml).join(" · ")}</div>` : ""}
         <div class="page-actions wa-inbox-actions" style="flex-wrap:wrap">
           <input list="receipt-clients" data-receipt-client="${x.id}" value="${c ? escapeAttr(c.id + " - " + c.name) : ""}" placeholder="Cliente" style="flex:1;min-width:180px" autocomplete="off" />
@@ -875,6 +925,9 @@
       <h2 class="page-title" style="font-size:18px">&#129534; Comprobantes de transferencia por WhatsApp</h2>
       <p class="muted" style="margin-top:0;font-size:13px">Las fotos que llegan al WhatsApp vinculado se leen con IA. Los comprobantes aparecen en <strong>Pagos</strong> para registrarlos con un toque.</p>
       <label style="display:flex;gap:8px;align-items:flex-start;margin:6px 0"><input type="checkbox" id="rc-auto" ${cfg.auto ? "checked" : ""} style="width:auto;min-height:auto;margin-top:3px" /><span><strong>Registrar los pagos solos</strong><br><span class="muted" style="font-size:13px">Solo si: el número está vinculado a un cliente, la IA leyó el monto con seguridad, el nº de operación no llegó antes, no hay un pago igual de ese cliente en los últimos 3 días, es de la última semana${cfg.checkAccount ? " y va a una de tus cuentas" : ""}. Si falla algo, queda en Pagos para revisar. Lo hace el equipo de la carga automática de pedidos (tiene que estar activada).</span></span></label>
+      <label style="display:flex;gap:8px;align-items:flex-start;margin:6px 0"><input type="checkbox" id="rc-auto-hist" ${cfg.autoHistoric ? "checked" : ""} style="width:auto;min-height:auto;margin-top:3px" /><span><strong>Registrar solos también los comprobantes viejos</strong><br><span class="muted" style="font-size:13px">Los que ya estaban cargados se marcan solos; los que faltan se registran con su fecha (la del banco si está en un resumen), con los mismos controles.</span></span></label>
+      <label style="display:flex;gap:8px;align-items:flex-start;margin:6px 0"><input type="checkbox" id="rc-auto-bank" ${cfg.autoBank ? "checked" : ""} style="width:auto;min-height:auto;margin-top:3px" /><span><strong>Registrar solos los créditos de los resúmenes del banco</strong><br><span class="muted" style="font-size:13px">Solo los que el sistema ya sabe de qué cliente son (por un comprobante de WhatsApp o un pagador aprendido) y que no están cargados. Los que ya estaban se marcan solos. Los dudosos quedan para revisar.</span></span></label>
+      <p class="muted" style="font-size:12px;margin:0 0 6px">Todo lo que se registre solo queda en Pagos → "Registrados por comprobantes y resúmenes", para chequearlo. Lo hace el equipo de la carga automática de pedidos (tiene que estar activada).</p>
       <label style="display:flex;gap:8px;align-items:flex-start;margin:6px 0"><input type="checkbox" id="rc-check" ${cfg.checkAccount ? "checked" : ""} style="width:auto;min-height:auto;margin-top:3px" /><span><strong>Controlar que la transferencia vaya a una de mis cuentas</strong><br><span class="muted" style="font-size:13px">Si el comprobante no muestra el titular, CUIT, CBU/CVU o alias de alguna cuenta de abajo, queda para revisar.</span></span></label>
       <strong style="font-size:14px">Cuentas (mías y de proveedores)</strong>
       <div class="table-wrap" style="margin-top:4px"><table><thead><tr><th>Nombre</th><th>De</th><th>Titular</th><th>CUIT</th><th>CBU/CVU</th><th>Alias</th><th></th></tr></thead><tbody>
@@ -942,9 +995,55 @@
     state.appSettings.payerMap = mapa;
   }
 
+  // Registrar un credito del banco como pago del cliente (con la fecha del banco).
+  async function bankRegister(x, c, auto) {
+    recordPayment({ date: x.fecha, clientId: c.id, orderIds: [], amount: x.monto, method: "transferencia", receivedByUserId: currentUser.id, notes: ["Resumen " + (x.account || "banco"), x.descripcion].filter(Boolean).join(" · ").slice(0, 300) });
+    const pay = state.payments[state.payments.length - 1];
+    pay.bankMovementId = x.id;
+    if (auto) pay.autoLoaded = true;
+    learnPayer(x.cuit, x.nombre || x.descripcion, c.id);
+    saveState();
+    const llego = await confirmChangesReachedServer();
+    if (llego === "rechazado" || !(state.payments || []).some((p) => p.id === pay.id)) throw new Error("el servidor no aceptó el pago; revisá Pagos");
+    await waInboxPost("/bank/movements/" + x.id + "/done", { paymentId: pay.id, clientId: c.id, auto: !!auto });
+    return pay;
+  }
+
+  // Lista para chequear: todo lo registrado por comprobantes de WhatsApp y resumenes del banco.
+  function sourcesLogHtml() {
+    if (!currentUser || !["manager", "admin"].includes(currentUser.role)) return "";
+    return `<div class="panel" style="margin-bottom:14px"><details id="sources-log"><summary><strong>&#128203; Registrados por comprobantes y resúmenes</strong> <span class="muted">(últimos 90 días, para chequear)</span></summary>
+      <label style="display:inline-flex;gap:6px;align-items:center;margin:6px 0;font-size:13px"><input type="checkbox" id="sources-only-auto" style="width:auto;min-height:auto" /> Solo los que se registraron solos</label>
+      <div id="sources-log-list"><p class="muted">Cargando...</p></div></details></div>`;
+  }
+  async function paintSourcesLog() {
+    const el = document.getElementById("sources-log-list");
+    if (!el) return;
+    try {
+      const r = await cloudRequest(getCloudSyncConfig(), "/payments/from-sources?days=90", { method: "GET" });
+      const j = await r.json().catch(() => ({}));
+      const soloAuto = (document.getElementById("sources-only-auto") || {}).checked;
+      const items = (j.items || []).filter((x) => !soloAuto || /^Automático/.test(x.handled_by || ""));
+      if (!items.length) { el.innerHTML = `<p class="muted">Nada registrado todavía.</p>`; return; }
+      const total = items.reduce((t, x) => t + Number(x.monto || 0), 0);
+      el.innerHTML = `<p class="muted" style="font-size:13px">${items.length} pagos · total ${formatMoney(total)}</p><div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Origen</th><th>Cliente</th><th class="num">Monto</th><th>Pago</th><th>Quién</th><th></th></tr></thead><tbody>${items.map((x) => {
+        const c = x.client_id ? getClient(x.client_id) : null;
+        const origen = x.origen === "banco" ? "&#127974; Resumen " + escapeHtml(x.account || "") : "&#129534; WhatsApp" + (x.historic ? " (viejo)" : "");
+        return `<tr><td>${escapeHtml(formatDate(x.fecha))}</td><td>${origen}${x.descripcion ? `<br><span class="muted" style="font-size:12px">${escapeHtml(String(x.descripcion).slice(0, 80))}</span>` : ""}</td><td>${escapeHtml(c ? c.id + " - " + c.name : x.client_id || "")}</td><td class="num">${formatMoney(x.monto)}</td><td>${escapeHtml(x.payment_id || "")}</td><td>${/^Automático/.test(x.handled_by || "") ? "&#9881;&#65039; " : ""}${escapeHtml(x.handled_by || "")}<br><span class="muted" style="font-size:12px">${escapeHtml(formatTimestampShort(x.handled_at))}</span></td><td>${x.image_key ? `<button class="btn small ghost" type="button" data-src-view="${escapeAttr(x.image_key)}">Ver</button>` : ""}</td></tr>`;
+      }).join("")}</tbody></table></div><p class="muted" style="font-size:12px">Si alguno está mal, anulá el pago (${"Pagos → historial"}) y corregilo.</p>`;
+      el.querySelectorAll("[data-src-view]").forEach((b) => b.addEventListener("click", () => openProofViewer(b.dataset.srcView, "", "Comprobante de WhatsApp")));
+    } catch (e) { el.innerHTML = `<p class="muted">No se pudo cargar.</p>`; }
+  }
+
   function bankPanelHtml() {
     if (!currentUser || !["manager", "admin"].includes(currentUser.role)) return "";
     afterRender.push(() => refreshBankMovements());
+    afterRender.push(() => {
+      const det = document.getElementById("sources-log");
+      if (det) det.addEventListener("toggle", () => { if (det.open) paintSourcesLog(); });
+      const chk = document.getElementById("sources-only-auto");
+      if (chk) chk.addEventListener("change", paintSourcesLog);
+    });
     const cuentas = ["Brubank", "Galicia"].concat(receiptCfg().accounts.filter((a) => !a.providerId).map((a) => a.name));
     return `<div class="panel" id="bank-panel" style="margin-bottom:14px">
       <h2 class="page-title" style="font-size:18px;margin:0">&#127974; Resúmenes del banco</h2>
@@ -970,10 +1069,25 @@
         if (!f) return alert("Elegí el archivo del resumen.");
         if (!cuenta) return alert("Poné de qué cuenta es (Brubank, Galicia...).");
         up.disabled = true;
-        msg.textContent = /\.pdf$/i.test(f.name) ? "Leyendo el PDF con IA (puede tardar un minuto)..." : "Subiendo...";
+        ui.bankMsg = "";
+        msg.textContent = /\.pdf$/i.test(f.name) ? "Subiendo el PDF..." : "Subiendo...";
         try {
           const data = await new Promise((ok, mal) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = () => mal(new Error("no se pudo leer el archivo")); r.readAsDataURL(f); });
-          const j = await waInboxPost("/bank/import", { fileName: f.name, account: cuenta, data });
+          const inicio = await waInboxPost("/bank/import", { fileName: f.name, account: cuenta, data });
+          // La lectura sigue en el servidor: se consulta el avance cada 3 segundos (hasta 15 minutos).
+          let j = { estado: "leyendo" };
+          for (let i = 0; i < 300 && j.estado === "leyendo"; i++) {
+            await new Promise((ok) => setTimeout(ok, 3000));
+            try {
+              const r = await cloudRequest(getCloudSyncConfig(), "/bank/import/" + inicio.job, { method: "GET" });
+              j = await r.json().catch(() => ({ estado: "leyendo" }));
+              if (!r.ok) throw new Error(j.error || "HTTP " + r.status);
+            } catch (e) { if (/No encuentro/.test(e.message)) throw e; continue; }
+            const m1 = document.getElementById("bank-msg");
+            if (m1 && j.estado === "leyendo") m1.textContent = j.partes ? "Leyendo con IA: parte " + j.hechas + " de " + j.partes + "..." : "Leyendo...";
+          }
+          if (j.estado === "error") throw new Error(j.error);
+          if (j.estado !== "listo") throw new Error("Sigue leyendo en el servidor. Tocá Subir de nuevo en unos minutos (no se duplica) o recargá Pagos.");
           ui.bankMsg = j.creditos + " créditos en el archivo: " + j.nuevos + " nuevos" + (j.repetidos ? ", " + j.repetidos + " ya estaban subidos" : "") + ".";
           const m2 = document.getElementById("bank-msg");
           if (m2) m2.textContent = ui.bankMsg;
@@ -1015,6 +1129,7 @@
     </div>`;
     box.innerHTML = `<p class="muted" style="font-size:13px;margin:0 0 6px"><strong>${faltan.length}</strong> sin cargar · <strong>${posibles.length}</strong> posibles · <strong>${seguros.length}</strong> ya cargados.</p>
       <datalist id="bank-clients">${activeClients().map((c) => `<option value="${escapeAttr(c.id + " - " + c.name)}"></option>`).join("")}</datalist>
+      ${faltan.filter((x) => x.client_id).length ? `<div class="page-actions" style="margin-bottom:8px"><button class="btn small primary" type="button" data-bank-pay-known>Registrar los ${faltan.filter((x) => x.client_id).length} sin cargar que ya sé de qué cliente son</button><span class="muted" style="font-size:12px">(por un comprobante de WhatsApp o un pagador ya aprendido)</span></div>` : ""}
       ${seguros.length ? `<div class="page-actions" style="margin-bottom:8px"><button class="btn small blue" type="button" data-bank-match-all>Marcar los ${seguros.length} que ya estaban cargados</button></div>` : ""}
       ${faltan.length ? `<h3 style="font-size:15px;margin:8px 0 4px">Sin cargar (${faltan.length})</h3>${faltan.map(fila).join("")}` : ""}
       ${posibles.length ? `<h3 style="font-size:15px;margin:8px 0 4px">Posibles (mismo monto y fecha, falta confirmar el cliente) (${posibles.length})</h3>${posibles.map(fila).join("")}` : ""}
@@ -1046,6 +1161,19 @@
       try { await waInboxPost("/bank/movements/" + b.dataset.bankDiscard + "/discard", {}); } catch (e) { alert(e.message); }
       refreshBankMovements();
     }));
+    const registrarBanco = (x, c) => bankRegister(x, c, false);
+    box.querySelectorAll("[data-bank-pay-known]").forEach((b) => b.addEventListener("click", async () => {
+      const lista = faltan.filter((x) => x.client_id && getClient(x.client_id));
+      const total = lista.reduce((t, x) => t + x.monto, 0);
+      if (!confirm("Registrar " + lista.length + " pagos por transferencia (total " + formatMoney(total) + "), cada uno con su cliente y la fecha del banco. ¿Seguir?")) return;
+      b.disabled = true;
+      let bien = 0, mal = 0;
+      for (const x of lista) {
+        try { await registrarBanco(x, getClient(x.client_id)); bien += 1; b.textContent = "Registrando... " + bien + " de " + lista.length; } catch (e) { mal += 1; }
+      }
+      alert("Listo: " + bien + " pagos registrados" + (mal ? ", " + mal + " no se pudieron" : "") + ".");
+      refreshBankMovements();
+    }));
     box.querySelectorAll("[data-bank-pay]").forEach((b) => b.addEventListener("click", async () => {
       const x = item(b.dataset.bankPay);
       if (!x) return;
@@ -1055,16 +1183,7 @@
       if (x.match && !confirm("Ojo: puede que ya esté cargado (" + x.match.id + "). ¿Registrar otro pago igual?")) return;
       if (!confirm("Registrar pago por transferencia de " + formatMoney(x.monto) + " de " + c.id + " - " + c.name + " con fecha " + formatDate(x.fecha) + "?")) return;
       b.disabled = true;
-      try {
-        recordPayment({ date: x.fecha, clientId: c.id, orderIds: [], amount: x.monto, method: "transferencia", receivedByUserId: currentUser.id, notes: ["Resumen " + (x.account || "banco"), x.descripcion].filter(Boolean).join(" · ").slice(0, 300) });
-        const pay = state.payments[state.payments.length - 1];
-        pay.bankMovementId = x.id;
-        learnPayer(x.cuit, x.nombre || x.descripcion, c.id);
-        saveState();
-        const llego = await confirmChangesReachedServer();
-        if (llego === "rechazado" || !(state.payments || []).some((p) => p.id === pay.id)) throw new Error("el servidor no aceptó el pago; revisá Pagos");
-        await waInboxPost("/bank/movements/" + x.id + "/done", { paymentId: pay.id, clientId: c.id });
-      } catch (e) { alert("No se pudo registrar: " + e.message); }
+      try { await registrarBanco(x, c); } catch (e) { alert("No se pudo registrar: " + e.message); }
       refreshBankMovements();
     }));
   }
@@ -1126,6 +1245,7 @@
       const prob = ya ? [] : receiptProblems(x, x.client_id, monto);
       return `<div class="wa-inbox-item">
         <div class="wa-inbox-head"><strong>${escapeHtml(formatDate(receiptDate(x)))}</strong> · ${c ? escapeHtml(c.id + " - " + c.name) + ` <span class="muted">(${escapeHtml(receiptWho(x))})</span>` : "Sin vincular: " + escapeHtml(receiptWho(x))} · <strong>${monto ? formatMoney(monto) : "sin monto"}</strong> <span class="muted">${escapeHtml([ai.banco, ai.operacion ? "Op " + ai.operacion : "", ai.origen_nombre ? "De: " + ai.origen_nombre : ""].filter(Boolean).join(" · "))}</span></div>
+        ${x.bank && !ya ? `<div style="font-size:13px">&#127974; Está en el resumen de ${escapeHtml(x.bank.account || "banco")} del ${escapeHtml(formatDate(x.bank.fecha))}: la transferencia llegó.</div>` : ""}
         ${ya ? `<div class="muted" style="font-size:13px">&#9989; Ya está cargado: <strong>${escapeHtml(ya.id)}</strong> del ${escapeHtml(formatDate(ya.date))} por ${formatMoney(ya.amount)}</div>` : prob.length ? `<div class="wa-inbox-auto">&#9888;&#65039; ${prob.map(escapeHtml).join(" · ")}</div>` : ""}
         <div class="page-actions wa-inbox-actions" style="flex-wrap:wrap">
           ${ya ? `<button class="btn small primary" type="button" data-hist-match="${x.id}">Ok, ya estaba</button>` : `<input list="receipt-clients-h" data-hist-client="${x.id}" value="${c ? escapeAttr(c.id + " - " + c.name) : ""}" placeholder="Cliente" style="flex:1;min-width:160px" autocomplete="off" /><input data-hist-amount="${x.id}" inputmode="decimal" value="${monto ? escapeAttr(formatAmountInput(monto)) : ""}" placeholder="Monto" style="width:120px" /><button class="btn small primary" type="button" data-hist-pay="${x.id}">Registrar con fecha ${escapeHtml(formatDate(receiptDate(x)).slice(0, 5))}</button>`}
@@ -1140,6 +1260,7 @@
         <button class="btn small ghost" type="button" data-hist-refresh>Actualizar</button>
       </div>
       <p class="muted" style="font-size:13px;margin:4px 0 8px">Leídos del historial. Cada uno se compara con los pagos que ya están en el sistema (mismo cliente, mismo monto, hasta 5 días de diferencia). <strong>${yaCargados.length}</strong> ya están cargados y <strong>${faltan.length}</strong> no los encuentro. Nada se registra solo.</p>
+      ${(() => { const n = faltan.filter((f) => f.x.bank && f.x.client_id && f.monto > 0).length; return n ? `<div class="page-actions" style="margin-bottom:8px"><button class="btn small primary" type="button" data-hist-bank-all>Registrar los ${n} que están en el resumen del banco</button><span class="muted" style="font-size:12px">(con cliente y monto; con la fecha del banco)</span></div>` : ""; })()}
       <datalist id="receipt-clients-h">${activeClients().map((c) => `<option value="${escapeAttr(c.id + " - " + c.name)}"></option>`).join("")}</datalist>
       ${yaCargados.length ? `<div class="page-actions" style="margin-bottom:8px"><button class="btn small blue" type="button" data-hist-match-all>Marcar los ${yaCargados.length} que ya estaban cargados</button></div>` : ""}
       ${items.some((x) => !x.ai) ? `<div class="page-actions" style="margin-bottom:8px"><button class="btn small primary" type="button" data-receipts-reread-all>Leer de nuevo los ${items.filter((x) => !x.ai).length} que no se pudieron leer</button></div>` : ""}
@@ -1166,6 +1287,26 @@
       if (!f || !f.ya) return;
       b.disabled = true;
       try { await marcar(f); } catch (e) { alert(e.message); }
+      refreshWaHistoric();
+    }));
+    box.querySelectorAll("[data-hist-bank-all]").forEach((b) => b.addEventListener("click", async () => {
+      const lista = (ui.waHistoricRows || []).filter((f) => !f.ya && f.x.bank && f.x.client_id && f.monto > 0);
+      const total = lista.reduce((t, f) => t + f.monto, 0);
+      if (!confirm("Registrar " + lista.length + " pagos por transferencia (total " + formatMoney(total) + ") que tienen comprobante de WhatsApp y además están en el resumen del banco. Cada uno va con su cliente y la fecha del banco. ¿Seguir?")) return;
+      b.disabled = true;
+      let bien = 0, mal = 0;
+      for (const f of lista) {
+        try {
+          const cta = receiptAccountMatch(f.x.ai || {});
+          const prov = cta && cta.providerId ? getProvider(cta.providerId) : null;
+          if (prov && f.monto > getProviderBalance(prov.id) + 0.005) { mal += 1; continue; }
+          await waInboxPost("/receipts/" + f.x.id + "/claim", {});
+          await registerReceipt(f.x, f.x.client_id, f.monto, false, f.x.bank.fecha);
+          bien += 1;
+          b.textContent = "Registrando... " + bien + " de " + lista.length;
+        } catch (e) { mal += 1; await waInboxPost("/receipts/" + f.x.id + "/release", {}).catch(() => {}); }
+      }
+      alert("Listo: " + bien + " pagos registrados" + (mal ? ", " + mal + " quedaron para revisar a mano" : "") + ".");
       refreshWaHistoric();
     }));
     box.querySelectorAll("[data-hist-match-all]").forEach((b) => b.addEventListener("click", async () => {
@@ -1274,6 +1415,14 @@
       if (auto.checked && !confirm("Con esto los pagos de los comprobantes que pasen todos los controles se registran solos (se descuentan del saldo) sin que nadie los revise. ¿Prenderlo?")) { auto.checked = false; return; }
       saveReceiptCfg({ auto: auto.checked });
       autoInboxLog(auto.checked ? "Registro automático de comprobantes prendido" : "Registro automático de comprobantes apagado");
+    });
+    [["rc-auto-hist", "autoHistoric", "Registrar solos los comprobantes viejos"], ["rc-auto-bank", "autoBank", "Registrar solos los créditos del banco"]].forEach(([id, key, label]) => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener("change", () => {
+        if (el.checked && !confirm(label + ": se crean los pagos (baja el saldo del cliente y entra al Banco) sin que nadie los revise. Quedan en la lista para chequear. ¿Prenderlo?")) { el.checked = false; return; }
+        saveReceiptCfg({ [key]: el.checked });
+        autoInboxLog(label + (el.checked ? ": prendido" : ": apagado"));
+      });
     });
     const chk = document.getElementById("rc-check");
     chk.addEventListener("change", () => {
@@ -14843,6 +14992,7 @@
       ${waReceiptsPanelHtml()}
       ${waHistoricPanelHtml()}
       ${bankPanelHtml()}
+      ${sourcesLogHtml()}
       <div class="grid">
         <form id="payment-form" class="panel">
           <div class="form-grid payment-form-grid">
