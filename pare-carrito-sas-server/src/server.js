@@ -28,7 +28,7 @@ const STATE_HISTORY_KEEP = Number(process.env.STATE_HISTORY_KEEP || 30);
 const MOONSHOT_API_KEY = process.env.MOONSHOT_API_KEY || "";
 const MOONSHOT_API_URL = (process.env.MOONSHOT_API_URL || "https://api.moonshot.ai/v1/chat/completions").trim();
 const MOONSHOT_MODEL = process.env.MOONSHOT_MODEL || "kimi-k2.7";
-const MOONSHOT_VISION_MODEL = process.env.MOONSHOT_VISION_MODEL || "moonshot-v1-32k-vision-preview";
+const MOONSHOT_VISION_MODEL = process.env.MOONSHOT_VISION_MODEL || "kimi-k3.1-pro";
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || "";
 const OPENROUTER_API_URL = (process.env.OPENROUTER_API_URL || "https://openrouter.ai/api/v1/chat/completions").trim();
 const OPENROUTER_VISION_MODEL = process.env.OPENROUTER_VISION_MODEL || "openai/gpt-4o-mini";
@@ -2496,12 +2496,16 @@ async function googleVisionOcrRequest(url, apiKey, image, lang) {
 }
 
 async function visionOcrRequest(url, apiKey, model, image, prompt, extraHeaders) {
+  // Kimi K3 requires its default temperature; OCR only needs the final text.
+  const generation = /^kimi-k3(?:[.-]|$)/.test(model)
+    ? { thinking: { type: "disabled" } }
+    : { temperature: 0 };
   const response = await fetch(url, {
     method: "POST",
     headers: Object.assign({ "content-type": "application/json", authorization: "Bearer " + apiKey }, extraHeaders || {}),
     body: JSON.stringify({
       model: model,
-      temperature: 0,
+      ...generation,
       max_tokens: 1600,
       messages: [
         {
