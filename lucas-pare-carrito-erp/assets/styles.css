@@ -4446,3 +4446,9 @@ tr:last-child td {
 .lc-ver { min-height: auto; padding: 3px 10px; font-size: 12px; margin-top: 4px; }
 .lc-conv { max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; background: #efeae2; border-radius: 8px; padding: 8px; margin-top: 6px; }
 .lc-conv .wa-arch-msg { font-size: 13px; }
+
+/* Aviso de mensajes nuevos de WhatsApp */
+#wa-notif-stack { position: fixed; right: 12px; bottom: 12px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; max-width: min(380px, calc(100vw - 24px)); }
+.wa-notif { background: #fff; border: 1px solid #c8e6d5; border-left: 5px solid #25d366; border-radius: 10px; box-shadow: 0 6px 20px rgba(15, 23, 42, 0.18); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.wa-notif-text { color: #334155; font-size: 13px; margin-top: 2px; word-break: break-word; }
+.wa-notif-actions { display: flex; gap: 6px; justify-content: flex-end; }

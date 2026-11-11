@@ -4465,6 +4465,31 @@ app.get("/whatsapp/archive/range", authenticate, requireRole("manager", "admin")
 // el bot este en "solo recibir", que apaga solo las respuestas automaticas). Queda en el archivo con el
 // nombre de quien lo escribio.
 const waReplyTimes = new Map();
+// Pedido a un proveedor (Miriam, Mario, Chicho) desde Mi recorrido / checklist: sale por el WhatsApp
+// vinculado al chat o grupo elegido en Configuracion (o a su telefono). El destino lo decide el
+// servidor con la configuracion guardada, no el celular.
+const PROVIDER_WA_DEFAULT = { miriam: "5493876340895", mario: "5493874662116", chicho: "5493874630413" };
+app.post("/whatsapp/provider-send", authenticate, requireRole("manager", "admin", "employee"), async (req, res) => {
+  const key = String((req.body && req.body.key) || "").toLowerCase();
+  const text = String((req.body && req.body.text) || "").trim();
+  if (!PROVIDER_WA_DEFAULT[key]) return res.status(400).json({ error: "Proveedor desconocido." });
+  if (!text) return res.status(400).json({ error: "No hay nada para mandar." });
+  if (text.length > 8000) return res.status(400).json({ error: "El mensaje es muy largo." });
+  const stored = await loadStateData();
+  const cfg = (stored && stored.data && stored.data.appSettings && stored.data.appSettings.providerWa && stored.data.appSettings.providerWa[key]) || {};
+  const chat = String(cfg.chat || PROVIDER_WA_DEFAULT[key]);
+  if (!/^\d{6,20}$/.test(chat) && !/^[\d-]+@g\.us$/.test(chat)) return res.status(400).json({ error: "El destino configurado no es válido." });
+  const r = await botRequest("/send", { to: chat, text, channel: "linked", manual: true });
+  if (!r.ok) return res.status(502).json({ error: r.error || "No se pudo enviar por el WhatsApp vinculado." });
+  const quien = String(req.user.name || req.user.username || "").slice(0, 80) + " (sistema)";
+  await pool.query(
+    `INSERT INTO whatsapp_archive (wa_id, chat_id, chat_name, is_group, sender_phone, sender_name, from_me, msg_type, text, ts)
+     VALUES ($1,$2,$3,$4,'',$5,TRUE,'texto',$6,now()) ON CONFLICT (chat_id, wa_id) DO NOTHING`,
+    [String(r.id || "SIS-" + Date.now()), chat, String(cfg.name || ""), chat.endsWith("@g.us"), quien, text]).catch(() => {});
+  console.log("WhatsApp: pedido a " + key + " enviado por " + req.user.username + ".");
+  res.json({ ok: true, destino: cfg.name || chat });
+});
+
 app.post("/whatsapp/archive/reply", authenticate, requireRole("manager", "admin", "employee"), canSeeWaArchive, async (req, res) => {
   const chat = String((req.body && req.body.chat) || "").trim();
   const text = String((req.body && req.body.text) || "").trim();
@@ -4619,6 +4644,17 @@ app.get("/whatsapp/archive/messages", authenticate, requireRole("manager", "admi
   if (!chat) return res.status(400).json({ error: "Falta el chat." });
   const { rows } = await pool.query("SELECT wa_id, chat_name, is_group, sender_phone, sender_name, from_me, msg_type, text, ts FROM whatsapp_archive WHERE chat_id = $1 ORDER BY ts DESC LIMIT 1000", [chat]);
   res.json({ ok: true, messages: rows.reverse() });
+});
+
+// Mensajes nuevos (recibidos) desde un momento: para avisar en la app a quienes tienen acceso.
+app.get("/whatsapp/archive/new", authenticate, requireRole("manager", "admin", "employee", "contador"), canSeeWaArchive, async (req, res) => {
+  const since = new Date(String(req.query.since || ""));
+  if (isNaN(since.getTime())) return res.json({ ok: true, now: new Date().toISOString(), messages: [] });
+  const desde = new Date(Math.max(since.getTime(), Date.now() - 6 * 3600 * 1000));
+  const { rows } = await pool.query(
+    "SELECT chat_id, chat_name, is_group, sender_name, msg_type, text, ts FROM whatsapp_archive WHERE NOT from_me AND ts > $1 AND ts <= now() ORDER BY ts LIMIT 50",
+    [desde]);
+  res.json({ ok: true, now: new Date().toISOString(), messages: rows });
 });
 
 app.post("/external/orders", externalAuth, async (req, res) => {

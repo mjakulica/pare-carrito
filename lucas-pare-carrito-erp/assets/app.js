@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v136";
+  const APP_VERSION = "v137";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -536,9 +536,9 @@
     // Timer liviano cada minuto SIN red: solo dispara el chequeo (una peticion HEAD) al entrar
     // en una de las horas objetivo, una sola vez por hora.
     setInterval(() => {
-      const now = new Date();
-      if (UPDATE_CHECK_HOURS.indexOf(now.getHours()) === -1) return;
-      const key = now.getFullYear() + "-" + now.getMonth() + "-" + now.getDate() + "-" + now.getHours();
+      const now = saltaParts();
+      if (UPDATE_CHECK_HOURS.indexOf(now.h) === -1) return;
+      const key = now.iso + "-" + now.h;
       if (key === lastUpdateCheckKey) return;
       lastUpdateCheckKey = key;
       maybeApplyUpdate();
@@ -975,6 +975,127 @@
     btn.disabled = false;
     if (after) after();
   }
+
+  // Configuracion: a que chat o grupo se mandan los pedidos de Miriam, Mario y Chicho.
+  const PROVIDER_WA = [{ key: "miriam", name: "Miriam", phone: "5493876340895" }, { key: "mario", name: "Mario", phone: "5493874662116" }, { key: "chicho", name: "Chicho", phone: "5493874630413" }];
+  function providerWaConfigHtml() {
+    if (!currentUser || !["manager", "admin"].includes(currentUser.role)) return "";
+    const cfg = (state.appSettings && state.appSettings.providerWa) || {};
+    afterRender.push(bindProviderWaConfig);
+    return `<div class="panel" style="margin-top:14px">
+      <h2 class="page-title" style="font-size:18px">Pedidos a proveedores por WhatsApp</h2>
+      <p class="muted" style="font-size:13px;margin-top:0">Los botones de Miriam, Mario y Chicho (Mi recorrido y checklist) mandan el pedido por el WhatsApp vinculado a este chat o grupo. Si no elegís nada, va a su teléfono.</p>
+      <datalist id="pwa-chats"></datalist>
+      ${PROVIDER_WA.map((p) => `<div class="page-actions" style="flex-wrap:wrap;gap:8px;margin:4px 0"><strong style="width:70px">${escapeHtml(p.name)}</strong><input data-pwa="${p.key}" list="pwa-chats" value="${escapeAttr((cfg[p.key] && cfg[p.key].name) || "")}" placeholder="Teléfono ${escapeAttr(formatWaPhone(p.phone))} (o elegí un grupo)" style="flex:1;min-width:200px" autocomplete="off" /><button class="btn small primary" type="button" data-pwa-save="${p.key}">Guardar</button>${cfg[p.key] ? `<button class="btn small ghost" type="button" data-pwa-clear="${p.key}">Volver al teléfono</button>` : ""}</div>`).join("")}
+    </div>`;
+  }
+  function bindProviderWaConfig() {
+    let chats = [];
+    const etiqueta = (c) => (c.is_group ? "Grupo: " : "") + (c.chat_name || c.chat_id) + (c.is_group ? "" : " (" + formatWaPhone(c.chat_id) + ")");
+    cloudRequest(getCloudSyncConfig(), "/whatsapp/archive/chats", { method: "GET" }).then((r) => r.json()).then((j) => {
+      chats = (j.chats || []).filter((c) => c.chat_name || c.is_group);
+      const dl = document.getElementById("pwa-chats");
+      if (dl) dl.innerHTML = chats.map((c) => `<option value="${escapeAttr(etiqueta(c))}"></option>`).join("");
+    }).catch(() => {});
+    const guardar = (key, val) => {
+      state.appSettings = state.appSettings || {};
+      const cfg = { ...(state.appSettings.providerWa || {}) };
+      if (val) cfg[key] = val; else delete cfg[key];
+      state.appSettings.providerWa = cfg;
+      saveState();
+      render();
+    };
+    document.querySelectorAll("[data-pwa-save]").forEach((b) => b.addEventListener("click", () => {
+      const key = b.dataset.pwaSave;
+      const v = (document.querySelector(`[data-pwa="${key}"]`) || {}).value || "";
+      const c = chats.find((x) => etiqueta(x) === v) || chats.find((x) => normalizeText(x.chat_name || "").includes(normalizeText(v)));
+      if (!v.trim()) return guardar(key, null);
+      if (!c) return alert("Elegí un chat o grupo de la lista (tiene que haber escrito al WhatsApp vinculado).");
+      guardar(key, { chat: c.chat_id, name: etiqueta(c) });
+    }));
+    document.querySelectorAll("[data-pwa-clear]").forEach((b) => b.addEventListener("click", () => guardar(b.dataset.pwaClear, null)));
+  }
+
+  // ---- Aviso de mensajes nuevos de WhatsApp ----
+  // A quienes pueden ver los mensajes: cada 30 segundos se buscan los recibidos; aparece un aviso
+  // con "Ver conversacion" y, si el celular dio permiso, una notificacion del sistema (con la app
+  // abierta o en segundo plano). En Mensajes WhatsApp se puede apagar o sacar los grupos.
+  function waNotifPrefs() {
+    try { return JSON.parse(localStorage.getItem("lpc_wa_notif") || "{}"); } catch (e) { return {}; }
+  }
+  function setWaNotifPrefs(p) {
+    try { localStorage.setItem("lpc_wa_notif", JSON.stringify({ ...waNotifPrefs(), ...p })); } catch (e) { /* nada */ }
+  }
+  async function pollWaNewMessages() {
+    if (!currentUser || ui.waNotifOff || !["manager", "admin", "employee", "contador"].includes(currentUser.role)) return;
+    if (typeof autoInboxIsRobot === "function" && autoInboxIsRobot()) return;
+    const prefs = waNotifPrefs();
+    if (prefs.off) return;
+    const key = "lpc_wa_notif_since_" + currentUser.id;
+    let since = "";
+    try { since = localStorage.getItem(key) || ""; } catch (e) { /* nada */ }
+    try {
+      // La hora de referencia es la del servidor (el reloj del celular puede estar corrido).
+      const r = await cloudRequest(getCloudSyncConfig(), "/whatsapp/archive/new?since=" + encodeURIComponent(since), { method: "GET" });
+      if (!since) {
+        const j0 = await r.json().catch(() => ({}));
+        if (r.ok && j0.now) try { localStorage.setItem(key, j0.now); } catch (e) { /* nada */ }
+        if (r.status === 403) ui.waNotifOff = true;
+        return;
+      }
+      if (r.status === 403) { ui.waNotifOff = true; return; }
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) return;
+      const nuevos = (j.messages || []).filter((m) => !(prefs.noGroups && (m.is_group || String(m.chat_id).endsWith("@g.us"))));
+      const ultimo = (j.messages || []).reduce((t, m) => (String(m.ts) > t ? String(m.ts) : t), since);
+      try { localStorage.setItem(key, ultimo); } catch (e) { /* nada */ }
+      // Un aviso por chat (el ultimo mensaje de cada uno).
+      const porChat = new Map();
+      nuevos.forEach((m) => porChat.set(m.chat_id, m));
+      porChat.forEach((m) => showWaNotif(m, nuevos.filter((x) => x.chat_id === m.chat_id).length));
+    } catch (e) { /* sin red */ }
+  }
+  function showWaNotif(m, cuantos) {
+    const quien = (m.is_group ? (m.chat_name || "Grupo") + (m.sender_name ? " · " + m.sender_name : "") : m.chat_name || m.sender_name || formatWaPhone(m.chat_id));
+    const texto = String(m.text || "").slice(0, 140) + (cuantos > 1 ? " (+" + (cuantos - 1) + ")" : "");
+    let box = document.getElementById("wa-notif-stack");
+    if (!box) { box = document.createElement("div"); box.id = "wa-notif-stack"; document.body.appendChild(box); }
+    const el = document.createElement("div");
+    el.className = "wa-notif";
+    el.innerHTML = `<div><strong>&#128172; ${escapeHtml(quien)}</strong><div class="wa-notif-text">${escapeHtml(texto)}</div></div><div class="wa-notif-actions"><button class="btn small primary" type="button" data-n-ver>Ver conversación</button><button class="btn small ghost" type="button" data-n-x>&#10005;</button></div>`;
+    const abrir = () => { el.remove(); location.hash = "#/whatsapp-mensajes"; setTimeout(() => { try { loadWaArchiveChat(m.chat_id); } catch (e) { /* nada */ } }, 300); };
+    el.querySelector("[data-n-ver]").addEventListener("click", abrir);
+    el.querySelector("[data-n-x]").addEventListener("click", () => el.remove());
+    box.prepend(el);
+    while (box.children.length > 4) box.lastChild.remove();
+    setTimeout(() => el.remove(), 60000);
+    try {
+      if ("Notification" in window && Notification.permission === "granted" && document.visibilityState !== "visible") {
+        const n = new Notification(quien, { body: texto, tag: "wa-" + m.chat_id });
+        n.onclick = () => { window.focus(); abrir(); n.close(); };
+      }
+    } catch (e) { /* el celular no deja */ }
+  }
+  // Controles en Mensajes WhatsApp (por celular): avisos si/no, sin grupos, notificaciones del sistema.
+  function waNotifControlsHtml() {
+    const p = waNotifPrefs();
+    const perm = "Notification" in window ? Notification.permission : "no";
+    setTimeout(() => {
+      const on = document.getElementById("wa-notif-on");
+      if (on && !on.dataset.b) { on.dataset.b = "1"; on.addEventListener("change", () => { setWaNotifPrefs({ off: !on.checked }); }); }
+      const ng = document.getElementById("wa-notif-nogroups");
+      if (ng && !ng.dataset.b) { ng.dataset.b = "1"; ng.addEventListener("change", () => { setWaNotifPrefs({ noGroups: ng.checked }); }); }
+      const pb = document.getElementById("wa-notif-perm");
+      if (pb && !pb.dataset.b) { pb.dataset.b = "1"; pb.addEventListener("click", async () => { try { await Notification.requestPermission(); } catch (e) { /* nada */ } render(); }); }
+    }, 0);
+    return `<div class="page-actions" style="flex-wrap:wrap;gap:12px;margin-bottom:10px;font-size:13px">
+      <label style="display:inline-flex;gap:6px;align-items:center"><input type="checkbox" id="wa-notif-on" ${p.off ? "" : "checked"} style="width:auto;min-height:auto" /> Avisarme de mensajes nuevos</label>
+      <label style="display:inline-flex;gap:6px;align-items:center"><input type="checkbox" id="wa-notif-nogroups" ${p.noGroups ? "checked" : ""} style="width:auto;min-height:auto" /> Sin los grupos</label>
+      ${perm === "default" ? `<button class="btn small ghost" type="button" id="wa-notif-perm">Activar notificaciones del celular</button>` : perm === "granted" ? `<span class="muted">Notificaciones del celular activadas</span>` : ""}
+    </div>`;
+  }
+  setInterval(() => { pollWaNewMessages(); }, 30 * 1000);
+  setTimeout(() => { pollWaNewMessages(); }, 10000);
 
   // ---- Resumenes bancarios (Brubank, Galicia Office...) ----
   // Se suben en Pagos. El servidor deja solo los creditos y los compara con los pagos cargados. Quien
@@ -1710,7 +1831,7 @@
     if (!cc.on || h < cc.desde || h >= cc.hasta || isSundayISO(todayISO())) return;
     const desde = cc.desde;
     const [hh, mm] = desde.split(":").map(Number);
-    const inicio = new Date(); inicio.setHours(hh, mm, 0, 0);
+    const inicio = new Date(saltaTimeMs(todayISO(), String(hh).padStart(2, "0") + ":" + String(mm).padStart(2, "0")));
     const cambios = items.filter((x) => x.status === "pendiente" && (x.kind === "agregar" || x.kind === "cancelar") && !x.auto_note && new Date(x.created_at).getTime() >= inicio.getTime());
     for (const x of cambios) {
       const c = x.client_id ? getClient(x.client_id) : null;
@@ -8144,7 +8265,8 @@
     if (!movement || !movement.createdAt) return null;
     const fecha = new Date(movement.createdAt);
     if (isNaN(fecha.getTime())) return null;
-    return fecha.getHours() * 60 + fecha.getMinutes();
+    const p = saltaParts(fecha);
+    return p.h * 60 + p.min;
   }
 
   function stockCountsInWindow(dateISO, ventana) {
@@ -8163,7 +8285,7 @@
   function stockCountAuthorLabel(movement) {
     if (!movement) return "";
     const fecha = movement.createdAt ? new Date(movement.createdAt) : null;
-    const hora = fecha && !isNaN(fecha.getTime()) ? fecha.getHours() + ":" + String(fecha.getMinutes()).padStart(2, "0") : "";
+    const hora = fecha && !isNaN(fecha.getTime()) ? saltaParts(fecha).h + ":" + String(saltaParts(fecha).min).padStart(2, "0") : "";
     const user = movement.userId ? getUser(movement.userId) : null;
     const quien = user ? user.name : String(movement.userId || "");
     return [quien, hora].filter(Boolean).join(" - ");
@@ -10076,7 +10198,7 @@
       if (tEl) tEl.addEventListener("change", () => { ui.profitTo = tEl.value || todayISO(); render(); });
       document.querySelectorAll("[data-profit-range]").forEach((b) => b.addEventListener("click", () => {
         const r = b.dataset.profitRange;
-        if (r === "this-month") { const d = new Date(); ui.profitFrom = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-01`; ui.profitTo = todayISO(); }
+        if (r === "this-month") { ui.profitFrom = todayISO().slice(0, 7) + "-01"; ui.profitTo = todayISO(); }
         else if (r === "30") { ui.profitFrom = addDaysISO(todayISO(), -29); ui.profitTo = todayISO(); }
         render();
       }));
@@ -12698,11 +12820,7 @@
   // ===== Checklist operativo del empleado (home) =====
   function employeeChecklistDayKey() {
     // Reinicia a las 04:00 (dia operativo: 04:00 de hoy a 04:00 de manana).
-    const shifted = new Date(Date.now() - 4 * 60 * 60 * 1000);
-    const y = shifted.getFullYear();
-    const m = String(shifted.getMonth() + 1).padStart(2, "0");
-    const d = String(shifted.getDate()).padStart(2, "0");
-    return `${y}-${m}-${d}`;
+    return saltaParts(Date.now() - 4 * 60 * 60 * 1000).iso;
   }
 
   function employeeChecklistItems() {
@@ -12792,11 +12910,20 @@
     printHtmlDocument(fileDate(todayISO()) + " Imprimibles", sections.join(pageBreak));
   }
 
-  function sendDivideWhatsappForName(name, phone, includeClients) {
+  // Pedido a Miriam / Mario / Chicho: sale por el WhatsApp vinculado al chat o grupo elegido en
+  // Configuracion. Si el vinculado no anda, como antes: se copia el texto y se abre su WhatsApp.
+  async function sendDivideWhatsappForName(name, phone, includeClients) {
     const value = assigneeValueByName(name);
     const openLink = () => { try { window.open("https://wa.me/" + phone, "_blank"); } catch (e) {} };
     if (!value) { alert("No se encontro el proveedor " + name + " para copiar su pedido."); openLink(); return; }
     const text = buildDivideClipboardText([value], includeClients);
+    try {
+      const j = await waInboxPost("/whatsapp/provider-send", { key: normalizeText(name), text });
+      alert("Pedido de " + name + " enviado por el WhatsApp vinculado" + (j.destino ? " a " + j.destino : "") + ".");
+      return;
+    } catch (e) {
+      if (!confirm("No se pudo mandar por el WhatsApp vinculado (" + e.message + "). ¿Copiar el pedido y abrir el WhatsApp de " + name + " como antes?")) return;
+    }
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(text).then(openLink, openLink);
     } else {
@@ -13191,9 +13318,32 @@
         <button class="btn blue" type="button" data-recorrido-orders="editar">&#9998; Editar pedidos</button>
         ${step ? `<button class="btn ghost" type="button" data-route="mi-recorrido">Inicio del recorrido</button>` : ""}
       </div>`,
-      `${step ? renderRecorridoStepper(step) : ""}${body}`,
+      `<div id="rec-inbox-alert">${recInboxAlertHtml()}</div>${step ? renderRecorridoStepper(step) : ""}${body}`,
       "mi-recorrido"
     );
+  }
+
+  // Pedidos de WhatsApp sin cargar en la bandeja: cartel bien visible en Mi recorrido (y se pregunta
+  // antes de imprimir, porque lo que falta cargar no saldria en las impresiones).
+  function recInboxPendientes() {
+    return ((ui.recInbox && ui.recInbox.items) || []).filter((x) => x.status === "pendiente" && ["pedido", "agregar", "cancelar"].includes(x.kind));
+  }
+  function recInboxAlertHtml() {
+    const n = recInboxPendientes().length;
+    if (!ui.recInbox || Date.now() - ui.recInbox.at > 30000) setTimeout(refreshRecInbox, 0);
+    if (!n) return "";
+    return `<div class="alert warn" style="margin-bottom:12px;font-size:16px;border-width:2px"><strong>&#9888;&#65039; Hay ${n} pedido${n === 1 ? "" : "s"} de WhatsApp sin cargar en la bandeja.</strong> Cargalos antes de imprimir. <button class="btn small primary" type="button" onclick="location.hash='#/nuevo-pedido'">Ir a la bandeja</button></div>`;
+  }
+  async function refreshRecInbox() {
+    if (ui.recInboxLoading || !currentUser || !WA_INBOX_ROLES.includes(currentUser.role)) return;
+    ui.recInboxLoading = true;
+    try {
+      const r = await cloudRequest(getCloudSyncConfig(), "/inbox", { method: "GET" });
+      const j = await r.json().catch(() => ({}));
+      if (r.ok) ui.recInbox = { at: Date.now(), items: j.items || [] };
+    } catch (e) { /* sin red */ } finally { ui.recInboxLoading = false; }
+    const box = document.getElementById("rec-inbox-alert");
+    if (box) box.innerHTML = recInboxAlertHtml();
   }
 
   // Agregar productos / Editar pedidos desde Mi recorrido: se elige el pedido de hoy del cliente y se
@@ -13389,6 +13539,8 @@
         const boton = botones.find((x) => x.n === n);
         if (!boton) return;
         const accion = b.dataset.wa ? boton.wa : boton;
+        const pend = recInboxPendientes().length;
+        if (pend && !confirm("Hay " + pend + " pedido" + (pend === 1 ? "" : "s") + " de WhatsApp sin cargar en la bandeja: no van a salir en las impresiones. ¿Estás seguro que querés seguir?")) return;
         runRecorridoPrint(accion.run);
         markChecklistStep(accion.key);
         // Las 4 impresiones en PDF juntas equivalen al "Generar Imprimibles" del checklist.
@@ -16267,7 +16419,7 @@
       </div>
       <div style="margin:6px 0"><strong style="font-size:14px">Equipos que hacen la carga</strong><div id="auto-inbox-status"><p class="muted" style="margin:4px 0">Consultando...</p></div></div>
       <div><strong style="font-size:14px">Últimos movimientos en este equipo</strong><div id="auto-inbox-log">${autoInboxLogHtml()}</div></div>
-    </div>${receiptsConfigHtml()}<div id="wa-linked-panel" class="panel" style="margin-top:14px">${waLinkedPanelInner()}</div>${waArchiveAccessHtml()}` : ""}${["manager", "admin"].includes(currentUser.role) ? metaReviewerPanelHtml() : ""}${window.WhatsAppTemplates ? window.WhatsAppTemplates.html() : ""}`;
+    </div>${receiptsConfigHtml()}${providerWaConfigHtml()}<div id="wa-linked-panel" class="panel" style="margin-top:14px">${waLinkedPanelInner()}</div>${waArchiveAccessHtml()}` : ""}${["manager", "admin"].includes(currentUser.role) ? metaReviewerPanelHtml() : ""}${window.WhatsAppTemplates ? window.WhatsAppTemplates.html() : ""}`;
   }
 
   // ---- WhatsApp vinculado por QR (mientras Meta no aprueba) ----
@@ -22656,12 +22808,13 @@
       }
     });
     const msgs = ui.waArchiveMsgs;
-    const hora = (ts) => new Date(ts).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+    const hora = (ts) => new Date(ts).toLocaleString("es-AR", { timeZone: "America/Argentina/Salta", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
     return pageShell(
       "Mensajes de WhatsApp",
       "Copia de todos los chats del WhatsApp vinculado por QR (individuales y grupos, recibidos y enviados). Se guardan 90 días: si bloquean el número, acá queda todo.",
       `${["manager", "admin"].includes(currentUser.role) ? `<button class="btn primary" type="button" id="wa-link-chats">Vincular chats con clientes</button><button class="btn primary" type="button" id="wa-alias-check">Comprobar alias (30 días)</button><button class="btn ghost" type="button" data-route="configuracion">Vinculación</button>` : ""}`,
       `${ui.waArchiveError ? `<div class="alert warn">${escapeHtml(ui.waArchiveError)}</div>` : ""}
+      ${waNotifControlsHtml()}
       <form id="wa-arch-search" class="page-actions" style="margin-bottom:12px"><input id="wa-arch-q" placeholder="Buscar por cliente, nombre, número o texto" value="${escapeAttr(ui.waArchiveQ || "")}" style="flex:1;min-width:220px" /><button class="btn primary" type="submit">Buscar</button>${ui.waArchiveQ ? `<button class="btn ghost" type="button" id="wa-arch-all">Ver todos</button>` : ""}</form>
       <div class="wa-arch ${ui.waArchiveChat ? "con-chat" : ""}">
         <div class="panel wa-arch-list">
@@ -22736,7 +22889,7 @@
     const verMensajes = new Map();
     const lcConvHtml = (msgs) => {
       if (!msgs.length) return `<p class="muted">Sin mensajes.</p>`;
-      const hora = (ts) => new Date(ts).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+      const hora = (ts) => new Date(ts).toLocaleString("es-AR", { timeZone: "America/Argentina/Salta", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
       return msgs.slice(-25).map((m) => `<div class="wa-arch-msg ${m.from_me ? "mine" : ""}">${!m.from_me && m.is_group ? `<div class="wa-arch-sender">${escapeHtml(m.sender_name || formatWaPhone(m.sender_phone))}</div>` : ""}<div>${escapeHtml(m.text || "")}</div><div class="wa-arch-time">${hora(m.ts)}</div></div>`).join("");
     };
     const etiqueta = (id) => { const c = getClient(id); return c ? c.id + " - " + c.name : ""; };
@@ -23035,7 +23188,7 @@
     let n = 0;
     const sugerencias = [];
     const bloque = (f, tipo) => `<details class="alias-check-item ${tipo}"><summary><strong>${formatDate(f.order.date)} · ${nombre(f.order)}</strong> <span class="muted">${escapeHtml(f.order.id)}</span></summary>
-      <div class="alias-check-texts"><div><div class="muted">Mensaje original de WhatsApp (${new Date(f.wAt).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })})</div><pre>${escapeHtml(f.W)}</pre></div>
+      <div class="alias-check-texts"><div><div class="muted">Mensaje original de WhatsApp (${new Date(f.wAt).toLocaleString("es-AR", { timeZone: "America/Argentina/Salta", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })})</div><pre>${escapeHtml(f.W)}</pre></div>
       <div><div class="muted">Texto guardado en el pedido</div><pre>${escapeHtml(f.T || "(el pedido no se cargó con texto)")}</pre></div></div>
       ${f.unmatched.length ? `<p><strong>Renglones del mensaje que no se reconocen:</strong> ${f.unmatched.map((u) => `"${escapeHtml(u)}"`).join(", ")}</p>` : ""}
       ${f.difAlias.length && f.explica ? `<p style="margin-bottom:4px"><strong>Renglón por renglón, cómo lo lee hoy el sistema:</strong></p>
@@ -25927,8 +26080,8 @@
   }
 
   function currentTimeHHMM() {
-    const now = new Date();
-    return String(now.getHours()).padStart(2, "0") + ":" + String(now.getMinutes()).padStart(2, "0");
+    const p = saltaParts();
+    return String(p.h).padStart(2, "0") + ":" + String(p.min).padStart(2, "0");
   }
 
   function getCustomerMinOrderDate() {
@@ -28758,18 +28911,30 @@
     return Math.round(Number(value || 0) * 10) / 10;
   }
 
+  // Fecha y hora SIEMPRE de Salta (UTC-3, sin horario de verano), no las del celular: si alguien
+  // carga un pedido desde otro pais (Australia), la fecha de hoy y las horas de corte son las de aca.
+  // (Numero literal, no una constante: estas funciones se usan al arrancar, antes de esta linea.)
+  function saltaParts(value) {
+    const t = value == null ? Date.now() : new Date(value).getTime();
+    const x = new Date(t - 10800000);
+    return { y: x.getUTCFullYear(), m: x.getUTCMonth() + 1, d: x.getUTCDate(), h: x.getUTCHours(), min: x.getUTCMinutes(), dow: x.getUTCDay(), iso: x.toISOString().slice(0, 10) };
+  }
+  // Momento (ms) de una hora de Salta en una fecha ("2026-11-11", "05:30").
+  function saltaTimeMs(dateISO, hhmm) {
+    const [y, m, d] = String(dateISO).split("-").map(Number);
+    const [h, mi] = String(hhmm || "00:00").split(":").map(Number);
+    return Date.UTC(y, m - 1, d, h, mi) + 10800000;
+  }
   function todayISO() {
-    const date = new Date();
-    const offset = date.getTimezoneOffset();
-    const local = new Date(date.getTime() - offset * 60000);
-    return local.toISOString().slice(0, 10);
+    return saltaParts().iso;
   }
 
   function formatClockHM(iso) {
     if (!iso) return "";
     const d = new Date(iso);
     if (isNaN(d.getTime())) return "";
-    return d.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", hour12: false });
+    const p = saltaParts(d);
+    return String(p.h).padStart(2, "0") + ":" + String(p.min).padStart(2, "0");
   }
 
   // Fecha por defecto para un pedido nuevo: despues de las 10:00 se asume para el dia
@@ -28805,7 +28970,8 @@
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return "";
     const pad = (num) => String(num).padStart(2, "0");
-    return pad(date.getDate()) + "/" + pad(date.getMonth() + 1) + " " + pad(date.getHours()) + ":" + pad(date.getMinutes());
+    const p = saltaParts(date);
+    return pad(p.d) + "/" + pad(p.m) + " " + pad(p.h) + ":" + pad(p.min);
   }
 
   function formatDateShort(value) {
