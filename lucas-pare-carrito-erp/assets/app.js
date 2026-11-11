@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v137";
+  const APP_VERSION = "v138";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -512,7 +512,9 @@
       const r = await cloudRequest(config, "/devices/versions", { method: "GET" });
       if (!r.ok) return;
       const j = await r.json();
-      const viejos = (j.devices || []).filter((d) => d.version !== APP_VERSION && (Date.now() - new Date(d.lastSeen).getTime()) < 24 * 3600 * 1000);
+      // Solo equipos que se usaron hace poco (el equipo del servidor se reinicia y deja "equipos" viejos
+      // que ya no existen): 2 horas, y 20 minutos para el de la carga automatica.
+      const viejos = (j.devices || []).filter((d) => d.version !== APP_VERSION && (Date.now() - new Date(d.lastSeen).getTime()) < (/carga-automatica/.test(d.username || "") ? 20 * 60000 : 2 * 3600000));
       const antes = JSON.stringify(ui.outdatedDevices || []);
       ui.outdatedDevices = viejos;
       if (JSON.stringify(viejos) !== antes && !hasUnsavedWork()) render();
@@ -1696,7 +1698,9 @@
       paymentReceived: 0,
       paymentStatus: "pending",
       remitoPrinted: false,
-      notes: (ev.revisar || []).length ? "Revisar (carga automática): " + ev.revisar.join(" | ") : "",
+      notes: "",
+      // Avisos de la carga automatica: solo para la oficina (no salen en remitos ni impresiones).
+      autoReview: (ev.revisar || []).length ? ev.revisar.join(" | ") : "",
       autoLoaded: true,
       whatsappText: { name: fileDate(date) + " Pedido " + client.name, text: x.text },
       createdAt: new Date().toISOString(),
@@ -7947,7 +7951,7 @@
       const creator = getUser(order.userId);
       const metaLine = deletedView
         ? `<br><small class="muted order-meta">Eliminado ${formatTimestampShort(order.deletedAt)} por ${escapeHtml(order.deletedBy || "-")}</small>`
-        : `<br><small class="muted order-meta">${order.autoLoaded ? "&#9881;&#65039; Carga automática - " : escapeHtml(creator ? creator.name : "")}${creator && !order.autoLoaded && order.createdAt ? " - " : ""}${formatTimestampShort(order.createdAt)}</small>`;
+        : `<br><small class="muted order-meta">${order.autoLoaded ? "&#9881;&#65039; Carga automática - " : escapeHtml(creator ? creator.name : "")}${creator && !order.autoLoaded && order.createdAt ? " - " : ""}${formatTimestampShort(order.createdAt)}</small>${orderAutoReview(order) ? `<br><small style="color:#b45309">&#9888;&#65039; Revisar: ${escapeHtml(orderAutoReview(order).slice(0, 160))}</small>` : ""}`;
       return `
         <tr>
           <td><strong>${escapeHtml(order.id)}</strong> <span class="muted">${formatDateShort(order.date)}</span>${metaLine}</td>
@@ -8212,7 +8216,8 @@
           <div><span class="muted">Estado</span><strong>${statusLabel(order.status)}</strong></div>
           <div><span class="muted">Vehículo</span><strong>${escapeHtml(vehicle ? vehicle.name : order.deliveryVehicleId || "-")}</strong></div>
         </div>
-        ${order.notes ? `<div class="note-card" style="margin:12px 0"><strong>Notas del pedido</strong><small>${escapeHtml(order.notes)}</small></div>` : ""}
+        ${orderPublicNotes(order) ? `<div class="note-card" style="margin:12px 0"><strong>Notas del pedido</strong><small>${escapeHtml(orderPublicNotes(order))}</small></div>` : ""}
+        ${orderAutoReview(order) ? `<div class="note-card" style="margin:12px 0"><strong>&#9881;&#65039; Revisar (carga automática, no sale en el remito)</strong><small>${escapeHtml(orderAutoReview(order))}</small></div>` : ""}
         <div class="table-wrap">
           <table>
             <thead><tr><th>Producto</th><th>Cantidad</th><th>Precio unitario</th><th>Subtotal</th><th>IVA</th><th>Total</th></tr></thead>
@@ -13224,6 +13229,18 @@
   function orderIsReplacement(order) {
     return /\[REC-/.test(String(order && order.notes || ""));
   }
+  // Notas que salen en remitos e impresiones: sin los avisos de la carga automatica (pedidos de
+  // antes los tenian en las notas).
+  const AUTO_REVIEW_RE = /\s*Revisar \(carga automática\):[\s\S]*$/;
+  function orderPublicNotes(order) {
+    return String((order && order.notes) || "").replace(AUTO_REVIEW_RE, "").trim();
+  }
+  function orderAutoReview(order) {
+    if (!order) return "";
+    if (order.autoReview) return String(order.autoReview);
+    const m = String(order.notes || "").match(/Revisar \(carga automática\):\s*([\s\S]*)$/);
+    return m ? m[1].trim() : "";
+  }
 
   function recorridoReminders(order) {
     const out = [];
@@ -13704,7 +13721,7 @@
           </div>
         </div>
         ${recordatorios.length ? `<div class="recorrido-reminders">${recordatorios.map((r) => `<div class="recorrido-reminder ${r.tipo}"><strong>&#9888; ${escapeHtml(r.texto)}</strong>${r.detalle ? `<div>${escapeHtml(r.detalle)}</div>` : ""}</div>`).join("")}</div>` : ""}
-        ${order.notes && !orderIsReplacement(order) ? `<div class="note-text" style="margin:8px 0">${escapeHtml(order.notes)}</div>` : ""}
+        ${orderPublicNotes(order) && !orderIsReplacement(order) ? `<div class="note-text" style="margin:8px 0">${escapeHtml(orderPublicNotes(order))}</div>` : ""}
         <ul class="recorrido-items">${(order.items || []).map((item) => `<li><span>${escapeHtml(item.productName)}${item.note ? ` <span class="note-text">${escapeHtml(item.note)}</span>` : ""}</span><strong>${formatNumber(item.quantity)} ${escapeHtml(item.unitType || "")}</strong></li>`).join("")}</ul>
         <div class="recorrido-total"><span>Total del pedido</span><strong>${formatMoney(total)}</strong></div>
         ${saldo > total + 1 ? `<div class="muted" style="font-size:13px">Saldo de la cuenta con este pedido: <strong>${formatMoney(saldo)}</strong></div>` : ""}
@@ -14156,7 +14173,7 @@
       <article class="order-card">
         <div class="order-card-title">${escapeHtml(client ? client.name : order.clientId)}</div>
         <div class="muted">${escapeHtml(order.id)} - ${order.items.length} items - ${formatMoney(order.totalAmount)}</div>
-        ${order.notes ? `<div class="note-text" style="margin-top:6px">${escapeHtml(order.notes)}</div>` : ""}
+        ${orderPublicNotes(order) ? `<div class="note-text" style="margin-top:6px">${escapeHtml(orderPublicNotes(order))}</div>` : ""}
         <div class="field" style="margin-top:8px">
           <label>Mover a vehículo</label>
           <select data-move-order="${order.id}">
@@ -14309,7 +14326,7 @@
           <div class="vehicle-print-num">N° ${escapeHtml(order.id)}</div>
           <strong>${escapeHtml(order.clientId)}) ${escapeHtml(client ? client.name : order.clientId)}</strong>
           ${client && client.address ? `<div class="vehicle-print-sub">${escapeHtml(client.address)}</div>` : ""}
-          ${order.notes ? `<div class="vehicle-print-sub">Nota: ${escapeHtml(order.notes)}</div>` : ""}
+          ${orderPublicNotes(order) ? `<div class="vehicle-print-sub">Nota: ${escapeHtml(orderPublicNotes(order))}</div>` : ""}
           <ul>${order.items.map((item) => `<li>${escapeHtml(item.productName)}: ${formatNumber(item.quantity)} ${escapeHtml(item.unitType)}${item.note ? " (" + escapeHtml(item.note) + ")" : ""}</li>`).join("")}</ul>
           <div class="vehicle-print-total"><span>Total</span> <strong>${formatMoney(order.totalAmount)}</strong></div>
         </li>
@@ -14821,7 +14838,7 @@
         </table>
         <footer class="remito-footer">
           <div>
-            <div>Notas: ${escapeHtml(order.notes || "")}</div>
+            <div>Notas: ${escapeHtml(orderPublicNotes(order))}</div>
             ${tplGet("remito", "leyenda", "") ? `<div>${escapeHtml(tplGet("remito", "leyenda", ""))}</div>` : ""}
             <div class="received">Recibi conforme:</div>
           </div>
