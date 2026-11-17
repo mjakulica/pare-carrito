@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v140";
+  const APP_VERSION = "v141";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -1094,7 +1094,7 @@
         ${it.texto ? `<details><summary class="muted">Mensaje de WhatsApp</summary><pre style="white-space:pre-wrap;font-size:12px">${escapeHtml(it.texto)}</pre></details>` : ""}
       </div>`;
     };
-    out.innerHTML = `<p class="muted" style="font-size:13px">${items.length} pedidos con cambios de ${j.revisados || 0} revisados.</p>
+    out.innerHTML = `<p class="muted" style="font-size:13px">${items.length} pedidos con cambios de ${j.revisados || 0} revisados.${j.pesosOcultos ? " No se muestran " + j.pesosOcultos + " cambios de peso cargados en Unidades (no son errores)." : ""}</p>
       ${top.length ? `<div class="panel" style="margin-bottom:10px"><strong>Cambios de producto que más se repiten</strong><ul class="order-parse-list">${top.slice(0, 15).map((c) => `<li><strong>${escapeHtml(c.k)}</strong> · ${c.n} vez/veces</li>`).join("")}</ul><p class="muted" style="font-size:12px;margin:0">Si un cambio se repite, casi seguro es un error de lectura: tocá "Crear alias" en uno de esos pedidos para que no vuelva a pasar con ese cliente.</p></div>` : ""}
       ${items.map(fila).join("") || `<p class="muted">Ningún pedido cambió después de cargarse en ese período.</p>`}`;
     out.querySelectorAll("[data-oc-alias]").forEach((b) => b.addEventListener("click", () => {
@@ -24721,6 +24721,13 @@
   function learnFromParseEdit(beforeText, afterText, beforeClient, clientId) {
     if (!beforeText || !clientId || beforeClient !== clientId || normalizeText(beforeText) === normalizeText(afterText)) return [];
     if (!currentUser || !["manager", "admin", "employee"].includes(currentUser.role)) return [];
+    // Solo si es una CORRECCION del mismo mensaje (la mayoria de los renglones iguales). Si se pego
+    // otro mensaje del mismo cliente (un agregado, el pedido de otro dia) no hay nada que aprender:
+    // antes emparejaba renglones de mensajes distintos y guardaba alias absurdos ("miel" -> Frutilla).
+    const renglones = (t) => String(t || "").split(/\r?\n/).map((l) => normalizeText(l)).filter(Boolean);
+    const antes = renglones(beforeText), despues = renglones(afterText);
+    const iguales = antes.filter((l) => despues.includes(l)).length;
+    if (!antes.length || Math.abs(antes.length - despues.length) > 2 || iguales < Math.ceil(antes.length * 0.5)) return [];
     const out = [];
     suggestAliasesFromEdit(beforeText, afterText, clientId).forEach((sug) => {
       const r = saveClientAlias(clientId, sug.productId, sug.alias);
@@ -24889,6 +24896,24 @@
     return (state.productAliases || []).some(mismaUnidad) || (state.clientProductAliases || []).some(mismaUnidad);
   }
 
+  // "Miel caña" no es "Miel de Abeja": el producto tiene una palabra que el pedido no dice (abeja) y
+  // el pedido una que el producto no tiene (caña). Mejor no reconocerlo (pide alias) que cargar otra
+  // cosa. No aplica si el texto es un alias guardado.
+  const VARIETY_IGNORE = /^(grandes?|chicos?|chicas?|medianos?|medianas?|maduros?|maduras?|verdes?|lindos?|lindas?|buenos?|buenas?|frescos?|frescas?|porfa\w*|favor|gracias|para|mas|bien|cortados?|limpios?|enteros?|enteras?|premium|especial|comun|tipo|extra)$/;
+  function productVarietyConflict(name, product, clientId) {
+    const n = normalizeText(name);
+    if (!n || !product) return false;
+    const esAlias = (a) => a && normalizeText(a.alias) === n;
+    if ((state.clientProductAliases || []).some((a) => a && a.clientId === clientId && esAlias(a)) || (state.productAliases || []).some(esAlias)) return false;
+    const palabras = (t) => t.split(/\s+/).filter((w) => w.length >= 4 && !/\d/.test(w) && !isOrderConnectorToken(w) && !RUN_UNIT_TOKEN.test(w) && !VARIETY_IGNORE.test(w));
+    const pN = palabras(n);
+    const pP = palabras(stripTrailingProductUnitWords(normalizeText(product.name))).filter((w) => !/^(unidad(es)?|kg|bolsa|jaula|cajon|docena|atado|bandeja|maple)$/.test(w));
+    const parecidas = (a, b) => a === b || a.replace(/(es|s)$/, "") === b.replace(/(es|s)$/, "") || (a.length >= 4 && b.length >= 4 && a.slice(0, 4) === b.slice(0, 4));
+    const sobraP = pP.filter((w) => !pN.some((x) => parecidas(x, w)));
+    const sobraN = pN.filter((w) => !pP.some((x) => parecidas(x, w)));
+    return sobraP.length > 0 && sobraN.length > 0;
+  }
+
   let parseMemo = null;
   function parseWhatsappOrder(text, clientId) {
     if (parseMemo) {
@@ -24923,7 +24948,9 @@
         ? findProductForParsedLine(parsed.name, parsed.unitTypeBeforeAdjust, clientId, parsed.requestedUnit)
         : findProductForParsedLine(parsed.name, parsed.unitType, clientId);
       product = applyParsedProductLineOverrides(product, line, parsed, clientId);
-      if (!product) {
+      // La nota corta del renglon ("caña" en "Miel caña") tambien cuenta como parte del nombre.
+      const notaCorta = String(parsed.note || "").trim().split(/\s+/).filter(Boolean).length <= 2 ? String(parsed.note || "") : "";
+      if (!product || productVarietyConflict((parsed.name + " " + notaCorta).trim(), product, clientId)) {
         unmatched.push(line);
         return;
       }
@@ -25012,7 +25039,9 @@
   // Apio  Perejil"): se corta en los espacios dobles y donde, despues de un producto con su cantidad,
   // empieza otro con mayuscula. Solo si el renglon arranca por el nombre ("Papas 4 bolsas"), para no
   // romper "2 kg Tomate Perita".
-  const RUN_UNIT_TOKEN = /^(kgs?|kilos?|k|grs?|gramos|bolsas?|atados?|cajon(es)?|cajas?|jaulas?|unidad(es)?|unid|uni|u|docenas?|doc|maples?|bandejas?|plantas?|raiz|raices|piezas?)$/i;
+  // Incluye las abreviaturas de las listas en columnas: "3 b" / "1 bl" (bolsa), "4 pl" (planta),
+  // "2 at" (atado), "4 un" (unidad), "1 DC" (docena), "1 cj" (cajon), "1 j" (jaula).
+  const RUN_UNIT_TOKEN = /^(kgs?|kilos?|k|grs?|gramos|bolsas?|b|bl|bol|atados?|at|cajon(es)?|cj|cjn|cajas?|jaulas?|j|jl|unidad(es)?|unid|uni|un|u|docenas?|doc|dc|maples?|bandejas?|plantas?|pl|plta|raiz|raices|piezas?)$/i;
   let runOnRootsCache = null;
   function runOnCatalog() {
     const lista = state.products || [];
@@ -25041,7 +25070,7 @@
     // lo que sigue, no son productos aparte.
     let prefijo = "";
     // Solo cantidad (y quiza unidad): "1", "1/2", "1 1/2", "1 y 1/2", "1,5", "2 kg", "3 bolsas".
-    const UNID = "(kgs?|kilos?|k|grs?|gramos|bolsas?|atados?|cajon(es)?|cajas?|jaulas?|unidad(es)?|unid|uni|u|docenas?|doc|maples?|bandejas?|plantas?)";
+    const UNID = "(kgs?|kilos?|k|grs?|gramos|bolsas?|bol|bl|b|atados?|at|cajon(es)?|cjn|cj|cajas?|jaulas?|jl|j|unidad(es)?|unid|uni|un|u|docenas?|doc|dc|maples?|bandejas?|plantas?|plta|pl)";
     const SOLO_CANT = new RegExp("^(\\d+([.,]\\d+)?(\\s+\\d+/\\d+)?|\\d+/\\d+)(\\s*y\\s*(medio|media|\\d+/\\d+))?(\\s*" + UNID + ")?\\.?$", "i");
     crudos.forEach((t0) => {
       const soloCantidad = SOLO_CANT.test(t0);
@@ -25353,6 +25382,11 @@
       // Cualquier otro punto separa tokens: "1doc. Limones" y "1doc.Limones" -> "1 doc limones".
       // Sin esto, "doc.limones" quedaba pegado y el producto no matcheaba (caia en un match raro).
       .replace(/\./g, " ")
+      // Codigos pegados a un numero que no son cantidades ("Hola eb2 1 kg de palta": "eb2" es el
+      // local). Antes "eb 2" daba 2 kg y "eb" matcheaba Cebolla. "x2" (por dos) se respeta.
+      .replace(/(^|\s)([a-wyzA-WYZ]{1,3})(\d{1,3})(?=\s|$)/g, (m, ini, letras, num, off, full) => (/\d/.test(full.slice(off + m.length)) ? ini : m))
+      // "Frutilla q cajon": la q esta al lado del 1 en el teclado.
+      .replace(/(^|\s)q(?=\s+(cajon|cajones|bolsas?|kgs?|kilos?|atados?|jaulas?|docenas?|doc|bandejas?|unidad(es)?)\b)/gi, "$11")
       .replace(/(\d)([a-zA-Z\u00c0-\u017f]+)/g, "$1 $2")
       .replace(/([a-zA-Z\u00c0-\u017f])(\d)/g, "$1 $2")
       .replace(/(\d)\s*\/\s*(\d)/g, "$1/$2")

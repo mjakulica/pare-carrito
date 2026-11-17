@@ -4671,19 +4671,26 @@ app.get("/orders/changes", authenticate, requireRole("manager", "admin"), async 
   const actuales = new Map((((stored && stored.data) || {}).orders || []).filter((o) => o && o.id).map((o) => [o.id, o]));
   const clave = (it) => String(it.productId || it.productName || "");
   const out = [];
+  let pesosOcultos = 0;
   versiones.forEach((v, id) => {
     const fin = actuales.get(id);
     if (!fin || ["cancelado", "anulado"].includes(fin.status)) return;
     const ini = new Map((v.primera.items || []).filter(Boolean).map((it) => [clave(it), it]));
     const fi = new Map((fin.items || []).filter(Boolean).map((it) => [clave(it), it]));
     const quitados = [], agregados = [], cantidades = [];
+    let pesos = 0;
     ini.forEach((it, k) => {
       const f = fi.get(k);
       if (!f) quitados.push({ productId: it.productId, name: it.productName, qty: Number(it.quantity || 0) });
-      else if (Math.abs(Number(f.quantity || 0) - Number(it.quantity || 0)) > 0.0001) cantidades.push({ productId: it.productId, name: it.productName, de: Number(it.quantity || 0), a: Number(f.quantity || 0) });
+      else if (Math.abs(Number(f.quantity || 0) - Number(it.quantity || 0)) > 0.0001) {
+        // Peso cargado en Unidades (5 unidades de zanahoria -> 0,7 kg): no es un error de carga.
+        if (f.unitAdjusted) pesos += 1;
+        else cantidades.push({ productId: it.productId, name: it.productName, de: Number(it.quantity || 0), a: Number(f.quantity || 0) });
+      }
     });
     fi.forEach((it, k) => { if (!ini.has(k)) agregados.push({ productId: it.productId, name: it.productName, qty: Number(it.quantity || 0) }); });
-    if (!quitados.length && !agregados.length && !cantidades.length) return;
+    if (!quitados.length && !agregados.length && !cantidades.length) { if (pesos) pesosOcultos += pesos; return; }
+    pesosOcultos += pesos;
     out.push({
       id, date: fin.date, clientId: fin.clientId, autoLoaded: !!(v.primera.autoLoaded || fin.autoLoaded),
       cargadoPor: v.primeraPor, cargadoAt: v.primeraAt, editores: Array.from(v.editores).filter((e) => e && e !== v.primeraPor).concat(v.editores.has(v.primeraPor) ? [v.primeraPor] : []),
@@ -4692,7 +4699,7 @@ app.get("/orders/changes", authenticate, requireRole("manager", "admin"), async 
     });
   });
   out.sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(a.clientId).localeCompare(String(b.clientId)));
-  res.json({ ok: true, desde, hasta, revisados: versiones.size, items: out });
+  res.json({ ok: true, desde, hasta, revisados: versiones.size, pesosOcultos, items: out });
 });
 
 // Mensajes nuevos (recibidos) desde un momento: para avisar en la app a quienes tienen acceso.
