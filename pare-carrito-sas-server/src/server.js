@@ -4646,6 +4646,55 @@ app.get("/whatsapp/archive/messages", authenticate, requireRole("manager", "admi
   res.json({ ok: true, messages: rows.reverse() });
 });
 
+// ---------- Cambios en los pedidos despues de cargarlos ----------
+// Cada cambio que sube un equipo queda en state_operations. De ahi sale la PRIMERA version de cada
+// pedido (como se cargo) y se compara con la de hoy (la correcta, ya revisada): que producto se
+// cambio por cual, que cantidades se corrigieron, que se agrego o saco, y quien lo hizo.
+app.get("/orders/changes", authenticate, requireRole("manager", "admin"), async (req, res) => {
+  const desde = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.from || "")) ? String(req.query.from) : new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+  const hasta = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.to || "")) ? String(req.query.to) : new Date().toISOString().slice(0, 10);
+  const { rows } = await pool.query(
+    `SELECT o.applied_at, o.applied_by, elem
+       FROM state_operations o, jsonb_array_elements(CASE WHEN jsonb_typeof(o.patch->'arrays'->'orders'->'upsert') = 'array' THEN o.patch->'arrays'->'orders'->'upsert' ELSE '[]'::jsonb END) elem
+      WHERE o.applied_at >= ($1::text::date - interval '3 days') AND elem->>'date' BETWEEN $1::text AND $2::text
+      ORDER BY o.applied_at`, [desde, hasta]);
+  const versiones = new Map();
+  rows.forEach((r) => {
+    const o = r.elem || {};
+    if (!o.id) return;
+    const v = versiones.get(o.id) || { primera: null, primeraPor: "", primeraAt: null, editores: new Set() };
+    if (!v.primera) { v.primera = o; v.primeraPor = r.applied_by || ""; v.primeraAt = r.applied_at; }
+    else v.editores.add(r.applied_by || "");
+    versiones.set(o.id, v);
+  });
+  const stored = await loadStateData();
+  const actuales = new Map((((stored && stored.data) || {}).orders || []).filter((o) => o && o.id).map((o) => [o.id, o]));
+  const clave = (it) => String(it.productId || it.productName || "");
+  const out = [];
+  versiones.forEach((v, id) => {
+    const fin = actuales.get(id);
+    if (!fin || ["cancelado", "anulado"].includes(fin.status)) return;
+    const ini = new Map((v.primera.items || []).filter(Boolean).map((it) => [clave(it), it]));
+    const fi = new Map((fin.items || []).filter(Boolean).map((it) => [clave(it), it]));
+    const quitados = [], agregados = [], cantidades = [];
+    ini.forEach((it, k) => {
+      const f = fi.get(k);
+      if (!f) quitados.push({ productId: it.productId, name: it.productName, qty: Number(it.quantity || 0) });
+      else if (Math.abs(Number(f.quantity || 0) - Number(it.quantity || 0)) > 0.0001) cantidades.push({ productId: it.productId, name: it.productName, de: Number(it.quantity || 0), a: Number(f.quantity || 0) });
+    });
+    fi.forEach((it, k) => { if (!ini.has(k)) agregados.push({ productId: it.productId, name: it.productName, qty: Number(it.quantity || 0) }); });
+    if (!quitados.length && !agregados.length && !cantidades.length) return;
+    out.push({
+      id, date: fin.date, clientId: fin.clientId, autoLoaded: !!(v.primera.autoLoaded || fin.autoLoaded),
+      cargadoPor: v.primeraPor, cargadoAt: v.primeraAt, editores: Array.from(v.editores).filter((e) => e && e !== v.primeraPor).concat(v.editores.has(v.primeraPor) ? [v.primeraPor] : []),
+      texto: (fin.whatsappText && fin.whatsappText.text) || (v.primera.whatsappText && v.primera.whatsappText.text) || "",
+      quitados, agregados, cantidades
+    });
+  });
+  out.sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(a.clientId).localeCompare(String(b.clientId)));
+  res.json({ ok: true, desde, hasta, revisados: versiones.size, items: out });
+});
+
 // Mensajes nuevos (recibidos) desde un momento: para avisar en la app a quienes tienen acceso.
 app.get("/whatsapp/archive/new", authenticate, requireRole("manager", "admin", "employee", "contador"), canSeeWaArchive, async (req, res) => {
   const since = new Date(String(req.query.since || ""));

@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v139";
+  const APP_VERSION = "v140";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -1016,6 +1016,105 @@
       guardar(key, { chat: c.chat_id, name: etiqueta(c) });
     }));
     document.querySelectorAll("[data-pwa-clear]").forEach((b) => b.addEventListener("click", () => guardar(b.dataset.pwaClear, null)));
+  }
+
+  // ---- Cambios en los pedidos despues de cargarlos ----
+  // Compara como se cargo cada pedido (la primera version que llego al servidor) con como quedo
+  // (la correcta). Sirve para encontrar errores de lectura: "Palta -> Cebolla" repetido es un alias
+  // mal puesto o una palabra que el lector confunde.
+  function orderChangesSwaps(it) {
+    // Lo que se saco y lo que se agrego en el mismo pedido se emparejan en orden: X se cambio por Y.
+    const n = Math.min(it.quitados.length, it.agregados.length);
+    return Array.from({ length: n }, (_, i) => ({ de: it.quitados[i], a: it.agregados[i] }));
+  }
+  // Renglon del texto de WhatsApp que el lector tomo como ese producto (para crear el alias).
+  function orderChangesSourceLine(texto, clientId, productId) {
+    for (const raw of expandWhatsappOrderLines(texto || "")) {
+      const line = stripOrderCourtesy(raw);
+      if (!line) continue;
+      const parsed = parseOrderLine(line, clientId);
+      if (!parsed) continue;
+      const p = parsed.requestedUnit ? findProductForParsedLine(parsed.name, parsed.unitTypeBeforeAdjust, clientId, parsed.requestedUnit) : findProductForParsedLine(parsed.name, parsed.unitType, clientId);
+      if (p && p.id === productId) return { line: line.trim(), name: parsed.name };
+    }
+    return null;
+  }
+  function openOrderChanges() {
+    ui.ocFrom = ui.ocFrom || addDaysISO(todayISO(), -7);
+    ui.ocTo = ui.ocTo || addDaysISO(todayISO(), 1);
+    const body = `<div class="page-actions" style="flex-wrap:wrap;gap:8px">
+        <label>Desde <input type="date" id="oc-from" value="${escapeAttr(ui.ocFrom)}" /></label>
+        <label>Hasta <input type="date" id="oc-to" value="${escapeAttr(ui.ocTo)}" /></label>
+        <label style="display:inline-flex;gap:6px;align-items:center"><input type="checkbox" id="oc-auto" ${ui.ocAuto ? "checked" : ""} style="width:auto;min-height:auto" /> Solo carga automática</label>
+        <button class="btn small primary" type="button" id="oc-go">Ver</button>
+      </div>
+      <p class="muted" style="font-size:13px">Cómo se cargó cada pedido (primera versión) contra cómo quedó (la correcta). Solo aparecen los que cambiaron.</p>
+      <div id="oc-out"><p class="muted">Cargando...</p></div>`;
+    showModal("Cambios en los pedidos después de cargarlos", body, () => {
+      const go = document.getElementById("oc-go");
+      go.addEventListener("click", () => { ui.ocFrom = document.getElementById("oc-from").value; ui.ocTo = document.getElementById("oc-to").value; ui.ocAuto = document.getElementById("oc-auto").checked; loadOrderChanges(); });
+      loadOrderChanges();
+    }, { hideSave: true, cancelLabel: "Cerrar", className: "modal-wide" });
+  }
+  window.__openOrderChanges = openOrderChanges;
+  async function loadOrderChanges() {
+    const out = document.getElementById("oc-out");
+    if (!out) return;
+    out.innerHTML = `<p class="muted">Cargando...</p>`;
+    let j;
+    try {
+      const r = await cloudRequest(getCloudSyncConfig(), "/orders/changes?from=" + encodeURIComponent(ui.ocFrom) + "&to=" + encodeURIComponent(ui.ocTo), { method: "GET" });
+      j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || "HTTP " + r.status);
+    } catch (e) { out.innerHTML = `<p class="muted">${escapeHtml(e.message)}</p>`; return; }
+    const items = (j.items || []).filter((x) => !ui.ocAuto || x.autoLoaded);
+    // Resumen: cambios de producto que se repiten (lo mas util para corregir el lector).
+    const cuenta = new Map();
+    items.forEach((it) => orderChangesSwaps(it).forEach((sw) => {
+      const k = sw.de.name + " → " + sw.a.name;
+      const c = cuenta.get(k) || { k, n: 0, sw, ejemplos: [] };
+      c.n += 1;
+      if (c.ejemplos.length < 3) c.ejemplos.push(it);
+      cuenta.set(k, c);
+    }));
+    const top = Array.from(cuenta.values()).sort((a, b) => b.n - a.n);
+    ui.ocItems = items;
+    const cli = (id) => { const c = getClient(id); return c ? c.id + " - " + c.name : id; };
+    const fila = (it, idx) => {
+      const sw = orderChangesSwaps(it);
+      const restoQ = it.quitados.slice(sw.length), restoA = it.agregados.slice(sw.length);
+      const lineas = []
+        .concat(sw.map((x, k) => `<li>&#128260; <strong>${escapeHtml(formatNumber(x.de.qty) + " " + x.de.name)}</strong> → <strong>${escapeHtml(formatNumber(x.a.qty) + " " + x.a.name)}</strong> ${it.texto ? `<button class="btn small ghost" type="button" data-oc-alias="${idx}|${k}">Crear alias</button>` : ""}</li>`))
+        .concat(it.cantidades.map((x) => `<li>&#9998;&#65039; ${escapeHtml(x.name)}: ${escapeHtml(formatNumber(x.de))} → ${escapeHtml(formatNumber(x.a))}</li>`))
+        .concat(restoQ.map((x) => `<li>&#10134; Se sacó ${escapeHtml(formatNumber(x.qty) + " " + x.name)}</li>`))
+        .concat(restoA.map((x) => `<li>&#10133; Se agregó ${escapeHtml(formatNumber(x.qty) + " " + x.name)}</li>`));
+      return `<div class="wa-inbox-item">
+        <div class="wa-inbox-head"><strong>${escapeHtml(formatDate(it.date))} · ${escapeHtml(cli(it.clientId))}</strong> <span class="muted">${escapeHtml(it.id)}</span> ${it.autoLoaded ? `<span class="pill gray">&#9881;&#65039; carga automática</span>` : `<span class="muted">cargó ${escapeHtml(it.cargadoPor)}</span>`}${it.editores.length ? ` <span class="muted">· corrigió ${escapeHtml(it.editores.join(", "))}</span>` : ""}</div>
+        <ul class="order-parse-list" style="margin:4px 0">${lineas.join("")}</ul>
+        ${it.texto ? `<details><summary class="muted">Mensaje de WhatsApp</summary><pre style="white-space:pre-wrap;font-size:12px">${escapeHtml(it.texto)}</pre></details>` : ""}
+      </div>`;
+    };
+    out.innerHTML = `<p class="muted" style="font-size:13px">${items.length} pedidos con cambios de ${j.revisados || 0} revisados.</p>
+      ${top.length ? `<div class="panel" style="margin-bottom:10px"><strong>Cambios de producto que más se repiten</strong><ul class="order-parse-list">${top.slice(0, 15).map((c) => `<li><strong>${escapeHtml(c.k)}</strong> · ${c.n} vez/veces</li>`).join("")}</ul><p class="muted" style="font-size:12px;margin:0">Si un cambio se repite, casi seguro es un error de lectura: tocá "Crear alias" en uno de esos pedidos para que no vuelva a pasar con ese cliente.</p></div>` : ""}
+      ${items.map(fila).join("") || `<p class="muted">Ningún pedido cambió después de cargarse en ese período.</p>`}`;
+    out.querySelectorAll("[data-oc-alias]").forEach((b) => b.addEventListener("click", () => {
+      const [i, k] = b.dataset.ocAlias.split("|").map(Number);
+      const it = (ui.ocItems || [])[i];
+      const sw = it && orderChangesSwaps(it)[k];
+      if (!sw) return;
+      const src = orderChangesSourceLine(it.texto, it.clientId, sw.de.productId);
+      const destino = getProduct(sw.a.productId);
+      if (!destino) return alert("El producto " + sw.a.name + " ya no existe.");
+      if (!src) return alert("No encontré en el mensaje el renglón que se leyó como " + sw.de.name + " (puede que el texto haya cambiado o que lo hayan cargado a mano). Revisalo en Comprobar alias.");
+      const alias = normalizeText(src.name);
+      if (!alias) return;
+      if (!confirm("En el mensaje decía \"" + src.line + "\" y se cargó " + sw.de.name + ".\n\n¿Guardar que, para " + cli(it.clientId) + ", \"" + alias + "\" es " + destino.name + "?")) return;
+      state.clientProductAliases = (state.clientProductAliases || []).filter((a) => !(a && a.clientId === it.clientId && normalizeText(a.alias) === alias));
+      state.clientProductAliases.push({ clientId: it.clientId, alias, productId: destino.id });
+      saveState();
+      b.textContent = "Alias guardado ✓";
+      b.disabled = true;
+    }));
   }
 
   // ---- Aviso de mensajes nuevos de WhatsApp ----
@@ -8006,7 +8105,7 @@
       "Pedidos",
       currentUser.role === "employee" ? "Pedidos para reparto y cobranza segun el rango seleccionado." : isClientLikeRole(currentUser.role) ? "Pedidos de su cuenta." : "Lista de pedidos y estados.",
       (["manager", "admin"].includes(currentUser.role)
-        ? `<button class="btn primary" data-route="nuevo-pedido">Nuevo pedido</button>`
+        ? `<button class="btn primary" data-route="nuevo-pedido">Nuevo pedido</button><button class="btn ghost" type="button" onclick="window.__openOrderChanges && window.__openOrderChanges()">Cambios después de cargar</button>`
         : currentUser.role === "employee" ? `<button class="btn primary" data-route="nuevo-pedido">Nuevo Pedido</button><button class="btn blue" data-route="pagos">Registrar pago</button>` : "") + `<button class="btn ghost" data-open-recambio>Pedir recambio</button>` + (["manager", "admin", "employee"].includes(currentUser.role) ? `<button class="btn ghost" data-open-charge-next>Cobrar en próximo pedido</button>` : ""),
       `
       ${showTrashTabs ? `<div class="tabs"><button class="tab ${!annulledView && !deletedView ? "active" : ""}" data-orders-tab="activos">Pedidos</button><button class="tab ${annulledView ? "active" : ""}" data-orders-tab="anulados">Anulados</button><button class="tab ${deletedView ? "active" : ""}" data-orders-tab="eliminados">Eliminados</button></div>` : ""}
