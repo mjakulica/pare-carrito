@@ -44,6 +44,8 @@ async function entrar(page) {
   await page.evaluate(() => { localStorage.setItem("lpc_auto_inbox_device", "1"); localStorage.setItem("lpc_robot", "1"); });
   await page.reload({ waitUntil: "domcontentloaded" });
   await sleep(5000);
+  // Cerrar las ventanas que aparecen al entrar (si quedan abiertas, la app no baja datos nuevos).
+  await page.evaluate(() => document.querySelectorAll("[data-close-modal]").forEach((b) => b.click())).catch(() => {});
   const dentro = await page.evaluate(() => !document.querySelector("#login-username"));
   if (!dentro) throw new Error("no pudo entrar al sistema");
   log("Adentro del sistema como", username);
@@ -67,6 +69,7 @@ async function sesion() {
       if (page.isClosed()) throw new Error("se cerró la página");
       const afuera = await page.evaluate(() => !!document.querySelector("#login-username")).catch(() => true);
       if (afuera) { log("Se cerró la sesión: vuelvo a entrar"); await entrar(page); }
+      else await page.evaluate(() => document.querySelectorAll("[data-close-modal]").forEach((b) => b.click())).catch(() => {});
     }
     log("Reinicio programado del navegador");
   } finally {

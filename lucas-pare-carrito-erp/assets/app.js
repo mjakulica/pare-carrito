@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v141";
+  const APP_VERSION = "v142";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -1834,9 +1834,15 @@
     if (ui.autoInboxRunning || !currentUser || !WA_INBOX_ROLES.includes(currentUser.role) || !autoInboxThisDevice() || !navigator.onLine) return;
     // Latido: que se vea en Configuracion que este equipo esta andando (y si esta en pausa).
     const pausa = !autoInboxOn() ? "desactivada" : autoInboxIsRobot() && !autoInboxRobotAllowed() ? "en pausa (equipo del servidor apagado)" : "activa";
-    cloudRequest(getCloudSyncConfig(), "/inbox/auto-heartbeat", { method: "POST", body: JSON.stringify({ device: autoInboxDeviceName(), robot: autoInboxIsRobot(), estado: pausa, version: APP_VERSION }) }).catch(() => {});
+    cloudRequest(getCloudSyncConfig(), "/inbox/auto-heartbeat", { method: "POST", body: JSON.stringify({ device: autoInboxDeviceName(), robot: autoInboxIsRobot(), estado: pausa, version: APP_VERSION, datos: (getCloudSyncConfig() || {}).lastSync || "" }) }).catch(() => {});
     if (pausa !== "activa") return;
     if (typeof serverDataReady === "function" && !serverDataReady()) return;
+    // Equipo del servidor: cierra cualquier ventana que haya quedado abierta y trae lo ultimo del
+    // servidor (saludos, alias, pedidos) antes de leer la bandeja.
+    if (autoInboxIsRobot()) {
+      if (ui.modal) { ui.modal = null; render(); }
+      try { await cloudPull(false); } catch (e) { /* sigue con lo que tiene */ }
+    }
     ui.autoInboxRunning = true;
     try {
       const r = await cloudRequest(getCloudSyncConfig(), "/inbox", { method: "GET" });
@@ -2047,7 +2053,7 @@
       const eq = j.equipos || [];
       const hace = (iso) => { const m = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000)); return m < 1 ? "recién" : m < 60 ? "hace " + m + " min" : "hace " + Math.round(m / 60) + " h"; };
       const tarde = (iso) => Date.now() - new Date(iso).getTime() > 5 * 60000;
-      box.innerHTML = eq.length ? `<ul class="order-parse-list">${eq.map((x) => `<li>${x.robot ? "&#128421;&#65039; " : "&#128187; "}<strong>${escapeHtml(x.device)}</strong> — ${tarde(x.at) ? `<span style="color:var(--red, #b42318)">sin señal (${escapeHtml(hace(x.at))})</span>` : escapeHtml(x.estado || "activa") + " · " + escapeHtml(hace(x.at))}${x.version ? (x.version === APP_VERSION ? ` <span class="muted">(${escapeHtml(x.version)})</span>` : ` <span style="color:var(--red, #b42318)">(versión vieja ${escapeHtml(x.version)})</span>`) : ""}</li>`).join("")}</ul>` : `<p class="muted" style="margin:4px 0">Ningún equipo está haciendo la carga ahora.${autoInboxRobotAllowed() ? " El del servidor aparece acá cuando arranca (después de publicar la versión)." : ""}</p>`;
+      box.innerHTML = eq.length ? `<ul class="order-parse-list">${eq.map((x) => `<li>${x.robot ? "&#128421;&#65039; " : "&#128187; "}<strong>${escapeHtml(x.device)}</strong> — ${tarde(x.at) ? `<span style="color:var(--red, #b42318)">sin señal (${escapeHtml(hace(x.at))})</span>` : escapeHtml(x.estado || "activa") + " · " + escapeHtml(hace(x.at))}${x.datos && Date.now() - new Date(x.datos).getTime() > 15 * 60000 ? ` <span style="color:var(--red, #b42318)">(sus datos son de ${escapeHtml(hace(x.datos))})</span>` : ""}${x.version ? (x.version === APP_VERSION ? ` <span class="muted">(${escapeHtml(x.version)})</span>` : ` <span style="color:var(--red, #b42318)">(versión vieja ${escapeHtml(x.version)})</span>`) : ""}</li>`).join("")}</ul>` : `<p class="muted" style="margin:4px 0">Ningún equipo está haciendo la carga ahora.${autoInboxRobotAllowed() ? " El del servidor aparece acá cuando arranca (después de publicar la versión)." : ""}</p>`;
     } catch (e) { box.innerHTML = `<p class="muted" style="margin:4px 0">No se pudo consultar.</p>`; }
   }
   setInterval(() => { paintAutoInboxStatus(); }, 30 * 1000);
@@ -4182,7 +4188,11 @@
       }
       // La descarga al abrir (isLogin) no se saltea: antes, si al arrancar habia una ventana
       // emergente o un guardado pendiente, no bajaba nada y el equipo quedaba con datos viejos.
-      if (!manual && !isLogin) {
+      // El equipo del servidor (carga automatica) no tiene a nadie escribiendo: no se frena por una
+      // ventana abierta. Antes una ventana que quedaba abierta (la de al entrar) lo dejaba con los
+      // datos del arranque todo el dia: no veia saludos, alias ni pedidos nuevos y cargaba peor.
+      const esRobot = typeof autoInboxIsRobot === "function" && autoInboxIsRobot();
+      if (!manual && !isLogin && !esRobot) {
         const active = document.activeElement;
         const typing = active && ["INPUT", "TEXTAREA", "SELECT"].includes(active.tagName);
         if (typing || ui.modal || cloudPushTimer) return;
