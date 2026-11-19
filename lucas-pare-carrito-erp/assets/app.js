@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v143";
+  const APP_VERSION = "v144";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -1835,6 +1835,17 @@
     // Latido: que se vea en Configuracion que este equipo esta andando (y si esta en pausa).
     const pausa = !autoInboxOn() ? "desactivada" : autoInboxIsRobot() && !autoInboxRobotAllowed() ? "en pausa (equipo del servidor apagado)" : "activa";
     cloudRequest(getCloudSyncConfig(), "/inbox/auto-heartbeat", { method: "POST", body: JSON.stringify({ device: autoInboxDeviceName(), robot: autoInboxIsRobot(), estado: pausa, version: APP_VERSION, datos: (getCloudSyncConfig() || {}).lastSync || "" }) }).catch(() => {});
+    // Los comprobantes de WhatsApp los registra este mismo equipo aunque la carga automatica de
+    // pedidos este desactivada (tienen su propio tilde en Pagos).
+    if (pausa === "desactivada") {
+      if (ui.autoInboxRunning || (typeof serverDataReady === "function" && !serverDataReady())) return;
+      ui.autoInboxRunning = true;
+      try {
+        if (autoInboxIsRobot()) { if (ui.modal) { ui.modal = null; render(); } try { await cloudPull(false); } catch (e) { /* sigue */ } }
+        await runAutoReceipts();
+      } catch (e) { /* se reintenta */ } finally { ui.autoInboxRunning = false; }
+      return;
+    }
     if (pausa !== "activa") return;
     if (typeof serverDataReady === "function" && !serverDataReady()) return;
     // Equipo del servidor: cierra cualquier ventana que haya quedado abierta y trae lo ultimo del
@@ -2916,7 +2927,12 @@
       localStorage.setItem(STORAGE_KEY, texto);
       return true;
     } catch (error) {
-      noteStorageProblem("copia de los datos: " + ((error && error.message) || error));
+      // La copia completa de los datos es solo para abrir mas rapido: si no entra en el lugar que
+      // el navegador le da a la pagina (unos 5 MB, no tiene que ver con el disco) se bajan del
+      // servidor al abrir. No es un problema: lo que importa (cambios sin enviar, sesion) se guarda
+      // aparte y si eso falla si se avisa.
+      console.warn("La copia local de los datos no entra en el navegador; se usa la del servidor.", error);
+      ui.stateCopyTooBig = true;
       return false;
     }
   }
@@ -5055,7 +5071,7 @@
     const bajando = (ui.syncDownloading
       ? `<div class="alert" style="margin-bottom:14px"><strong>Sincronizando:</strong> descargando datos del servidor...</div>`
       : "") + (ui.storageProblem
-      ? `<div class="alert warn" style="margin-bottom:14px"><strong>Este celular no tiene espacio libre.</strong> La app sigue funcionando y envia todo al servidor, pero si se cierra con cambios sin enviar se pueden perder. Libera espacio en el telefono (fotos, videos, apps) cuando puedas.</div>`
+      ? `<div class="alert warn" style="margin-bottom:14px"><strong>Este navegador no deja guardar más datos de la app.</strong> La app sigue funcionando y envía todo al servidor, pero si se cierra con cambios sin enviar se pueden perder. Esperá a que diga que está todo enviado antes de cerrarla. Si pasa en un celular, liberá espacio (fotos, videos, apps).</div>`
       : "");
     if (!localPersistRole()) return bajando;
     let html = bajando + outdatedDevicesBannerHtml();
@@ -15698,7 +15714,7 @@
         const client = getClient(clientId);
         return getSaldoMovements(clientId, ui.balanceFrom, ui.balanceTo).map((entry) => ({ ...entry, clientName: client ? client.name : clientId }));
       })
-      .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.id).localeCompare(String(b.id)));
+      .sort((a, b) => saldoOrder(a, b));
     const showClientColumn = clientIds.length > 1;
     const movementRows = movements.map((entry) => `
       <tr>
@@ -22662,7 +22678,9 @@
     const como = (it) => (it.como || []).map((c) => {
       const base = c.modo === "exacto" ? "pago justo" : c.modo === "suma" ? "pago de " + c.cuantos + " remitos juntos" : c.modo === "elegido" ? "pago de este remito" : "a cuenta";
       const dif = c.diferencia && Math.abs(c.diferencia) >= 0.5 ? " (" + (c.diferencia > 0 ? "+" : "") + formatMoney(c.diferencia) + ")" : "";
-      return escapeHtml(base + " " + c.ref + " del " + formatDate(c.date)) + dif;
+      const medio = c.medio ? ({ efectivo: "efectivo", transferencia: "transferencia", ajuste: "ajuste" }[c.medio] || c.medio) : "";
+      const extra = [c.total ? "pago total " + formatMoney(c.total) : "", medio, c.cargado ? "cargó: " + c.cargado : ""].filter(Boolean).join(" · ");
+      return escapeHtml(base + " " + c.ref + " del " + formatDate(c.date)) + dif + (extra ? `<br><span class="muted">${escapeHtml(extra)}</span>` : "");
     }).join("<br>");
     const pill = (it) => it.estado === "pagado" ? `<span class="pill green">Pagado</span>` : it.estado === "parcial" ? `<span class="pill amber">Parcial: falta ${formatMoney(it.pendiente)}</span>` : `<span class="pill" style="background:#fde2e1;color:#b42318">Sin pagar</span>`;
     box.innerHTML = `<details ${j.salteados ? "open" : ""}><summary><strong>Remitos pagos y pendientes</strong> · ${abiertos.length} sin pagar o parciales (${formatMoney(j.deuda || 0)})${j.salteados ? ` · <span style="color:#b42318">&#9888;&#65039; ${j.salteados} salteado${j.salteados === 1 ? "" : "s"}</span>` : ""}</summary>
@@ -24037,7 +24055,7 @@
       let balance = 0;
       saldos
         .filter((entry) => entry.clientId === clientId)
-        .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.id).localeCompare(String(b.id)))
+        .sort((a, b) => saldoOrder(a, b))
         .forEach((entry) => {
           balance += Number(entry.amount || 0);
           entry.balance = balance;
@@ -28797,11 +28815,17 @@
     updateOrderAccounting(order);
   }
 
+  // Orden de la cuenta corriente: por fecha y, el mismo dia, el "Saldo anterior" primero.
+  function saldoOrder(a, b) {
+    const ap = (e) => (e && (e.type === "apertura" || e.relatedEntityType === "apertura" || e.__opening) ? 0 : 1);
+    return String(a.date).localeCompare(String(b.date)) || ap(a) - ap(b) || String(a.id).localeCompare(String(b.id));
+  }
+
   function recomputeClientSaldoBalances(clientId) {
     let balance = 0;
     state.saldos
       .filter((entry) => entry.clientId === clientId)
-      .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.id).localeCompare(String(b.id)))
+      .sort((a, b) => saldoOrder(a, b))
       .forEach((entry) => {
         balance += Number(entry.amount || 0);
         entry.balance = balance;
@@ -28839,9 +28863,13 @@
           };
         });
     }
+    // El saldo de cada fila se calcula aca, en orden (el guardado podia venir en otro orden).
+    let corrido = 0;
     return state.saldos
-      .filter((entry) => entry.clientId === clientId && entry.date >= start && entry.date <= end)
-      .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.id).localeCompare(String(b.id)));
+      .filter((entry) => entry.clientId === clientId)
+      .sort((a, b) => saldoOrder(a, b))
+      .map((entry) => { corrido += Number(entry.amount || 0); return { ...entry, balance: corrido }; })
+      .filter((entry) => entry.date >= start && entry.date <= end);
   }
 
   function getClientAccumulatedIva(clientId) {

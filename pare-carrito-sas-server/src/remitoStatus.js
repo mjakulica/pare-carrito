@@ -12,6 +12,18 @@
 // "Mismo monto": igual o con menos del 1% de diferencia (y al menos $1 de tolerancia por redondeo).
 const igualMonto = (a, b) => Math.abs(a - b) <= Math.max(1, Math.abs(b) * 0.01);
 
+// Medio del pago y como se cargo (persona, comprobante de WhatsApp o resumen del banco).
+function origenPago(c) {
+  const p = c.pay;
+  if (!p) return { medio: c.e.type === "ajuste" || /ajuste/i.test(c.e.description || "") ? "ajuste" : String(c.e.type || "credito"), cargado: String(c.e.description || "").slice(0, 60) };
+  const quien = String(p.recordedBy || p.receivedByName || "");
+  const solo = p.autoLoaded ? " (solo)" : quien ? " (" + quien + ")" : "";
+  const cargado = p.bankMovementId ? "resumen del banco" + solo
+    : p.receiptId ? "comprobante de WhatsApp" + solo
+    : quien;
+  return { medio: String(p.method || ""), cargado };
+}
+
 function computeRemitoStatus(data, clientId) {
   const orders = (data.orders || []).filter((o) => o && o.clientId === clientId && !o.exampleOnly && !o.deletedAt && !["cancelado", "anulado"].includes(o.status) && Number(o.totalAmount || 0) > 0);
   const saldos = (data.saldos || []).filter((e) => e && e.clientId === clientId);
@@ -40,18 +52,20 @@ function computeRemitoStatus(data, clientId) {
   creditos.forEach((c) => {
     let resto = c.monto;
     const ref = c.pay ? c.pay.id : c.e.id;
+    const info = origenPago(c);
+    const aplicarC = (it, monto, extra) => aplicar(it, monto, { ref, date: c.date, total: c.monto, ...info, ...extra });
     // Pago registrado con pedidos elegidos: primero a esos.
     const elegidos = c.pay && Array.isArray(c.pay.orderIds) ? c.pay.orderIds.map((id) => items.find((it) => it.id === id)).filter(Boolean) : [];
     elegidos.forEach((it) => {
       if (resto <= 0.005) return;
       const a = Math.min(resto, pend(it));
-      if (a > 0) { aplicar(it, a, { ref, date: c.date, modo: "elegido", monto: a }); resto -= a; }
+      if (a > 0) { aplicarC(it, a, { modo: "elegido", monto: a }); resto -= a; }
     });
     if (resto <= 0.005) return;
     const abiertos = items.filter((it) => pend(it) > 0.005);
     // 1) mismo monto: el mas viejo con ese pendiente
     const exacto = abiertos.find((it) => igualMonto(resto, pend(it)));
-    if (exacto) { const p = pend(exacto); aplicar(exacto, p, { ref, date: c.date, modo: "exacto", monto: p, diferencia: Math.round((resto - p) * 100) / 100 }); return; }
+    if (exacto) { const p = pend(exacto); aplicarC(exacto, p, { modo: "exacto", monto: p, diferencia: Math.round((resto - p) * 100) / 100 }); return; }
     // 2) suma de varios: primero remitos seguidos, despues cualquier combinacion de los 16 mas viejos
     let grupo = null;
     for (let i = 0; i < abiertos.length && !grupo; i++) {
@@ -76,14 +90,14 @@ function computeRemitoStatus(data, clientId) {
     }
     if (grupo) {
       const suma = grupo.reduce((t, it) => t + pend(it), 0);
-      grupo.forEach((it) => aplicar(it, pend(it), { ref, date: c.date, modo: "suma", cuantos: grupo.length, monto: pend(it), diferencia: Math.round((resto - suma) * 100) / 100 }));
+      grupo.forEach((it) => aplicarC(it, pend(it), { modo: "suma", cuantos: grupo.length, monto: pend(it), diferencia: Math.round((resto - suma) * 100) / 100 }));
       return;
     }
     // 3) a cuenta: del mas viejo al mas nuevo
     for (const it of abiertos) {
       if (resto <= 0.005) break;
       const a = Math.min(resto, pend(it));
-      aplicar(it, a, { ref, date: c.date, modo: "a cuenta", monto: a });
+      aplicarC(it, a, { modo: "a cuenta", monto: a });
       resto -= a;
     }
   });
