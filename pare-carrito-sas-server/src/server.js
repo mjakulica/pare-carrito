@@ -4646,6 +4646,28 @@ app.get("/whatsapp/archive/messages", authenticate, requireRole("manager", "admi
   res.json({ ok: true, messages: rows.reverse() });
 });
 
+// ---------- Remitos pagos / parciales / pendientes por cliente ----------
+const { computeRemitoStatus } = require("./remitoStatus");
+app.get("/clients/:id/remitos", authenticate, requireRole("manager", "admin", "employee", "contador"), async (req, res) => {
+  const stored = await loadStateData();
+  if (!stored) return res.status(404).json({ error: "Sin datos." });
+  res.json({ ok: true, ...computeRemitoStatus(stored.data, String(req.params.id)) });
+});
+// Resumen de todos los clientes: cuantos remitos salteados y la deuda por remitos.
+app.get("/clients/remitos-resumen", authenticate, requireRole("manager", "admin", "employee", "contador"), async (req, res) => {
+  const stored = await loadStateData();
+  if (!stored) return res.status(404).json({ error: "Sin datos." });
+  const out = {};
+  (stored.data.clients || []).filter((c) => c && c.id && c.isActive !== false).forEach((c) => {
+    const r = computeRemitoStatus(stored.data, c.id);
+    if (r.salteados || r.items.some((it) => it.estado !== "pagado")) {
+      const pend = r.items.filter((it) => it.estado !== "pagado");
+      out[c.id] = { salteados: r.salteados, pendientes: pend.length, masViejo: pend.length ? pend[0].date : "" };
+    }
+  });
+  res.json({ ok: true, clientes: out });
+});
+
 // ---------- Cambios en los pedidos despues de cargarlos ----------
 // Cada cambio que sube un equipo queda en state_operations. De ahi sale la PRIMERA version de cada
 // pedido (como se cargo) y se compara con la de hoy (la correcta, ya revisada): que producto se

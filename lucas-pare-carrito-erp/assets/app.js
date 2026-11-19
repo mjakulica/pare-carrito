@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v142";
+  const APP_VERSION = "v143";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -15595,7 +15595,7 @@
       return `
         <tr>
           <td>${escapeHtml(client ? client.id : item.clientId)}</td>
-          <td>${escapeHtml(client ? client.name : item.clientId)}${parentTag}${childTag}</td>
+          <td>${escapeHtml(client ? client.name : item.clientId)}${parentTag}${childTag}<span data-remitos-flag="${escapeAttr(item.clientId)}"></span></td>
           <td class="num">${formatMoney(item.balance)}${groupLine}</td>
           <td class="num">${client && shouldApplyInvoiceVat(client) ? formatMoney(getClientAccumulatedIva(item.clientId)) : "-"}</td>
           <td>${escapeHtml(client ? paymentTypeLabel(client.paymentType) : "")}</td>
@@ -15634,6 +15634,7 @@
         render();
       }));
       document.querySelectorAll("[data-show-balance]").forEach((button) => button.addEventListener("click", () => openBalanceHistory(button.dataset.showBalance)));
+      paintRemitosFlags();
       document.querySelectorAll("[data-adjust-balance-client]").forEach((button) => button.addEventListener("click", () => openBalanceAdjustModal(button.dataset.adjustBalanceClient)));
       document.querySelectorAll("[data-print-order-remito]").forEach((button) => button.addEventListener("click", () => printOrderRemitoDirect(button.dataset.printOrderRemito)));
     });
@@ -22628,6 +22629,48 @@
 
   // Si algo falla al armar los movimientos (un dato raro que vino del servidor), se muestra el
   // motivo en vez de dejar la pantalla sin nada: asi se puede saber que registro lo causa.
+  // ---- Remitos pagos / parciales / pendientes (calculado en el servidor con todo el historial) ----
+  // Pagos por remito (mismo monto, hasta 1% de diferencia), pagos de varios remitos juntos (suman
+  // el monto) y pagos a cuenta (del mas viejo al mas nuevo, el ultimo parcial). "Salteado": un
+  // remito sin pagar mas viejo que otros que se pagaron justos (se olvidaron de ese).
+  async function paintRemitosFlags() {
+    if (!currentUser || !["manager", "admin", "employee", "contador"].includes(currentUser.role)) return;
+    try {
+      const r = await cloudRequest(getCloudSyncConfig(), "/clients/remitos-resumen", { method: "GET" });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) return;
+      document.querySelectorAll("[data-remitos-flag]").forEach((el) => {
+        const x = (j.clientes || {})[el.dataset.remitosFlag];
+        if (!x) { el.innerHTML = ""; return; }
+        el.innerHTML = (x.salteados ? `<br><span class="pill" style="background:#fde2e1;color:#b42318">&#9888;&#65039; ${x.salteados} remito${x.salteados === 1 ? "" : "s"} salteado${x.salteados === 1 ? "" : "s"}</span>` : "")
+          + (x.pendientes ? `<br><span class="muted" style="font-size:12px">${x.pendientes} remito${x.pendientes === 1 ? "" : "s"} sin pagar${x.masViejo ? " desde el " + escapeHtml(formatDate(x.masViejo)) : ""}</span>` : "");
+      });
+    } catch (e) { /* sin datos */ }
+  }
+  async function paintRemitosStatus(clientId) {
+    const box = document.getElementById("remitos-status");
+    if (!box) return;
+    let j;
+    try {
+      const r = await cloudRequest(getCloudSyncConfig(), "/clients/" + encodeURIComponent(clientId) + "/remitos", { method: "GET" });
+      j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || "HTTP " + r.status);
+    } catch (e) { box.innerHTML = `<p class="muted">No se pudo calcular el estado de los remitos: ${escapeHtml(e.message)}</p>`; return; }
+    const items = (j.items || []).slice();
+    const abiertos = items.filter((it) => it.estado !== "pagado");
+    const mostrar = items.slice().reverse().slice(0, 40);
+    const como = (it) => (it.como || []).map((c) => {
+      const base = c.modo === "exacto" ? "pago justo" : c.modo === "suma" ? "pago de " + c.cuantos + " remitos juntos" : c.modo === "elegido" ? "pago de este remito" : "a cuenta";
+      const dif = c.diferencia && Math.abs(c.diferencia) >= 0.5 ? " (" + (c.diferencia > 0 ? "+" : "") + formatMoney(c.diferencia) + ")" : "";
+      return escapeHtml(base + " " + c.ref + " del " + formatDate(c.date)) + dif;
+    }).join("<br>");
+    const pill = (it) => it.estado === "pagado" ? `<span class="pill green">Pagado</span>` : it.estado === "parcial" ? `<span class="pill amber">Parcial: falta ${formatMoney(it.pendiente)}</span>` : `<span class="pill" style="background:#fde2e1;color:#b42318">Sin pagar</span>`;
+    box.innerHTML = `<details ${j.salteados ? "open" : ""}><summary><strong>Remitos pagos y pendientes</strong> · ${abiertos.length} sin pagar o parciales (${formatMoney(j.deuda || 0)})${j.salteados ? ` · <span style="color:#b42318">&#9888;&#65039; ${j.salteados} salteado${j.salteados === 1 ? "" : "s"}</span>` : ""}</summary>
+      <p class="muted" style="font-size:12px;margin:4px 0">Pago justo = mismo monto que el remito (hasta 1% de diferencia). Varios remitos juntos = el pago es la suma. A cuenta = se descuenta del más viejo al más nuevo. <strong>Salteado</strong> = quedó sin pagar pero se pagaron remitos posteriores.</p>
+      <div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Remito</th><th class="num">Total</th><th>Estado</th><th>Cómo se pagó</th></tr></thead><tbody>${mostrar.map((it) => `<tr ${it.salteado ? 'style="background:#fff1f0"' : ""}><td>${escapeHtml(formatDate(it.date))}</td><td>${escapeHtml(it.tipo === "cargo" ? (it.descripcion || "Cargo") : it.id)}${it.salteado ? ` <strong style="color:#b42318">&#9888;&#65039; salteado</strong>` : ""}</td><td class="num">${formatMoney(it.total)}</td><td>${pill(it)}</td><td style="font-size:12px">${como(it) || "-"}</td></tr>`).join("") || `<tr><td colspan="5" class="muted">Sin remitos.</td></tr>`}</tbody></table></div>
+      ${items.length > 40 ? `<p class="muted" style="font-size:12px">Se muestran los últimos 40.</p>` : ""}</details>`;
+  }
+
   function openBalanceHistory(clientId) {
     try {
       openBalanceHistoryInner(clientId);
@@ -22671,6 +22714,7 @@
         <span class="muted">Rango: ${formatDate(ui.balanceFrom)} - ${formatDate(ui.balanceTo)}</span>
       </div>
       ${balanceRangeWarningHtml(ui.balanceFrom, ui.balanceTo)}
+      <div id="remitos-status" style="margin-bottom:12px"><p class="muted">Calculando qué remitos están pagos...</p></div>
       <div class="table-wrap">
         <table>
           <thead><tr><th>Fecha</th><th>Tipo</th><th>Descripcion</th><th>Monto</th><th>Saldo</th></tr></thead>
@@ -22679,6 +22723,7 @@
       </div>
       `,
       () => {
+        paintRemitosStatus(clientId);
         const ajustar = document.querySelector("[data-adjust-balance]");
         if (ajustar) ajustar.addEventListener("click", () => openBalanceAdjustModal(clientId));
         document.querySelectorAll("[data-annul-adjustment]").forEach((button) => button.addEventListener("click", () => annulManualBalanceAdjustment(button.dataset.annulAdjustment)));
