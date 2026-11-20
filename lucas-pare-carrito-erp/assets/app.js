@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v145";
+  const APP_VERSION = "v146";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -1427,6 +1427,50 @@
     return (state.payments || []).filter((p) => p && p.status !== "anulado" && (p.clientId === clientId || (p.groupClientIds || []).includes(clientId)) && Math.abs(Number(p.amount || 0) - amount) <= 1 && !(usados && usados.has(p.id)) && !(p.receiptId && String(p.receiptId) !== String(r.id)) && dias(String(p.date || f), f) <= 5)
       .sort((a, b) => dias(String(a.date), f) - dias(String(b.date), f))[0] || null;
   }
+
+  // Inicio: aviso de transferencias que todavia no son un pago de un cliente (comprobantes de
+  // WhatsApp por revisar, comprobantes viejos que no estan cargados y creditos del resumen del
+  // banco sin registrar). Se consulta al servidor cada 2 minutos como mucho.
+  function dashPayAlertHtml() {
+    if (!currentUser || !["manager", "admin"].includes(currentUser.role)) return "";
+    if (!ui.dashPay || Date.now() - ui.dashPay.at > 120000) setTimeout(refreshDashPayAlert, 0);
+    return `<div id="dash-pay-alert">${dashPayAlertInner()}</div>`;
+  }
+  function dashPayAlertInner() {
+    const d = ui.dashPay;
+    if (!d) return "";
+    const partes = [
+      { n: d.wa.length, total: d.wa.reduce((t, x) => t + Number((x.ai && x.ai.monto) || 0), 0), txt: "comprobante(s) de WhatsApp por revisar", ir: "wa-receipts", sinCli: d.wa.filter((x) => !x.client_id).length },
+      { n: d.hist.length, total: d.hist.reduce((t, x) => t + Number((x.ai && x.ai.monto) || 0), 0), txt: "comprobante(s) viejo(s) de WhatsApp que no están cargados", ir: "wa-historic", sinCli: d.hist.filter((x) => !x.client_id).length },
+      { n: d.bank.length, total: d.bank.reduce((t, x) => t + Number(x.monto || 0), 0), txt: "transferencia(s) del resumen del banco sin registrar", ir: "bank-panel", sinCli: d.bank.filter((x) => !x.client_id).length }
+    ].filter((x) => x.n);
+    if (!partes.length) return "";
+    return `<div class="alert warn" style="margin-bottom:12px"><strong>&#128176; Transferencias sin registrar como pago de un cliente</strong>
+      <ul style="margin:6px 0 0 18px">${partes.map((x) => `<li><strong>${x.n}</strong> ${escapeHtml(x.txt)} (${formatMoney(x.total)})${x.sinCli ? ` · <span style="color:#b42318">${x.sinCli} sin cliente vinculado</span>` : ""} <button class="btn small" type="button" data-dash-pay-go="${x.ir}">Ver</button></li>`).join("")}</ul></div>`;
+  }
+  async function refreshDashPayAlert() {
+    if (ui.dashPayLoading || !currentUser || !["manager", "admin"].includes(currentUser.role)) return;
+    ui.dashPayLoading = true;
+    try {
+      const get = async (path) => { const r = await cloudRequest(getCloudSyncConfig(), path, { method: "GET" }); const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || "HTTP " + r.status); return j.items || []; };
+      const [wa, hist, bank] = await Promise.all([
+        get("/receipts?status=pendiente,procesando"),
+        get("/receipts?status=pendiente,procesando&historic=1"),
+        get("/bank/movements?status=pendiente")
+      ]);
+      ui.dashPay = { at: Date.now(), wa, hist: hist.filter((x) => !x.match), bank: bank.filter((x) => !x.match && !x.receipt) };
+    } catch (e) { /* sin red: se reintenta en el proximo render */ } finally { ui.dashPayLoading = false; }
+    const box = document.getElementById("dash-pay-alert");
+    if (box) box.innerHTML = dashPayAlertInner();
+  }
+  document.addEventListener("click", (ev) => {
+    const b = ev.target && ev.target.closest && ev.target.closest("[data-dash-pay-go]");
+    if (!b) return;
+    const id = b.dataset.dashPayGo;
+    location.hash = "#/pagos";
+    let n = 0;
+    const t = setInterval(() => { const el = document.getElementById(id); n += 1; if ((el && el.offsetParent !== null) || n > 20) { clearInterval(t); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); } }, 300);
+  });
 
   function waHistoricPanelHtml() {
     if (!currentUser || !["manager", "admin"].includes(currentUser.role)) return "";
@@ -5196,6 +5240,7 @@
       `<button class="btn primary" data-route="nuevo-pedido">Nuevo pedido</button>
        <button class="btn blue" data-route="pagos">Registrar pago</button>`,
       `
+      ${dashPayAlertHtml()}
       ${renderPendingTransfersBanner()}
       ${renderPendingUsersBanner()}
       ${renderPendingReplacementsBanner()}
