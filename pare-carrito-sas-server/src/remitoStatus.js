@@ -3,7 +3,8 @@
 // Que remitos estan pagos, parciales o pendientes para un cliente, a partir de su cuenta corriente
 // (todo el historial del servidor). Los pagos que se registraron con pedidos elegidos van a esos
 // pedidos. Los demas (y lo que sobro) se imputan, en orden de fecha:
-//   1) a un remito pendiente con el MISMO monto (pago por remito, como Charrua o Gertrudis);
+//   1) a un remito pendiente con el MISMO monto (pago por remito, como Charrua o Gertrudis), el
+//      mas cercano en monto; nunca a un remito posterior al pago;
 //   2) a varios remitos pendientes que SUMAN el monto (pagaron 3 remitos juntos);
 //   3) si no coincide, a cuenta: del remito mas viejo al mas nuevo, el ultimo queda parcial.
 // Un remito pendiente MAS VIEJO que otros que se pagaron justos queda marcado "salteado": el
@@ -62,39 +63,44 @@ function computeRemitoStatus(data, clientId) {
       if (a > 0) { aplicarC(it, a, { modo: "elegido", monto: a }); resto -= a; }
     });
     if (resto <= 0.005) return;
-    const abiertos = items.filter((it) => pend(it) > 0.005);
-    // 1) mismo monto: el mas viejo con ese pendiente
-    const exacto = abiertos.find((it) => igualMonto(resto, pend(it)));
+    // Un pago nunca paga un remito posterior a el (salvo lo que sobre, a cuenta).
+    const abiertos = items.filter((it) => pend(it) > 0.005 && (!c.date || !it.date || it.date <= c.date));
+    const dif = (x) => Math.abs(resto - x);
+    // 1) mismo monto: el remito con el monto MAS CERCANO (empate: el mas viejo)
+    let exacto = null;
+    abiertos.forEach((it) => { if (igualMonto(resto, pend(it)) && (!exacto || dif(pend(it)) < dif(pend(exacto)) - 0.005)) exacto = it; });
     if (exacto) { const p = pend(exacto); aplicarC(exacto, p, { modo: "exacto", monto: p, diferencia: Math.round((resto - p) * 100) / 100 }); return; }
-    // 2) suma de varios: primero remitos seguidos, despues cualquier combinacion de los 16 mas viejos
-    let grupo = null;
-    for (let i = 0; i < abiertos.length && !grupo; i++) {
-      let s = 0;
-      for (let j = i; j < abiertos.length; j++) {
-        s += pend(abiertos[j]);
-        if (j > i && igualMonto(resto, s)) { grupo = abiertos.slice(i, j + 1); break; }
-        if (s > resto * 1.01 + 1) break;
+    // 2) suma de varios: remitos seguidos (los mas cercanos al pago primero) o cualquier combinacion
+    //    de los 16 mas nuevos anteriores al pago; gana la suma mas cercana al monto.
+    let grupo = null, mejorDif = Infinity;
+    const probar = (g) => { const s2 = g.reduce((t, it) => t + pend(it), 0); if (igualMonto(resto, s2) && dif(s2) < mejorDif - 0.005) { grupo = g; mejorDif = dif(s2); } };
+    for (let j = abiertos.length - 1; j >= 1; j--) {
+      let s2 = pend(abiertos[j]);
+      for (let i = j - 1; i >= 0; i--) {
+        s2 += pend(abiertos[i]);
+        if (s2 > resto * 1.01 + 1) break;
+        probar(abiertos.slice(i, j + 1));
       }
     }
     if (!grupo) {
-      const cand = abiertos.slice(0, 16);
+      const cand = abiertos.slice(-16);
       const n = cand.length;
-      let mejor = null;
-      for (let mask = 1; mask < (1 << n) && !mejor; mask++) {
+      for (let mask = 1; mask < (1 << n); mask++) {
         if ((mask & (mask - 1)) === 0) continue; // uno solo ya se probo
-        let s = 0;
-        for (let k = 0; k < n; k++) if (mask & (1 << k)) s += pend(cand[k]);
-        if (igualMonto(resto, s)) mejor = cand.filter((_, k) => mask & (1 << k));
+        let s2 = 0;
+        for (let k = 0; k < n; k++) if (mask & (1 << k)) s2 += pend(cand[k]);
+        if (igualMonto(resto, s2) && dif(s2) < mejorDif - 0.005) { grupo = cand.filter((_, k) => mask & (1 << k)); mejorDif = dif(s2); }
       }
-      grupo = mejor;
     }
     if (grupo) {
       const suma = grupo.reduce((t, it) => t + pend(it), 0);
       grupo.forEach((it) => aplicarC(it, pend(it), { modo: "suma", cuantos: grupo.length, monto: pend(it), diferencia: Math.round((resto - suma) * 100) / 100 }));
       return;
     }
-    // 3) a cuenta: del mas viejo al mas nuevo
-    for (const it of abiertos) {
+    // 3) a cuenta: del mas viejo al mas nuevo (primero los anteriores al pago; si sobra, adelanto
+    //    para los que vienen despues)
+    const aCuenta = abiertos.concat(items.filter((it) => pend(it) > 0.005 && !abiertos.includes(it)));
+    for (const it of aCuenta) {
       if (resto <= 0.005) break;
       const a = Math.min(resto, pend(it));
       aplicarC(it, a, { modo: "a cuenta", monto: a });
