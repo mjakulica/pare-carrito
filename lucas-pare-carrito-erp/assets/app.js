@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v148";
+  const APP_VERSION = "v149";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -714,7 +714,7 @@
       const j = await r.json().catch(() => ({}));
       if (!r.ok) return;
       const probados = autoReceiptsTried();
-      for (const x of (j.items || []).filter((y) => !probados.includes(y.id) && y.client_id && !(y.note && /^reenviado sin/.test(y.note))).slice(0, 10)) {
+      for (const x of (j.items || []).filter((y) => !probados.includes(y.id) && y.client_id && !y.client_por_nombre && !(y.note && /^reenviado sin/.test(y.note))).slice(0, 10)) {
         autoReceiptsMarkTried(x.id);
         const monto = Number((x.ai && x.ai.monto) || 0);
         const prob = receiptProblems(x, x.client_id, monto);
@@ -755,7 +755,7 @@
             const prob = receiptProblems(x, x.client_id, monto);
             const cta = receiptAccountMatch(x.ai || {});
             const prov = cta && cta.providerId ? getProvider(cta.providerId) : null;
-            if (prob.length || !c || (prov && monto > getProviderBalance(prov.id) + 0.005)) continue;
+            if (prob.length || !c || x.client_por_nombre || (prov && monto > getProviderBalance(prov.id) + 0.005)) continue;
             await waInboxPost("/receipts/" + x.id + "/claim", {});
             const pay = await registerReceipt(x, c.id, monto, true, x.bank ? x.bank.fecha : receiptDate(x));
             autoInboxLog("Comprobante viejo registrado solo: " + formatMoney(monto) + " de " + c.id + " - " + c.name + " (" + pay.id + ")");
@@ -771,7 +771,7 @@
           if (n >= 20) break;
           try {
             if (x.match && x.match.seguro) { await waInboxPost("/bank/movements/" + x.id + "/done", { paymentId: x.match.id, clientId: x.match.clientId, auto: true }); n += 1; continue; }
-            if (x.match || !x.client_id || !getClient(x.client_id)) continue; // dudoso o sin cliente: a mano
+            if (x.match || x.propia || x.client_por_nombre || !x.client_id || !getClient(x.client_id)) continue; // dudoso, sugerido por el nombre o sin cliente: a mano
             const pay = await bankRegister(x, getClient(x.client_id), true);
             autoInboxLog("Crédito del banco registrado solo: " + formatMoney(x.monto) + " de " + x.client_id + " (" + pay.id + ")");
             n += 1;
@@ -1316,7 +1316,8 @@
           }
           if (j.estado === "error") throw new Error(j.error);
           if (j.estado !== "listo") throw new Error("Sigue leyendo en el servidor. Tocá Subir de nuevo en unos minutos (no se duplica) o recargá Pagos.");
-          ui.bankMsg = j.creditos + " créditos en el archivo: " + j.nuevos + " nuevos" + (j.repetidos ? ", " + j.repetidos + " ya estaban subidos" : "") + ".";
+          const ctl = j.control || {};
+          ui.bankMsg = j.creditos + " créditos en el archivo (" + formatMoney(ctl.suma != null ? ctl.suma : 0) + "): " + j.nuevos + " nuevos" + (j.repetidos ? ", " + j.repetidos + " ya estaban subidos" : "") + "." + (ctl.cuadra === true ? " ✅ Cuadra con el total de créditos del resumen." : ctl.cuadra === false ? " ⚠️ NO cuadra con el total de créditos del resumen (" + formatMoney(ctl.totalResumen) + "): puede faltar alguno, revisalo." : "");
           const m2 = document.getElementById("bank-msg");
           if (m2) m2.textContent = ui.bankMsg;
         } catch (e) { msg.textContent = ""; alert(e.message); }
@@ -1341,7 +1342,8 @@
     if (!items.length) { box.innerHTML = `<p class="muted" style="margin:0">No hay movimientos del banco por revisar.</p>`; return; }
     const seguros = items.filter((x) => x.match && x.match.seguro);
     const posibles = items.filter((x) => x.match && !x.match.seguro);
-    const faltan = items.filter((x) => !x.match);
+    const propias = items.filter((x) => !x.match && x.propia);
+    const faltan = items.filter((x) => !x.match && !x.propia);
     const cli = (id) => { const c = getClient(id); return c ? c.id + " - " + c.name : id || ""; };
     const fila = (x) => `<div class="wa-inbox-item">
       <div class="wa-inbox-head"><strong>${escapeHtml(formatDate(x.fecha))}</strong> · <strong>${formatMoney(x.monto)}</strong> <span class="pill gray">${escapeHtml(x.account || "")}</span></div>
@@ -1350,18 +1352,20 @@
       ${x.match ? `<div style="font-size:13px;margin:4px 0">${x.match.seguro ? "&#9989; Ya está cargado" : "&#10067; Puede ser"}: <strong>${escapeHtml(x.match.id)}</strong> del ${escapeHtml(formatDate(x.match.date))} de ${escapeHtml(cli(x.match.clientId))}</div>` : ""}
       <div class="page-actions wa-inbox-actions" style="flex-wrap:wrap">
         ${x.match ? `<button class="btn small primary" type="button" data-bank-match="${x.id}">${x.match.seguro ? "Ok, ya estaba" : "Es ese pago"}</button>` : ""}
-        <input list="bank-clients" data-bank-client="${x.id}" value="${escapeAttr(x.client_id ? cli(x.client_id) : "")}" placeholder="Cliente" style="flex:1;min-width:160px" autocomplete="off" />
+        <input list="bank-clients" data-bank-client="${x.id}" value="${escapeAttr(x.client_id ? cli(x.client_id) : "")}" placeholder="Cliente" style="flex:1;min-width:160px" autocomplete="off" />${x.client_por_nombre ? `<span class="pill amber" title="El nombre del cliente aparece en el texto del banco: confirmalo">por el nombre</span>` : ""}
         <button class="btn small ${x.match ? "ghost" : "primary"}" type="button" data-bank-pay="${x.id}">Registrar con fecha ${escapeHtml(formatDate(x.fecha).slice(0, 5))}</button>
         <button class="btn small ghost" type="button" data-bank-discard="${x.id}">No es un cobro</button>
       </div>
     </div>`;
-    box.innerHTML = `<p class="muted" style="font-size:13px;margin:0 0 6px"><strong>${faltan.length}</strong> sin cargar · <strong>${posibles.length}</strong> posibles · <strong>${seguros.length}</strong> ya cargados.</p>
+    const sumaF = faltan.reduce((t, x) => t + Number(x.monto || 0), 0);
+    box.innerHTML = `<p class="muted" style="font-size:13px;margin:0 0 6px"><strong>${faltan.length}</strong> sin cargar (${formatMoney(sumaF)}) · <strong>${posibles.length}</strong> posibles · <strong>${seguros.length}</strong> ya cargados${propias.length ? " · <strong>" + propias.length + "</strong> entre tus cuentas" : ""}.</p>
       <datalist id="bank-clients">${activeClients().map((c) => `<option value="${escapeAttr(c.id + " - " + c.name)}"></option>`).join("")}</datalist>
-      ${faltan.filter((x) => x.client_id).length ? `<div class="page-actions" style="margin-bottom:8px"><button class="btn small primary" type="button" data-bank-pay-known>Registrar los ${faltan.filter((x) => x.client_id).length} sin cargar que ya sé de qué cliente son</button><span class="muted" style="font-size:12px">(por un comprobante de WhatsApp o un pagador ya aprendido)</span></div>` : ""}
+      ${faltan.filter((x) => x.client_id).length ? `<div class="page-actions" style="margin-bottom:8px"><button class="btn small primary" type="button" data-bank-pay-known>Registrar los ${faltan.filter((x) => x.client_id).length} sin cargar que ya sé de qué cliente son</button><span class="muted" style="font-size:12px">(por un comprobante de WhatsApp, un pagador ya aprendido o el nombre del cliente en el banco${faltan.some((x) => x.client_por_nombre) ? ": revisá los marcados \"por el nombre\"" : ""})</span></div>` : ""}
       ${seguros.length ? `<div class="page-actions" style="margin-bottom:8px"><button class="btn small blue" type="button" data-bank-match-all>Marcar los ${seguros.length} que ya estaban cargados</button></div>` : ""}
       ${faltan.length ? `<h3 style="font-size:15px;margin:8px 0 4px">Sin cargar (${faltan.length})</h3>${faltan.map(fila).join("")}` : ""}
       ${posibles.length ? `<h3 style="font-size:15px;margin:8px 0 4px">Posibles (mismo monto y fecha, falta confirmar el cliente) (${posibles.length})</h3>${posibles.map(fila).join("")}` : ""}
-      ${seguros.length ? `<details style="margin-top:8px"><summary><strong>Ya cargados (${seguros.length})</strong></summary>${seguros.map(fila).join("")}</details>` : ""}`;
+      ${seguros.length ? `<details style="margin-top:8px"><summary><strong>Ya cargados (${seguros.length})</strong></summary>${seguros.map(fila).join("")}</details>` : ""}
+      ${propias.length ? `<details style="margin-top:8px"><summary><strong>Entre tus cuentas (${propias.length}, ${formatMoney(propias.reduce((t, x) => t + Number(x.monto || 0), 0))})</strong> <span class="muted" style="font-size:12px">no son cobros: descartalos</span></summary><div class="page-actions" style="margin:6px 0"><button class="btn small ghost" type="button" data-bank-discard-own>Descartar las ${propias.length}</button></div>${propias.map(fila).join("")}</details>` : ""}`;
     const item = (id) => items.find((y) => String(y.id) === String(id));
     const confirmarMatch = async (x) => {
       await waInboxPost("/bank/movements/" + x.id + "/done", { paymentId: x.match.id, clientId: x.match.clientId });
@@ -1381,6 +1385,12 @@
       for (const x of seguros) { try { await confirmarMatch(x); } catch (e) { mal += 1; } }
       saveState();
       if (mal) alert(mal + " no se pudieron marcar.");
+      refreshBankMovements();
+    }));
+    box.querySelectorAll("[data-bank-discard-own]").forEach((b) => b.addEventListener("click", async () => {
+      if (!confirm("Descartar " + propias.length + " transferencias entre tus cuentas (no son cobros de clientes)?")) return;
+      b.disabled = true;
+      for (const x of propias) { try { await waInboxPost("/bank/movements/" + x.id + "/discard", {}); } catch (e) { /* sigue */ } }
       refreshBankMovements();
     }));
     box.querySelectorAll("[data-bank-discard]").forEach((b) => b.addEventListener("click", async () => {
@@ -1617,7 +1627,7 @@
         get("/receipts?status=pendiente,procesando&historic=1"),
         get("/bank/movements?status=pendiente")
       ]);
-      ui.dashPay = { at: Date.now(), wa, hist: hist.filter((x) => !x.match), bank: bank.filter((x) => !x.match && !x.receipt) };
+      ui.dashPay = { at: Date.now(), wa, hist: hist.filter((x) => !x.match), bank: bank.filter((x) => !x.match && !x.receipt && !x.propia) };
     } catch (e) { /* sin red: se reintenta en el proximo render */ } finally { ui.dashPayLoading = false; }
     const box = document.getElementById("dash-pay-alert");
     if (box) box.innerHTML = dashPayAlertInner();

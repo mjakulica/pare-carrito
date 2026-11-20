@@ -163,4 +163,51 @@ function parseBankFile(buf, fileName) {
   return rowsToCredits(readCsv(buf.toString("utf8").includes("�") ? buf.toString("latin1") : buf.toString("utf8")));
 }
 
-module.exports = { parseBankFile, rowsToCredits, readCsv, readXlsx, parseMonto, parseFecha, nombrePagador, CUIT_RE };
+
+// ---- Texto de un PDF con columnas (pdftotext -layout), sin IA ----
+// Renglon: fecha, (referencia), descripcion y tres montos al final: debito, credito y saldo (o
+// credito, debito y saldo, segun los titulos). "-" es columna vacia. El total de creditos del
+// resumen ("Créditos $ 15.286.955,62") sirve para controlar que no falte ninguno.
+const MONTO_COL = "(-|-?\\$?\\s?-?[\\d.]+,\\d{2})";
+const RENGLON_RE = new RegExp("^\\s*(\\d{1,2}[-/]\\d{1,2}[-/]\\d{2,4})\\s+(.+?)\\s{2,}" + MONTO_COL + "\\s{2,}" + MONTO_COL + "\\s{2,}" + MONTO_COL + "\\s*$");
+function totalCreditosResumen(texto) {
+  for (const l of String(texto || "").split(/\r?\n/)) {
+    const m = norm(l).match(/\b(?:total\s+(?:de\s+)?)?creditos\s+\$\s?([\d.]+,\d{2})/);
+    if (m) return parseMonto(m[1]);
+  }
+  return null;
+}
+function parseBankText(texto) {
+  const lineas = String(texto || "").split(/\r?\n/);
+  // Orden de las columnas segun el renglon de titulos
+  let creditoPrimero = null;
+  for (const l of lineas) {
+    const n = norm(l);
+    const d = n.search(/\bdebitos?\b/), c = n.search(/\bcreditos?\b/);
+    if (d >= 0 && c >= 0 && /\bsaldo\b/.test(n) && /\bfecha\b/.test(n)) { creditoPrimero = c < d; break; }
+  }
+  if (creditoPrimero === null) return null;
+  const totalResumen = totalCreditosResumen(texto);
+  const creditos = [];
+  let renglones = 0;
+  for (const l of lineas) {
+    if (/U\$S|USD/.test(l)) continue;
+    const m = l.match(RENGLON_RE);
+    if (!m) continue;
+    renglones += 1;
+    const col = creditoPrimero ? m[3] : m[4];
+    if (col === "-" ) continue;
+    const monto = parseMonto(col);
+    if (!(monto > 0)) continue;
+    const fecha = parseFecha(m[1]);
+    if (!fecha) continue;
+    const desc = m[2].replace(/^\d{6,}\s+/, "").replace(/\s{2,}/g, " ").trim().slice(0, 500);
+    const c = desc.match(CUIT_RE);
+    creditos.push({ fecha, monto: Math.round(monto * 100) / 100, descripcion: desc, cuit: c ? c[1] + c[2] + c[3] : "", nombre: nombrePagador(desc), saldo: null });
+  }
+  if (!renglones) return null;
+  const suma = Math.round(creditos.reduce((t, x) => t + x.monto, 0) * 100) / 100;
+  return { creditos, totalResumen, suma, cuadra: totalResumen == null ? null : Math.abs(totalResumen - suma) < 0.01 };
+}
+
+module.exports = { parseBankText, totalCreditosResumen, parseBankFile, rowsToCredits, readCsv, readXlsx, parseMonto, parseFecha, nombrePagador, CUIT_RE };

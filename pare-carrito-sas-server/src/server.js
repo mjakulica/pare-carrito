@@ -3846,6 +3846,8 @@ app.get("/receipts", authenticate, requireRole("manager", "admin", "employee"), 
           const nom = bankImport.nombrePagador(r.ai.origen_nombre || "");
           const id = (cuit.length === 11 && mapa["cuit:" + cuit]) || (nom.length >= 4 && mapa["nom:" + nom]) || "";
           if (id) { c = clientes.find((x) => String(x.id) === String(id)) || null; if (c) r.client_por_pagador = true; }
+          // El nombre del cliente en quien transfirio (sugerencia: no se registra solo).
+          if (!c && r.ai.origen_nombre) { c = clientByPayerText(r.ai.origen_nombre, clientes); if (c) r.client_por_nombre = true; }
         }
         if (c) r.client_id = c.id;
       });
@@ -3975,6 +3977,14 @@ async function pdfBankCredits(buf, progreso) {
     fs.writeFileSync(path.join(dir, "in.pdf"), buf);
     const texto = await new Promise((resolve, reject) => execFile("pdftotext", ["-layout", path.join(dir, "in.pdf"), "-"], { timeout: 60000, maxBuffer: 20 * 1024 * 1024 }, (err, out) => err ? reject(new Error(err.code === "ENOENT" ? "falta pdftotext en el servidor" : "no se pudo leer el PDF")) : resolve(out)));
     if (!texto.trim()) throw new Error("el PDF no tiene texto (¿es una foto escaneada?)");
+    // Resumen con columnas (Brubank y similares): se lee renglon por renglon, sin IA, y se controla
+    // contra el total de creditos del resumen. La IA queda para los formatos que no se entienden.
+    const directo = bankImport.parseBankText(texto);
+    if (directo && directo.creditos.length) {
+      const out2 = directo.creditos;
+      out2.control = { metodo: "columnas", suma: directo.suma, totalResumen: directo.totalResumen, cuadra: directo.cuadra };
+      return out2;
+    }
     const out = [];
     const lineas = texto.split("\n");
     // Partes de 200 renglones, de a 3 a la vez (un resumen largo tardaba mas de un minuto).
@@ -4009,6 +4019,9 @@ async function pdfBankCredits(buf, progreso) {
         out.push({ fecha, monto: Math.round(monto * 100) / 100, descripcion: desc, cuit: c ? c[1] + c[2] + c[3] : "", nombre: bankImport.nombrePagador(desc), saldo: null });
       });
     }
+    out.control = { metodo: "ia", suma: Math.round(out.reduce((t, x) => t + x.monto, 0) * 100) / 100 };
+    const tot = bankImport.totalCreditosResumen(texto);
+    if (tot != null) { out.control.totalResumen = tot; out.control.cuadra = Math.abs(tot - out.control.suma) < 0.01; }
     return out;
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
@@ -4044,7 +4057,15 @@ async function importBankFile(buf, fileName, account, username, progreso) {
   const req = { user: { username } };
   let nuevos = 0;
   const vistos = new Map();
+  const vistosFM = new Map();
   for (const c of creditos) {
+    // Ya subido antes (quizas leido de otra forma, con otro texto): mismo dia y monto en esa cuenta,
+    // tantas veces como aparece en este archivo.
+    const fm = c.fecha + "|" + c.monto.toFixed(2);
+    const kfm = (vistosFM.get(fm) || 0) + 1;
+    vistosFM.set(fm, kfm);
+    const ya = await pool.query("SELECT count(*)::int AS n FROM bank_movements WHERE lower(COALESCE(account,'')) = lower($1) AND fecha = $2 AND monto = $3", [account || "", c.fecha, c.monto]);
+    if (ya.rows[0].n >= kfm) continue;
     // Dos movimientos iguales el mismo dia (mismo monto y texto) son dos pagos: se numeran.
     const base = [account, c.fecha, c.monto.toFixed(2), bankImport.nombrePagador(c.descripcion), c.saldo == null ? "" : c.saldo].join("|");
     const k = (vistos.get(base) || 0) + 1;
@@ -4053,9 +4074,31 @@ async function importBankFile(buf, fileName, account, username, progreso) {
     const r = await pool.query("INSERT INTO bank_movements (hash, account, fecha, monto, descripcion, cuit, nombre, file_name, uploaded_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (hash) DO NOTHING RETURNING id", [hash, account || null, c.fecha, c.monto, c.descripcion, c.cuit || null, c.nombre || null, fileName, req.user.username]);
     if (r.rows.length) nuevos += 1;
   }
-  return { creditos: creditos.length, nuevos, repetidos: creditos.length - nuevos };
+  return { creditos: creditos.length, nuevos, repetidos: creditos.length - nuevos, control: creditos.control || { metodo: "archivo", suma: Math.round(creditos.reduce((t, x) => t + x.monto, 0) * 100) / 100 } };
 }
 
+// Cliente cuyo nombre aparece en el texto del banco o del comprobante (palabras distintivas de 4+
+// letras: todas, o una de 5+). Gana el que mas palabras coincide; solo si queda uno.
+const NOMBRE_COMUN = new Set(["salta", "local", "verduleria", "restaurante", "resto", "cafe", "kiosco", "despensa", "panaderia", "almacen", "hotel", "club", "casa", "comedor", "rotiseria", "sucursal", "centro", "norte", "plaza", "parada"]);
+function clientByPayerText(texto, clientes) {
+  const t = new Set(normTxt(texto).replace(/[^a-z0-9n ]/g, " ").split(/\s+/).filter(Boolean));
+  if (!t.size) return null;
+  let mejor = 0, cand = [];
+  (clientes || []).forEach((c) => {
+    if (!c || c.isActive === false) return;
+    const w = normTxt(c.name || "").replace(/[^a-z0-9n ]/g, " ").split(/\s+/).filter((x) => x.length >= 4 && !NOMBRE_COMUN.has(x) && !/^\d+$/.test(x));
+    const hits = w.filter((x) => t.has(x));
+    if (!hits.length || !(hits.length === w.length || hits.some((x) => x.length >= 5))) return;
+    if (hits.length > mejor) { mejor = hits.length; cand = [c]; } else if (hits.length === mejor) cand.push(c);
+  });
+  // Empate (ej. "Charrua" y "Charrua GyT"): el de nombre mas corto, si es uno solo.
+  if (cand.length > 1) {
+    const largo = (c) => normTxt(c.name || "").split(" ").length;
+    const min = Math.min(...cand.map(largo));
+    cand = cand.filter((c) => largo(c) === min);
+  }
+  return cand.length === 1 ? cand[0] : null;
+}
 app.get("/bank/movements", authenticate, requireRole("manager", "admin"), async (req, res) => {
   const estado = String(req.query.status || "pendiente");
   const { rows } = await pool.query("SELECT id, account, fecha::text AS fecha, monto::float AS monto, descripcion, cuit, nombre, file_name, status, client_id, payment_id, handled_by, handled_at FROM bank_movements WHERE status = ANY($1) ORDER BY fecha DESC, id DESC LIMIT 2000", [estado.split(",")]);
@@ -4071,6 +4114,10 @@ app.get("/bank/movements", authenticate, requireRole("manager", "admin"), async 
     rows.filter((r) => r.status === "pendiente").sort((a, b2) => String(a.fecha).localeCompare(String(b2.fecha))).forEach((r) => {
       const sug = (r.cuit && mapa["cuit:" + r.cuit]) || (r.nombre && mapa["nom:" + r.nombre]) || "";
       if (!r.client_id && sug) r.client_id = sug;
+      r.propia = /de una cuenta tuya|cuenta propia|entre cuentas propias/i.test(r.descripcion || "");
+      // Si no se aprendio todavia: el nombre del cliente esta en la descripcion del banco
+      // ("EL CHARRUA SRL", "PISTACCHIO S A S"). Es una sugerencia: no se registra solo.
+      if (!r.client_id && !r.propia) { const c = clientByPayerText(r.descripcion, data.clients); if (c) { r.client_id = c.id; r.client_por_nombre = true; } }
       const cand = pagos.filter((p) => !usados.has(p.id) && Math.abs(Number(p.amount || 0) - r.monto) <= 1 && dias(String(p.date || ""), r.fecha) <= 3 && (r.client_id ? (p.clientId === r.client_id || (p.groupClientIds || []).includes(r.client_id)) : p.method === "transferencia"))
         .sort((x, y) => dias(String(x.date), r.fecha) - dias(String(y.date), r.fecha));
       if (cand.length) { usados.add(cand[0].id); r.match = { id: cand[0].id, date: cand[0].date, amount: Number(cand[0].amount || 0), clientId: cand[0].clientId, seguro: !!r.client_id }; }
