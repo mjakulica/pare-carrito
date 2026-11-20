@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v147";
+  const APP_VERSION = "v148";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -620,7 +620,7 @@
   // cuanto entro a cada cuenta.
   function receiptCfg() {
     const c = (state.appSettings && state.appSettings.receipts) || {};
-    return { auto: !!c.auto, autoHistoric: !!c.autoHistoric, autoBank: !!c.autoBank, checkAccount: !!c.checkAccount, accounts: Array.isArray(c.accounts) ? c.accounts : [], excludedChats: Array.isArray(c.excludedChats) ? c.excludedChats : [] };
+    return { auto: !!c.auto, autoHistoric: !!c.autoHistoric, autoBank: !!c.autoBank, checkAccount: !!c.checkAccount, accounts: Array.isArray(c.accounts) ? c.accounts : [], excludedChats: Array.isArray(c.excludedChats) ? c.excludedChats : [], forwarders: Array.isArray(c.forwarders) ? c.forwarders : [] };
   }
   function saveReceiptCfg(patch) {
     state.appSettings = state.appSettings || {};
@@ -714,7 +714,7 @@
       const j = await r.json().catch(() => ({}));
       if (!r.ok) return;
       const probados = autoReceiptsTried();
-      for (const x of (j.items || []).filter((y) => !probados.includes(y.id)).slice(0, 10)) {
+      for (const x of (j.items || []).filter((y) => !probados.includes(y.id) && y.client_id && !(y.note && /^reenviado sin/.test(y.note))).slice(0, 10)) {
         autoReceiptsMarkTried(x.id);
         const monto = Number((x.ai && x.ai.monto) || 0);
         const prob = receiptProblems(x, x.client_id, monto);
@@ -926,10 +926,10 @@
     return `<div class="panel" style="margin-top:14px" id="receipts-config">
       <h2 class="page-title" style="font-size:18px">&#129534; Comprobantes de transferencia por WhatsApp</h2>
       <p class="muted" style="margin-top:0;font-size:13px">Las fotos que llegan al WhatsApp vinculado se leen con IA. Los comprobantes aparecen en <strong>Pagos</strong> para registrarlos con un toque.</p>
-      <label style="display:flex;gap:8px;align-items:flex-start;margin:6px 0"><input type="checkbox" id="rc-auto" ${cfg.auto ? "checked" : ""} style="width:auto;min-height:auto;margin-top:3px" /><span><strong>Registrar los pagos solos</strong><br><span class="muted" style="font-size:13px">Solo si: el número está vinculado a un cliente, la IA leyó el monto con seguridad, el nº de operación no llegó antes, no hay un pago igual de ese cliente en los últimos 3 días, es de la última semana${cfg.checkAccount ? " y va a una de tus cuentas" : ""}. Si falla algo, queda en Pagos para revisar. Lo hace el equipo de la carga automática de pedidos (tiene que estar activada).</span></span></label>
+      <label style="display:flex;gap:8px;align-items:flex-start;margin:6px 0"><input type="checkbox" id="rc-auto" ${cfg.auto ? "checked" : ""} style="width:auto;min-height:auto;margin-top:3px" /><span><strong>Registrar los pagos solos</strong><br><span class="muted" style="font-size:13px">Solo si: el número está vinculado a un cliente, la IA leyó el monto con seguridad, el nº de operación no llegó antes, no hay un pago igual de ese cliente en los últimos 3 días, es de la última semana${cfg.checkAccount ? " y va a una de tus cuentas" : ""}. Si falla algo, queda en Pagos para revisar. Lo hace el equipo de la carga automática de pedidos (aunque la carga de pedidos esté desactivada).</span></span></label>
       <label style="display:flex;gap:8px;align-items:flex-start;margin:6px 0"><input type="checkbox" id="rc-auto-hist" ${cfg.autoHistoric ? "checked" : ""} style="width:auto;min-height:auto;margin-top:3px" /><span><strong>Registrar solos también los comprobantes viejos</strong><br><span class="muted" style="font-size:13px">Los que ya estaban cargados se marcan solos; los que faltan se registran con su fecha (la del banco si está en un resumen), con los mismos controles.</span></span></label>
       <label style="display:flex;gap:8px;align-items:flex-start;margin:6px 0"><input type="checkbox" id="rc-auto-bank" ${cfg.autoBank ? "checked" : ""} style="width:auto;min-height:auto;margin-top:3px" /><span><strong>Registrar solos los créditos de los resúmenes del banco</strong><br><span class="muted" style="font-size:13px">Solo los que el sistema ya sabe de qué cliente son (por un comprobante de WhatsApp o un pagador aprendido) y que no están cargados. Los que ya estaban se marcan solos. Los dudosos quedan para revisar.</span></span></label>
-      <p class="muted" style="font-size:12px;margin:0 0 6px">Todo lo que se registre solo queda en Pagos → "Registrados por comprobantes y resúmenes", para chequearlo. Lo hace el equipo de la carga automática de pedidos (tiene que estar activada).</p>
+      <p class="muted" style="font-size:12px;margin:0 0 6px">Todo lo que se registre solo queda en Pagos → "Registrados por comprobantes y resúmenes", para chequearlo. Lo hace el equipo de la carga automática de pedidos (aunque la carga de pedidos esté desactivada).</p>
       <label style="display:flex;gap:8px;align-items:flex-start;margin:6px 0"><input type="checkbox" id="rc-check" ${cfg.checkAccount ? "checked" : ""} style="width:auto;min-height:auto;margin-top:3px" /><span><strong>Controlar que la transferencia vaya a una de mis cuentas</strong><br><span class="muted" style="font-size:13px">Si el comprobante no muestra el titular, CUIT, CBU/CVU o alias de alguna cuenta de abajo, queda para revisar.</span></span></label>
       <strong style="font-size:14px">Cuentas (mías y de proveedores)</strong>
       <div class="table-wrap" style="margin-top:4px"><table><thead><tr><th>Nombre</th><th>De</th><th>Titular</th><th>CUIT</th><th>CBU/CVU</th><th>Alias</th><th></th></tr></thead><tbody>
@@ -945,6 +945,12 @@
       </div>
       <p class="muted" style="font-size:12px;margin:4px 0 0">Cuenta de un proveedor: cuando un cliente le transfiere directo a ese proveedor, al registrar el pago se descuenta el saldo del cliente <strong>y</strong> lo que le debés al proveedor.</p>
       <div class="page-actions" style="margin-top:6px"><button class="btn small primary" type="button" id="rc-add">Agregar cuenta</button></div>
+      <div class="auto-late" style="margin-top:10px">
+        <strong style="font-size:14px">Mis números que reenvían comprobantes</strong>
+        <p class="muted" style="font-size:13px;margin:2px 0 6px">Por ejemplo tu celular personal: si un cliente te manda el comprobante ahí, reenviáselo al WhatsApp vinculado con el <strong>número del cliente</strong> (o su nombre) escrito en la foto o en un mensaje justo después ("31", "charrua"). El comprobante se asigna a ese cliente, no a tu número.</p>
+        <div>${cfg.forwarders.map((x, i) => `<span class="pill gray" style="margin:2px">${escapeHtml((x.name ? x.name + " · " : "") + formatWaPhone(x.phone))} <button class="btn small ghost" type="button" data-rc-fw-del="${i}" style="min-height:auto;padding:0 6px">x</button></span>`).join("") || `<span class="muted" style="font-size:13px">Ninguno.</span>`}</div>
+        <div class="page-actions" style="margin-top:6px;flex-wrap:wrap"><input id="rc-fw-phone" inputmode="tel" placeholder="Teléfono (ej. 387 5123456)" style="width:200px" /><input id="rc-fw-name" placeholder="Nombre (ej. Mauri personal)" style="width:200px" /><button class="btn small primary" type="button" id="rc-fw-add">Agregar</button></div>
+      </div>
       <div class="auto-late" style="margin-top:10px">
         <strong style="font-size:14px">No leer las fotos de estos chats</strong>
         <p class="muted" style="font-size:13px;margin:2px 0 6px">Por ejemplo el grupo del equipo: ahí no mandan comprobantes los clientes, así no se gasta IA en esas fotos.</p>
@@ -1428,6 +1434,159 @@
       .sort((a, b) => dias(String(a.date), f) - dias(String(b.date), f))[0] || null;
   }
 
+  // ---- Subir comprobantes a mano / chat exportado del celular personal ----
+  // WhatsApp -> chat -> Exportar chat -> Incluir archivos arma un .zip con el texto del chat y las
+  // fotos/PDF. Se abre aca mismo (sin subir el zip entero), se elige de quien y desde cuando, y se
+  // manda cada archivo al servidor, que lo lee con IA como un "comprobante viejo".
+  async function zipEntries(buf) {
+    const dv = new DataView(buf);
+    let eocd = -1;
+    for (let i = buf.byteLength - 22; i >= Math.max(0, buf.byteLength - 70000); i--) if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+    if (eocd < 0) throw new Error("no es un archivo .zip");
+    const total = dv.getUint16(eocd + 10, true);
+    let off = dv.getUint32(eocd + 16, true);
+    const dec = new TextDecoder("utf-8");
+    const out = [];
+    for (let k = 0; k < total && dv.getUint32(off, true) === 0x02014b50; k++) {
+      const method = dv.getUint16(off + 10, true), comp = dv.getUint32(off + 20, true), size = dv.getUint32(off + 24, true);
+      const nl = dv.getUint16(off + 28, true), el = dv.getUint16(off + 30, true), cl = dv.getUint16(off + 32, true), local = dv.getUint32(off + 42, true);
+      const name = dec.decode(new Uint8Array(buf, off + 46, nl));
+      out.push({ name, size, getData: async () => {
+        const start = local + 30 + dv.getUint16(local + 26, true) + dv.getUint16(local + 28, true);
+        const raw = buf.slice(start, start + comp);
+        if (method === 0) return raw;
+        if (method !== 8 || typeof DecompressionStream === "undefined") throw new Error("este navegador no puede abrir el .zip");
+        return new Response(new Blob([raw]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).arrayBuffer();
+      } });
+      off += 46 + nl + el + cl;
+    }
+    return out;
+  }
+  const UPL_MEDIA = /\.(jpe?g|png|webp|pdf)$/i;
+  function uplMime(name) { const e = (name.match(/\.(\w+)$/) || [])[1].toLowerCase(); return e === "pdf" ? "application/pdf" : e === "png" ? "image/png" : e === "webp" ? "image/webp" : "image/jpeg"; }
+  // Hora de Salta (dia/mes/año hh:mm) -> ms
+  const uplTs = (y, m, d, h, mi) => Date.UTC(y < 100 ? 2000 + y : y, m - 1, d, h + 3, mi);
+  function uplDateFromName(name) {
+    let x = name.match(/(20\d\d)(\d\d)(\d\d)-WA/);
+    if (x) return uplTs(+x[1], +x[2], +x[3], 12, 0);
+    x = name.match(/(20\d\d)-(\d\d)-(\d\d)-(\d\d)-(\d\d)/);
+    if (x) return uplTs(+x[1], +x[2], +x[3], +x[4], +x[5]);
+    return 0;
+  }
+  async function uplParseFiles(fileList) {
+    const out = [];
+    for (const f of Array.from(fileList || [])) {
+      if (/\.zip$/i.test(f.name)) {
+        const entries = await zipEntries(await f.arrayBuffer());
+        const base = (n) => n.split("/").pop();
+        const media = entries.filter((e) => UPL_MEDIA.test(e.name) && !base(e.name).startsWith("."));
+        const txtE = entries.find((e) => /(^|\/)_chat\.txt$/i.test(e.name)) || entries.find((e) => /\.txt$/i.test(e.name));
+        const info = new Map();
+        if (txtE) {
+          const txt = new TextDecoder("utf-8").decode(await txtE.getData());
+          const re = /^[‎‏\s]*\[?(\d{1,2})\/(\d{1,2})\/(\d{2,4}),?\s+(\d{1,2}):(\d{2})(?::\d{2})?\s*([ap]\.?\s*m\.?)?\]?\s*(?:-\s+)?([^:]{1,60}):/i;
+          let actual = null;
+          txt.split(/\r?\n/).forEach((linea) => {
+            const m = linea.match(re);
+            if (m) { let h = +m[4]; const ap = (m[6] || "").toLowerCase(); if (ap.startsWith("p") && h < 12) h += 12; if (ap.startsWith("a") && h === 12) h = 0; actual = { ts: uplTs(+m[3], +m[2], +m[1], h, +m[5]), sender: m[7].replace(/[‎‏]/g, "").trim() }; }
+            if (!actual) return;
+            media.forEach((e) => { const n = base(e.name); if (!info.has(n) && linea.includes(n)) info.set(n, actual); });
+          });
+        }
+        media.forEach((e) => { const n = base(e.name); const i = info.get(n) || {}; out.push({ name: n, size: e.size, ts: i.ts || uplDateFromName(n), sender: i.sender || "", getData: e.getData }); });
+      } else if (UPL_MEDIA.test(f.name)) {
+        out.push({ name: f.name, size: f.size, ts: f.lastModified || 0, sender: "", getData: () => f.arrayBuffer() });
+      }
+    }
+    return out;
+  }
+  function receiptUploadPanelHtml() {
+    if (!currentUser || !["manager", "admin"].includes(currentUser.role)) return "";
+    afterRender.push(bindReceiptUpload);
+    return `<details class="panel" id="receipt-upload" style="margin-bottom:14px" ${ui.upl ? "open" : ""}><summary><strong>&#128228; Subir chat exportado o comprobantes</strong> <span class="muted" style="font-size:13px">(los que te mandaron a otro celular)</span></summary>
+      <p class="muted" style="font-size:13px;margin:6px 0">En el celular: abrí el chat → ⋮ → Más → <strong>Exportar chat → Incluir archivos</strong> y subí el .zip. También podés subir fotos o PDF sueltos. Solo se leen las fotos y PDF; los que ya estaban cargados se reconocen y no se duplican.</p>
+      <div class="page-actions" style="flex-wrap:wrap;gap:8px"><input type="file" id="upl-file" multiple accept=".zip,application/zip,image/*,application/pdf" /></div>
+      <div id="upl-body" style="margin-top:8px"></div>
+    </details>`;
+  }
+  function paintReceiptUpload() {
+    const box = document.getElementById("upl-body");
+    if (!box) return;
+    const u = ui.upl;
+    if (!u) { box.innerHTML = ""; return; }
+    if (u.msg && !u.files) { box.innerHTML = `<p class="muted">${escapeHtml(u.msg)}</p>`; return; }
+    const quienes = new Map();
+    u.files.forEach((f) => quienes.set(f.sender || "(sin nombre)", (quienes.get(f.sender || "(sin nombre)") || 0) + 1));
+    const elegidos = uplSelected();
+    box.innerHTML = `<p style="margin:0 0 6px"><strong>${u.files.length}</strong> foto(s)/PDF encontrados.</p>
+      ${quienes.size > 1 || !quienes.has("(sin nombre)") ? `<div style="margin:4px 0"><span class="muted" style="font-size:13px">Mandados por (destildá los tuyos):</span><br>${[...quienes.entries()].map(([q, n]) => `<label style="display:inline-flex;gap:4px;align-items:center;margin:2px 10px 2px 0"><input type="checkbox" data-upl-who="${escapeAttr(q)}" ${u.skip && u.skip.includes(q) ? "" : "checked"} style="width:auto;min-height:auto" /> ${escapeHtml(q)} (${n})</label>`).join("")}</div>` : ""}
+      <div class="page-actions" style="flex-wrap:wrap;gap:8px;margin-top:6px">
+        <div class="field"><label>Desde</label><input type="date" id="upl-from" value="${escapeAttr(u.from || "")}" /></div>
+        <div class="field" style="min-width:240px"><label>Cliente (si es un solo cliente)</label><input id="upl-client" list="upl-clients" value="${escapeAttr(u.client || "")}" placeholder="Ej. 31 - Charrua" autocomplete="off" /></div>
+        <datalist id="upl-clients">${activeClients().map((c) => `<option value="${escapeAttr(c.id + " - " + c.name)}"></option>`).join("")}</datalist>
+      </div>
+      <div class="page-actions" style="margin-top:6px"><button class="btn primary" type="button" id="upl-go" ${u.running || !elegidos.length ? "disabled" : ""}>Leer ${elegidos.length} archivo(s)</button> <span class="muted" id="upl-msg">${escapeHtml(u.msg || "")}</span></div>`;
+    box.querySelectorAll("[data-upl-who]").forEach((c) => c.addEventListener("change", () => {
+      const q = c.dataset.uplWho;
+      u.skip = (u.skip || []).filter((x) => x !== q).concat(c.checked ? [] : [q]);
+      paintReceiptUpload();
+    }));
+    const from = document.getElementById("upl-from");
+    from.addEventListener("change", () => { u.from = from.value; paintReceiptUpload(); });
+    const cli = document.getElementById("upl-client");
+    cli.addEventListener("change", () => { u.client = cli.value; });
+    document.getElementById("upl-go").addEventListener("click", runReceiptUpload);
+  }
+  function uplSelected() {
+    const u = ui.upl;
+    if (!u || !u.files) return [];
+    const desde = u.from ? Date.parse(u.from + "T03:00:00Z") : 0;
+    return u.files.filter((f) => !(u.skip || []).includes(f.sender || "(sin nombre)") && (!desde || !f.ts || f.ts >= desde));
+  }
+  function bindReceiptUpload() {
+    const inp = document.getElementById("upl-file");
+    if (!inp) return;
+    inp.addEventListener("change", async () => {
+      ui.upl = { msg: "Abriendo..." };
+      paintReceiptUpload();
+      try {
+        const files = await uplParseFiles(inp.files);
+        if (!files.length) { ui.upl = { msg: "No encontré fotos ni PDF en lo que subiste." }; paintReceiptUpload(); return; }
+        ui.upl = { files, from: addDaysISO(todayISO(), -90), client: "", skip: [] };
+      } catch (e) { ui.upl = { msg: "No se pudo abrir: " + e.message }; }
+      paintReceiptUpload();
+    });
+    paintReceiptUpload();
+  }
+  async function runReceiptUpload() {
+    const u = ui.upl;
+    const lista = uplSelected();
+    const txt = String(u.client || "").trim();
+    const c = txt ? getClient(txt.split(" - ")[0].trim()) : null;
+    if (txt && !c) return alert("No encontré el cliente \"" + txt + "\". Elegilo de la lista o dejalo vacío.");
+    if (!c && !confirm("No elegiste cliente: los comprobantes van a quedar sin vincular y vas a tener que elegir el cliente en cada uno. ¿Seguir?")) return;
+    u.running = true;
+    let ok = 0, rep = 0, mal = 0;
+    const setMsg = (m) => { u.msg = m; const el = document.getElementById("upl-msg"); if (el) el.textContent = m; };
+    paintReceiptUpload();
+    for (let i = 0; i < lista.length; i++) {
+      const f = lista[i];
+      setMsg("Subiendo " + (i + 1) + " de " + lista.length + "...");
+      try {
+        const data = await f.getData();
+        if (data.byteLength > 8 * 1024 * 1024) { mal += 1; continue; }
+        const mime = uplMime(f.name);
+        const url = await new Promise((res2, rej) => { const r = new FileReader(); r.onload = () => res2(r.result); r.onerror = () => rej(new Error("no se pudo leer")); r.readAsDataURL(new Blob([data], { type: mime })); });
+        const j = await waInboxPost("/receipts/upload", { [mime === "application/pdf" ? "pdfData" : "imageData"]: url, clientId: c ? c.id : "", senderName: f.sender || "", fileName: f.name, ts: f.ts || 0, waId: (c ? c.id : "") + ":" + f.name + ":" + f.size });
+        if (j.repetido) rep += 1; else ok += 1;
+      } catch (e) { mal += 1; }
+    }
+    u.running = false;
+    setMsg("Listo: " + ok + " subido(s)" + (rep ? ", " + rep + " ya estaban" : "") + (mal ? ", " + mal + " con error" : "") + ". La IA los va leyendo de a poco: aparecen en \"Comprobantes viejos de WhatsApp\" (los que no son comprobantes se descartan solos).");
+    paintReceiptUpload();
+    setTimeout(() => { if (typeof refreshWaHistoric === "function") refreshWaHistoric(); }, 20000);
+  }
+
   // Inicio: aviso de transferencias que todavia no son un pago de un cliente (comprobantes de
   // WhatsApp por revisar, comprobantes viejos que no estan cargados y creditos del resumen del
   // banco sin registrar). Se consulta al servidor cada 2 minutos como mucho.
@@ -1649,6 +1808,20 @@
   function bindReceiptsConfig() {
     const auto = document.getElementById("rc-auto");
     if (!auto) return;
+    const fwAdd = document.getElementById("rc-fw-add");
+    if (fwAdd) fwAdd.addEventListener("click", () => {
+      let tel = soloDigitos(document.getElementById("rc-fw-phone").value);
+      if (tel.length < 8) return alert("Poné el teléfono con característica (ej. 387 5123456).");
+      if (tel.length === 10) tel = "549" + tel;
+      const name = document.getElementById("rc-fw-name").value.trim();
+      saveReceiptCfg({ forwarders: receiptCfg().forwarders.filter((f) => soloDigitos(f.phone).slice(-8) !== tel.slice(-8)).concat([{ phone: tel, name }]) });
+      render();
+    });
+    document.querySelectorAll("[data-rc-fw-del]").forEach((b) => b.addEventListener("click", () => {
+      const l = receiptCfg().forwarders.slice(); l.splice(Number(b.dataset.rcFwDel), 1);
+      saveReceiptCfg({ forwarders: l });
+      render();
+    }));
     // Chats a no leer: lista de chats del archivo de WhatsApp.
     let chats = [];
     const etiqueta = (c) => (c.is_group ? "Grupo: " : "") + (c.chat_name || c.chat_id) + (c.is_group ? "" : " (" + formatWaPhone(c.chat_id) + ")");
@@ -15344,6 +15517,7 @@
       `
       ${waReceiptsPanelHtml()}
       ${waHistoricPanelHtml()}
+      ${receiptUploadPanelHtml()}
       ${bankPanelHtml()}
       ${sourcesLogHtml()}
       <div class="grid">

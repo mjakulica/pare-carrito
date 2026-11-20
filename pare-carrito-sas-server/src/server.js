@@ -3594,6 +3594,19 @@ app.post("/external/inbox", externalAuth, async (req, res) => {
   const phone = phoneDigits(b.phone);
   const kind = String(b.kind || "");
   if (!phone || !INBOX_KINDS.has(kind) || !String(b.text || "").trim()) return res.status(400).json({ error: "Se espera { phone, kind, text }." });
+  // Mensaje corto del celular que reenvia comprobantes ("31", "charrua"): es el cliente de los
+  // comprobantes que reenvio en los ultimos 10 minutos, no un pedido.
+  try {
+    const stored = await loadStateData();
+    const data = (stored && stored.data) || {};
+    if (receiptForwarder(data, phone)) {
+      const c = clientFromShortText(b.text, data.clients);
+      if (c) {
+        const u = await pool.query("UPDATE wa_receipts SET client_id = $2, note = NULL WHERE right(regexp_replace(COALESCE(phone,''), '\\D', '', 'g'), 8) = $1 AND client_id IS NULL AND status IN ('leyendo','pendiente') AND created_at > now() - interval '10 minutes' RETURNING id", [phone.slice(-8), c.id]);
+        return res.json({ ok: true, comprobantes: u.rowCount, clientId: c.id });
+      }
+    }
+  } catch (e) { /* sigue como mensaje normal */ }
   const { rows } = await pool.query(
     "INSERT INTO whatsapp_inbox (phone, profile_name, client_id, kind, text, items, order_id, candidates, channel) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id",
     [phone, String(b.profileName || "").slice(0, 120), b.clientId ? String(b.clientId) : null, kind, String(b.text).slice(0, 4000), JSON.stringify(Array.isArray(b.items) ? b.items : []), b.orderId ? String(b.orderId) : null, JSON.stringify(Array.isArray(b.candidates) ? b.candidates : []), b.channel === "linked" ? "linked" : "cloud"]
@@ -3686,45 +3699,111 @@ function pdfFirstPageToPng(buffer) {
   });
 }
 
-app.post("/external/wa-receipt", externalAuth, async (req, res) => {
-  const b = req.body || {};
+// Numeros que REENVIAN comprobantes (el celular personal del dueño): el cliente no es ese numero,
+// sale del texto de la foto ("31", "charrua") o de un mensaje corto que se manda justo despues.
+function receiptForwarder(data, tel) {
+  const lista = (data && data.appSettings && data.appSettings.receipts && data.appSettings.receipts.forwarders) || [];
+  const t = phoneDigits(tel);
+  if (t.length < 8) return null;
+  return lista.find((f) => phoneDigits(f.phone).length >= 8 && phoneDigits(f.phone).slice(-8) === t.slice(-8)) || null;
+}
+function clientFromShortText(text, clientes) {
+  const t = String(text || "").trim();
+  if (!t || t.length > 40) return null;
+  const activos = (clientes || []).filter((c) => c && c.isActive !== false);
+  const num = t.match(/(?:^|[^\d])(\d{1,4})(?![\d.,])/);
+  if (num) { const c = activos.find((x) => /^\d+$/.test(String(x.id)) && Number(x.id) === Number(num[1])); if (c) return c; }
+  const n = normTxt(t).replace(/[^a-z0-9n ]/g, " ").replace(/\s+/g, " ").trim();
+  if (n.length < 4) return null;
+  const cand = activos.filter((c) => { const cn = normTxt(c.name || "").replace(/[^a-z0-9n ]/g, " ").replace(/\s+/g, " ").trim(); return cn && (cn.includes(n) || n.split(" ").some((w) => w.length >= 5 && cn.split(" ").includes(w))); });
+  return cand.length === 1 ? cand[0] : null;
+}
+
+// La IA lee de a pocos comprobantes a la vez (un chat exportado puede traer cientos de fotos).
+const receiptQueue = [];
+let receiptRunning = 0;
+function enqueueReceipt(id, image) {
+  receiptQueue.push([id, image]);
+  const next = () => {
+    while (receiptRunning < 3 && receiptQueue.length) {
+      const [i, img] = receiptQueue.shift();
+      receiptRunning += 1;
+      processReceipt(i, img).catch(() => {}).finally(() => { receiptRunning -= 1; next(); });
+    }
+  };
+  next();
+}
+
+async function intakeReceipt(b, origen) {
   const pdf = String(b.pdfData || "").match(/^data:application\/pdf;base64,([a-z0-9+/=\s]+)$/i);
   if (pdf) {
     const buf = Buffer.from(pdf[1].replace(/\s/g, ""), "base64");
-    if (buf.length > 10 * 1024 * 1024) return res.status(413).json({ error: "PDF muy grande." });
+    if (buf.length > 10 * 1024 * 1024) return [413, { error: "PDF muy grande." }];
     try {
       const png = await pdfFirstPageToPng(buf);
       b.imageData = "data:image/png;base64," + png.toString("base64");
-    } catch (e) { return res.status(422).json({ error: "PDF: " + e.message }); }
+    } catch (e) { return [422, { error: "PDF: " + e.message }]; }
   }
-  // Chats excluidos en Configuracion (ej. el grupo del equipo): no se leen, asi no se gasta IA.
-  try {
-    const stored = await loadStateData();
-    const excl = ((stored && stored.data && stored.data.appSettings && stored.data.appSettings.receipts && stored.data.appSettings.receipts.excludedChats) || []).map((x) => String(x.chat || ""));
-    const chat = String(b.chatId || "");
-    const tel = phoneDigits(b.phone);
-    if (excl.some((c) => c && (c === chat || (tel.length >= 8 && phoneDigits(c).length >= 8 && !c.endsWith("@g.us") && phoneDigits(c).slice(-8) === tel.slice(-8))))) return res.json({ ok: true, excluido: true });
-  } catch (e) { /* si no se puede leer la configuracion, se procesa */ }
+  let note = null;
+  if (origen === "whatsapp") {
+    // Chats excluidos en Configuracion (ej. el grupo del equipo): no se leen, asi no se gasta IA.
+    try {
+      const stored = await loadStateData();
+      const data = (stored && stored.data) || {};
+      const excl = ((data.appSettings && data.appSettings.receipts && data.appSettings.receipts.excludedChats) || []).map((x) => String(x.chat || ""));
+      const chat = String(b.chatId || "");
+      const tel = phoneDigits(b.phone);
+      if (excl.some((c) => c && (c === chat || (tel.length >= 8 && phoneDigits(c).length >= 8 && !c.endsWith("@g.us") && phoneDigits(c).slice(-8) === tel.slice(-8))))) return [200, { ok: true, excluido: true }];
+      const fw = !b.isGroup && receiptForwarder(data, tel);
+      if (fw) {
+        let c = clientFromShortText(b.caption, data.clients);
+        // El numero (mandado DESPUES de la foto) pudo llegar al servidor antes que ella, que tarda en
+        // bajar: mensaje corto de ese chat en los 10 minutos siguientes a la foto.
+        if (!c) {
+          const t0 = Number(b.ts) > 0 ? new Date(Number(b.ts)) : new Date();
+          const q = await pool.query("SELECT text FROM whatsapp_archive WHERE right(regexp_replace(chat_id, '\\D', '', 'g'), 8) = $1 AND NOT is_group AND NOT from_me AND length(COALESCE(text,'')) BETWEEN 1 AND 40 AND ts BETWEEN $2::timestamptz AND $2::timestamptz + interval '10 minutes' ORDER BY ts", [tel.slice(-8), t0.toISOString()]).catch(() => ({ rows: [] }));
+          for (const x of q.rows) { c = clientFromShortText(x.text, data.clients); if (c) break; }
+        }
+        b.clientId = c ? c.id : null;
+        b.senderName = "Reenviado por " + (fw.name || "vos");
+        if (!c) note = "reenviado sin número de cliente (escribilo en la foto o en un mensaje justo después)";
+      }
+    } catch (e) { /* si no se puede leer la configuracion, se procesa */ }
+  }
   const image = parseImageDataUrl(b.imageData);
-  if (!image) return res.status(400).json({ error: "Se espera imageData (PNG, JPG o WEBP en base64)." });
-  if (image.byteLength > 8 * 1024 * 1024) return res.status(413).json({ error: "Imagen muy grande." });
+  if (!image) return [400, { error: "Se espera imageData (PNG, JPG o WEBP en base64)." }];
+  if (image.byteLength > 8 * 1024 * 1024) return [413, { error: "Imagen muy grande." }];
   const waId = String(b.waId || "").slice(0, 120) || null;
   if (waId) {
     const ya = await pool.query("SELECT id FROM wa_receipts WHERE wa_id = $1", [waId]);
-    if (ya.rows.length) return res.json({ ok: true, id: ya.rows[0].id, repetido: true });
+    if (ya.rows.length) return [200, { ok: true, id: ya.rows[0].id, repetido: true }];
   }
   const ext = image.mimeType.includes("png") ? "png" : image.mimeType.includes("webp") ? "webp" : "jpg";
   const key = Date.now() + "-" + crypto.randomBytes(4).toString("hex") + "-comprobante-whatsapp." + ext;
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
   fs.writeFileSync(path.join(UPLOAD_DIR, key), Buffer.from(image.base64, "base64"));
-  await pool.query("INSERT INTO proofs (key, content_type, uploaded_by) VALUES ($1,$2,$3)", [key, image.mimeType, "whatsapp"]);
+  await pool.query("INSERT INTO proofs (key, content_type, uploaded_by) VALUES ($1,$2,$3)", [key, image.mimeType, origen === "whatsapp" ? "whatsapp" : String(origen).slice(0, 60)]);
   const { rows } = await pool.query(
-    "INSERT INTO wa_receipts (wa_id, phone, chat_id, is_group, client_id, sender_name, caption, image_key, historic, msg_ts) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (wa_id) DO NOTHING RETURNING id",
-    [waId, phoneDigits(b.phone) || null, String(b.chatId || "").slice(0, 80) || null, !!b.isGroup, b.clientId ? String(b.clientId) : null, String(b.senderName || "").slice(0, 120), String(b.caption || "").slice(0, 500), key, !!b.historic, Number(b.ts) > 0 ? new Date(Number(b.ts)) : null]
+    "INSERT INTO wa_receipts (wa_id, phone, chat_id, is_group, client_id, sender_name, caption, image_key, historic, msg_ts, note) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT (wa_id) DO NOTHING RETURNING id",
+    [waId, phoneDigits(b.phone) || null, String(b.chatId || "").slice(0, 80) || null, !!b.isGroup, b.clientId ? String(b.clientId) : null, String(b.senderName || "").slice(0, 120), String(b.caption || "").slice(0, 500), key, !!b.historic, Number(b.ts) > 0 ? new Date(Number(b.ts)) : null, note]
   );
-  if (!rows.length) return res.json({ ok: true, repetido: true });
-  res.json({ ok: true, id: rows[0].id });
-  processReceipt(rows[0].id, image).catch(() => {});
+  if (!rows.length) return [200, { ok: true, repetido: true }];
+  enqueueReceipt(rows[0].id, image);
+  return [200, { ok: true, id: rows[0].id }];
+}
+
+app.post("/external/wa-receipt", externalAuth, async (req, res) => {
+  const [st, j] = await intakeReceipt(req.body || {}, "whatsapp");
+  res.status(st).json(j);
+});
+
+// Comprobantes subidos a mano (fotos/PDF sueltos o los de un chat exportado del celular personal).
+// Entran como "comprobantes viejos", con el cliente elegido.
+app.post("/receipts/upload", authenticate, requireRole("manager", "admin"), async (req, res) => {
+  const b = req.body || {};
+  const body = { imageData: b.imageData, pdfData: b.pdfData, clientId: b.clientId || null, senderName: String(b.senderName || "").slice(0, 100) + " (chat exportado)", caption: String(b.fileName || "").slice(0, 200), historic: true, ts: b.ts, waId: b.waId ? "subido:" + String(b.waId).slice(0, 100) : null, chatId: "subido", phone: "" };
+  const [st, j] = await intakeReceipt(body, "subido " + (req.user && (req.user.username || req.user.name) || ""));
+  res.status(st).json(j);
 });
 
 const RECEIPT_COLS = "id, created_at, phone, chat_id, is_group, client_id, sender_name, caption, image_key, status, ai, dup_of, note, payment_id, handled_by, handled_at, historic, msg_ts";
@@ -3756,8 +3835,18 @@ app.get("/receipts", authenticate, requireRole("manager", "admin", "employee"), 
         if (chat.endsWith("@g.us")) c = clientes.find((x) => Array.isArray(x.waGroups) && x.waGroups.includes(chat));
         const tel = phoneDigits(r.phone || (chat.endsWith("@g.us") ? "" : chat));
         if (!c && tel.length >= 8) c = clientes.find((x) => (x.phones || [x.phone]).some((ph) => phoneDigits(ph).length >= 8 && phoneDigits(ph).slice(-8) === tel.slice(-8)));
+        const fw = receiptForwarder(stored && stored.data, r.phone);
         const k = r.chat_name.match(/^\s*(\d{1,4})\s*[)\-.:]/);
-        if (!c && k) c = clientes.find((x) => /^\d+$/.test(String(x.id)) && Number(x.id) === Number(k[1]));
+        if (!c && k && !fw) c = clientes.find((x) => /^\d+$/.test(String(x.id)) && Number(x.id) === Number(k[1]));
+        if (fw) c = null;
+        // Quien transfirio (CUIT o nombre del comprobante), aprendido de los pagos ya registrados.
+        if (!c && r.ai) {
+          const mapa = (stored && stored.data && stored.data.appSettings && stored.data.appSettings.payerMap) || {};
+          const cuit = phoneDigits(r.ai.origen_cuit);
+          const nom = bankImport.nombrePagador(r.ai.origen_nombre || "");
+          const id = (cuit.length === 11 && mapa["cuit:" + cuit]) || (nom.length >= 4 && mapa["nom:" + nom]) || "";
+          if (id) { c = clientes.find((x) => String(x.id) === String(id)) || null; if (c) r.client_por_pagador = true; }
+        }
         if (c) r.client_id = c.id;
       });
     } catch (e) { /* sin nombres */ }
@@ -4364,6 +4453,7 @@ app.post("/external/wa-archive", externalAuth, async (req, res) => {
   const list = Array.isArray(req.body && req.body.messages) ? req.body.messages.slice(0, 2000) : [];
   let n = 0;
   const limite = Date.now() - ARCHIVE_DAYS * 86400000;
+  let fwData = null;
   for (const m of list) {
     const ts = new Date(Number(m.ts) || m.ts);
     if (!m || !m.waId || !m.chatId || isNaN(ts) || ts.getTime() < limite) continue;
@@ -4373,6 +4463,18 @@ app.post("/external/wa-archive", externalAuth, async (req, res) => {
       [String(m.waId).slice(0, 120), String(m.chatId).slice(0, 120), String(m.chatName || "").slice(0, 200), !!m.isGroup, phoneDigits(m.senderPhone).slice(0, 20), String(m.senderName || "").slice(0, 120), !!m.fromMe, String(m.type || "texto").slice(0, 30), String(m.text || "").slice(0, 4000), ts]
     );
     n += r.rowCount;
+    // Mensaje corto del celular que reenvia comprobantes ("31", "charrua"): es el cliente de los
+    // comprobantes que reenvio en los 10 minutos anteriores.
+    if (r.rowCount && !m.isGroup && !m.fromMe && String(m.text || "").trim() && String(m.text).length <= 40) {
+      try {
+        if (!fwData) { const st = await loadStateData(); fwData = (st && st.data) || {}; }
+        const tel = phoneDigits(m.senderPhone || m.chatId);
+        if (receiptForwarder(fwData, tel)) {
+          const c = clientFromShortText(m.text, fwData.clients);
+          if (c) await pool.query("UPDATE wa_receipts SET client_id = $2, note = NULL WHERE right(regexp_replace(COALESCE(phone,''), '\\D', '', 'g'), 8) = $1 AND client_id IS NULL AND status IN ('leyendo','pendiente') AND COALESCE(msg_ts, created_at) BETWEEN $3::timestamptz - interval '10 minutes' AND $3::timestamptz", [tel.slice(-8), c.id, ts.toISOString()]);
+        }
+      } catch (e) { /* sigue */ }
+    }
   }
   // Una vez por hora se borra lo de mas de 90 dias.
   if (Date.now() - archiveLastCleanup > 3600000) {
