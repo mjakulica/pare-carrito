@@ -5099,7 +5099,7 @@ app.post("/clients/holiday-broadcast", authenticate, requireRole("manager", "adm
   if (!stored) return res.status(404).json({ error: "Sin datos." });
   const d = stored.data || {};
   const settings = d.appSettings || {};
-  if (whatsappOff(settings)) return res.json({ ok: true, skipped: "whatsapp desactivado" });
+  if (whatsappOff(settings)) return res.json({ ok: true, skipped: process.env.WHATSAPP_DISABLED ? "Los WhatsApp automáticos están apagados en el servidor (WHATSAPP_DISABLED)." : "Los WhatsApp automáticos están desactivados: Configuración → tildá \"Enviar WhatsApp automáticos\"." });
   const porVinculado = await linkedNoticeReady(settings, "feriado");
   const templateName = settings.holidayTemplateName || "";
   if (!templateName && !porVinculado) return res.status(400).json({ error: "Configura el nombre de la plantilla de Meta en Configuracion (o vinculá el WhatsApp por QR)." });
@@ -5116,7 +5116,7 @@ app.post("/clients/holiday-broadcast", authenticate, requireRole("manager", "adm
     });
   });
   const unique = Array.from(new Set(numbers));
-  if (!unique.length) return res.json({ ok: true, sent: 0, failed: 0, note: "No hay numeros cargados." });
+  if (!unique.length) return res.json({ ok: true, sent: 0, failed: 0, total: 0, skipped: "Ningún cliente activo tiene teléfono cargado." });
   if (porVinculado) {
     // Por el WhatsApp comun: solo a los clientes que escribieron en los ultimos 60 dias (no a toda la
     // agenda) y de a uno, con pausas largas, para no parecer un envio masivo.
