@@ -51,6 +51,15 @@ CREATE TABLE IF NOT EXISTS state_operations (
   patch JSONB NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS state_operations_applied_at ON state_operations (applied_at);
+-- Cuando cada usuario entra a "Mi recorrido" (inicio del trabajo en el mercado)
+CREATE TABLE IF NOT EXISTS user_events (
+  id BIGSERIAL PRIMARY KEY,
+  username TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  device TEXT,
+  at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS user_events_at ON user_events (at);
 
 -- Espejo relacional (se refresca en cada subida de estado; consultas y reportes pesados)
 CREATE TABLE IF NOT EXISTS clients (

@@ -4826,17 +4826,41 @@ app.get("/users/activity", authenticate, requireRole("manager", "admin"), async 
   const hoy = new Date(Date.now() - 3 * 3600000).toISOString().slice(0, 10);
   const desde = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.from || "")) ? String(req.query.from) : hoy;
   const hasta = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.to || "")) ? String(req.query.to) : desde;
+  // El inicio es el primer movimiento desde las 5 de la mañana (Salta): lo de antes (pedidos
+  // cargados a la noche o de madrugada desde la casa) se muestra aparte.
   const { rows } = await pool.query(
     `WITH ops AS (
        SELECT applied_by, applied_at, (applied_at AT TIME ZONE 'America/Argentina/Salta')::date AS dia,
+              extract(hour FROM applied_at AT TIME ZONE 'America/Argentina/Salta') >= 5 AS de_dia,
               ARRAY(SELECT k FROM jsonb_object_keys(CASE WHEN jsonb_typeof(patch->'arrays') = 'object' THEN patch->'arrays' ELSE '{}'::jsonb END) k WHERE k = ANY($3)) AS claves
          FROM state_operations
         WHERE applied_at >= ($1::text::date + interval '3 hours') AND applied_at < ($2::text::date + interval '1 day 3 hours') AND applied_by IS NOT NULL)
-     SELECT applied_by AS username, dia::text AS dia, min(applied_at) AS primero, max(applied_at) AS ultimo, count(*)::int AS cambios,
-            (array_agg(array_to_string(claves, ',') ORDER BY applied_at))[1] AS primero_que
+     SELECT applied_by AS username, dia::text AS dia,
+            min(applied_at) FILTER (WHERE de_dia) AS primero, max(applied_at) AS ultimo, count(*)::int AS cambios,
+            (array_agg(array_to_string(claves, ',') ORDER BY applied_at) FILTER (WHERE de_dia))[1] AS primero_que,
+            count(*) FILTER (WHERE NOT de_dia)::int AS antes, min(applied_at) FILTER (WHERE NOT de_dia) AS antes_desde
        FROM ops WHERE cardinality(claves) > 0
       GROUP BY applied_by, dia ORDER BY dia DESC, primero`, [desde, hasta, WORK_KEYS]);
-  res.json({ ok: true, desde, hasta, items: rows.map((r) => ({ ...r, primero_que: String(r.primero_que || "").split(",").filter(Boolean) })) });
+  // Entrada a "Mi recorrido" (la primera desde las 5)
+  const ev = await pool.query(
+    `SELECT username, (at AT TIME ZONE 'America/Argentina/Salta')::date::text AS dia, min(at) AS recorrido
+       FROM user_events WHERE kind = 'recorrido' AND at >= ($1::text::date + interval '3 hours') AND at < ($2::text::date + interval '1 day 3 hours')
+        AND extract(hour FROM at AT TIME ZONE 'America/Argentina/Salta') >= 5
+      GROUP BY 1, 2`, [desde, hasta]).catch(() => ({ rows: [] }));
+  const items = rows.map((r) => ({ ...r, primero_que: String(r.primero_que || "").split(",").filter(Boolean), recorrido: null }));
+  ev.rows.forEach((e) => {
+    const it = items.find((x) => x.username === e.username && x.dia === e.dia);
+    if (it) it.recorrido = e.recorrido;
+    else items.push({ username: e.username, dia: e.dia, primero: null, ultimo: null, cambios: 0, primero_que: [], antes: 0, antes_desde: null, recorrido: e.recorrido });
+  });
+  res.json({ ok: true, desde, hasta, items });
+});
+// La app avisa cuando el usuario entra a "Mi recorrido" (una vez por dia y equipo).
+app.post("/users/event", authenticate, async (req, res) => {
+  const kind = String((req.body || {}).kind || "");
+  if (!["recorrido"].includes(kind)) return res.status(400).json({ error: "Evento desconocido." });
+  await pool.query("INSERT INTO user_events (username, kind, device) VALUES ($1,$2,$3)", [req.user.username, kind, String((req.body || {}).device || "").slice(0, 80)]);
+  res.json({ ok: true });
 });
 
 // ---------- Cambios en los pedidos despues de cargarlos ----------
