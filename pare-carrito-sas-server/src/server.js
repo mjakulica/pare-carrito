@@ -4817,6 +4817,28 @@ app.get("/clients/remitos-resumen", authenticate, requireRole("manager", "admin"
   res.json({ ok: true, clientes: out });
 });
 
+// ---------- A que hora empezo a trabajar cada usuario ----------
+// Cada cambio que sube un equipo queda en state_operations con el usuario y la hora en que llego al
+// servidor. El primer cambio "de trabajo" del dia (pedidos, pagos, compras, caja, stock, remitos,
+// productos, clientes...) es la hora de inicio. No cuentan los ajustes de configuracion.
+const WORK_KEYS = ["orders", "payments", "purchases", "caja", "stockMovements", "remitos", "saldos", "cashClosings", "replacements", "providerPayments", "providerLedger", "clientTransfers", "vendorLedger", "attendance", "employeePayments", "employeeReimbursements", "performanceAdjustments", "products", "clients", "providers"];
+app.get("/users/activity", authenticate, requireRole("manager", "admin"), async (req, res) => {
+  const hoy = new Date(Date.now() - 3 * 3600000).toISOString().slice(0, 10);
+  const desde = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.from || "")) ? String(req.query.from) : hoy;
+  const hasta = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.to || "")) ? String(req.query.to) : desde;
+  const { rows } = await pool.query(
+    `WITH ops AS (
+       SELECT applied_by, applied_at, (applied_at AT TIME ZONE 'America/Argentina/Salta')::date AS dia,
+              ARRAY(SELECT k FROM jsonb_object_keys(CASE WHEN jsonb_typeof(patch->'arrays') = 'object' THEN patch->'arrays' ELSE '{}'::jsonb END) k WHERE k = ANY($3)) AS claves
+         FROM state_operations
+        WHERE applied_at >= ($1::text::date + interval '3 hours') AND applied_at < ($2::text::date + interval '1 day 3 hours') AND applied_by IS NOT NULL)
+     SELECT applied_by AS username, dia::text AS dia, min(applied_at) AS primero, max(applied_at) AS ultimo, count(*)::int AS cambios,
+            (array_agg(array_to_string(claves, ',') ORDER BY applied_at))[1] AS primero_que
+       FROM ops WHERE cardinality(claves) > 0
+      GROUP BY applied_by, dia ORDER BY dia DESC, primero`, [desde, hasta, WORK_KEYS]);
+  res.json({ ok: true, desde, hasta, items: rows.map((r) => ({ ...r, primero_que: String(r.primero_que || "").split(",").filter(Boolean) })) });
+});
+
 // ---------- Cambios en los pedidos despues de cargarlos ----------
 // Cada cambio que sube un equipo queda en state_operations. De ahi sale la PRIMERA version de cada
 // pedido (como se cargo) y se compara con la de hoy (la correcta, ya revisada): que producto se

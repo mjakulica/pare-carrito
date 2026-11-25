@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v150";
+  const APP_VERSION = "v151";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -1442,6 +1442,45 @@
     const dias = (a, b) => Math.abs(new Date(a + "T00:00:00") - new Date(b + "T00:00:00")) / 86400000;
     return (state.payments || []).filter((p) => p && p.status !== "anulado" && (p.clientId === clientId || (p.groupClientIds || []).includes(clientId)) && Math.abs(Number(p.amount || 0) - amount) <= 1 && !(usados && usados.has(p.id)) && !(p.receiptId && String(p.receiptId) !== String(r.id)) && dias(String(p.date || f), f) <= 5)
       .sort((a, b) => dias(String(a.date), f) - dias(String(b.date), f))[0] || null;
+  }
+
+  // ---- Control: a que hora empezo a trabajar cada usuario ----
+  // El servidor guarda cada cambio que sube un equipo; el primero "de trabajo" del dia es la hora de
+  // inicio (no cuentan abrir el sistema ni cambios de configuracion).
+  const ACT_LABEL = { orders: "pedido", payments: "pago", purchases: "compra", caja: "caja", stockMovements: "stock", remitos: "remito", saldos: "saldo", cashClosings: "cierre de caja", replacements: "recambio", providerPayments: "pago a proveedor", providerLedger: "proveedor", clientTransfers: "transferencia", vendorLedger: "vendedor", attendance: "asistencia", employeePayments: "pago a empleado", employeeReimbursements: "reintegro", performanceAdjustments: "ajuste", products: "productos", clients: "clientes", providers: "proveedores" };
+  function userActivityHtml(date) {
+    if (!currentUser || !["manager", "admin"].includes(currentUser.role)) return "";
+    const key = date;
+    if (!ui.userAct || ui.userAct.key !== key || Date.now() - ui.userAct.at > 120000) setTimeout(() => refreshUserActivity(date), 0);
+    return `<div class="panel" style="margin-bottom:14px" id="user-activity">${userActivityInner(date)}</div>`;
+  }
+  function userActivityInner(date) {
+    const a = ui.userAct && ui.userAct.key === date ? ui.userAct : null;
+    const usuario = (u) => (state.users || []).find((x) => x && x.username === u);
+    const hora = (iso) => formatClockHM(iso);
+    const head = `<h2 class="page-title" style="font-size:18px;margin:0">&#9201;&#65039; Inicio de actividad del ${escapeHtml(formatDate(date))}</h2><p class="muted" style="font-size:13px;margin:2px 0 8px">Hora del primer movimiento de cada usuario en el sistema (pedido, pago, compra, caja, stock...). Abrir el sistema no cuenta.</p>`;
+    if (!a) return head + `<p class="muted" style="margin:0">Buscando...</p>`;
+    if (a.error) return head + `<p class="muted" style="margin:0">No se pudo consultar: ${escapeHtml(a.error)}</p>`;
+    const dia = a.items.filter((r) => r.dia === date && !/carga-automatica/.test(r.username));
+    const filas = dia.map((r) => { const u = usuario(r.username); return `<tr><td><strong>${escapeHtml(u ? u.name : r.username)}</strong>${u ? ` <span class="muted" style="font-size:12px">${escapeHtml(roleLabel(u.role))}</span>` : ""}</td><td class="num"><strong>${escapeHtml(hora(r.primero))}</strong></td><td>${escapeHtml(r.primero_que.map((k) => ACT_LABEL[k] || k).join(", "))}</td><td class="num">${escapeHtml(hora(r.ultimo))}</td><td class="num">${r.cambios}</td></tr>`; }).join("");
+    // Ultimos 14 dias: hora de inicio de cada empleado por dia
+    const dias = Array.from(new Set(a.items.map((r) => r.dia))).sort().reverse();
+    const users = Array.from(new Set(a.items.map((r) => r.username))).filter((u) => !/carga-automatica/.test(u));
+    const celda = (u, d) => { const r = a.items.find((x) => x.username === u && x.dia === d); return r ? hora(r.primero) : "-"; };
+    return head + `<div class="table-wrap"><table><thead><tr><th>Usuario</th><th>Primer movimiento</th><th>Qué hizo</th><th>Último</th><th>Cambios</th></tr></thead><tbody>${filas || `<tr><td colspan="5" class="muted">Nadie hizo movimientos ese día.</td></tr>`}</tbody></table></div>
+      ${dias.length > 1 ? `<details style="margin-top:8px"><summary><strong>Últimos 14 días</strong></summary><div class="table-wrap"><table><thead><tr><th>Día</th>${users.map((u) => `<th>${escapeHtml((usuario(u) || {}).name || u)}</th>`).join("")}</tr></thead><tbody>${dias.map((d) => `<tr><td>${escapeHtml(formatDate(d))}</td>${users.map((u) => `<td class="num">${escapeHtml(celda(u, d))}</td>`).join("")}</tr>`).join("")}</tbody></table></div></details>` : ""}
+      <p class="muted" style="font-size:12px;margin:6px 0 0">Es la hora en que el cambio llegó al servidor: si el celular estaba sin señal, puede ser un poco más tarde.</p>`;
+  }
+  async function refreshUserActivity(date) {
+    if (ui.userActLoading) return;
+    ui.userActLoading = true;
+    try {
+      const r = await cloudRequest(getCloudSyncConfig(), "/users/activity?from=" + addDaysISO(date, -13) + "&to=" + date, { method: "GET" });
+      const j = await r.json().catch(() => ({}));
+      ui.userAct = r.ok ? { key: date, at: Date.now(), items: j.items || [] } : { key: date, at: Date.now(), items: [], error: j.error || "HTTP " + r.status };
+    } catch (e) { ui.userAct = { key: date, at: Date.now(), items: [], error: e.message }; } finally { ui.userActLoading = false; }
+    const box = document.getElementById("user-activity");
+    if (box) box.innerHTML = userActivityInner(date);
   }
 
   // ---- Subir comprobantes a mano / chat exportado del celular personal ----
@@ -17178,6 +17217,7 @@
       `
       ${avisoVentana}
       ${dashPayAlertHtml()}
+      ${userActivityHtml(date)}
       <details class="panel" style="margin-bottom:14px">
         <summary style="cursor:pointer;font-weight:600">Resumen diario por correo: ${(state.appSettings || {}).controlEmailEnabled === false ? "desactivado" : "todas las noches a las " + ((state.appSettings || {}).controlEmailHour != null && (state.appSettings || {}).controlEmailHour !== "" ? state.appSettings.controlEmailHour : 21) + " h"} (cambiar)</summary>
         <div style="margin-top:8px">${controlEmailSettingsHtml()}</div>

@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS state_operations (
   applied_by TEXT,
   patch JSONB NOT NULL DEFAULT '{}'
 );
+CREATE INDEX IF NOT EXISTS state_operations_applied_at ON state_operations (applied_at);
 
 -- Espejo relacional (se refresca en cada subida de estado; consultas y reportes pesados)
 CREATE TABLE IF NOT EXISTS clients (
