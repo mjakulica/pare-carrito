@@ -9,7 +9,7 @@
   // Precios, ni por el motor automatico, ni por relaciones, importaciones o precio de mercado. El
   // servidor lo vuelve a controlar en cada cambio de precio.
   const MIN_MARGIN_PCT = 8;
-  const APP_VERSION = "v152";
+  const APP_VERSION = "v153";
   const WHATSAPP_LINK = "https://wa.me/5493874566725";
   const WHATSAPP_REGISTER_LINK = "https://api.whatsapp.com/send?phone=5493874566725&text=*Hola!*%20%F0%9F%91%8B%20Me%20interesa%20trabajar%20con%20ustedes%2C%20acabo%20de%20registrarme%20en%20su%20p%C3%A1gina.";
   const WHATSAPP_SVG = `<svg viewBox="0 0 32 32" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M16 .8C7.6.8.8 7.6.8 16c0 2.7.7 5.3 2 7.6L.8 31.2l7.8-2c2.2 1.2 4.7 1.9 7.4 1.9 8.4 0 15.2-6.8 15.2-15.1S24.4.8 16 .8zm0 27.5c-2.4 0-4.7-.6-6.7-1.8l-.5-.3-4.6 1.2 1.2-4.5-.3-.5c-1.3-2-2-4.4-2-6.9C3.1 8.9 8.9 3.1 16 3.1S28.9 8.9 28.9 16 23.1 28.3 16 28.3zm7.1-9.2c-.4-.2-2.3-1.1-2.7-1.3-.4-.1-.6-.2-.9.2-.3.4-1 1.3-1.2 1.5-.2.2-.4.3-.8.1-.4-.2-1.6-.6-3.1-1.9-1.1-1-1.9-2.3-2.1-2.6-.2-.4 0-.6.2-.8.2-.2.4-.4.6-.7.2-.2.3-.4.4-.7.1-.3.1-.5 0-.7-.1-.2-.9-2.1-1.2-2.9-.3-.8-.6-.7-.9-.7h-.8c-.3 0-.7.1-1 .5-.4.4-1.4 1.3-1.4 3.2s1.4 3.7 1.6 4c.2.3 2.8 4.3 6.8 6 .9.4 1.7.7 2.3.9 1 .3 1.8.3 2.5.2.8-.1 2.3-.9 2.7-1.9.3-.9.3-1.7.2-1.9-.1-.1-.3-.2-.7-.4z"/></svg>`;
@@ -13023,7 +13023,8 @@
   function filterDivideAssignables(assignables, assigneeValues) {
     if (!Array.isArray(assigneeValues) || assigneeValues.includes("all")) return assignables;
     if (assigneeValues.length === 0) return [];
-    return assignables.filter(({ item }) => assigneeValues.includes(getEffectiveItemAssigneeValue(item)));
+    // "none": los productos sin asignar (en el listado de compras general aparecen como uno mas).
+    return assignables.filter(({ item }) => { const v = getEffectiveItemAssigneeValue(item); return assigneeValues.includes(v) || (!v && assigneeValues.includes("none")); });
   }
 
   function sortDivideGroupsByAssignee(groups) {
@@ -13124,7 +13125,7 @@
       const clientIds = Object.keys(group.clients).sort(compareClientIdStrings);
       const clients = clientIds.map((clientId) => `${escapeHtml(formatClientIdShort(clientId))}) ${formatDivideQty(group.clients[clientId])}${escapeHtml(divideNotesText(group.notes, clientId))}`).join(" / ");
       const total = clientIds.reduce((sum, clientId) => sum + Number(group.clients[clientId] || 0), 0);
-      return `<li><strong>${escapeHtml(group.productName)}${isAll ? " - " + escapeHtml(group.assigneeName) : ""}</strong>: ${clients} = ${escapeHtml(divideQtyLabel(total, group.unitType))}</li>`;
+      return `<li><strong>${escapeHtml(group.productName)}${isAll ? " - " + escapeHtml(group.assigneeName) : group.assigneeName === "Sin asignar" ? " - SIN ASIGNAR" : ""}</strong>: ${clients} = ${escapeHtml(divideQtyLabel(total, group.unitType))}</li>`;
     }).join("")}</ul>`;
   }
 
@@ -13178,7 +13179,7 @@
     const isAll = !Array.isArray(assigneeValues) || assigneeValues.includes("all");
     const labels = assigneeValues.length === 0 ? "Ninguno" : (isAll ? "Todos" : assigneeValues.map((value) => {
       const entry = activeAssignees().find((a) => a.value === value);
-      return entry ? entry.label : value;
+      return entry ? entry.label : value === "none" ? "Sin asignar" : value;
     }).join(", "));
     const title = "Dividir compras - " + labels + " - " + formatDate(getDivideContextDate());
     const byProduct = {};
@@ -13295,7 +13296,7 @@
     const all = activeAssignees().map((a) => a.value);
     const miriam = assigneeValueByName("Miriam");
     const antonia = assigneeValueByName("Antonia");
-    const allSinMiriam = all.filter((v) => v !== miriam);
+    const allSinMiriam = all.filter((v) => v !== miriam).concat(["none"]);
     const date = ui.vehicleDate || todayISO();
     // Un solo archivo con los 4 imprimibles separados por salto de pagina: una sola ventana de
     // impresion (no cuelga el celular). La impresion por separado en Dividir/Vehiculos no cambia.
@@ -13393,7 +13394,7 @@
     const antonia = assigneeValueByName("Antonia");
     return [
       { n: 1, key: "rec-imp-pedidos", label: "Pedidos sin dividir", sub: "Vehiculos - Sin dividir", run: () => printVehicleDirect("flat") },
-      { n: 2, key: "rec-imp-general", label: "Compras (todos menos Miriam)", sub: "Dividir - PDF", run: () => printDivideDocument(all.filter((v) => v !== miriam)) },
+      { n: 2, key: "rec-imp-general", label: "Compras (todos menos Miriam)", sub: "Dividir - PDF", run: () => printDivideDocument(all.filter((v) => v !== miriam).concat(["none"])) },
       { n: 3, key: "rec-imp-miriam", label: "Miriam", sub: "Dividir - PDF", run: () => (miriam ? printDivideDocument([miriam]) : alert("No se encontro a Miriam en Dividir Compras.")),
         wa: { key: "miriam", run: () => sendDivideWhatsappForName("Miriam", "5493876340895") } },
       { n: 4, key: "rec-imp-antonia", label: "Antonia", sub: "Dividir - PDF", run: () => (antonia ? printDivideDocument([antonia]) : alert("No se encontro a Antonia en Dividir Compras.")) },
@@ -14449,7 +14450,7 @@
     const isAll = !Array.isArray(assigneeValues) || assigneeValues.includes("all");
     const labels = assigneeValues.length === 0 ? "Ninguno" : (isAll ? "Todos" : assigneeValues.map((value) => {
       const entry = activeAssignees().find((a) => a.value === value);
-      return entry ? entry.label : value;
+      return entry ? entry.label : value === "none" ? "Sin asignar" : value;
     }).join(", "));
     const includeClientsEl = document.getElementById("divide-include-clients");
     const includeClients = includeClientsEl ? includeClientsEl.checked : true;
@@ -14473,7 +14474,7 @@
     const isAll = !Array.isArray(assigneeValues) || assigneeValues.includes("all");
     const labels = assigneeValues.length === 0 ? "Ninguno" : (isAll ? "Todos" : assigneeValues.map((value) => {
       const entry = activeAssignees().find((a) => a.value === value);
-      return entry ? entry.label : value;
+      return entry ? entry.label : value === "none" ? "Sin asignar" : value;
     }).join(", "));
     const title = isAll
       ? fileDate(todayISO()) + " Compras"
@@ -20726,6 +20727,7 @@
         assignedToType: "",
         assignedToId: ""
       };
+      setProductAssignee(product, assigneeValueByName("Lucas") || "");
       state.products.push(product);
     } else {
       product.name = name;
@@ -22244,7 +22246,8 @@
     const product = id ? getProduct(id) : null;
     const generalAliases = product ? state.productAliases.filter((alias) => alias.productId === product.id).map((alias) => alias.alias).join(", ") : "";
     const clientAliases = product ? state.clientProductAliases.filter((alias) => alias.productId === product.id).map((alias) => alias.clientId + ":" + alias.alias).join(", ") : "";
-    const assignedValue = product ? getProductAssigneeValue(product.id) : "";
+    // Producto nuevo: queda asignado a Lucas (se puede cambiar).
+    const assignedValue = product ? getProductAssigneeValue(product.id) : (assigneeValueByName("Lucas") || "");
     showModal(
       product ? "Editar producto" : "Agregar producto",
       `
@@ -23326,7 +23329,8 @@
             <div class="wa-arch-msgs" id="wa-arch-msgs">${msgs === null ? `<p class="muted">Cargando...</p>` : msgs.map((m) => `<div class="wa-arch-msg ${m.from_me ? "mine" : ""} ${q && String(m.text || "").toLowerCase().includes(q) ? "hit" : ""} ${(ui.waArchiveSel || new Set()).has(m.wa_id) ? "sel" : ""}">
               ${!m.from_me && m.msg_type === "texto" && WA_INBOX_ROLES.includes(currentUser.role) ? `<label class="wa-arch-pick" title="Elegir para mandar a la bandeja"><input type="checkbox" data-wa-pick="${escapeAttr(m.wa_id)}" ${(ui.waArchiveSel || new Set()).has(m.wa_id) ? "checked" : ""} /></label>` : ""}
               ${!m.from_me && m.is_group ? `<div class="wa-arch-sender">${escapeHtml(m.sender_name || formatWaPhone(m.sender_phone))}</div>` : ""}
-              <div>${escapeHtml(m.text || "")}</div><div class="wa-arch-time">${m.from_me && /\(sistema\)$/.test(m.sender_name || "") ? escapeHtml(String(m.sender_name).replace(/ \(sistema\)$/, "")) + " · " : ""}${hora(m.ts)}</div>
+              ${m.image_key ? proofImageTag(m.image_key, "", `class="wa-arch-img" style="display:block;max-width:240px;max-height:320px;border-radius:8px;margin:2px 0 4px;cursor:zoom-in" onclick="if(this.src)window.open(this.src)"`) : ""}
+              <div>${escapeHtml(m.image_key ? String(m.text || "").replace(/^\[[^\]]+\]\s*/, "") : m.text || "")}</div><div class="wa-arch-time">${m.from_me && /\(sistema\)$/.test(m.sender_name || "") ? escapeHtml(String(m.sender_name).replace(/ \(sistema\)$/, "")) + " · " : ""}${hora(m.ts)}</div>
             </div>`).join("")}</div>
             ${(ui.waArchiveSel && ui.waArchiveSel.size) ? `<div class="wa-arch-tobox"><span>${ui.waArchiveSel.size} mensaje(s) elegido(s)</span><button class="btn primary" type="button" id="wa-arch-to-inbox">Mandar a la bandeja de Nuevo Pedido</button><button class="btn ghost small" type="button" id="wa-arch-sel-clear">Cancelar</button></div>` : ""}
             <form id="wa-arch-reply" class="wa-arch-reply">

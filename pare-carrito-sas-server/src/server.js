@@ -4791,7 +4791,12 @@ app.post("/whatsapp/archive/to-inbox", authenticate, requireRole(...INBOX_ROLES)
 app.get("/whatsapp/archive/messages", authenticate, requireRole("manager", "admin", "employee", "contador"), canSeeWaArchive, async (req, res) => {
   const chat = String(req.query.chat || "");
   if (!chat) return res.status(400).json({ error: "Falta el chat." });
-  const { rows } = await pool.query("SELECT wa_id, chat_name, is_group, sender_phone, sender_name, from_me, msg_type, text, ts FROM whatsapp_archive WHERE chat_id = $1 ORDER BY ts DESC LIMIT 1000", [chat]);
+  // Las fotos y PDF que mandan los clientes quedan guardados (se leen para buscar comprobantes): la
+  // conversacion muestra la imagen (el PDF, su primera pagina).
+  const { rows } = await pool.query(
+    `SELECT a.wa_id, a.chat_name, a.is_group, a.sender_phone, a.sender_name, a.from_me, a.msg_type, a.text, a.ts, r.image_key
+       FROM whatsapp_archive a LEFT JOIN LATERAL (SELECT image_key FROM wa_receipts WHERE wa_id = a.wa_id AND image_key IS NOT NULL LIMIT 1) r ON true
+      WHERE a.chat_id = $1 ORDER BY a.ts DESC LIMIT 1000`, [chat]);
   res.json({ ok: true, messages: rows.reverse() });
 });
 
